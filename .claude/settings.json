@@ -1,0 +1,55 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find *)",
+      "Bash(pnpm *)",
+      "Bash(git -C * status*)",
+      "Bash(git -C * log*)",
+      "Bash(git -C * diff*)",
+      "Bash(git -C * branch*)",
+      "Bash(git -C * show*)",
+      "Bash(git -C * add -- *)",
+      "Bash(git -C * add -N -- *)",
+      "Bash(git -C * commit*)",
+      "Bash(git -C * rev-parse*)",
+      "Bash(git -C * init*)",
+      "Bash(git status*)",
+      "Bash(git log*)",
+      "Bash(git diff*)",
+      "Bash(git add -- *)",
+      "Bash(git add -N -- *)",
+      "Bash(git commit*)",
+      "Bash(git rev-parse*)",
+      "Bash(git init*)",
+      "Bash(node *)",
+      "Bash(npm *)",
+      "Read(*)",
+      "Edit(*)"
+    ],
+    "deny": [
+      "Bash(rm -rf ~:*)",
+      "Read(./.env)",
+      "Read(./docs/ignore/prompt.md)"
+    ],
+    "ask": [
+      "Bash(git push *)",
+      "Bash(git -C * push*)",
+      "Bash(git reset --hard *)",
+      "Bash(git -C * reset --hard*)",
+      "Bash(git rebase *)",
+      "Bash(git -C * rebase*)",
+      "Bash(git clean -f*)",
+      "Bash(git -C * clean -f*)"
+    ]
+  },
+  "enabledPlugins": {
+    "codex@openai-codex": true,
+    "context7@claude-plugins-official": true,
+    "playwright@claude-plugins-official": true,
+    "ponytail@ponytail": true,
+    "taste-skill@taste-skill": true,
+    "ui-ux-pro-max@ui-ux-pro-max-skill": true,
+    "typescript-lsp@claude-plugins-official": true,
+    "pyright-lsp@claude-plugins-official": true
+  }
+}

@@ -1,0 +1,30 @@
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Claude Code local settings (per-user, not committed)
+#.claude/settings.local.json
+
+# editor files
+.vscode/*
+.idea/*
+
+# target directories(codex)
+target-*/
+
+# local git worktrees
+.worktrees/
+
+# macOS
+.DS_Store
+
+# ignore files
+/docs/ignore/
+
+# playwright
+.playwright/
+.playwright-cli/
+.playwright-mcp/
