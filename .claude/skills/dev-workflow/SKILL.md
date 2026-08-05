@@ -1,6 +1,6 @@
 ---
 name: dev-workflow
-description: Use when an Agent is implementing a TRD or feature, fixing a Bug, refactoring code, or needs real test, integration, and browser evidence before delivery.
+description: Use when 需要实现 TRD 或功能、修复 Bug、重构代码，或在交付前需要真实测试、联调与浏览器证据时。
 argument-hint: <TRD、需求、Bug、重构目标或代码上下文>
 disable-model-invocation: true
 allowed-tools: Read, Glob, Grep, Bash, Write, Edit, TaskOutput, TodoWrite, Agent(dev), Agent(reviewer)
