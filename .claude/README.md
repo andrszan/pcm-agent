@@ -95,6 +95,8 @@ Codex 环境不可用时，先按顺序检查 `node -v`、`codex --version`、`c
 └── skills/
     ├── project-intake/
     │   └── SKILL.md
+    ├── project-bootstrap/
+    │   └── SKILL.md
     ├── solution-design/
     │   └── SKILL.md
     ├── requirement-breakdown/
@@ -114,6 +116,7 @@ Codex 环境不可用时，先按顺序检查 `node -v`、`codex --version`、`c
 | 能力 | 用途 | 是否可独立调用 |
 |---|---|---|
 | `project-intake` | 了解项目事实、运行方式、约束与初始风险 | 是 |
+| `project-bootstrap` | 将前后端或全栈基础模板有限范围项目化，并收口身份、配置、联调、视觉和验证基线 | 是 |
 | `solution-design` | 为跨模块或关键技术方向形成设计选择；其他 Skill 不以它为必需前提 | 是，可选 |
 | `requirement-breakdown` | 把业务目标梳理为可讨论、可演进的需求边界 | 是 |
 | `trd-design` | 形成或调整面向当前实现的技术设计 | 是 |
