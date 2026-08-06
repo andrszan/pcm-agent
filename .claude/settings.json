@@ -27,19 +27,11 @@
       "Edit(*)"
     ],
     "deny": [
-      "Bash(rm -rf ~:*)",
-      "Read(./.env)",
-      "Read(./docs/ignore/prompt.md)"
+      "Bash(rm -rf ~:*)"
     ],
     "ask": [
       "Bash(git push *)",
-      "Bash(git -C * push*)",
-      "Bash(git reset --hard *)",
-      "Bash(git -C * reset --hard*)",
-      "Bash(git rebase *)",
-      "Bash(git -C * rebase*)",
-      "Bash(git clean -f*)",
-      "Bash(git -C * clean -f*)"
+      "Bash(git -C * push*)"
     ]
   },
   "enabledPlugins": {

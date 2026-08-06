@@ -62,6 +62,8 @@
 - 不可以在git提交内容中添加 `Co-Authored-By` 署名。
 - 交付完成后必须同步需求状态：将活动 TRD 的需求状态和完成日期更新为实际结果，并同步 Backlog 总览及对应详情卡的状态；若需求未完成或验证受阻，必须保留准确状态和阻塞说明，不得只回填实施结果而遗漏状态。
 - 提交前检查需求状态、TRD、Backlog 和代码提交是否一致；状态同步与本次需求交付属于同一收尾动作。
+- 正式需求开发在新分支上进行；交付完成并验证后，必须将该分支合并回 `main`，再删除或保留特性分支由项目约定决定。下一个需求应从最新的 `main` 开新分支，不能在上一需求的特性分支上继续开发。
+- 默认只 commit、不 push；合并回 `main` 是本地操作，不涉及远程。
 - commit 使用 Conventional Commits：`<type>[optional scope]: <description>`。`type` 和可选 `scope` 使用英文；description、body、footer 默认使用中文。
 
 例如：
