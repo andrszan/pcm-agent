@@ -42,6 +42,7 @@
     "taste-skill@taste-skill": true,
     "ui-ux-pro-max@ui-ux-pro-max-skill": true,
     "typescript-lsp@claude-plugins-official": true,
-    "pyright-lsp@claude-plugins-official": true
+    "pyright-lsp@claude-plugins-official": true,
+    "skill-creator@claude-plugins-official": true
   }
 }
