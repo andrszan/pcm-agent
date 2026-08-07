@@ -28,3 +28,14 @@ target-*/
 .playwright/
 .playwright-cli/
 .playwright-mcp/
+
+# 根目录若产生 .env 不得入库；各子仓库另有各自规则
+.env*
+!.env.example
+
+# 前后端为独立 Git 仓库，不由根仓库跟踪其内容
+/frontend/
+/backend/
+
+# Claude worktrees
+.claude/worktrees/
