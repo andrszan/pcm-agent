@@ -111,6 +111,8 @@ Codex 环境不可用时，先按顺序检查 `node -v`、`codex --version`、`c
     │   └── SKILL.md
     ├── playwright-cli/
     │   └── SKILL.md
+    ├── pcm-product-factory/
+    │   └── SKILL.md
     └── session-rule-retrospective/
         ├── SKILL.md
         └── evals/
@@ -128,6 +130,7 @@ Codex 环境不可用时，先按顺序检查 `node -v`、`codex --version`、`c
 | `codex-review` | 使用可用的 Codex 环境对代码、文档或分支差异进行独立只读审查 | 是，可选 |
 | `commit-changes` | 按功能结果自动规划一个或多个提交并精确创建本地 commit | 是 |
 | `playwright-cli` | 自动化浏览器交互、检查网页和执行浏览器验证 | 是 |
+| `pcm-product-factory` | 面向毕业设计市场筛选可销售的完整 Web 产品，默认裁决唯一冠军并生成含双语品牌与 UI 设计契约的初版 PRD，同步更新产品目录 | 是 |
 | `session-rule-retrospective` | 复盘一次 AI 会话或工作流后，把可复用、跨会话的工程经验去重、归类、增量写入 `.claude/rules/` | 是 |
 
 `dev-workflow` 是唯一承载完整开发闭环的开发能力，同时仍可独立调用并根据输入、代码事实、风险和可用环境自适应执行；其他 Skills 提供各自专注的能力，不构成必经关卡。
