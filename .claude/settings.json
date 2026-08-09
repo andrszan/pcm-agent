@@ -32,7 +32,8 @@
     "ask": [
       "Bash(git push *)",
       "Bash(git -C * push*)"
-    ]
+    ],
+    "defaultMode": "bypassPermissions"
   },
   "enabledPlugins": {
     "codex@openai-codex": true,
