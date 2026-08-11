@@ -202,7 +202,7 @@ glob 注意事项：
 - 在根仓库操作（`.claude/rules/` 属于根仓库，不在 `frontend/`、`backend/` 子仓库）。
 - `git add .claude/rules/` 精确暂存本次 rules 改动；禁止 `git add .`、`git add -A` 或纳入 rules 目录外的任何文件。
 - rules 为项目级配置，直接在当前分支提交，无需特性分支。
-- commit message 用 Conventional Commits：`chore(rules): <中文简述>`；不得添加 `Co-Authored-By` 署名。
+- commit message 用 Conventional Commits：`chore(rules): <中文简述>`。
 - 不 push。
 - 若提交被 pre-commit hook 拒绝或工作树有冲突，如实汇报并停止，不强行绕过。
 

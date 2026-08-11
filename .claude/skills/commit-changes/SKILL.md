@@ -127,7 +127,7 @@ git -C <repo> log --oneline -20
 
 message 应描述实际 diff 形成的功能结果。`intent` 和 `change_summary` 只是理解素材；不得因为说明不完整而遗漏必要配套内容，也不得在代码没有实现时夸大结果。
 
-不得使用 `update`、`changes`、`complete task` 等无法独立理解的泛化标题，也不得包含内部任务 ID、工作流 run、尝试次数、Agent 名称、`Co-Authored-By` 或其他自动署名。需要补充动机和影响时可以添加简洁 body。
+不得使用 `update`、`changes`、`complete task` 等无法独立理解的泛化标题，也不得包含内部任务 ID、工作流 run、尝试次数、Agent 名称。需要补充动机和影响时可以添加简洁 body。
 
 ## 已有暂存内容
 
@@ -192,7 +192,6 @@ pre-commit hook、签名、空提交或其他 commit 错误发生后：
 - 不提交开发 `.env`、秘密、凭据、token、私钥和临时过程文件；
 - 不覆盖、清理或顺手提交无法确认归属的用户修改；
 - 不为了让提交成功而修改代码、文档或配置；
-- 不添加 `Co-Authored-By` 或其他协作者尾注。
 
 用户要求 push、强制提交秘密、绕过 hook 或执行破坏性 Git 时，拒绝该部分并说明原因。
 
