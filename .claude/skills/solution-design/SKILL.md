@@ -199,7 +199,7 @@ disable-model-invocation: true
 默认生成一份综合技术方案：
 
 ```text
-docs/design/<项目名>-技术方案.md
+docs/design/技术方案.md
 ```
 
 推荐结构：
