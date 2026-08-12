@@ -10,6 +10,9 @@
 
 - 从真实目标、现有代码、配置、测试和项目约定出发，不为了套流程而补造中间产物。
 - 编排与能力解耦。可以有多套可选编排模板，也可以由 AI 依据项目状态和风险临时设计编排。
+- **Skill 独立，组合逻辑属于编排。** 每个 Skill 必须能在没有其它可选 Skill 时独立完成自身职责，不得把另一 Skill 的存在、调用结果或专属产物作为隐藏运行依赖。需要在某项能力前后执行其它能力时，由用户、外部编排模板或当前任务计划显式组合；被调用的 Skill 自行判断是否适用，并可无副作用跳过。
+- **能力之间优先通过项目事实协作，而不是相互调用。** Skill 可以读取已经存在的需求、活动 TRD、设计文档、代码、Git diff 和验证结果，但不能假设这些事实必须由某个特定 Skill 生成；生成某项事实的 Skill 未安装时，其他能力仍应能够使用该事实或独立完成自己的职责。
+- 一个 Skill 不应为了组织组合流程而修改另一个 Skill，使后者负责探测、推荐或调用自己；调用顺序和重复策略留给外部编排。
 - 活动需求和活动 TRD 可以随着代码事实调整；已完成并归档的**历史**需求和 TRD 必须保持不可变。后续演进通过新的需求和新的 TRD 记录。
 - 用户已有未提交修改是受保护的上下文：先识别、避免覆盖，不擅自 `reset`、`restore`、`checkout` 或 `clean`。
 - 验证以真实行为和风险为中心，不能把局部 Mock 当作最终交付证据。
@@ -99,6 +102,12 @@ Codex 环境不可用时，先按顺序检查 `node -v`、`codex --version`、`c
     │   └── SKILL.md
     ├── project-bootstrap/
     │   └── SKILL.md
+    ├── engineering-architecture/
+    │   └── SKILL.md
+    ├── ui-ux-framework/
+    │   ├── SKILL.md
+    │   └── evals/
+    │       └── evals.json
     ├── solution-design/
     │   └── SKILL.md
     ├── requirement-breakdown/
@@ -126,6 +135,8 @@ Codex 环境不可用时，先按顺序检查 `node -v`、`codex --version`、`c
 | `project-intake` | 通过持续对话理解项目目标、用户、产品范围、业务规则和已知外部约束，形成或更新产品定义 | 是 |
 | `project-readiness` | 根据最新项目文档和工程事实生成或更新项目准备清单，核验仓库、依赖、服务、账号、素材、配置和真实验证条件 | 是 |
 | `project-bootstrap` | 将前后端或全栈基础模板有限范围项目化，并收口身份、配置、联调、视觉和验证基线 | 是 |
+| `engineering-architecture` | 基于真实工程事实设计项目级分层、业务模块边界、目录与包职责、依赖规则、设计模式取舍和文件放置约束 | 是 |
+| `ui-ux-framework` | 通过 `bootstrap`、`before`、`after` 三种显式调用模式建立项目级框架、在活动 TRD 开发前判断并补足需求级 UI/UX 设计、在开发后判断并审查真实实现；每次先判断适用性，可无副作用跳过 | 是，可选 |
 | `solution-design` | 为跨模块或关键技术方向形成设计选择；其他 Skill 不以它为必需前提 | 是，可选 |
 | `requirement-breakdown` | 把业务目标梳理为可讨论、可演进的需求边界 | 是 |
 | `trd-design` | 形成或调整面向当前实现的技术设计 | 是 |
@@ -149,13 +160,31 @@ pcm-product-factory
 → solution-design
 → project-readiness
 → project-bootstrap
+→ engineering-architecture
+→ ui-ux-framework bootstrap（首个重要 UI 需求前可选）
 → requirement-breakdown
 → trd-design
-→ dev-workflow
+→ ui-ux-framework before @活动TRD（可选，先判断适用性）
+→ dev-workflow @活动TRD
+→ ui-ux-framework after @活动TRD（可选，先判断适用性）
 → session-rule-retrospective
 ```
 
 这个示例把 `project-readiness` 放在项目级技术方向和基础模板选择已经明确之后、模板项目化之前，目的是避免项目准备清单提前把候选数据库、服务或模板习惯固化成技术前提。它会根据用户提供的资料和当前项目最新事实生成或更新准备清单，不依赖其它 skill，也不要求固定在这个位置调用；开发者可以按项目状态在其它合适时机独立调用或重复调用。
+
+示例中的 `engineering-architecture` 位于 `project-bootstrap` 之后，是因为此时通常已经具备可读取的真实仓库、基础模板和项目化工程事实，适合把总体技术方向进一步转化为分层、模块、目录职责、依赖和文件放置规则。这同样只是推荐时机；既有项目、单仓项目或局部架构调整可以直接独立调用，不要求先运行 `project-bootstrap`，也不要求固定数量的 Git 仓库。
+
+`ui-ux-framework` 也是可选独立能力。新项目通常可在基础模板和工程事实存在后、首个重要 UI 需求前由用户显式运行 `bootstrap`，建立 `docs/ui-ux/framework.md`；已有页面但体验漂移的项目也可独立运行 `bootstrap`。项目级框架建立后，正式需求可以由用户或外部编排采用：
+
+```text
+ui-ux-framework before @活动TRD
+→ dev-workflow @活动TRD
+→ ui-ux-framework after @活动TRD
+```
+
+三次调用彼此没有隐藏依赖：`before` 读取活动 TRD 后自行判断是否存在新的需求级 UI/UX 决策；`after` 读取活动 TRD、最终 diff 和真实页面后自行判断是否存在 UI/UX 实现需要审查；不适用时均简短说明并无副作用跳过。`dev-workflow` 不探测、推荐或调用 `ui-ux-framework`，即使项目没有安装 UI/UX Skill 也能独立完成自己的开发闭环。该前后编排是正式 UI 需求的可选组合，不要求每个开发任务都展开设计和审查。
+
+UI/UX 框架定义跨需求稳定的设计契约；`before` 的需求级决定默认进入活动 TRD，`after` 审查真实实现是否以正确、一致、可用的方式工作。框架文档只记录稳定决策和真实实现路径；不要创建 UI Manifest、逐页资产清单、完整组件 API 副本、需求级平行设计文档或会话设计流水。
 
 实际工作中可以跳过、替换、重复或重新排序这些能力。例如，已有明确产品定义时可以直接讨论技术方案；已有明确 Bug 时可以直接进入 `dev-workflow`；小范围且风险较低的修改也可以只使用需要的检查和 `commit-changes`。
 
