@@ -115,12 +115,12 @@
       "productId": "PCM-20260812-003",
       "formalTitle": "基于 Web 的社区物品维修预约与维修进度协作系统设计与实现",
       "brand": {
-        "zh": "修好了",
-        "en": "FixNest",
+        "zh": "修迹",
+        "en": "MendMark",
         "subtitle": "物品送修、进度跟踪与维修档案",
         "codename": "Mendline"
       },
-      "repository": "fixnest",
+      "repository": "mendmark",
       "templateFamily": "item-repair-workorder-and-service",
       "domain": "日常物品维修与服务协作",
       "targetUsers": [
@@ -163,7 +163,7 @@
       "fallbackSummary": "严格限制小家电、数码外设和日常物品；使用类别化引导卡、人工初检和人工检测，不作自动诊断；费用只记录估价与确认结果；图片和邮件不可用时，文字工单、站内通知、方案确认、维修时间轴、交付验收和档案沉淀仍可完成。",
       "status": "prd-v1",
       "date": "2026-08-12",
-      "prdFile": "修好了-产品需求文档-v1.md"
+      "prdFile": "修迹-产品需求文档-v1.md"
     }
   ]
 }
