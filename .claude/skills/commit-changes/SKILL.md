@@ -2,6 +2,7 @@
 name: commit-changes
 description: Use when 需要检查当前 Git 变更、按可独立理解的功能结果自动规划一个或多个提交、精确暂存并创建本地提交时；保护用户已有修改和暂存意图，默认只 commit、不 push。
 argument-hint: <仓库路径、变更目标或明确文件范围，可选 expected_head>
+disable-model-invocation: true
 ---
 
 # commit-changes — 精确、安全地提交 Git 变更
@@ -35,12 +36,15 @@ git -C <repo> diff --stat
 git -C <repo> diff --name-status
 git -C <repo> diff --cached --name-status
 git -C <repo> diff --check
+git -C <repo> rev-parse --verify HEAD
 git -C <repo> log --oneline -20
 ```
 
+`rev-parse --verify HEAD` 在尚无提交的初始仓库中会失败；这表示当前分支处于 unborn 状态，不是仓库错误。此时将提交基线记录为 `unborn`，跳过依赖历史提交的读取，继续检查全部 staged、unstaged 和未跟踪文件内容。已有提交时正常读取历史。
+
 继续查看全部相关 staged、unstaged 和未跟踪文件内容，而不是只看统计信息。检查冲突、未完成的 merge、rebase、cherry-pick 或 revert；存在这些状态时停止，不擅自解决或继续提交。
 
-提供 `expected_head` 时，开始规划前必须校验当前 HEAD。后续每次提交前也要确认 HEAD 等于上一步记录的值，防止并发操作改变提交基础。
+提供 `expected_head` 时，开始规划前必须校验当前基线；调用方可以提供具体提交值或 `unborn`。后续每次提交前也要确认基线等于上一步记录的值，防止并发操作改变提交基础。
 
 ## 按功能结果规划提交
 
@@ -90,7 +94,7 @@ git -C <repo> log --oneline -20
 
 对每个自动规划或明确给出的提交组依次执行：
 
-1. 确认当前 index 符合“已有暂存内容”的处理规则，并记录当前 HEAD。
+1. 确认当前 index 符合“已有暂存内容”的处理规则，并记录当前 HEAD；初始仓库记录为 `unborn`。
 2. 对由本能力规划的未暂存文件逐路径暂存，禁止宽泛暂存：
    ```bash
    git -C <repo> add -- <当前提交组文件...>
@@ -113,7 +117,7 @@ git -C <repo> log --oneline -20
    git -C <repo> show --stat --oneline HEAD
    git -C <repo> status --short
    ```
-7. 将实际提交文件与计划分组比较，确认 hook 没有意外加入其他内容；然后基于新的 HEAD 继续下一组。
+7. 将实际提交文件与计划分组比较，确认 hook 没有意外加入其他内容；初始提交成功后从 `unborn` 切换为真实 HEAD，然后基于新的 HEAD 继续下一组。
 
 删除、重命名和未跟踪文件同样必须纳入明确分组和完整内容检查。禁止使用 `git add .`、`git add -A` 或其他会扩大范围的命令。
 

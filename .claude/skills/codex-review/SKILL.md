@@ -2,6 +2,7 @@
 name: codex-review
 description: Use when 需要使用可用的 Codex 环境，对代码变更、分支差异、活动 TRD 或指定技术问题进行独立只读审查时；只返回真实审查发现，不修改内容，也不替 Leader 作最终判断。
 argument-hint: <仓库路径、审查对象、目标或关注点，可选 scope/base>
+disable-model-invocation: true
 ---
 
 # codex-review — Codex 独立审查

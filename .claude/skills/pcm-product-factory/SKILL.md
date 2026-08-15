@@ -1,6 +1,6 @@
 ---
 name: "pcm-product-factory"
-description: "面向大学生毕业设计市场批量筛选易理解、可销售、可开发的完整 Web 应用产品，默认裁决唯一冠军并生成技术后置、含双语品牌和 UI 设计契约的真实产品初版 PRD。"
+description: "Use when 需要面向大学生毕业设计市场筛选易理解、可销售、可开发的完整 Web 应用产品方向，并形成可供后续产品定义使用的初版 PRD 时。"
 argument-hint: <产品领域、已有题目、产品约束或“生成一个新方向”>
 disable-model-invocation: true
 ---

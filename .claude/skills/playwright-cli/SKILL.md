@@ -1,7 +1,8 @@
 ---
 name: playwright-cli
-description: Automate browser interactions, test web pages and work with Playwright tests.
-allowed-tools: Bash(playwright-cli:*) Bash(npx:*) Bash(npm:*)
+description: Use when 需要通过当前环境已经可用的 playwright-cli 操作或检查真实网页、调试浏览器行为，或生成和运行 Playwright 测试时。
+disable-model-invocation: true
+allowed-tools: Bash(playwright-cli:*)
 ---
 
 # Browser Automation with playwright-cli
@@ -340,19 +341,15 @@ playwright-cli close-all
 playwright-cli kill-all
 ```
 
-## Installation
+## Availability Boundary
 
-If global `playwright-cli` command is not available, try a local version via `npx playwright cli`:
-
-```bash
-npx --no-install playwright --version
-```
-
-When local version is available, use `npx playwright cli` in all commands. Otherwise, install `playwright-cli` as a global command:
+This Skill only uses a `playwright-cli` command that is already available in the current environment. Check availability before opening a session:
 
 ```bash
-npm install -g @playwright/cli@latest
+playwright-cli --help
 ```
+
+If the command is unavailable, stop and report the missing tool. Do not install a package, invoke an `npx` fallback, change project dependencies, or modify global tooling from this Skill.
 
 ## Example: Form submission
 
