@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
 from common.files import write_json
 
 
-def run_dir_path(runs_dir: Path, run_id: str) -> Path:
+def create_run_dir(runs_dir: Path, run_id: str) -> Path:
     if Path(run_id).name != run_id or run_id in {"", ".", ".."}:
         raise ValueError(f"无效运行 ID：{run_id}")
     resolved_runs_dir = runs_dir.resolve()
@@ -16,30 +15,11 @@ def run_dir_path(runs_dir: Path, run_id: str) -> Path:
         run_dir.relative_to(resolved_runs_dir)
     except ValueError as error:
         raise ValueError(f"无效运行 ID：{run_id}") from error
-    return run_dir
-
-
-def create_run_dir(runs_dir: Path, run_id: str) -> Path:
-    run_dir = run_dir_path(runs_dir, run_id)
     if run_dir.exists():
         raise FileExistsError(f"运行目录已存在，拒绝覆盖：{run_dir}")
     (run_dir / "steps").mkdir(parents=True)
     (run_dir / "logs").mkdir()
     return run_dir
-
-
-def open_run_dir(runs_dir: Path, run_id: str) -> Path:
-    run_dir = run_dir_path(runs_dir, run_id)
-    if not run_dir.is_dir():
-        raise FileNotFoundError(f"运行目录不存在：{run_dir}")
-    return run_dir
-
-
-def read_json(path: Path) -> dict[str, Any]:
-    data = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict):
-        raise ValueError(f"JSON 顶层必须是对象：{path}")
-    return data
 
 
 def write_state(run_dir: Path, state: dict[str, Any]) -> None:
