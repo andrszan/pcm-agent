@@ -8,10 +8,11 @@
 
 ## 一、目标
 
-PCM 自动化流程接收一个初始项目选题或已有项目资料，自动完成：
+PCM 自动化流程接收一份产品初稿；资料不足时先形成产品初稿，然后自动完成：
 
 ```text
-项目选题
+产品初稿
+→ 建立产品项目工作区
 → 产品定义
 → 总体技术方案
 → 基础工程准备与项目化
@@ -67,6 +68,7 @@ PCM 步骤可以顺序调用多个 Skill，但不改变 Skill 自身职责。例
 
 AI 决策能力主要处理：
 
+- 从产品初稿提取当前选题名和项目文件夹名；初稿未明确文件夹名时，可以根据选题生成稳定的小写 kebab-case 名称；
 - 从候选方案中选择推荐方案；
 - 判断文档是否满足当前步骤完成条件；
 - 判断需求或 UI/UX 能力是否适用；
@@ -76,6 +78,8 @@ AI 决策能力主要处理：
 
 Python 程序直接负责：
 
+- 校验项目文件夹名为单段小写 kebab-case，并根据配置的产品工作区根目录计算最终路径；
+- 对固定模板仓库执行 Git 浅克隆、记录分支和 commit、清理上游 Git 历史、初始化产品文档目录并原子发布工作区；
 - 读写运行状态；
 - 创建和检查目录；
 - 调用 Claude Agent SDK；
@@ -146,8 +150,43 @@ PCM Demo 只保存支持继续运行所必需的状态：
 {
   "run_id": "20260816-153000",
   "status": "running",
-  "topic": "家庭食材管理与一周膳食计划系统",
-  "workspace": "workspace/20260816-153000",
+  "input": {
+    "type": "product_draft",
+    "source_path": "/absolute/path/to/产品初稿.md",
+    "source_sha256": "<sha256>",
+    "content": "<完整 UTF-8 初稿内容>",
+    "published_path": "/products/family-meal-planner/docs/产品初稿.md"
+  },
+  "project": {
+    "topic_name": "家庭食材管理与一周膳食计划系统",
+    "project_directory_name": "family-meal-planner",
+    "extraction": {
+      "directory_name_source": "generated",
+      "reason": "初稿未提供仓库名，根据选题生成"
+    }
+  },
+  "workspace": {
+    "root": "/products",
+    "root_source": "PCM_WORKSPACE_ROOT",
+    "staging_path": "/products/family-meal-planner.pcm-tmp-20260816-153000",
+    "final_path": "/products/family-meal-planner"
+  },
+  "template": {
+    "repository": "git@gitlab.com:baiyiyu/andrszan/pcm-agent-skills.git",
+    "remote_url": "git@gitlab.com:baiyiyu/andrszan/pcm-agent-skills.git",
+    "default_branch": "main",
+    "actual_branch": "main",
+    "commit_sha": "<sha>"
+  },
+  "publication_phase": "published",
+  "checks": {
+    "template_capabilities_present": true,
+    "git_removed": true,
+    "docs_reinitialized": true,
+    "draft_hash_matches": true,
+    "source_draft_unchanged": true,
+    "renamed_to_final_path": true
+  },
   "current_step": 12,
   "active_requirement": "REQ-002",
   "completed_requirements": ["REQ-001"],
@@ -169,6 +208,8 @@ PCM Demo 只保存支持继续运行所必需的状态：
 6. 若当前步骤已有 Claude session，优先恢复原会话；
 7. 若步骤中途异常，重新核验当前文件和 Git 事实后重跑当前步骤；
 8. 状态不符合预期时阻塞并报告，不自动删除或覆盖。
+9. 第 1 步恢复时重新核对产品初稿哈希、项目目录名、工作区根目录、固定模板来源以及临时和最终目录事实；只有临时目录能由状态证明属于同一 run 且 clone 完整时才允许续接。
+10. 第 1 步最终目录已完整发布且证据一致时可确认既有成功；临时和最终目录同时存在、目录归属不明或证据冲突时返回 `blocked` 并保留现场。
 
 ## 五、项目初始化流程
 
@@ -182,10 +223,19 @@ PCM Demo 只保存支持继续运行所必需的状态：
 
 ### 第 1 步：建立项目工作区
 
-- 输入：工作区模板来源、运行 ID 和目标目录。
-- 输出：独立、可操作的项目工作区。
-- 完成条件：根目录和能力文件可用，没有误带原仓库 Git 历史或无关项目资料。
-- 自动化说明：由 Python 和 Shell 脚本复制或准备工作区，并记录实际路径。
+- 输入：产品初稿；运行 ID；产品工作区根目录。Demo 通过 `--workspace-root`、进程环境或 `pcm-demo/.env` 的 `PCM_WORKSPACE_ROOT` 取得根目录，优先级依次降低。
+- AI 输出：从初稿提取 `topic_name` 和 `project_directory_name`。后者必须是单段小写 kebab-case；初稿没有明确名称时允许根据选题生成，并记录生成理由。
+- 模板：固定使用 `git@gitlab.com:baiyiyu/andrszan/pcm-agent-skills.git` 默认分支的最新内容，不由 AI 或单次运行更换。
+- 执行动作：
+  1. 在产品工作区根目录中计算最终路径 `<root>/<project_directory_name>` 和同级临时路径 `<root>/<project_directory_name>.pcm-tmp-<run-id>`；
+  2. 使用 `git clone --depth 1` 将固定模板克隆到临时路径，记录默认分支、实际分支和 commit SHA；
+  3. 核验模板关键能力存在后，删除临时目录中的上游 `.git/`，清空并保留 `docs/`，将输入初稿按原始字节写为 `docs/产品初稿.md`；
+  4. 核验 `.git/` 不存在、`docs/` 只包含产品初稿、初稿哈希一致、源初稿未改变且模板关键能力仍存在；
+  5. 全部核验通过后，将同级临时目录原子重命名为最终路径。
+- 输出：最终项目根路径和 `<final_path>/docs/产品初稿.md`。
+- 完成条件：最终目录独立、可操作，模板来源和 commit 可追溯，没有误带上游 Git 历史，初始化后的 `docs/` 只含当前产品初稿，状态和文件事实一致。
+- 自动化说明：AI 只提取项目身份；Git、路径、清理、哈希、核验和发布由 Python 程序确定性执行。最终路径必须原先不存在，不以复制少量能力文件代替完整模板 clone。
+- 阻塞与失败：初稿无法确定选题、缺少不可替代的模板仓库读取权限或目录归属不明时返回 `blocked`；AI API、结构解析、Git 工具、网络、clone、清理、写入、核验或 rename 的执行错误返回 `failed`。失败时保留临时现场，恢复时按已记录阶段安全续接，不自动删除归属不明内容。
 
 ### 第 2 步：项目需求与产品定义
 
@@ -368,8 +418,10 @@ PCM Demo 同时支持：
 # 单独验证一步
 python -m steps.step_02_project_intake --run-id <run-id>
 
-# 从选题完整执行
-python run_all.py --topic "家庭食材管理与一周膳食计划系统"
+# 从产品初稿完整执行
+python run_all.py \
+  --product-draft "../docs/prd/修迹-产品需求文档-v1.md" \
+  --workspace-root "/path/to/products"
 
 # 从阻塞或失败位置继续
 python run_all.py --resume <run-id>

@@ -6,7 +6,7 @@
 
 ## 一、验证目标
 
-给定一个现有产品需求文档，通过一条命令自动完成：
+给定一个现有产品初稿，通过一条命令自动完成：
 
 1. 第 0～10 步项目初始化；
 2. 生成完整但规模可控的 Backlog；
@@ -19,7 +19,9 @@
 最终验证命令形态：
 
 ```bash
-python run_all.py --prd "../docs/prd/修迹-产品需求文档-v1.md"
+python run_all.py \
+  --product-draft "../docs/prd/修迹-产品需求文档-v1.md" \
+  --workspace-root "/path/to/products"
 ```
 
 ## 二、明确不做
@@ -42,7 +44,7 @@ Demo 只保留跑通完整流程必需的脚本、薄封装、JSON 状态和日�
 
 ## 三、黄金项目输入
 
-第一轮端到端验收使用现有产品需求文档：
+第一轮端到端验收使用现有完整产品初稿：
 
 ```text
 docs/prd/修迹-产品需求文档-v1.md
@@ -58,9 +60,9 @@ docs/prd/修迹-产品需求文档-v1.md
 - 首版不依赖真实支付、地图、物流、即时聊天或自动诊断服务；
 - 可以通过本地测试、真实服务和浏览器完成验收。
 
-完整运行通过 `--prd` 接收源 PRD。程序将源文件复制到本次运行的独立工作区，记录源路径和内容哈希，后续步骤只读取或修正工作区副本，不修改当前能力仓库中的原始 PRD。
+完整运行通过 `--product-draft` 接收源产品初稿，通过可选 `--workspace-root` 覆盖 `PCM_WORKSPACE_ROOT`。程序记录源路径、完整 UTF-8 内容和 SHA-256，从初稿提取项目选题和文件夹名，将固定开发管理模板浅克隆并初始化后发布到 `<workspace-root>/<project_directory_name>`，把初稿写为项目内的 `docs/产品初稿.md`。后续步骤只操作项目工作区，不修改当前能力仓库中的源初稿。
 
-因为输入已经是完整产品初稿，第 0 步应确认输入充分后无副作用跳过；第 2 步仍需调用 `project-intake` 核验和收敛工作区副本，使其成为被开发项目的当前权威产品定义。源 PRD 只提供产品要求，不提供预生成的技术方案、Backlog、TRD、代码或验收结论，因此不会把目标实现作为隐藏答案交给 Agent。
+因为输入已经是完整产品初稿，第 0 步应确认输入充分后无副作用跳过；第 1 步将其发布为项目内 `docs/产品初稿.md`；第 2 步仍需调用 `project-intake` 核验和收敛该初稿，使后续产品定义文档成为被开发项目的当前权威事实。源初稿只提供产品要求，不提供预生成的技术方案、Backlog、TRD、代码或验收结论，因此不会把目标实现作为隐藏答案交给 Agent。
 
 完整 Demo 默认只承诺实现 PRD 中“E.1 当前必须实现”的首版范围。“E.2 重要增强”和“E.3 未来扩展”不得自动进入首轮 Backlog，除非它们是完成 E.1 闭环不可缺少的条件。
 
@@ -74,11 +76,13 @@ Demo 计划位于当前工作区根目录：
 pcm-demo/
 ```
 
-它是 PCM 前置验证工具，不属于被开发项目的 `frontend/` 或 `backend/`。实际被 Agent 开发的项目放在 Demo 的可丢弃工作区中：
+它是 PCM 前置验证工具，不属于被开发项目的 `frontend/` 或 `backend/`。运行状态、步骤结果和日志保存在被 Git 忽略的 `pcm-demo/runs/<run-id>/`，只作为本地恢复数据，不提交实际 run 内容；实际被 Agent 开发的项目位于配置的产品工作区根目录中：
 
 ```text
-pcm-demo/workspace/<run-id>/
+<PCM_WORKSPACE_ROOT>/<project_directory_name>/
 ```
+
+第 1 步在最终目录同级使用 `<project_directory_name>.pcm-tmp-<run-id>` 临时 clone，全部核验通过后原子发布。run ID 用于运行记录和临时目录归属，不作为最终项目文件夹名。
 
 Demo 不直接在当前 `pcm-agent-skills` 能力仓库中执行项目初始化、功能分支和合并，避免验证过程破坏当前仓库。
 
@@ -90,6 +94,7 @@ Demo 不直接在当前 `pcm-agent-skills` 能力仓库中执行项目初始化�
 pcm-demo/
 ├── pyproject.toml
 ├── .env.example
+├── .gitignore        # 忽略 runs/、本地环境和运行产物
 ├── README.md
 │
 ├── common/
@@ -107,24 +112,8 @@ pcm-demo/
 ├── steps/
 │   ├── step_00_product_draft.py
 │   ├── step_01_create_workspace.py
-│   ├── step_02_project_intake.py
-│   ├── step_03_solution_design.py
-│   ├── step_04_assemble_projects.py
-│   ├── step_05_project_readiness.py
-│   ├── step_06_project_bootstrap.py
-│   ├── step_07_initialize_repositories.py
-│   ├── step_08_engineering_architecture.py
-│   ├── step_09_ui_ux_framework.py
-│   ├── step_10_requirement_breakdown.py
-│   ├── step_11_select_requirement.py
-│   ├── step_12_finalize_trd.py
-│   ├── step_13_create_feature_branches.py
-│   ├── step_14_develop.py
-│   ├── step_15_ui_ux_review.py
-│   ├── step_16_merge_code.py
-│   ├── step_17_sync_status.py
-│   ├── step_18_merge_root.py
-│   └── step_19_retrospective.py
+│   └── step_02_project_intake.py
+│   # 后续步骤在对应阶段设计确认后再新增
 │
 ├── run_step.py
 ├── run_all.py
@@ -218,6 +207,7 @@ Git 命令必须显式指定目标仓库，不在根目录使用宽泛暂存或�
 LLM_BASE_URL=
 LLM_API_KEY=
 LLM_MODEL=
+PCM_WORKSPACE_ROOT=
 ANTHROPIC_API_KEY=
 ```
 
@@ -225,15 +215,16 @@ ANTHROPIC_API_KEY=
 
 完整运行的输入包括：
 
-- 现有产品需求文档路径；
-- 当前能力仓库或待复制的项目工作区来源；
+- 现有产品初稿路径；
+- 产品工作区根目录，优先使用 CLI `--workspace-root` 覆盖，其次读取 `PCM_WORKSPACE_ROOT`；
+- 固定开发管理模板仓库 `git@gitlab.com:baiyiyu/andrszan/pcm-agent-skills.git` 的 GitLab SSH 读取权限；
 - 可用基础模板或脚手架来源；
 - AI-compatible 模型配置；
 - Claude Agent SDK 认证和运行环境；
 - Git、Python、Node.js、包管理器和浏览器等本机工具；
 - 修迹首版不需要的外部服务默认不提供。
 
-程序必须在开始运行时校验 PRD 文件存在且可读，将其复制到独立工作区，并在 `state.json` 中记录源路径、源文件 SHA-256 和工作区副本路径。源文件后续发生变化不影响已开始的运行；`--resume` 始终继续使用原工作区副本。
+程序必须在开始运行时校验产品初稿存在且可读，记录源路径、完整 UTF-8 内容和 SHA-256。第 1 步从初稿提取选题和项目文件夹名，将固定模板浅克隆到最终目录同级临时目录，记录实际分支与 commit，删除上游 `.git/`，重置 `docs/` 并写入 `docs/产品初稿.md`，全部核验通过后原子发布到最终项目路径。源文件后续变化不得被静默接受；`--resume` 根据已保存内容、哈希、临时现场和发布证据继续。
 
 缺少不可替代资源时允许在运行中阻塞。
 
@@ -287,16 +278,42 @@ runs/<run-id>/
   "run_id": "20260816-153000",
   "status": "blocked",
   "input": {
-    "type": "prd",
-    "source_prd": "../docs/prd/修迹-产品需求文档-v1.md",
+    "type": "product_draft",
+    "source_path": "/absolute/path/to/修迹-产品需求文档-v1.md",
     "source_sha256": "<sha256>",
-    "workspace_prd": "docs/prd/修迹-产品需求文档-v1.md"
+    "content": "<完整 UTF-8 初稿内容>",
+    "published_path": "/products/mendmark/docs/产品初稿.md"
   },
   "project": {
-    "name": "修迹 MendMark",
-    "repository": "mendmark"
+    "topic_name": "基于 Web 的社区物品维修预约与维修进度协作系统",
+    "project_directory_name": "mendmark",
+    "extraction": {
+      "directory_name_source": "source",
+      "reason": "初稿已明确 Git 仓库名"
+    }
   },
-  "workspace": "workspace/20260816-153000",
+  "workspace": {
+    "root": "/products",
+    "root_source": "PCM_WORKSPACE_ROOT",
+    "staging_path": "/products/mendmark.pcm-tmp-20260816-153000",
+    "final_path": "/products/mendmark"
+  },
+  "template": {
+    "repository": "git@gitlab.com:baiyiyu/andrszan/pcm-agent-skills.git",
+    "remote_url": "git@gitlab.com:baiyiyu/andrszan/pcm-agent-skills.git",
+    "default_branch": "main",
+    "actual_branch": "main",
+    "commit_sha": "<sha>"
+  },
+  "publication_phase": "published",
+  "checks": {
+    "template_capabilities_present": true,
+    "git_removed": true,
+    "docs_reinitialized": true,
+    "draft_hash_matches": true,
+    "source_draft_unchanged": true,
+    "renamed_to_final_path": true
+  },
   "current_step": 14,
   "active_requirement": "REQ-003",
   "completed_requirements": ["REQ-001", "REQ-002"],
@@ -339,11 +356,12 @@ python run_all.py \
   --to-step 15
 ```
 
-### 从 PRD 完整运行
+### 从产品初稿完整运行
 
 ```bash
 python run_all.py \
-  --prd "../docs/prd/修迹-产品需求文档-v1.md"
+  --product-draft "../docs/prd/修迹-产品需求文档-v1.md" \
+  --workspace-root "/path/to/products"
 ```
 
 ### 阻塞或失败后继续
@@ -363,9 +381,10 @@ python run_all.py --resume <run-id>
 ## 十一、一键流程逻辑
 
 ```python
-async def run_project(prd_path: Path) -> None:
-    project_input = await prepare_prd_input(prd_path)
-    await run_initialization_steps(project_input)  # 0～10
+async def run_project(product_draft_path: Path, workspace_root: Path | None = None) -> None:
+    project_input = await prepare_product_draft(product_draft_path)
+    project_workspace = await publish_project_workspace(project_input, workspace_root)
+    await run_initialization_steps(project_workspace)  # 2～10
 
     while True:
         requirement = await select_next_requirement()
@@ -396,18 +415,19 @@ while True:
 
 下一开发会话按以下顺序实现，不要求一次写出所有复杂逻辑：
 
-1. 建立 `pcm-demo/` 和最小配置；
-2. 实现 AI-compatible 聊天封装；
-3. 实现 Claude Agent SDK 封装并完成一次指定目录调用；
-4. 实现命令、文件和 `state.json` 读写；
-5. 建立统一步骤入口和结果格式；
-6. 按第 0～19 步逐个实现和单独验证；
-7. 实现 `run_all.py` 的初始化流程；
-8. 实现 Backlog 需求循环；
-9. 实现 `--resume`；
-10. 使用《修迹》PRD 完整运行，并确认源 PRD 未被修改；
-11. 根据真实失败只修正阻断跑通的问题；
-12. 记录正式 PCM 需要重新设计的事实和风险。
+1. 每个新步骤开始前，对照原手稿、当前 PCM 流程设计和活动 TRD，与开发者确认输入、输出、操作、完成条件及失败、阻塞和恢复边界；
+2. 先同步并提交对应设计文档；
+3. 建立 `pcm-demo/` 和最小配置；
+4. 实现 AI-compatible 聊天封装；
+5. 实现命令、文件和 `state.json` 读写；
+6. 按已确认合同实现并真实验证第 1 步的项目身份提取、固定模板浅克隆、初始化清理、原子发布和安全恢复；
+7. 实现 Claude Agent SDK 封装并完成一次指定目录调用；
+8. 建立统一步骤入口和结果格式；
+9. 只完成当前阶段的第 0～2 步及串联运行；
+10. 阶段 1 验收通过后，再增量设计和实现下一阶段；
+11. 使用《修迹》产品初稿完整运行，并确认源初稿未被修改；
+12. 根据真实失败只修正阻断跑通的问题；
+13. 记录正式 PCM 需要重新设计的事实和风险。
 
 ## 十三、完成标准
 
@@ -418,14 +438,14 @@ Demo 完成需要同时满足：
 3. AI-compatible 模型能够完成必要的语义决策；
 4. Claude Agent SDK 能在指定工作区调用项目 Skills、修改文件和执行验证；
 5. 上一步输出能够成为下一步输入；
-6. `run_all.py` 能从指定 PRD 开始执行第 0～10 步，正确复制输入、记录哈希并使用工作区副本；
+6. `run_all.py` 能从指定产品初稿开始执行第 0～10 步，第 1 步真实完成项目身份提取、固定模板浅克隆、模板分支和 SHA 记录、上游 `.git/` 清除、`docs/产品初稿.md` 写入及原子发布；
 7. 至少两个需求经过第 11～19 步，证明需求循环真实发生；
 8. 活动步骤内的修正和重新核验可以完成，不需要外层步骤回退；
 9. 至少验证一次人工补充资源后的 `--resume`，可以使用人为制造的非秘密测试阻塞；
 10. 所有 Backlog 需求完成后，项目最终检查通过；
 11. 最终生成的根仓库、前端和后端项目可以真实安装、构建、启动和验收；
 12. 输出一份简短的 Demo 结论，记录可行能力、失败点、成本耗时和正式 PCM 的设计输入；
-13. 完整运行前后，当前能力仓库中的 `docs/prd/修迹-产品需求文档-v1.md` 内容哈希保持不变。
+13. 完整运行前后，当前能力仓库中的 `docs/prd/修迹-产品需求文档-v1.md` 内容哈希保持不变，已发布项目的 `docs/产品初稿.md` 与其哈希一致；第 1 步至少真实验证一次失败现场保留和安全续接。
 
 ## 十四、Demo 结论应回答的问题
 

@@ -14,7 +14,7 @@
 本 TRD 先指导两个近期阶段：
 
 1. **阶段 0：技术探针**——证明 Claude Agent SDK、项目 Skills、权限策略、会话恢复和 AI-compatible 结构化决策能够在本机真实工作；
-2. **阶段 1：最小骨架与第 0～2 步**——建立可运行的公共封装，打通从 PRD 输入到 `project-intake` 收敛产品定义的第一个纵向切片。
+2. **阶段 1：最小骨架与第 0～2 步**——建立可运行的公共封装，打通从产品初稿输入、发布独立产品项目工作区到 `project-intake` 收敛产品定义的第一个纵向切片。
 
 后续第 3～19 步只在本文中保留阶段边界和进入条件。前一阶段真实验收通过后，再根据运行事实增量补充下一阶段设计，不提前规定尚未验证的内部实现。
 
@@ -33,9 +33,10 @@
 ### 1. Demo 运行边界
 
 - Demo 工具代码位于当前能力仓库的 `pcm-demo/`；
-- 每次运行使用独立工作区 `pcm-demo/workspace/<run-id>/`；
-- 源 PRD 复制进工作区后，后续步骤只操作副本；
-- 运行状态和步骤结果位于 `pcm-demo/runs/<run-id>/`；
+- 运行状态和步骤结果位于被 Git 忽略的 `pcm-demo/runs/<run-id>/`；该目录只保存本地恢复数据和脱敏日志，不得提交实际 run 内容；
+- 产品项目工作区位于实际采用的 `PCM_WORKSPACE_ROOT/<project_directory_name>/`，不以 run ID 作为最终项目目录名；
+- 第 1 步将源产品初稿写入产品项目的 `docs/产品初稿.md`，后续步骤只操作项目内文件；
+- 源产品初稿路径、完整 UTF-8 内容和 SHA-256 保存在运行状态中，源文件不得修改；
 - Demo 默认只操作本地文件、本地服务和本地 Git，不 push；
 - 文件、Git、测试、服务和浏览器事实优先于 Agent 的文字结论。
 
@@ -178,7 +179,71 @@ pcm-demo/
 
 `error` 至少包含稳定错误类型和脱敏消息，不保存密钥、完整环境变量或不必要的模型原始响应。
 
-### 2. Agent SDK 运行结果
+### 2. 第 1 步工作区发布合同
+
+第 1 步使用 AI-compatible 模型从产品初稿提取严格 JSON：
+
+```json
+{
+  "topic_name": "基于 Web 的社区物品维修预约与维修进度协作系统",
+  "project_directory_name": "mendmark"
+}
+```
+
+`topic_name` 必须明确表达当前产品选题。`project_directory_name` 必须是单段小写 kebab-case；初稿已经给出仓库名或英文代号时优先提取，未给出时允许模型根据选题生成，并把来源和生成理由写入提取证据。初稿无法确定产品选题时返回 `blocked`；API、结构解析或有限重试耗尽返回 `failed`，不能猜测字段。
+
+产品工作区根目录的优先级为 CLI `--workspace-root`、进程环境 `PCM_WORKSPACE_ROOT`、`pcm-demo/.env` 中的同名配置。最终项目路径为 `<root>/<project_directory_name>`，调用方不直接传入最终项目路径。固定模板仓库为 `git@gitlab.com:baiyiyu/andrszan/pcm-agent-skills.git`，使用默认分支最新内容，不允许模型或单次运行更换来源。
+
+确定性发布顺序为：
+
+1. 保存源产品初稿的绝对路径、完整 UTF-8 内容和 SHA-256；
+2. 在最终目录同级计算 `<project_directory_name>.pcm-tmp-<run-id>` 临时路径；
+3. 先用 Git 核验模板仓库默认分支和读取权限，再执行 `git clone --depth 1`；
+4. 记录模板默认分支、实际分支、commit SHA 和 remote URL，并核验 `CLAUDE.md`、`AGENTS.md`、`project-intake` Skill、`frontend/` 与 `backend/` 等关键能力；
+5. 只在临时目录已证明属于当前 run 后删除其中的 `.git/`，删除原 `docs/` 内容后重建空 `docs/`，再按原始字节写入 `docs/产品初稿.md`；
+6. 核验 `.git/` 不存在、`docs/` 只含产品初稿、源和目标初稿哈希一致、源文件未变化且模板能力仍存在；
+7. 所有核验通过后，将同文件系统中的临时目录原子重命名为最终项目路径。
+
+步骤对下游公开的 `outputs` 只包含最终项目根路径和 `docs/产品初稿.md`。第 1 步成功时 `state.json` 至少保存以下统一结构；完整命令结果放在步骤结果或脱敏日志中：
+
+```json
+{
+  "project": {
+    "topic_name": "基于 Web 的社区物品维修预约与维修进度协作系统",
+    "project_directory_name": "mendmark",
+    "extraction": {
+      "directory_name_source": "source",
+      "reason": "初稿已明确 Git 仓库名"
+    }
+  },
+  "workspace": {
+    "root": "/products",
+    "root_source": "PCM_WORKSPACE_ROOT",
+    "staging_path": "/products/mendmark.pcm-tmp-<run-id>",
+    "final_path": "/products/mendmark"
+  },
+  "template": {
+    "repository": "git@gitlab.com:baiyiyu/andrszan/pcm-agent-skills.git",
+    "remote_url": "git@gitlab.com:baiyiyu/andrszan/pcm-agent-skills.git",
+    "default_branch": "main",
+    "actual_branch": "main",
+    "commit_sha": "<sha>"
+  },
+  "publication_phase": "published",
+  "checks": {
+    "template_capabilities_present": true,
+    "git_removed": true,
+    "docs_reinitialized": true,
+    "draft_hash_matches": true,
+    "source_draft_unchanged": true,
+    "renamed_to_final_path": true
+  }
+}
+```
+
+失败时保留临时现场。恢复只续接状态能证明属于同一 run、同一模板和同一目标的完整 clone；不完整 clone、临时与最终目录同时存在、目录归属不明或证据冲突时不自动删除或覆盖。最终目录已经完整发布且证据一致时，可以确认既有成功而不重新 clone。
+
+### 3. Agent SDK 运行结果
 
 公共封装必须保留 SDK 原始终止语义，不将其压缩成一个含混的布尔值：
 
@@ -201,7 +266,7 @@ exception
 - 连接或子进程在 ResultMessage 之前失败时，session ID 可以为空；
 - 收到 ResultMessage 后仍继续消费消息流至结束，避免漏掉尾随系统事件。
 
-### 3. AI-compatible 决策结果
+### 4. AI-compatible 决策结果
 
 首轮只支持一个最小结构：
 
@@ -223,7 +288,7 @@ exception
 
 结构化响应解析失败时可以进行少量重试；持续失败则当前步骤返回 `failed`，不能猜测决策。
 
-### 4. 命令结果
+### 5. 命令结果
 
 命令封装返回：
 
@@ -410,7 +475,7 @@ AI-compatible 模型可以决定：
 - 实现统一步骤结果；
 - 实现 `run_step.py` 和只覆盖第 0～2 步的 `run_all.py`；
 - 实现第 0 步完整 PRD 无副作用跳过；
-- 实现第 1 步工作区创建、PRD 复制和 SHA-256 记录；
+- 实现第 1 步项目身份提取、固定模板浅克隆、初始化清理、产品初稿写入、原子发布和安全恢复；
 - 实现第 2 步 `project-intake` 多轮决策与 session 恢复；
 - 验证能力仓库中的源 PRD 哈希不变。
 
@@ -424,11 +489,14 @@ AI-compatible 模型可以决定：
 
 #### 第 1 步完成条件
 
-- 创建唯一 run ID、运行目录和独立工作区；
-- PRD 副本位于工作区预期路径；
-- `state.json` 记录源绝对路径或可解析路径、源 SHA-256、工作区副本路径和工作区根目录；
-- 重复执行不会静默覆盖归属不明的已有工作区；
-- 源 PRD 哈希保持不变。
+- AI-compatible 模型从真实产品初稿取得明确的 `topic_name` 和合法的 `project_directory_name`；目录名为单段小写 kebab-case，提取或生成依据已记录；
+- 实际产品工作区根目录按 `--workspace-root`、进程环境、Demo `.env` 的优先级解析并记录来源；
+- 固定模板仓库通过 `git clone --depth 1` 克隆到最终目录同级临时路径，实际默认分支、当前分支和 commit SHA 已记录；
+- 最终项目路径为 `<root>/<project_directory_name>`，由临时目录在全部核验通过后原子重命名生成；
+- 最终目录不含上游 `.git/`，模板关键能力仍存在，`docs/` 只包含 `产品初稿.md`；
+- `state.json` 记录源初稿绝对路径、完整内容和 SHA-256、项目属性、临时和最终路径、模板证据、当前发布阶段及核验结果；
+- 项目内 `docs/产品初稿.md` 与源初稿 SHA-256 一致，源初稿哈希保持不变；
+- 重复执行、归属不明目录、残留临时 clone、clone 或 rename 中断不会导致覆盖或误报成功，并可按已确认事实安全续接或明确阻塞。
 
 #### 第 2 步完成条件
 
@@ -469,7 +537,9 @@ AI-compatible 模型可以决定：
 - Agent SDK 初始化消息与 ResultMessage 解析；
 - 权限拒绝；
 - session ID 保存与恢复；
-- PRD 复制和源文件不变；
+- 产品初稿身份提取、模板分支和 SHA 记录、固定模板浅克隆、同级临时目录与原子发布；
+- 上游 `.git/` 清理、`docs/` 重置、项目内初稿写入以及源文件不变；
+- 第 1 步发布中断后的现场保留、归属核验和安全恢复；
 - 第 0～2 步单独运行及串联运行。
 
 SDK 和模型调用使用真实服务完成至少一次集成验证。纯解析和状态逻辑可以使用固定本地样例做单元测试，但不得用 Mock 的模型成功响应替代阶段验收。
@@ -485,14 +555,16 @@ SDK 和模型调用使用真实服务完成至少一次集成验证。纯解析�
 - 结构化响应持续解析失败；
 - 目标 Skill 未加载；
 - session ID 存在但恢复失败；
+- 第 1 步的项目身份结构化响应持续无效、工作区根配置无效、Git 工具或临时网络异常、模板 clone、清理、初稿写入、核验、原子 rename 或证据持久化失败；
 - 文件、状态或哈希操作失败；
 - 步骤完成条件未满足且属于可修复实现错误。
 
 ### 返回 `blocked`
 
-- 缺少不可替代账号、凭据、服务、设备、素材、数据或审批；
+- 缺少不可替代账号、凭据、服务、设备、素材、数据或审批，包括固定模板仓库所需的 SSH 凭据或读取权限；
+- 产品初稿无法确定明确选题；
 - 重大产品、架构、安全、兼容性或不可逆决定超出自动决策边界；
-- 工作区存在归属不明或冲突修改，无法安全继续；
+- 工作区存在归属不明或冲突修改，无法安全继续；第 1 步的临时和最终目录同时存在、现场归属不明或恢复证据不匹配也属于此类；
 - 当前事实相互冲突且不同选择会实质改变交付结果。
 
 ### 恢复原则
@@ -502,6 +574,7 @@ SDK 和模型调用使用真实服务完成至少一次集成验证。纯解析�
 - 原 session 可用时优先恢复；
 - 已存在的局部产物先核验再继续，不自动删除或覆盖；
 - 阻塞解除后重新执行当前步骤的完成条件检查。
+- 第 1 步最终目录完整且证据匹配时确认既有成功；仅有归属明确且 clone 完整的临时目录时从最后可核验阶段续接；临时和最终目录同时存在、归属不明或证据冲突时保留现场并返回 `blocked`。
 
 ## 十、配置与敏感信息
 
@@ -511,11 +584,12 @@ SDK 和模型调用使用真实服务完成至少一次集成验证。纯解析�
 LLM_BASE_URL=
 LLM_API_KEY=
 LLM_MODEL=
+PCM_WORKSPACE_ROOT=
 ANTHROPIC_API_KEY=
 CLAUDE_MODEL=
 ```
 
-具体键名在实现前与现有环境统一，避免同时支持没有真实需要的别名。实际 `.env` 必须 Git 忽略；`.env.example` 只保存键、公开默认值和安全占位说明。
+具体键名在实现前与现有环境统一，避免同时支持没有真实需要的别名。`--workspace-root` 可以覆盖 `PCM_WORKSPACE_ROOT`，实际采用的根目录及其来源必须写入运行状态。实际 `.env` 必须 Git 忽略；`.env.example` 只保存键、公开默认值和安全占位说明。
 
 日志不得记录：
 
@@ -538,4 +612,4 @@ CLAUDE_MODEL=
 8. 第 3 步需要的基础工程来源；当前能力仓库尚未把模板资产入口作为已确认事实；
 9. 后续开发步骤所需浏览器通道、外部审查能力和命令权限清单。
 
-这些事项不妨碍阶段 0 开始，但对应探针未通过前不得进入依赖它的业务步骤。
+这些事项不妨碍阶段 0 开始，但对应探针未通过前不得进入依赖它的业务步骤。每个新步骤实现前还必须先对照原手稿和当前流程设计，与开发者确认详细合同并同步本文；文档未一致前不得开始实现。
