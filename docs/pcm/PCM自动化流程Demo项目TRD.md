@@ -65,7 +65,9 @@ Python 编排器负责确定性操作和最终步骤状态，不把任何模型�
 
 探针 A 还确认：`setting_sources=["project"]` 和 `skills=["project-intake"]` 不构成完全隔离。init 消息仍显示父项目的其它 Skills、内建能力和项目设置启用的 `context7` 插件。因此后续步骤必须核验目标能力已加载，并通过 `tools`、`allowed_tools`、`disallowed_tools` 和权限模式控制可执行工具；不能根据 init 列表推断其它能力均已隐藏。
 
-SDK 不自动读取 Demo 的 `.env`。配置模块必须在创建 Agent SDK 或 AI-compatible 客户端前加载 `.env`，且不得把密钥写入状态或日志。
+`LLMConfig` 从 `pcm-demo/.env` 加载 `LLM_BASE_URL`、`LLM_API_KEY` 和 `LLM_MODEL`，同名进程环境变量优先。实际 `.env` 由 Git 忽略，配置对象的 `repr` 不包含字段值；`.env.example` 只保存公开占位说明。Claude Agent SDK 仍使用自身的 Anthropic 认证配置，两类模型配置不混用。
+
+SDK 不自动读取 Demo 的 `.env`。配置模块必须在创建 Agent SDK 或 OpenAI-compatible 客户端前显式加载配置，且不得把密钥写入状态或日志。探针 C 运行时发现宿主环境配置了 SOCKS 代理，但当前 OpenAI SDK 环境没有 SOCKS 依赖；探针通过 SDK 的 `DefaultAsyncHttpxClient(trust_env=False)` 明确禁用环境代理，未修改宿主代理配置，也未增加无关依赖。
 
 ### 4. Agent 运行成功与步骤成功相互独立
 
@@ -378,7 +380,9 @@ AI-compatible 模型可以决定：
 5. 三个进程 ID 互不相同，所有恢复结果的 session ID 与原值一致；
 6. 新值、当前文件 SHA-256 和实际 `Read` 工具事件共同证明 session 恢复没有替代文件事实核验。
 
-#### 探针 C：AI-compatible 结构化决策
+#### 探针 C：OpenAI-compatible 结构化决策
+
+探针 C 已使用 `LLM_MODEL` 配置的真实服务验证：低影响文档定稿返回 `approve`，扩大 E.1 并索要真实支付账号与密钥的建议返回 `blocked` 且包含解除条件；两次真实调用均一次得到合法结构。解析器另以一次人为非法 JSON 加一次合法 JSON 验证有限重试，该本地注入只覆盖解析分支，不计作模型成功。
 
 验证：
 
@@ -504,9 +508,9 @@ SDK 和模型调用使用真实服务完成至少一次集成验证。纯解析�
 首轮配置至少包含：
 
 ```text
-AI_BASE_URL=
-AI_API_KEY=
-AI_MODEL=
+LLM_BASE_URL=
+LLM_API_KEY=
+LLM_MODEL=
 ANTHROPIC_API_KEY=
 CLAUDE_MODEL=
 ```
@@ -529,8 +533,8 @@ CLAUDE_MODEL=
 3. 探针 A 已确认只设置 `project` source 不会隐藏父项目其它 Skills、内建能力和项目设置启用的插件；如后续需要更强隔离，应另行设计独立配置目录或显式本地插件方案；
 4. 探针 A 已确认当前权限组合可以拒绝路径级 Write，但其它写入工具和 Bash 命令仍需在对应权限档位引入时逐项验证；
 5. 探针 B 已确认同机、稳定工作区路径下的跨进程 session 恢复；跨机器或工作区迁移仍不属于首轮范围；
-6. AI-compatible 服务是否稳定支持当前 JSON 结构，是否需要单独的 schema 约束能力；
-7. 第 2 步 completion judge 应由同一个 AI-compatible 模型完成，还是先使用确定性文件检查加单次语义核验；
+6. 探针 C 已确认当前 OpenAI-compatible 服务支持约定 JSON 结构、低影响批准和越界阻塞；模型或服务变化时需重新运行探针；
+7. 第 2 步 completion judge 应复用该 OpenAI-compatible 模型，先执行确定性文件检查，再提交最小语义上下文进行核验；
 8. 第 3 步需要的基础工程来源；当前能力仓库尚未把模板资产入口作为已确认事实；
 9. 后续开发步骤所需浏览器通道、外部审查能力和命令权限清单。
 

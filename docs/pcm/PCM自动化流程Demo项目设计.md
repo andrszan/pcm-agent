@@ -137,7 +137,7 @@ pcm-demo/
 
 ## 六、公共封装
 
-### 1. OpenAI-compatible AI 调用
+### 1. OpenAI-compatible LLM 调用
 
 `common/ai_chat.py` 使用 `openai` Python 包调用支持相同消息格式的模型服务。模型不限定为 OpenAI 模型。
 
@@ -215,9 +215,9 @@ Git 命令必须显式指定目标仓库，不在根目录使用宽泛暂存或�
 `.env.example` 至少说明以下配置键，实际值保存在被 Git 忽略的 `.env` 中：
 
 ```text
-AI_BASE_URL=
-AI_API_KEY=
-AI_MODEL=
+LLM_BASE_URL=
+LLM_API_KEY=
+LLM_MODEL=
 ANTHROPIC_API_KEY=
 ```
 
