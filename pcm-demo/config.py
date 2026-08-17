@@ -28,15 +28,26 @@ class LLMConfig:
         )
 
 
-def load_workspace_root(override: Path | None = None, env_file: Path | None = None) -> tuple[Path, str]:
+def load_workspace_root(
+    override: Path | None = None, env_file: Path | None = None
+) -> tuple[Path, str]:
     if override is not None:
         return override.expanduser().resolve(), "cli"
+    value, source = _load_value("PCM_WORKSPACE_ROOT", env_file)
+    return Path(value).expanduser().resolve(), source
+
+
+def load_template_repository(env_file: Path | None = None) -> tuple[str, str]:
+    return _load_value("PCM_TEMPLATE_REPOSITORY", env_file)
+
+
+def _load_value(name: str, env_file: Path | None = None) -> tuple[str, str]:
     values = _read_env(env_file or Path(__file__).with_name(".env"))
-    raw_value = os.environ.get("PCM_WORKSPACE_ROOT") or values.get("PCM_WORKSPACE_ROOT")
-    if not raw_value:
-        raise ValueError("缺少工作区配置：PCM_WORKSPACE_ROOT")
-    source = "environment" if os.environ.get("PCM_WORKSPACE_ROOT") else "env_file"
-    return Path(raw_value).expanduser().resolve(), source
+    if os.environ.get(name):
+        return os.environ[name], "environment"
+    if values.get(name):
+        return values[name], "env_file"
+    raise ValueError(f"缺少配置：{name}")
 
 
 def _read_env(path: Path) -> dict[str, str]:

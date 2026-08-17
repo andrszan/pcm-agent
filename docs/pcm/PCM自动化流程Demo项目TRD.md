@@ -104,7 +104,7 @@ SDK session 保存 Agent 对话、工具调用和结果；工作区文件与 Git
 
 ### 1. 命令行入口
 
-- `run_step.py`：运行一个已经实现的步骤；
+- `run_step.py`：运行一个已经实现的步骤；当前第 0、1 步的实际命令和配置说明以 `pcm-demo/README.md` 为准；
 - `run_all.py`：按顺序运行已纳入当前阶段的步骤；
 - 未实现步骤必须明确返回“步骤尚未实现”的程序错误，不得返回业务 `success`；
 - 单步、区间和完整运行复用相同步骤函数。
@@ -192,13 +192,13 @@ pcm-demo/
 
 `topic_name` 必须明确表达当前产品选题。`project_directory_name` 必须是单段小写 kebab-case；初稿已经给出仓库名或英文代号时优先提取，未给出时允许模型根据选题生成，并把来源和生成理由写入提取证据。初稿无法确定产品选题时返回 `blocked`；API、结构解析或有限重试耗尽返回 `failed`，不能猜测字段。
 
-产品工作区根目录的优先级为 CLI `--workspace-root`、进程环境 `PCM_WORKSPACE_ROOT`、`pcm-demo/.env` 中的同名配置。最终项目路径为 `<root>/<project_directory_name>`，调用方不直接传入最终项目路径。固定模板仓库为 `git@gitlab.com:baiyiyu/andrszan/pcm-agent-skills.git`，使用默认分支最新内容，不允许模型或单次运行更换来源。
+产品工作区根目录的优先级为 CLI `--workspace-root`、进程环境 `PCM_WORKSPACE_ROOT`、`pcm-demo/.env` 中的同名配置。模板仓库从进程环境或 `pcm-demo/.env` 的 `PCM_TEMPLATE_REPOSITORY` 读取，单次运行不能覆盖。最终项目路径为 `<root>/<project_directory_name>`，调用方不直接传入最终项目路径。第 1 步 AI-compatible 调用使用 Responses API 的 `instructions`、`input` 和 `text.format` strict JSON Schema；服务不支持 `/responses` 或该 Schema 时返回 `failed`，不回退到 Chat Completions。
 
 确定性发布顺序为：
 
 1. 保存源产品初稿的绝对路径、完整 UTF-8 内容和 SHA-256；
 2. 在最终目录同级计算 `<project_directory_name>.pcm-tmp-<run-id>` 临时路径；
-3. 先用 Git 核验模板仓库默认分支和读取权限，再执行 `git clone --depth 1`；
+3. 先用 Git 核验已配置模板仓库默认分支和读取权限，再执行 `git clone --depth 1`；
 4. 记录模板默认分支、实际分支、commit SHA 和 remote URL，并核验 `CLAUDE.md`、`AGENTS.md`、`project-intake` Skill、`frontend/` 与 `backend/` 等关键能力；
 5. 只在临时目录已证明属于当前 run 后删除其中的 `.git/`，删除原 `docs/` 内容后重建空 `docs/`，再按原始字节写入 `docs/产品初稿.md`；
 6. 核验 `.git/` 不存在、`docs/` 只含产品初稿、源和目标初稿哈希一致、源文件未变化且模板能力仍存在；
@@ -447,7 +447,7 @@ AI-compatible 模型可以决定：
 
 #### 探针 C：OpenAI-compatible 结构化决策
 
-探针 C 已使用 `LLM_MODEL` 配置的真实服务验证：低影响文档定稿返回 `approve`，扩大 E.1 并索要真实支付账号与密钥的建议返回 `blocked` 且包含解除条件；两次真实调用均一次得到合法结构。解析器另以一次人为非法 JSON 加一次合法 JSON 验证有限重试，该本地注入只覆盖解析分支，不计作模型成功。
+探针 C 已使用 `LLM_MODEL` 配置的真实 Responses API 服务验证：低影响文档定稿一次返回 `approve`；扩大 E.1 并索要真实支付账号与密钥的建议在一次结构化修复重试后返回 `blocked` 且包含解除条件；解析器另以一次人为非法 JSON 加一次合法 JSON 验证有限重试。上述本地注入只覆盖解析分支，不计作模型成功。
 
 验证：
 
@@ -585,11 +585,11 @@ LLM_BASE_URL=
 LLM_API_KEY=
 LLM_MODEL=
 PCM_WORKSPACE_ROOT=
-ANTHROPIC_API_KEY=
+PCM_TEMPLATE_REPOSITORY=
 CLAUDE_MODEL=
 ```
 
-具体键名在实现前与现有环境统一，避免同时支持没有真实需要的别名。`--workspace-root` 可以覆盖 `PCM_WORKSPACE_ROOT`，实际采用的根目录及其来源必须写入运行状态。实际 `.env` 必须 Git 忽略；`.env.example` 只保存键、公开默认值和安全占位说明。
+具体键名在实现前与现有环境统一，避免同时支持没有真实需要的别名。`--workspace-root` 可以覆盖 `PCM_WORKSPACE_ROOT`，实际采用的根目录及其来源必须写入运行状态。Claude Agent SDK 认证当前使用进程环境或既有 Claude 登录态，不从 Demo `.env` 读取，进入第 2 步前再按实际运行方式确认。实际 `.env` 必须 Git 忽略；`.env.example` 只保存键、公开默认值和安全占位说明。
 
 日志不得记录：
 

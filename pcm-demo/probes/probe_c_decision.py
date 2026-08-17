@@ -15,6 +15,7 @@ from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 DEMO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(DEMO_ROOT))
 
+from common.openai_responses import request_json  # noqa: E402
 from config import LLMConfig  # noqa: E402
 
 ACTIONS = {"answer", "approve", "continue", "blocked"}
@@ -29,6 +30,17 @@ SYSTEM_PROMPT = """你是 PCM Demo 的受限决策器。根据当前步骤、事
 可以自动决定：不扩大范围的低影响、可逆文档细节，以及完成条件满足后的文档定稿许可。
 必须 blocked：改变目标用户或核心闭环、扩大 E.1 范围、新增真实外部服务或账号、重大架构/安全/权限/兼容性/不可逆数据决定、伪造凭据或降低验收标准。
 不要输出 API Key、环境变量值或 JSON 之外的文字。"""
+DECISION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "action": {"type": "string", "enum": ["answer", "approve", "continue", "blocked"]},
+        "answer": {"type": "string"},
+        "reason": {"type": "string"},
+        "required_inputs": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["action", "answer", "reason", "required_inputs"],
+    "additionalProperties": False,
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -93,18 +105,14 @@ async def request_decision(
             if previous_error is None
             else f"\n上一次响应无效：{previous_error}。请严格按 JSON 合同重新回答。"
         )
-        response = await client.chat.completions.create(
+        return await request_json(
+            client,
             model=config.model,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": decision_context + repair},
-            ],
-            response_format={"type": "json_object"},
+            instructions=SYSTEM_PROMPT,
+            input_text=decision_context + repair,
+            schema_name="pcm_decision",
+            schema=DECISION_SCHEMA,
         )
-        content = response.choices[0].message.content
-        if not content:
-            raise ValueError("模型返回了空内容")
-        return content
 
     return await parse_with_retry(get_content)
 

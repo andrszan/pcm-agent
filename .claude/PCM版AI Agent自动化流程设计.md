@@ -79,7 +79,7 @@ AI 决策能力主要处理：
 Python 程序直接负责：
 
 - 校验项目文件夹名为单段小写 kebab-case，并根据配置的产品工作区根目录计算最终路径；
-- 对固定模板仓库执行 Git 浅克隆、记录分支和 commit、清理上游 Git 历史、初始化产品文档目录并原子发布工作区；
+- 对配置的模板仓库执行 Git 浅克隆、记录分支和 commit、清理上游 Git 历史、初始化产品文档目录并原子发布工作区；
 - 读写运行状态；
 - 创建和检查目录；
 - 调用 Claude Agent SDK；
@@ -172,8 +172,8 @@ PCM Demo 只保存支持继续运行所必需的状态：
     "final_path": "/products/family-meal-planner"
   },
   "template": {
-    "repository": "git@gitlab.com:baiyiyu/andrszan/pcm-agent-skills.git",
-    "remote_url": "git@gitlab.com:baiyiyu/andrszan/pcm-agent-skills.git",
+    "repository": "<configured-template-repository>",
+    "remote_url": "<configured-template-repository>",
     "default_branch": "main",
     "actual_branch": "main",
     "commit_sha": "<sha>"
@@ -208,7 +208,7 @@ PCM Demo 只保存支持继续运行所必需的状态：
 6. 若当前步骤已有 Claude session，优先恢复原会话；
 7. 若步骤中途异常，重新核验当前文件和 Git 事实后重跑当前步骤；
 8. 状态不符合预期时阻塞并报告，不自动删除或覆盖。
-9. 第 1 步恢复时重新核对产品初稿哈希、项目目录名、工作区根目录、固定模板来源以及临时和最终目录事实；只有临时目录能由状态证明属于同一 run 且 clone 完整时才允许续接。
+9. 第 1 步恢复时重新核对产品初稿哈希、项目目录名、工作区根目录、配置的模板来源以及临时和最终目录事实；只有临时目录能由状态证明属于同一 run 且 clone 完整时才允许续接。
 10. 第 1 步最终目录已完整发布且证据一致时可确认既有成功；临时和最终目录同时存在、目录归属不明或证据冲突时返回 `blocked` 并保留现场。
 
 ## 五、项目初始化流程
@@ -223,18 +223,18 @@ PCM Demo 只保存支持继续运行所必需的状态：
 
 ### 第 1 步：建立项目工作区
 
-- 输入：产品初稿；运行 ID；产品工作区根目录。Demo 通过 `--workspace-root`、进程环境或 `pcm-demo/.env` 的 `PCM_WORKSPACE_ROOT` 取得根目录，优先级依次降低。
+- 输入：产品初稿；运行 ID；产品工作区根目录；从配置读取的模板仓库。Demo 通过 `--workspace-root`、进程环境或 `pcm-demo/.env` 的 `PCM_WORKSPACE_ROOT` 取得根目录，优先级依次降低；模板仓库由 `PCM_TEMPLATE_REPOSITORY` 读取，单次运行不能覆盖。
 - AI 输出：从初稿提取 `topic_name` 和 `project_directory_name`。后者必须是单段小写 kebab-case；初稿没有明确名称时允许根据选题生成，并记录生成理由。
-- 模板：固定使用 `git@gitlab.com:baiyiyu/andrszan/pcm-agent-skills.git` 默认分支的最新内容，不由 AI 或单次运行更换。
+- 模板：使用 `PCM_TEMPLATE_REPOSITORY` 配置的模板仓库默认分支最新内容，不由 AI 或单次运行更换来源。
 - 执行动作：
   1. 在产品工作区根目录中计算最终路径 `<root>/<project_directory_name>` 和同级临时路径 `<root>/<project_directory_name>.pcm-tmp-<run-id>`；
-  2. 使用 `git clone --depth 1` 将固定模板克隆到临时路径，记录默认分支、实际分支和 commit SHA；
+  2. 使用 `git clone --depth 1` 将配置的模板克隆到临时路径，记录默认分支、实际分支和 commit SHA；
   3. 核验模板关键能力存在后，删除临时目录中的上游 `.git/`，清空并保留 `docs/`，将输入初稿按原始字节写为 `docs/产品初稿.md`；
   4. 核验 `.git/` 不存在、`docs/` 只包含产品初稿、初稿哈希一致、源初稿未改变且模板关键能力仍存在；
   5. 全部核验通过后，将同级临时目录原子重命名为最终路径。
 - 输出：最终项目根路径和 `<final_path>/docs/产品初稿.md`。
 - 完成条件：最终目录独立、可操作，模板来源和 commit 可追溯，没有误带上游 Git 历史，初始化后的 `docs/` 只含当前产品初稿，状态和文件事实一致。
-- 自动化说明：AI 只提取项目身份；Git、路径、清理、哈希、核验和发布由 Python 程序确定性执行。最终路径必须原先不存在，不以复制少量能力文件代替完整模板 clone。
+- 自动化说明：AI-compatible 调用使用 Responses API 的严格 JSON Schema 只提取项目身份；服务不支持该协议时明确失败，不回退到 Chat Completions。Git、路径、清理、哈希、核验和发布由 Python 程序确定性执行。最终路径必须原先不存在，不以复制少量能力文件代替完整模板 clone。
 - 阻塞与失败：初稿无法确定选题、缺少不可替代的模板仓库读取权限或目录归属不明时返回 `blocked`；AI API、结构解析、Git 工具、网络、clone、清理、写入、核验或 rename 的执行错误返回 `failed`。失败时保留临时现场，恢复时按已记录阶段安全续接，不自动删除归属不明内容。
 
 ### 第 2 步：项目需求与产品定义

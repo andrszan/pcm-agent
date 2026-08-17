@@ -60,7 +60,7 @@ docs/prd/修迹-产品需求文档-v1.md
 - 首版不依赖真实支付、地图、物流、即时聊天或自动诊断服务；
 - 可以通过本地测试、真实服务和浏览器完成验收。
 
-完整运行通过 `--product-draft` 接收源产品初稿，通过可选 `--workspace-root` 覆盖 `PCM_WORKSPACE_ROOT`。程序记录源路径、完整 UTF-8 内容和 SHA-256，从初稿提取项目选题和文件夹名，将固定开发管理模板浅克隆并初始化后发布到 `<workspace-root>/<project_directory_name>`，把初稿写为项目内的 `docs/产品初稿.md`。后续步骤只操作项目工作区，不修改当前能力仓库中的源初稿。
+完整运行通过 `--product-draft` 接收源产品初稿，通过可选 `--workspace-root` 覆盖 `PCM_WORKSPACE_ROOT`。程序记录源路径、完整 UTF-8 内容和 SHA-256，从初稿提取项目选题和文件夹名，将 `PCM_TEMPLATE_REPOSITORY` 配置的开发管理模板浅克隆并初始化后发布到 `<workspace-root>/<project_directory_name>`，把初稿写为项目内的 `docs/产品初稿.md`。后续步骤只操作项目工作区，不修改当前能力仓库中的源初稿。
 
 因为输入已经是完整产品初稿，第 0 步应确认输入充分后无副作用跳过；第 1 步将其发布为项目内 `docs/产品初稿.md`；第 2 步仍需调用 `project-intake` 核验和收敛该初稿，使后续产品定义文档成为被开发项目的当前权威事实。源初稿只提供产品要求，不提供预生成的技术方案、Backlog、TRD、代码或验收结论，因此不会把目标实现作为隐藏答案交给 Agent。
 
@@ -208,23 +208,23 @@ LLM_BASE_URL=
 LLM_API_KEY=
 LLM_MODEL=
 PCM_WORKSPACE_ROOT=
-ANTHROPIC_API_KEY=
+PCM_TEMPLATE_REPOSITORY=
 ```
 
-如果 Claude Agent SDK 通过当前环境的其他认证方式运行，按实际支持方式配置，不伪造凭据。
+如果 Claude Agent SDK 通过当前环境的其他认证方式运行，按实际支持方式配置，不伪造凭据。Demo `.env` 当前只负责 `LLM_*`、工作区根目录和模板仓库配置；SDK 认证继续使用进程环境或既有 Claude 登录态，进入第 2 步前再确认具体加载方式。
 
 完整运行的输入包括：
 
 - 现有产品初稿路径；
 - 产品工作区根目录，优先使用 CLI `--workspace-root` 覆盖，其次读取 `PCM_WORKSPACE_ROOT`；
-- 固定开发管理模板仓库 `git@gitlab.com:baiyiyu/andrszan/pcm-agent-skills.git` 的 GitLab SSH 读取权限；
+- `PCM_TEMPLATE_REPOSITORY` 配置的开发管理模板仓库 GitLab SSH 读取权限；
 - 可用基础模板或脚手架来源；
 - AI-compatible 模型配置；
 - Claude Agent SDK 认证和运行环境；
 - Git、Python、Node.js、包管理器和浏览器等本机工具；
 - 修迹首版不需要的外部服务默认不提供。
 
-程序必须在开始运行时校验产品初稿存在且可读，记录源路径、完整 UTF-8 内容和 SHA-256。第 1 步从初稿提取选题和项目文件夹名，将固定模板浅克隆到最终目录同级临时目录，记录实际分支与 commit，删除上游 `.git/`，重置 `docs/` 并写入 `docs/产品初稿.md`，全部核验通过后原子发布到最终项目路径。源文件后续变化不得被静默接受；`--resume` 根据已保存内容、哈希、临时现场和发布证据继续。
+程序必须在开始运行时校验产品初稿存在且可读，记录源路径、完整 UTF-8 内容和 SHA-256。第 1 步从初稿提取选题和项目文件夹名，通过 Responses API 的 `instructions`、`input` 和 `text.format` strict JSON Schema 获取结构化结果；服务不支持该协议时明确失败，不回退到 Chat Completions。随后将 `PCM_TEMPLATE_REPOSITORY` 配置的模板浅克隆到最终目录同级临时目录，记录实际分支与 commit，删除上游 `.git/`，重置 `docs/` 并写入 `docs/产品初稿.md`，全部核验通过后原子发布到最终项目路径。源文件后续变化不得被静默接受；`--resume` 根据已保存内容、哈希、临时现场和发布证据继续。
 
 缺少不可替代资源时允许在运行中阻塞。
 
@@ -299,8 +299,8 @@ runs/<run-id>/
     "final_path": "/products/mendmark"
   },
   "template": {
-    "repository": "git@gitlab.com:baiyiyu/andrszan/pcm-agent-skills.git",
-    "remote_url": "git@gitlab.com:baiyiyu/andrszan/pcm-agent-skills.git",
+    "repository": "<configured-template-repository>",
+    "remote_url": "<configured-template-repository>",
     "default_branch": "main",
     "actual_branch": "main",
     "commit_sha": "<sha>"

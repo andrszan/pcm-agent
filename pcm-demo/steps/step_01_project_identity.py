@@ -5,11 +5,28 @@ import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from openai import AsyncOpenAI, DefaultAsyncHttpxClient
-
+from common.openai_responses import request_json_response
 from config import LLMConfig
 
 NAME_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+PROJECT_IDENTITY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "topic_name": {"type": "string"},
+        "project_directory_name": {"type": "string"},
+        "directory_name_source": {"type": "string", "enum": ["source", "generated"]},
+        "reason": {"type": "string"},
+        "blocked_reason": {"type": ["string", "null"]},
+    },
+    "required": [
+        "topic_name",
+        "project_directory_name",
+        "directory_name_source",
+        "reason",
+        "blocked_reason",
+    ],
+    "additionalProperties": False,
+}
 SYSTEM_PROMPT = """你负责从产品初稿提取第 1 步建立工作区所需的最小项目身份。
 
 只返回一个 JSON 对象，字段必须为：
@@ -23,14 +40,7 @@ SYSTEM_PROMPT = """你负责从产品初稿提取第 1 步建立工作区所需�
 
 
 def validate_identity(data: Any) -> dict[str, Any]:
-    required = {
-        "topic_name",
-        "project_directory_name",
-        "directory_name_source",
-        "reason",
-        "blocked_reason",
-    }
-    if not isinstance(data, dict) or set(data) != required:
+    if not isinstance(data, dict) or set(data) != set(PROJECT_IDENTITY_SCHEMA["required"]):
         raise ValueError("项目身份字段不符合约定")
     if data["blocked_reason"] is not None:
         if not isinstance(data["blocked_reason"], str) or not data["blocked_reason"].strip():
@@ -65,34 +75,18 @@ async def parse_with_retry(
 async def extract_project_identity(
     product_draft: str, config: LLMConfig
 ) -> tuple[dict[str, Any], int]:
-    client = AsyncOpenAI(
-        api_key=config.api_key,
-        base_url=config.base_url,
-        timeout=120.0,
-        max_retries=1,
-        http_client=DefaultAsyncHttpxClient(trust_env=False),
-    )
-
     async def get_content(attempt: int, previous_error: str | None) -> str:
         repair = (
             ""
             if previous_error is None
             else f"\n上一次响应无效：{previous_error}。请严格按 JSON 合同重新回答。"
         )
-        response = await client.chat.completions.create(
-            model=config.model,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": product_draft + repair},
-            ],
-            response_format={"type": "json_object"},
+        return await request_json_response(
+            config,
+            instructions=SYSTEM_PROMPT,
+            input_text=product_draft + repair,
+            schema_name="project_identity",
+            schema=PROJECT_IDENTITY_SCHEMA,
         )
-        content = response.choices[0].message.content
-        if not content:
-            raise ValueError("模型返回了空内容")
-        return content
 
-    try:
-        return await parse_with_retry(get_content)
-    finally:
-        await client.close()
+    return await parse_with_retry(get_content)

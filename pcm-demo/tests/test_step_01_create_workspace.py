@@ -10,9 +10,10 @@ from pathlib import Path
 DEMO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(DEMO_ROOT))
 
-from common.project_identity import validate_identity
 from common.files import write_json
-from config import load_workspace_root
+from common.openai_responses import request_json
+from config import load_template_repository, load_workspace_root
+from steps.step_01_project_identity import validate_identity
 from steps.step_01_create_workspace import (
     WorkspaceBlocked,
     inspect_clone,
@@ -65,6 +66,62 @@ class WorkspaceStepTests(unittest.TestCase):
                 else:
                     os.environ["PCM_WORKSPACE_ROOT"] = previous
 
+    def test_template_repository_missing_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            previous = os.environ.pop("PCM_TEMPLATE_REPOSITORY", None)
+            try:
+                with self.assertRaises(ValueError):
+                    load_template_repository(env_file)
+            finally:
+                if previous is not None:
+                    os.environ["PCM_TEMPLATE_REPOSITORY"] = previous
+
+    def test_template_repository_environment_precedence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            env_file.write_text(
+                "PCM_TEMPLATE_REPOSITORY=ssh://from-file\n", encoding="utf-8"
+            )
+            previous = os.environ.get("PCM_TEMPLATE_REPOSITORY")
+            try:
+                os.environ["PCM_TEMPLATE_REPOSITORY"] = "ssh://from-environment"
+                value, source = load_template_repository(env_file)
+                self.assertEqual(value, "ssh://from-environment")
+                self.assertEqual(source, "environment")
+            finally:
+                if previous is None:
+                    os.environ.pop("PCM_TEMPLATE_REPOSITORY", None)
+                else:
+                    os.environ["PCM_TEMPLATE_REPOSITORY"] = previous
+
+    def test_responses_request_uses_output_text(self) -> None:
+        calls: list[dict[str, object]] = []
+
+        class Responses:
+            async def create(self, **kwargs: object) -> object:
+                calls.append(kwargs)
+                return type("Response", (), {"status": "completed", "output_text": "{}"})()
+
+        class Client:
+            responses = Responses()
+
+        content = __import__("asyncio").run(
+            request_json(
+                Client(),
+                model="test-model",
+                instructions="system",
+                input_text="input",
+                schema_name="test_schema",
+                schema={"type": "object", "additionalProperties": False},
+            )
+        )
+        self.assertEqual(content, "{}")
+        self.assertEqual(calls[0]["instructions"], "system")
+        self.assertEqual(calls[0]["input"], "input")
+        self.assertEqual(calls[0]["max_output_tokens"], 512)
+        self.assertEqual(calls[0]["text"]["format"]["type"], "json_schema")
+
     def test_default_branch_parser(self) -> None:
         output = "ref: refs/heads/main\tHEAD\nabc\tHEAD"
         self.assertEqual(parse_default_branch(output), "main")
@@ -76,7 +133,7 @@ class WorkspaceStepTests(unittest.TestCase):
             marker = staging / "partial"
             marker.write_text("keep", encoding="utf-8")
             with self.assertRaises(WorkspaceBlocked):
-                inspect_clone(staging)
+                inspect_clone(staging, "ssh://template")
             self.assertEqual(marker.read_text(encoding="utf-8"), "keep")
 
     def test_symlink_staging_is_blocked_without_touching_target(self) -> None:
@@ -89,7 +146,7 @@ class WorkspaceStepTests(unittest.TestCase):
             staging = root / "staging"
             staging.symlink_to(target, target_is_directory=True)
             with self.assertRaises(WorkspaceBlocked):
-                inspect_clone(staging)
+                inspect_clone(staging, "ssh://template")
             self.assertEqual(marker.read_text(encoding="utf-8"), "keep")
 
     def test_symlink_final_is_not_accepted_as_prepared(self) -> None:

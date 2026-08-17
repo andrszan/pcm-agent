@@ -9,12 +9,11 @@ from secrets import token_hex
 from typing import Any
 
 from common.files import sha256
-from common.project_identity import extract_project_identity
 from common.state import create_run_dir, read_state, write_state, write_step_result
-from config import LLMConfig, load_workspace_root
+from config import LLMConfig, load_template_repository, load_workspace_root
 from steps.step_00_product_draft import run as run_product_draft
+from steps.step_01_project_identity import extract_project_identity
 from steps.step_01_create_workspace import (
-    TEMPLATE_URL,
     WorkspaceBlocked,
     clone_and_verify,
     inspect_clone,
@@ -122,6 +121,7 @@ def complete_step_one(
         write_state(run_dir, state)
 
     workspace_root, root_source = load_workspace_root(args.workspace_root)
+    template_repository, template_source = load_template_repository()
     if not workspace_root.is_dir():
         raise RuntimeError(f"产品工作区根目录不存在：{workspace_root}")
     project_name = state["project"]["project_directory_name"]
@@ -134,12 +134,15 @@ def complete_step_one(
             Path(recorded["root"]) != workspace_root
             or Path(recorded["staging_path"]) != staging_path
             or Path(recorded["final_path"]) != final_path
+            or recorded.get("template_repository") != template_repository
         ):
-            raise WorkspaceBlocked("工作区配置与已有运行记录不一致")
+            raise WorkspaceBlocked("工作区或模板配置与已有运行记录不一致")
     else:
         state["workspace"] = {
             "root": str(workspace_root),
             "root_source": root_source,
+            "template_repository": template_repository,
+            "template_source": template_source,
             "staging_path": str(staging_path),
             "final_path": str(final_path),
         }
@@ -155,12 +158,12 @@ def complete_step_one(
         else:
             raise WorkspaceBlocked("最终项目路径已存在或发布现场冲突")
     elif staging_path.exists() and phase == "intent_recorded":
-        state["template"] = inspect_clone(staging_path)
+        state["template"] = inspect_clone(staging_path, template_repository)
         state["publication_phase"] = "clone_verified"
         write_state(run_dir, state)
         phase = "clone_verified"
     elif phase == "intent_recorded":
-        state["template"] = clone_and_verify(staging_path)
+        state["template"] = clone_and_verify(staging_path, template_repository)
         state["publication_phase"] = "clone_verified"
         write_state(run_dir, state)
         phase = "clone_verified"

@@ -8,7 +8,6 @@ from typing import Any
 
 from common.files import sha256
 
-TEMPLATE_URL = "git@gitlab.com:baiyiyu/andrszan/pcm-agent-skills.git"
 REQUIRED_PATHS = (
     Path("CLAUDE.md"),
     Path("AGENTS.md"),
@@ -98,18 +97,20 @@ def require_real_directory(path: Path, description: str) -> None:
         raise WorkspaceBlocked(f"{description}不是可确认归属的真实目录：{path}")
 
 
-def inspect_clone(staging: Path) -> dict[str, str]:
+def inspect_clone(staging: Path, template_repository: str) -> dict[str, str]:
     require_real_directory(staging, "临时 clone")
     if not (staging / ".git").is_dir() or not verify_required_paths(staging):
         raise WorkspaceBlocked("临时 clone 不完整，保留现场等待处理")
-    default_branch = parse_default_branch(git("ls-remote", "--symref", TEMPLATE_URL, "HEAD"))
+    default_branch = parse_default_branch(
+        git("ls-remote", "--symref", template_repository, "HEAD")
+    )
     remote_url = git("remote", "get-url", "origin", cwd=staging)
     actual_branch = git("branch", "--show-current", cwd=staging)
     commit_sha = git("rev-parse", "HEAD", cwd=staging)
-    if remote_url != TEMPLATE_URL or actual_branch != default_branch:
+    if remote_url != template_repository or actual_branch != default_branch:
         raise WorkspaceBlocked("临时 clone 的模板来源或分支与当前合同不一致")
     return {
-        "repository": TEMPLATE_URL,
+        "repository": template_repository,
         "remote_url": remote_url,
         "default_branch": default_branch,
         "actual_branch": actual_branch,
@@ -117,10 +118,12 @@ def inspect_clone(staging: Path) -> dict[str, str]:
     }
 
 
-def clone_and_verify(staging: Path) -> dict[str, str]:
-    default_branch = parse_default_branch(git("ls-remote", "--symref", TEMPLATE_URL, "HEAD"))
-    git("clone", "--depth", "1", TEMPLATE_URL, str(staging))
-    template = inspect_clone(staging)
+def clone_and_verify(staging: Path, template_repository: str) -> dict[str, str]:
+    default_branch = parse_default_branch(
+        git("ls-remote", "--symref", template_repository, "HEAD")
+    )
+    git("clone", "--depth", "1", template_repository, str(staging))
+    template = inspect_clone(staging, template_repository)
     if template["default_branch"] != default_branch:
         raise RuntimeError("clone 期间模板默认分支发生变化")
     return template
