@@ -49,7 +49,7 @@ Python 编排器负责确定性操作和最终步骤状态，不把任何模型�
 
 ### 3. Claude Agent SDK 当前约束
 
-首轮实现基于 Python 包 `claude-agent-sdk`，最低 Python 版本按 SDK 当前要求使用 Python 3.10+。SDK 通常自带 Claude Code 二进制，但安装形态没有捆绑二进制时，需要本机另有可用的 Claude Code 可执行文件。
+首轮实现基于 Python 包 `claude-agent-sdk`，最低 Python 版本按 SDK 当前要求使用 Python 3.10+。探针 A 的真实运行环境为 Python 3.13.14、`claude-agent-sdk` 0.2.139 和 SDK 捆绑的 Claude Code 2.1.233；宿主机另有 Claude Code 2.1.223，但本次未使用它作为后备路径。
 
 每次项目 Agent 调用必须显式设置：
 
@@ -61,7 +61,9 @@ Python 编排器负责确定性操作和最终步骤状态，不把任何模型�
 - `max_turns` 和 `max_budget_usd`：探针与步骤分别设置有限上限，防止开放式任务无界运行；
 - `resume`：需要继续特定历史会话时使用已保存的 session ID。
 
-项目 Skills 来自工作区 `.claude/skills/`。当前核心流程 Skills 多数设置了 `disable-model-invocation: true`，因此步骤脚本应显式调用目标 Skill，不能只依赖模型自主选择。调用前应从 SDK 初始化消息核对目标 Skill 或命令确实已经加载。
+项目 Skills 来自工作区 `.claude/skills/`。当前核心流程 Skills 多数设置了 `disable-model-invocation: true`，因此步骤脚本应显式调用目标 Skill，不能只依赖模型自主选择。探针 A 已确认 `/project-intake` 可以显式调用，且目标 Skill 同时出现在 init 消息的 `skills` 和 `slash_commands` 中。
+
+探针 A 还确认：`setting_sources=["project"]` 和 `skills=["project-intake"]` 不构成完全隔离。init 消息仍显示父项目的其它 Skills、内建能力和项目设置启用的 `context7` 插件。因此后续步骤必须核验目标能力已加载，并通过 `tools`、`allowed_tools`、`disallowed_tools` 和权限模式控制可执行工具；不能根据 init 列表推断其它能力均已隐藏。
 
 SDK 不自动读取 Demo 的 `.env`。配置模块必须在创建 Agent SDK 或 AI-compatible 客户端前加载 `.env`，且不得把密钥写入状态或日志。
 
@@ -285,7 +287,7 @@ duration
 - Git 建分支、合并和提交继续由对应显式步骤或 `commit-changes` 负责；
 - 每类新增命令权限都由真实步骤需要证明。
 
-项目 `.claude/settings.json` 中的 allow、ask、deny 规则仍可能参与权限判断。Demo 必须通过查询参数明确覆盖运行模式，并用实际拒绝测试证明未授权工具不会执行。
+项目 `.claude/settings.json` 中的 allow、ask、deny 规则仍可能参与权限判断。探针 A 已确认 `permission_mode="dontAsk"` 配合显式 `tools` 和路径级 `disallowed_tools`，可以在当前项目默认 `bypassPermissions` 配置下拒绝目标 Write：SDK 产生了错误 ToolResult，目标文件没有创建，基线文件哈希保持不变。当前 SDK 没有把该拒绝汇总到 `ResultMessage.permission_denials`，因此实现必须同时观察中间 ToolResult 和最终文件事实。
 
 ### 4. Session 保存与恢复
 
@@ -521,10 +523,10 @@ CLAUDE_MODEL=
 
 以下事项必须由探针或后续阶段事实解决，暂不在本 TRD 中假定答案：
 
-1. 当前环境中 Agent SDK 的实际版本及捆绑 Claude Code 版本；
-2. 项目 Skill 在 SDK 中最稳定的显式调用格式；
-3. 只加载 `project` source 时，当前工作区 hooks、Subagents 和项目配置的实际加载结果；
-4. 查询参数中的权限模式与当前项目 `.claude/settings.json` 组合后的实际拒绝行为；
+1. 阶段 0 后续运行中 Agent SDK、捆绑 Claude Code 或模型版本发生变化时，需重新记录并复核探针结果；
+2. 项目 Skill 的显式调用已由探针 A 确认为 `/project-intake <参数>`，其它 Skill 在进入对应步骤前按相同方式逐个验证；
+3. 探针 A 已确认只设置 `project` source 不会隐藏父项目其它 Skills、内建能力和项目设置启用的插件；如后续需要更强隔离，应另行设计独立配置目录或显式本地插件方案；
+4. 探针 A 已确认当前权限组合可以拒绝路径级 Write，但其它写入工具和 Bash 命令仍需在对应权限档位引入时逐项验证；
 5. AI-compatible 服务是否稳定支持当前 JSON 结构，是否需要单独的 schema 约束能力；
 6. 第 2 步 completion judge 应由同一个 AI-compatible 模型完成，还是先使用确定性文件检查加单次语义核验；
 7. 第 3 步需要的基础工程来源；当前能力仓库尚未把模板资产入口作为已确认事实；
