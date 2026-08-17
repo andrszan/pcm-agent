@@ -1,0 +1,134 @@
+from __future__ import annotations
+
+import json
+import os
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+DEMO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(DEMO_ROOT))
+
+from common.project_identity import validate_identity
+from common.files import write_json
+from config import load_workspace_root
+from steps.step_01_create_workspace import (
+    WorkspaceBlocked,
+    inspect_clone,
+    parse_default_branch,
+    prepare_staging,
+    verify_prepared,
+)
+
+
+class WorkspaceStepTests(unittest.TestCase):
+    def test_json_write_replaces_complete_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            path.write_text('{"old": true}\n', encoding="utf-8")
+            write_json(path, {"new": True})
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"new": True})
+            self.assertFalse((path.parent / ".state.json.tmp").exists())
+
+    def test_identity_contract(self) -> None:
+        identity = validate_identity(
+            {
+                "topic_name": "修迹维修协作系统",
+                "project_directory_name": "mendmark",
+                "directory_name_source": "source",
+                "reason": "初稿已明确仓库名",
+                "blocked_reason": None,
+            }
+        )
+        self.assertEqual(identity["project_directory_name"], "mendmark")
+        with self.assertRaises(ValueError):
+            validate_identity({**identity, "project_directory_name": "Mend Mark"})
+
+    def test_workspace_root_precedence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            env_file = root / ".env"
+            env_file.write_text("PCM_WORKSPACE_ROOT=/from-file\n", encoding="utf-8")
+            previous = os.environ.get("PCM_WORKSPACE_ROOT")
+            try:
+                os.environ["PCM_WORKSPACE_ROOT"] = "/from-environment"
+                value, source = load_workspace_root(root / "from-cli", env_file)
+                self.assertEqual(value, (root / "from-cli").resolve())
+                self.assertEqual(source, "cli")
+                value, source = load_workspace_root(None, env_file)
+                self.assertEqual(value, Path("/from-environment"))
+                self.assertEqual(source, "environment")
+            finally:
+                if previous is None:
+                    os.environ.pop("PCM_WORKSPACE_ROOT", None)
+                else:
+                    os.environ["PCM_WORKSPACE_ROOT"] = previous
+
+    def test_default_branch_parser(self) -> None:
+        output = "ref: refs/heads/main\tHEAD\nabc\tHEAD"
+        self.assertEqual(parse_default_branch(output), "main")
+
+    def test_incomplete_staging_is_blocked_and_preserved(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            staging = Path(directory) / "staging"
+            staging.mkdir()
+            marker = staging / "partial"
+            marker.write_text("keep", encoding="utf-8")
+            with self.assertRaises(WorkspaceBlocked):
+                inspect_clone(staging)
+            self.assertEqual(marker.read_text(encoding="utf-8"), "keep")
+
+    def test_symlink_staging_is_blocked_without_touching_target(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "target"
+            target.mkdir()
+            marker = target / "keep"
+            marker.write_text("keep", encoding="utf-8")
+            staging = root / "staging"
+            staging.symlink_to(target, target_is_directory=True)
+            with self.assertRaises(WorkspaceBlocked):
+                inspect_clone(staging)
+            self.assertEqual(marker.read_text(encoding="utf-8"), "keep")
+
+    def test_symlink_final_is_not_accepted_as_prepared(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "target"
+            target.mkdir()
+            final = root / "final"
+            final.symlink_to(target, target_is_directory=True)
+            self.assertFalse(verify_prepared(final, "unused"))
+
+    def test_prepare_staging_resets_docs_and_preserves_template(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            staging = Path(directory) / "staging"
+            for path in (
+                staging / ".git",
+                staging / ".claude/skills/project-intake",
+                staging / "frontend",
+                staging / "backend",
+                staging / "docs",
+            ):
+                path.mkdir(parents=True, exist_ok=True)
+            (staging / "CLAUDE.md").write_text("@AGENTS.md\n", encoding="utf-8")
+            (staging / "AGENTS.md").write_text("rules\n", encoding="utf-8")
+            (staging / ".claude/skills/project-intake/SKILL.md").write_text(
+                "skill\n", encoding="utf-8"
+            )
+            (staging / "docs/old.md").write_text("old\n", encoding="utf-8")
+            draft = "初稿\n".encode()
+            import hashlib
+
+            draft_hash = hashlib.sha256(draft).hexdigest()
+            prepare_staging(staging, draft, draft_hash)
+            self.assertTrue(verify_prepared(staging, draft_hash))
+            self.assertEqual(
+                [path.name for path in (staging / "docs").iterdir()], ["产品初稿.md"]
+            )
+            self.assertFalse((staging / ".git").exists())
+
+
+if __name__ == "__main__":
+    unittest.main()

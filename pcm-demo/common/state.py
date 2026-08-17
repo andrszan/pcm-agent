@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,13 @@ def create_run_dir(runs_dir: Path, run_id: str) -> Path:
     (run_dir / "steps").mkdir(parents=True)
     (run_dir / "logs").mkdir()
     return run_dir
+
+
+def read_state(run_dir: Path) -> dict[str, Any]:
+    data = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("运行状态必须是 JSON 对象")
+    return data
 
 
 def write_state(run_dir: Path, state: dict[str, Any]) -> None:

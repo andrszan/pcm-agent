@@ -11,4 +11,8 @@ def sha256(path: Path) -> str:
 
 
 def write_json(path: Path, data: dict[str, Any]) -> None:
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    temporary.replace(path)

@@ -28,6 +28,17 @@ class LLMConfig:
         )
 
 
+def load_workspace_root(override: Path | None = None, env_file: Path | None = None) -> tuple[Path, str]:
+    if override is not None:
+        return override.expanduser().resolve(), "cli"
+    values = _read_env(env_file or Path(__file__).with_name(".env"))
+    raw_value = os.environ.get("PCM_WORKSPACE_ROOT") or values.get("PCM_WORKSPACE_ROOT")
+    if not raw_value:
+        raise ValueError("缺少工作区配置：PCM_WORKSPACE_ROOT")
+    source = "environment" if os.environ.get("PCM_WORKSPACE_ROOT") else "env_file"
+    return Path(raw_value).expanduser().resolve(), source
+
+
 def _read_env(path: Path) -> dict[str, str]:
     if not path.is_file():
         return {}
