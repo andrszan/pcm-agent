@@ -23,6 +23,9 @@ from steps.step_01_create_workspace import (
     verify_clone,
     verify_prepared,
 )
+from steps.step_02_project_intake import ProjectIntakeBlocked
+from steps.step_02_project_intake import result as project_intake_result
+from steps.step_02_project_intake import run as run_project_intake
 
 DEMO_ROOT = Path(__file__).resolve().parent
 
@@ -62,12 +65,12 @@ def load_or_create_step_one_run(args: argparse.Namespace) -> tuple[Path, dict[st
         run_dir = run_dir_for(args.run_id)
         state = read_state(run_dir)
         if state.get("current_step") == 0 and state.get("status") != "success":
-            raise WorkspaceBlocked("第 0 步尚未成功，不能建立项目工作区")
+            raise RuntimeError("第 0 步尚未成功，不能建立项目工作区")
         if state.get("current_step") not in {0, 1}:
-            raise WorkspaceBlocked("已有运行状态不属于第 0 或第 1 步")
+            raise RuntimeError("已有运行状态不属于第 0 或第 1 步")
         draft_path = Path(state["input"]["source_path"])
         if args.product_draft and args.product_draft.resolve() != draft_path:
-            raise WorkspaceBlocked("--product-draft 与已有运行记录不一致")
+            raise RuntimeError("--product-draft 与已有运行记录不一致")
         return run_dir, state, draft_path
 
     draft_path = require_draft(args.product_draft)
@@ -108,7 +111,7 @@ def complete_step_one(
             extract_project_identity(state["input"]["content"], LLMConfig.load())
         )
         if identity["blocked_reason"]:
-            raise WorkspaceBlocked(identity["blocked_reason"])
+            raise RuntimeError(identity["blocked_reason"])
         state["project"] = {
             "topic_name": identity["topic_name"],
             "project_directory_name": identity["project_directory_name"],
@@ -136,7 +139,7 @@ def complete_step_one(
             or Path(recorded["final_path"]) != final_path
             or recorded.get("template_repository") != template_repository
         ):
-            raise WorkspaceBlocked("工作区或模板配置与已有运行记录不一致")
+            raise RuntimeError("工作区或模板配置与已有运行记录不一致")
     else:
         state["workspace"] = {
             "root": str(workspace_root),
@@ -156,7 +159,7 @@ def complete_step_one(
         elif phase == "published" and not staging_path.exists() and verify_prepared(final_path, source_hash):
             pass
         else:
-            raise WorkspaceBlocked("最终项目路径已存在或发布现场冲突")
+            raise RuntimeError("最终项目路径已存在或发布现场冲突")
     elif staging_path.exists() and phase == "intent_recorded":
         state["template"] = inspect_clone(staging_path, template_repository)
         state["publication_phase"] = "clone_verified"
@@ -170,7 +173,7 @@ def complete_step_one(
 
     if phase == "clone_verified":
         if not verify_clone(staging_path, state["template"]):
-            raise WorkspaceBlocked("临时 clone 与已有运行证据不一致")
+            raise RuntimeError("临时 clone 与已有运行证据不一致")
         prepare_staging(staging_path, draft_bytes, source_hash)
         if sha256(draft_path) != source_hash:
             raise RuntimeError("第 1 步执行期间源产品初稿发生变化")
@@ -180,7 +183,7 @@ def complete_step_one(
 
     if phase == "prepared_verified" and not final_path.exists():
         if not verify_prepared(staging_path, source_hash):
-            raise WorkspaceBlocked("临时工作区与发布前证据不一致")
+            raise RuntimeError("临时工作区与发布前证据不一致")
         publish(staging_path, final_path)
         state["publication_phase"] = "published"
 
@@ -213,6 +216,23 @@ def complete_step_one(
         "已从固定模板发布独立产品项目工作区。",
         outputs=[str(final_path), str(published_draft)],
     )
+
+
+def load_step_two_run(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
+    if not args.run_id:
+        raise ValueError("第 2 步需要 --run-id")
+    run_dir = run_dir_for(args.run_id)
+    if not run_dir.is_dir():
+        raise ValueError(f"运行记录不存在：{args.run_id}")
+    state = read_state(run_dir)
+    if state.get("current_step") not in {1, 2}:
+        raise RuntimeError("已有运行状态不属于第 1 或第 2 步")
+    return run_dir, state
+
+
+async def run_step_two(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
+    run_dir, state = load_step_two_run(args)
+    return run_dir, await run_project_intake(run_dir, state)
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -251,7 +271,7 @@ def run_step_zero(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
 
 def main() -> int:
     args = parse_args()
-    if args.step not in {0, 1}:
+    if args.step not in {0, 1, 2}:
         print(f"步骤尚未实现：{args.step}", file=sys.stderr)
         return 2
 
@@ -260,9 +280,25 @@ def main() -> int:
     try:
         if args.step == 0:
             run_dir, result = run_step_zero(args)
-        else:
+        elif args.step == 1:
             run_dir, state, draft_path = load_or_create_step_one_run(args)
             run_dir, result = complete_step_one(args, run_dir, state, draft_path)
+        else:
+            if not args.run_id:
+                raise ValueError("第 2 步需要 --run-id")
+            run_dir = run_dir_for(args.run_id)
+            run_dir, result = asyncio.run(run_step_two(args))
+    except ProjectIntakeBlocked as error:
+        result = project_intake_result(
+            "blocked",
+            str(error),
+            blocked={
+                "reason": str(error),
+                "required_inputs": error.required_inputs,
+                "resume_step": 2,
+            },
+        )
+        error_message = str(error)
     except WorkspaceBlocked as error:
         result = workspace_result(
             "blocked",
@@ -270,21 +306,28 @@ def main() -> int:
             blocked={"reason": str(error), "required_inputs": [str(error)], "resume_step": 1},
         )
         error_message = str(error)
-    except (OSError, UnicodeError, RuntimeError, ValueError) as error:
-        result = workspace_result(
+    except Exception as error:
+        result_factory = project_intake_result if args.step == 2 else workspace_result
+        result = result_factory(
             "failed",
-            "第 1 步执行失败。",
+            f"第 {args.step} 步执行失败。",
             error={"type": type(error).__name__, "message": str(error)},
         )
         error_message = f"{type(error).__name__}: {error}"
 
-    if run_dir is not None and args.step == 1 and result["status"] != "success":
-        state = read_state(run_dir)
-        state.update({"status": result["status"], "current_step": 1, "blocked": result["blocked"], "error": result["error"]})
-        write_step_result(run_dir, 1, result)
-        write_state(run_dir, state)
-    elif run_dir is not None and args.step == 1:
-        write_step_result(run_dir, 1, result)
+    if run_dir is not None and args.step in {1, 2}:
+        if result["status"] != "success":
+            state = read_state(run_dir)
+            state.update(
+                {
+                    "status": result["status"],
+                    "current_step": args.step,
+                    "blocked": result["blocked"],
+                    "error": result["error"],
+                }
+            )
+            write_state(run_dir, state)
+        write_step_result(run_dir, args.step, result)
 
     if run_dir is not None:
         if result["status"] != "success":

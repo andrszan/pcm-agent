@@ -15,7 +15,6 @@ from common.openai_responses import request_json
 from config import load_template_repository, load_workspace_root
 from steps.step_01_create_workspace.project_identity import validate_identity
 from steps.step_01_create_workspace.workspace import (
-    WorkspaceBlocked,
     inspect_clone,
     parse_default_branch,
     prepare_staging,
@@ -128,17 +127,17 @@ class WorkspaceStepTests(unittest.TestCase):
         output = "ref: refs/heads/main\tHEAD\nabc\tHEAD"
         self.assertEqual(parse_default_branch(output), "main")
 
-    def test_incomplete_staging_is_blocked_and_preserved(self) -> None:
+    def test_incomplete_staging_fails_and_is_preserved(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             staging = Path(directory) / "staging"
             staging.mkdir()
             marker = staging / "partial"
             marker.write_text("keep", encoding="utf-8")
-            with self.assertRaises(WorkspaceBlocked):
+            with self.assertRaises(RuntimeError):
                 inspect_clone(staging, "ssh://template")
             self.assertEqual(marker.read_text(encoding="utf-8"), "keep")
 
-    def test_symlink_staging_is_blocked_without_touching_target(self) -> None:
+    def test_symlink_staging_fails_without_touching_target(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             target = root / "target"
@@ -147,7 +146,7 @@ class WorkspaceStepTests(unittest.TestCase):
             marker.write_text("keep", encoding="utf-8")
             staging = root / "staging"
             staging.symlink_to(target, target_is_directory=True)
-            with self.assertRaises(WorkspaceBlocked):
+            with self.assertRaises(RuntimeError):
                 inspect_clone(staging, "ssh://template")
             self.assertEqual(marker.read_text(encoding="utf-8"), "keep")
 

@@ -21,7 +21,7 @@ async def request_json(
     *,
     model: str,
     instructions: str,
-    input_text: str,
+    input_text: str | list[dict[str, Any]],
     schema_name: str,
     schema: dict[str, Any],
 ) -> str:
@@ -65,7 +65,7 @@ async def request_json_response(
     config: LLMConfig,
     *,
     instructions: str,
-    input_text: str,
+    input_text: str | list[dict[str, Any]],
     schema_name: str,
     schema: dict[str, Any],
 ) -> str:

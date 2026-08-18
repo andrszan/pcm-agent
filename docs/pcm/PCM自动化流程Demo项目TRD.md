@@ -62,6 +62,8 @@ Python 编排器负责确定性操作、两类会话的衔接和最终步骤状�
 
 正式步骤不传入 `permission_mode`、`tools`、`allowed_tools` 或 `disallowed_tools`，也不为每一步重新定义权限档位。`setting_sources` 保持 SDK/Claude Code 默认加载语义，使项目 `.claude/settings.json` 中的 `permissions.defaultMode`、`allow`、`ask`、`deny` 及插件配置作为统一项目配置生效。若未来某一步确有覆盖项目配置的特殊理由，必须先在该步合同中说明并单独确认，不能沿用探针限制。
 
+第 2 步真实运行确认：Claude Code 对未信任的新路径会忽略项目 `permissions.allow`。第 1 步已经通过 run 状态、固定模板来源和发布证据证明最终工作区归属，因此 PCM 在 `runs/<run-id>/claude-config/` 使用独立 `CLAUDE_CONFIG_DIR`，只为该 run 的最终项目路径写入 `hasTrustDialogAccepted: true`，使项目 settings 完整生效并让 SDK session 留在 run 私有目录；不得修改用户全局 `~/.claude.json`。该方式要求 SDK 认证由进程环境或适用于独立配置目录的受控凭据提供；缺少认证时返回 `failed`，不伪造凭据。
+
 项目 Skills 来自工作区 `.claude/skills/`。当前核心流程 Skills 多数设置了 `disable-model-invocation: true`，因此步骤脚本应显式调用目标 Skill，不能只依赖模型自主选择。探针 A 已确认 `/project-intake` 可以显式调用，且目标 Skill 同时出现在 init 消息的 `skills` 和 `slash_commands` 中。
 
 探针 A 使用显式权限覆盖验证了 SDK 的限制能力，也确认 Skills、插件和项目设置的实际加载结果需要从 init 消息核验。这些探针配置只证明 SDK 行为，不作为正式步骤的默认权限合同。
@@ -340,7 +342,7 @@ Claude Agent SDK 与 AI-compatible 决策模型使用不同的历史机制：
 - 每个需要继续的领域步骤使用稳定键保存 Claude session ID，例如 `project_intake`、`REQ-003:development`；
 - 第一次收到 init 或最终 ResultMessage 时更新 session ID；阻塞、turn 上限或预算上限发生时仍保存已取得的 session ID；
 - `--resume` 重新读取 `state.json`、原工作区和当前步骤，再通过 `resume=<session-id>` 继续；恢复后先要求 Agent 重新核验相关文件和 Git 事实；
-- 探针 B 已确认同一台机器上可由新进程使用原 session ID 恢复完整对话；恢复不会冻结文件内容，重新调用 `Read` 会得到工作区当前值；
+- 探针 B 已确认同一台机器上可由新进程使用原 session ID 恢复完整对话；恢复不会冻结文件内容，重新调用 `Read` 会得到工作区当前值；第 2 步把 SDK session 与 trust 状态固定在 `runs/<run-id>/claude-config/`，恢复时继续使用同一 `CLAUDE_CONFIG_DIR`；
 - session 文件缺失或无法恢复时，不静默新建会话冒充恢复成功，当前步骤返回 `failed`；
 - AI-compatible 接口不依赖服务端 conversation 或 response ID。PCM 按领域键把完整 `system`、`user`、`assistant` 消息历史原子写入 `runs/<run-id>/conversations/<key>.json`，每次调用携带该历史；
 - 不同步骤和不同活动需求使用独立领域键，避免上下文污染；`state.json` 只保存历史文件引用和当前轮次，不复制完整消息；

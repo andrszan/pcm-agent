@@ -21,7 +21,9 @@ class WorkspaceBlocked(RuntimeError):
     pass
 
 
-def git(*args: str, cwd: Path | None = None) -> str:
+def git(
+    *args: str, cwd: Path | None = None, remote_auth: bool = False
+) -> str:
     try:
         result = subprocess.run(
             ["git", *args],
@@ -36,7 +38,9 @@ def git(*args: str, cwd: Path | None = None) -> str:
         raise RuntimeError("Git 命令超时") from error
     if result.returncode:
         message = (result.stderr or result.stdout).strip()
-        if any(text in message.lower() for text in ("permission denied", "publickey", "access denied")):
+        if remote_auth and any(
+            text in message.lower() for text in ("permission denied", "publickey", "access denied")
+        ):
             raise WorkspaceBlocked("缺少固定模板仓库的 SSH 凭据或读取权限")
         raise RuntimeError(f"Git 命令失败：{message}")
     return result.stdout.strip()
@@ -94,21 +98,21 @@ def result(status: str, summary: str, *, blocked: dict[str, Any] | None = None, 
 
 def require_real_directory(path: Path, description: str) -> None:
     if path.is_symlink() or not path.is_dir():
-        raise WorkspaceBlocked(f"{description}不是可确认归属的真实目录：{path}")
+        raise RuntimeError(f"{description}不是可确认归属的真实目录：{path}")
 
 
 def inspect_clone(staging: Path, template_repository: str) -> dict[str, str]:
     require_real_directory(staging, "临时 clone")
     if not (staging / ".git").is_dir() or not verify_required_paths(staging):
-        raise WorkspaceBlocked("临时 clone 不完整，保留现场等待处理")
+        raise RuntimeError("临时 clone 不完整，保留现场等待处理")
     default_branch = parse_default_branch(
-        git("ls-remote", "--symref", template_repository, "HEAD")
+        git("ls-remote", "--symref", template_repository, "HEAD", remote_auth=True)
     )
     remote_url = git("remote", "get-url", "origin", cwd=staging)
     actual_branch = git("branch", "--show-current", cwd=staging)
     commit_sha = git("rev-parse", "HEAD", cwd=staging)
     if remote_url != template_repository or actual_branch != default_branch:
-        raise WorkspaceBlocked("临时 clone 的模板来源或分支与当前合同不一致")
+        raise RuntimeError("临时 clone 的模板来源或分支与当前合同不一致")
     return {
         "repository": template_repository,
         "remote_url": remote_url,
@@ -120,7 +124,7 @@ def inspect_clone(staging: Path, template_repository: str) -> dict[str, str]:
 
 def clone_and_verify(staging: Path, template_repository: str) -> dict[str, str]:
     default_branch = parse_default_branch(
-        git("ls-remote", "--symref", template_repository, "HEAD")
+        git("ls-remote", "--symref", template_repository, "HEAD", remote_auth=True)
     )
     git("clone", "--depth", "1", template_repository, str(staging))
     template = inspect_clone(staging, template_repository)
@@ -154,7 +158,7 @@ def prepare_staging(staging: Path, draft_bytes: bytes, source_hash: str) -> Path
 def publish(staging: Path, final_path: Path) -> None:
     require_real_directory(staging, "临时工作区")
     if final_path.exists() or final_path.is_symlink():
-        raise WorkspaceBlocked(f"最终项目路径已存在，拒绝覆盖：{final_path}")
+        raise RuntimeError(f"最终项目路径已存在，拒绝覆盖：{final_path}")
     try:
         os.rename(staging, final_path)
     except OSError as error:
