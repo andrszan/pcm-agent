@@ -12,10 +12,16 @@ sys.path.insert(0, str(DEMO_ROOT))
 
 from common.files import write_json
 from common.openai_responses import request_json
-from config import load_template_repository, load_workspace_root
+from config import (
+    CAPABILITY_REPOSITORY_ROOT,
+    load_template_repository,
+    load_workspace_root,
+)
 from steps.step_01_create_workspace.project_identity import validate_identity
 from steps.step_01_create_workspace.workspace import (
+    initialize_root_repository,
     inspect_clone,
+    inspect_root_repository,
     parse_default_branch,
     prepare_staging,
     verify_prepared,
@@ -67,7 +73,50 @@ class WorkspaceStepTests(unittest.TestCase):
                 else:
                     os.environ["PCM_WORKSPACE_ROOT"] = previous
 
-    def test_template_repository_missing_fails(self) -> None:
+    def test_workspace_root_rejects_capability_repository(self) -> None:
+        with self.assertRaisesRegex(ValueError, "能力仓库之外"):
+            load_workspace_root(CAPABILITY_REPOSITORY_ROOT / "pcm-demo/workspace")
+
+    def test_root_repository_is_unborn_main_and_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "project"
+            root.mkdir()
+            first = initialize_root_repository(root)
+            second = initialize_root_repository(root)
+            self.assertEqual(first, second)
+            self.assertEqual(
+                first,
+                {"path": str(root.resolve()), "branch": "main", "head": None},
+            )
+            self.assertEqual(inspect_root_repository(root), first)
+
+    def test_root_repository_with_commit_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "project"
+            root.mkdir()
+            initialize_root_repository(root)
+            import subprocess
+
+            (root / "tracked.txt").write_text("tracked\n", encoding="utf-8")
+            subprocess.run(["git", "add", "tracked.txt"], cwd=root, check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "user.name=PCM Test",
+                    "-c",
+                    "user.email=pcm@example.invalid",
+                    "commit",
+                    "-m",
+                    "test",
+                ],
+                cwd=root,
+                check=True,
+                capture_output=True,
+            )
+            with self.assertRaisesRegex(RuntimeError, "尚无 commit"):
+                inspect_root_repository(root)
+
         with tempfile.TemporaryDirectory() as directory:
             env_file = Path(directory) / ".env"
             previous = os.environ.pop("PCM_TEMPLATE_REPOSITORY", None)

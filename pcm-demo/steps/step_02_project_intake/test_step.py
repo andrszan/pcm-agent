@@ -14,6 +14,7 @@ sys.path.insert(0, str(DEMO_ROOT))
 from common.claude_agent import ClaudeRunResult
 from common.files import sha256, write_json
 from common.state import read_state, write_state
+from steps.step_01_create_workspace import initialize_root_repository
 from steps.step_02_project_intake.step import (
     OUTPUTS,
     ProjectIntakeBlocked,
@@ -51,11 +52,13 @@ class ProjectIntakeTests(unittest.TestCase):
         (workspace / "CLAUDE.md").write_text("@AGENTS.md\n", encoding="utf-8")
         (workspace / "AGENTS.md").write_text("规则\n", encoding="utf-8")
         (workspace / ".claude/settings.json").write_text("{}\n", encoding="utf-8")
+        root_repository = initialize_root_repository(workspace)
         state = {
             "run_id": "test",
             "status": "success",
             "current_step": 1,
-            "publication_phase": "published",
+            "publication_phase": "git_initialized",
+            "root_repository": root_repository,
             "workspace": {
                 "root": str(root),
                 "staging_path": str(root / "staging-unused"),
@@ -63,12 +66,16 @@ class ProjectIntakeTests(unittest.TestCase):
             },
             "checks": {
                 "template_capabilities_present": True,
-                "git_removed": True,
+                "upstream_git_removed": True,
                 "docs_reinitialized": True,
                 "draft_hash_matches": True,
                 "source_draft_unchanged": True,
                 "renamed_to_final_path": True,
-            },            "input": {
+                "root_git_initialized": True,
+                "root_git_is_final_path": True,
+                "root_git_has_no_commits": True,
+            },
+            "input": {
                 "source_path": str(draft),
                 "source_sha256": sha256(draft),
             },

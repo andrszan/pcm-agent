@@ -11,7 +11,7 @@
 - Python 3.10+、`uv`、`git`；
 - OpenAI-compatible 服务支持 `POST /v1/responses` 和 `text.format` strict JSON Schema；
 - 当前用户具备 `PCM_TEMPLATE_REPOSITORY` 的 Git SSH 读取权限；
-- `PCM_WORKSPACE_ROOT` 已存在且可写；
+- `PCM_WORKSPACE_ROOT` 已存在、可写，且位于当前能力仓库之外；
 - 目标项目目录尚不存在。
 
 从 `pcm-demo/` 初始化：
@@ -32,7 +32,7 @@ PCM_WORKSPACE_ROOT=
 PCM_TEMPLATE_REPOSITORY=
 ```
 
-`--workspace-root` 的优先级高于进程环境中的 `PCM_WORKSPACE_ROOT`，再高于 `.env`。模板仓库只从进程环境或 `.env` 读取，不提供单次 CLI 覆盖。
+`--workspace-root` 的优先级高于进程环境中的 `PCM_WORKSPACE_ROOT`，再高于 `.env`。无论来自哪一层，工作区根都必须位于当前 `pcm-agent-skills` 能力仓库之外。模板仓库只从进程环境或 `.env` 读取，不提供单次 CLI 覆盖。
 
 ## 输入与身份提取
 
@@ -86,8 +86,10 @@ uv run python run_step.py \
 3. `git clone --depth 1` 克隆配置模板并记录 remote、默认分支、实际分支和 commit SHA；
 4. 删除临时 clone 的 `.git/`，清空并保留 `docs/`；
 5. 写入原始初稿字节到 `docs/产品初稿.md`；
-6. 核验模板能力、`.git/`、`docs/` 和三方 SHA-256；
-7. 同一文件系统内将临时目录原子重命名为最终目录。
+6. 核验模板能力、上游 `.git/` 已删除、`docs/` 和三方 SHA-256；
+7. 同一文件系统内将临时目录原子重命名为最终目录；
+8. 在最终项目根执行 `git init -b main`，不暂存、不提交、不 push；
+9. 核验 Git 根等于最终目录、分支为 `main`、`HEAD` 尚不存在。
 
 ## 运行证据与恢复
 
@@ -101,7 +103,7 @@ runs/<run-id>/
 `publication_phase` 依次为：
 
 ```text
-intent_recorded → clone_verified → prepared_verified → published
+intent_recorded → clone_verified → prepared_verified → published → git_initialized
 ```
 
 失败或阻塞后保留现场，用相同 `--run-id` 重试：
@@ -113,13 +115,14 @@ uv run python run_step.py \
   --run-id step01-mendmark
 ```
 
-程序不会覆盖已有最终项目、归属不明临时目录或符号链接。目录冲突、SSH 读取权限缺失和初稿选题不明确属于 `blocked`；API、解析、Git、哈希、清理和发布执行错误属于 `failed`。
+程序不会覆盖已有最终项目、归属不明临时目录或符号链接。只有 SSH 读取权限缺失属于 `blocked`；工作区根位于能力仓库内部、目录冲突、初稿选题不明确、API、解析、Git、哈希、清理、发布或根仓库初始化错误属于 `failed`。原子发布后 `git init` 中断时，相同 run 只在发布证据一致的最终目录中补齐或核验零提交根仓库。
 
 ## 成功验收
 
-- `state.json` 状态为 `success`，发布阶段为 `published`；
+- `state.json` 状态为 `success`，发布阶段为 `git_initialized`；
 - 最终项目存在，临时路径消失；
-- `.git/` 不存在；
+- 模板上游 `.git/` 已清理，最终项目根具有新 `.git/`；
+- `git rev-parse --show-toplevel` 等于最终项目根，分支为 `main`，`HEAD` 不存在且没有 commit；
 - `docs/` 只包含 `产品初稿.md`；
 - `CLAUDE.md`、`AGENTS.md`、`project-intake` Skill、`frontend/`、`backend/` 存在；
 - 源初稿和项目内初稿 SHA-256 一致；

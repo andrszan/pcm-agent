@@ -9,6 +9,7 @@ from common.decision import SYSTEM_PROMPT, request_decision
 from common.files import sha256, write_json
 from common.state import write_state
 from config import LLMConfig
+from steps.step_01_create_workspace import inspect_root_repository
 
 STEP = 2
 NAME = "项目需求与产品定义"
@@ -60,8 +61,8 @@ def trust_project(config_dir_path: Path, workspace: Path) -> None:
 
 
 def validate_inputs(state: dict[str, Any]) -> tuple[Path, Path]:
-    if state.get("current_step") not in {1, 2} or state.get("publication_phase") != "published":
-        raise RuntimeError("第 1 步尚未成功发布项目工作区")
+    if state.get("current_step") not in {1, 2} or state.get("publication_phase") != "git_initialized":
+        raise RuntimeError("第 1 步尚未成功发布并初始化根 Git 仓库")
     workspace = Path(state["workspace"]["final_path"])
     root = Path(state["workspace"]["root"])
     staging = Path(state["workspace"]["staging_path"])
@@ -72,14 +73,20 @@ def validate_inputs(state: dict[str, Any]) -> tuple[Path, Path]:
         checks.get(key) is True
         for key in (
             "template_capabilities_present",
-            "git_removed",
+            "upstream_git_removed",
             "docs_reinitialized",
             "draft_hash_matches",
             "source_draft_unchanged",
             "renamed_to_final_path",
+            "root_git_initialized",
+            "root_git_is_final_path",
+            "root_git_has_no_commits",
         )
     ):
-        raise RuntimeError("第 1 步发布核验记录不完整")
+        raise RuntimeError("第 1 步发布或根 Git 核验记录不完整")
+    root_repository = inspect_root_repository(workspace)
+    if state.get("root_repository") != root_repository:
+        raise RuntimeError("第 1 步根 Git 仓库与运行记录不一致")
     draft = workspace / "docs/产品初稿.md"
     if not workspace.is_dir() or workspace.is_symlink() or not draft.is_file():
         raise RuntimeError("第 1 步发布的项目工作区或产品初稿不存在")

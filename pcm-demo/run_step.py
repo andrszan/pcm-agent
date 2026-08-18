@@ -16,12 +16,15 @@ from steps.step_01_create_workspace import extract_project_identity
 from steps.step_01_create_workspace import (
     WorkspaceBlocked,
     clone_and_verify,
+    initialize_root_repository,
     inspect_clone,
+    inspect_root_repository,
     prepare_staging,
     publish,
     result as workspace_result,
     verify_clone,
     verify_prepared,
+    verify_published_content,
 )
 from steps.step_02_project_intake import ProjectIntakeBlocked
 from steps.step_02_project_intake import result as project_intake_result
@@ -154,9 +157,19 @@ def complete_step_one(
 
     phase = state["publication_phase"]
     if final_path.exists():
-        if phase == "prepared_verified" and not staging_path.exists() and verify_prepared(final_path, source_hash):
+        if (
+            phase == "prepared_verified"
+            and not staging_path.exists()
+            and verify_published_content(final_path, source_hash)
+        ):
             state["publication_phase"] = "published"
-        elif phase == "published" and not staging_path.exists() and verify_prepared(final_path, source_hash):
+            write_state(run_dir, state)
+            phase = "published"
+        elif (
+            phase in {"published", "git_initialized"}
+            and not staging_path.exists()
+            and verify_published_content(final_path, source_hash)
+        ):
             pass
         else:
             raise RuntimeError("最终项目路径已存在或发布现场冲突")
@@ -186,9 +199,24 @@ def complete_step_one(
             raise RuntimeError("临时工作区与发布前证据不一致")
         publish(staging_path, final_path)
         state["publication_phase"] = "published"
+        write_state(run_dir, state)
+        phase = "published"
 
-    if not verify_prepared(final_path, source_hash) or staging_path.exists():
+    if phase == "published":
+        if not verify_published_content(final_path, source_hash) or staging_path.exists():
+            raise RuntimeError("最终项目工作区发布核验失败")
+        state["root_repository"] = initialize_root_repository(final_path)
+        state["publication_phase"] = "git_initialized"
+        write_state(run_dir, state)
+        phase = "git_initialized"
+
+    if phase != "git_initialized":
+        raise RuntimeError(f"第 1 步发布阶段不符合预期：{phase}")
+    if not verify_published_content(final_path, source_hash) or staging_path.exists():
         raise RuntimeError("最终项目工作区核验失败")
+    root_repository = inspect_root_repository(final_path)
+    if state.get("root_repository") != root_repository:
+        raise RuntimeError("根 Git 仓库与已有运行证据不一致")
     if sha256(draft_path) != source_hash:
         raise RuntimeError("第 1 步发布期间源产品初稿发生变化")
     published_draft = final_path / "docs" / "产品初稿.md"
@@ -196,15 +224,19 @@ def complete_step_one(
         {
             "status": "success",
             "current_step": 1,
-            "publication_phase": "published",
+            "publication_phase": "git_initialized",
+            "root_repository": root_repository,
             "input": {**state["input"], "published_path": str(published_draft)},
             "checks": {
                 "template_capabilities_present": True,
-                "git_removed": True,
+                "upstream_git_removed": True,
                 "docs_reinitialized": True,
                 "draft_hash_matches": True,
                 "source_draft_unchanged": sha256(draft_path) == source_hash,
                 "renamed_to_final_path": True,
+                "root_git_initialized": True,
+                "root_git_is_final_path": root_repository["path"] == str(final_path.resolve()),
+                "root_git_has_no_commits": root_repository["head"] is None,
             },
             "blocked": None,
             "error": None,
@@ -213,7 +245,7 @@ def complete_step_one(
     write_state(run_dir, state)
     return run_dir, workspace_result(
         "success",
-        "已从固定模板发布独立产品项目工作区。",
+        "已从固定模板发布独立产品项目工作区，并初始化零提交根 Git 仓库。",
         outputs=[str(final_path), str(published_draft)],
     )
 

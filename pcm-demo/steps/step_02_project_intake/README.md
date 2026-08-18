@@ -1,6 +1,6 @@
 # 第 2 步：项目需求与产品定义
 
-在第 1 步发布的项目工作区中显式调用 `project-intake`，由 AI-compatible 决策模型处理 Agent 的多轮问题和定稿授权。
+在第 1 步发布并初始化为零提交根 Git 仓库的独立产品工作区中显式调用 `project-intake`，由 AI-compatible 决策模型处理 Agent 的多轮问题和定稿授权。第 2 步在写入 trust 前重新核验最终路径、根 Git、`main` 分支、空 `HEAD`、初稿哈希和第 1 步证据。
 
 ## 输入边界
 

@@ -68,19 +68,50 @@ def verify_clone(staging: Path, template: dict[str, str]) -> bool:
     )
 
 
-def verify_prepared(root: Path, source_hash: str) -> bool:
+def verify_published_content(root: Path, source_hash: str) -> bool:
     if root.is_symlink():
         return False
     docs_dir = root / "docs"
     published_draft = docs_dir / "产品初稿.md"
     return (
         root.is_dir()
-        and not (root / ".git").exists()
         and docs_dir.is_dir()
         and sorted(path.name for path in docs_dir.iterdir()) == ["产品初稿.md"]
         and sha256(published_draft) == source_hash
         and verify_required_paths(root)
     )
+
+
+def verify_prepared(root: Path, source_hash: str) -> bool:
+    return verify_published_content(root, source_hash) and not (root / ".git").exists()
+
+
+def inspect_root_repository(root: Path) -> dict[str, str | None]:
+    require_real_directory(root, "最终项目根")
+    if not (root / ".git").is_dir():
+        raise RuntimeError("最终项目根尚未初始化 Git 仓库")
+    top_level = Path(git("rev-parse", "--show-toplevel", cwd=root)).resolve()
+    branch = git("branch", "--show-current", cwd=root)
+    head = subprocess.run(
+        ["git", "rev-parse", "--verify", "HEAD"],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        timeout=120,
+    )
+    if top_level != root.resolve() or branch != "main" or head.returncode == 0:
+        raise RuntimeError("根 Git 仓库必须位于最终项目根、分支为 main 且尚无 commit")
+    return {"path": str(top_level), "branch": branch, "head": None}
+
+
+def initialize_root_repository(root: Path) -> dict[str, str | None]:
+    require_real_directory(root, "最终项目根")
+    git_dir = root / ".git"
+    if not git_dir.exists():
+        git("init", "-b", "main", cwd=root)
+    elif not git_dir.is_dir():
+        raise RuntimeError("最终项目根的 .git 不是目录")
+    return inspect_root_repository(root)
 
 
 def result(status: str, summary: str, *, blocked: dict[str, Any] | None = None, error: dict[str, Any] | None = None, outputs: list[str] | None = None) -> dict[str, Any]:

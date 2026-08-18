@@ -8,6 +8,7 @@ from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_ENV_FILE = Path(__file__).with_name(".env")
+CAPABILITY_REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 
 
 class Settings(BaseSettings):
@@ -64,16 +65,25 @@ def load_settings(env_file: Path | None = None, **overrides: object) -> Settings
         raise ValueError(f"配置无效：{error}") from error
 
 
+def validate_workspace_root(path: Path) -> Path:
+    resolved = path.expanduser().resolve()
+    if resolved == CAPABILITY_REPOSITORY_ROOT or resolved.is_relative_to(
+        CAPABILITY_REPOSITORY_ROOT
+    ):
+        raise ValueError("PCM_WORKSPACE_ROOT 必须位于当前能力仓库之外")
+    return resolved
+
+
 def load_workspace_root(
     override: Path | None = None, env_file: Path | None = None
 ) -> tuple[Path, str]:
     if override is not None:
-        return override.expanduser().resolve(), "cli"
+        return validate_workspace_root(override), "cli"
     settings = load_settings(env_file)
     source = "environment" if os.environ.get("PCM_WORKSPACE_ROOT") else "env_file"
     if settings.pcm_workspace_root is None:
         raise ValueError("缺少配置：PCM_WORKSPACE_ROOT")
-    return settings.pcm_workspace_root.expanduser().resolve(), source
+    return validate_workspace_root(settings.pcm_workspace_root), source
 
 
 def load_template_repository(env_file: Path | None = None) -> tuple[str, str]:
