@@ -62,7 +62,7 @@ docs/prd/修迹-产品需求文档-v1.md
 
 完整运行通过 `--product-draft` 接收源产品初稿，通过可选 `--workspace-root` 覆盖 `PCM_WORKSPACE_ROOT`。程序记录源路径、完整 UTF-8 内容和 SHA-256，从初稿提取项目选题和文件夹名，将 `PCM_TEMPLATE_REPOSITORY` 配置的开发管理模板浅克隆并初始化后发布到 `<workspace-root>/<project_directory_name>`，把初稿写为项目内的 `docs/产品初稿.md`。后续步骤只操作项目工作区，不修改当前能力仓库中的源初稿。
 
-因为输入已经是完整产品初稿，第 0 步应确认输入充分后无副作用跳过；第 1 步将其发布为项目内 `docs/产品初稿.md`；第 2 步仍需调用 `project-intake` 核验和收敛该初稿，使后续产品定义文档成为被开发项目的当前权威事实。源初稿只提供产品要求，不提供预生成的技术方案、Backlog、TRD、代码或验收结论，因此不会把目标实现作为隐藏答案交给 Agent。
+因为输入已经是完整产品初稿，第 0 步应确认输入充分后无副作用跳过；第 1 步将其发布为项目内 `docs/产品初稿.md`；第 2 步调用 `project-intake`，由 Agent 与决策模型完成必要的多轮对话并生成该 Skill 规定的产品定义文档。第 2 步只验证输入承接、能力运行和产物事实，不把黄金项目的具体业务或后续技术方案、Backlog 逻辑写入通用程序。源初稿只提供产品要求，不提供预生成的技术方案、Backlog、TRD、代码或验收结论，因此不会把目标实现作为隐藏答案交给 Agent。
 
 完整 Demo 默认只承诺实现 PRD 中“E.1 当前必须实现”的首版范围。“E.2 重要增强”和“E.3 未来扩展”不得自动进入首轮 Backlog，除非它们是完成 E.1 闭环不可缺少的条件。
 
@@ -153,8 +153,10 @@ async def chat(messages: list[dict], *, model: str | None = None) -> str:
 约定：
 
 - `base_url`、`api_key` 和 `model` 从环境配置读取；
-- 历史消息由 Demo 自己维护和保存；
+- 历史消息按领域键完整保存到 `runs/<run-id>/conversations/<key>.json`，每次请求携带该历史，不同步骤和活动需求不共享历史；
 - 调用封装不依赖服务端 conversation 或 response ID；
+- 历史文件使用普通 JSON 原子覆盖，`state.json` 只保存文件引用和当前轮次；
+- 首轮不建设数据库、向量记忆、摘要或通用会话服务；
 - 需要结构化决策时，通过提示词要求返回 JSON，并在 Python 中解析；
 - 解析失败可以进行少量重试，持续失败则当前步骤返回 `failed`；
 - 不在日志和状态文件中保存密钥。
@@ -187,12 +189,13 @@ class ClaudeRunResult:
 约定：
 
 - `cwd` 始终指向当前运行的项目工作区根目录；
-- 加载项目 `.claude/`、Skills 和必要设置；
+- 加载项目 `.claude/`、Skills 和必要设置；步骤代码不重复传入 `permission_mode`、`tools`、`allowed_tools` 或 `disallowed_tools`，由项目 `.claude/settings.json` 及 Claude Code 默认设置加载语义统一决定权限和工具行为；
 - 消费并打印关键消息和工具执行信息；
 - 检查最终 Result 类型，不因收到文本就假定成功；
 - 捕获并保存 session ID；
 - 开发修复等场景可以恢复原 session；
-- Claude session 只保存 Agent 对话上下文，文件和 Git 事实仍从工作区读取。
+- 第 2 步通过 Claude Agent session ID 与 `conversations/project_intake.json` 分别恢复 Agent 上下文和决策模型历史；
+- 工作区文件和 Git 事实仍需重新读取；
 
 ### 3. 命令和 Git 调用
 
@@ -281,7 +284,8 @@ PCM_TEMPLATE_REPOSITORY=
 runs/<run-id>/
 ├── state.json
 ├── steps/
-└── logs/
+├── logs/
+└── conversations/
 ```
 
 `state.json` 示例：
@@ -335,6 +339,12 @@ runs/<run-id>/
     "REQ-003:trd": "session-id",
     "REQ-003:development": "session-id"
   },
+  "decision_conversations": {
+    "project_intake": {
+      "path": "conversations/project_intake.json",
+      "turn": 3
+    }
+  },
   "blocked": {
     "reason": "缺少不可替代的外部资源",
     "required_inputs": ["EXTERNAL_RESOURCE"],
@@ -344,7 +354,7 @@ runs/<run-id>/
 }
 ```
 
-不保存完整工作流历史。每一步的详细输入和结果分别写入 `steps/`，日志写入 `logs/`。
+不保存完整工作流历史。每一步的详细输入和结果分别写入 `steps/`，日志写入 `logs/`；只有无服务端会话状态的 AI-compatible 决策模型需要把完整消息历史写入 `conversations/`。
 
 ## 十、运行方式
 
