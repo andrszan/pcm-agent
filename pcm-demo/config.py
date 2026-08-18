@@ -1,31 +1,67 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
+
+from pydantic import Field, SecretStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+DEFAULT_ENV_FILE = Path(__file__).with_name(".env")
 
 
-@dataclass(frozen=True, repr=False)
+class Settings(BaseSettings):
+    llm_base_url: str | None = Field(default=None, validation_alias="LLM_BASE_URL")
+    llm_api_key: SecretStr | None = Field(default=None, validation_alias="LLM_API_KEY", repr=False)
+    llm_model: str | None = Field(default=None, validation_alias="LLM_MODEL")
+    pcm_workspace_root: Path | None = Field(default=None, validation_alias="PCM_WORKSPACE_ROOT")
+    pcm_template_repository: str | None = Field(default=None, validation_alias="PCM_TEMPLATE_REPOSITORY")
+
+    model_config = SettingsConfigDict(
+        env_file=DEFAULT_ENV_FILE,
+        env_file_encoding="utf-8",
+        env_ignore_empty=True,
+        env_prefix="",
+        extra="ignore",
+        populate_by_name=True,
+        cli_parse_args=False,
+    )
+
+
 class LLMConfig:
-    base_url: str
-    api_key: str
-    model: str
+    def __init__(self, base_url: str, api_key: SecretStr, model: str) -> None:
+        self.base_url = base_url
+        self.api_key = api_key
+        self.model = model
+
+    def __repr__(self) -> str:
+        return f"LLMConfig(base_url={self.base_url!r}, api_key=SecretStr('**********'), model={self.model!r})"
 
     @classmethod
     def load(cls, env_file: Path | None = None) -> "LLMConfig":
-        values = _read_env(env_file or Path(__file__).with_name(".env"))
-        config = {
-            name: os.environ.get(name) or values.get(name, "")
-            for name in ("LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL")
-        }
-        missing = [name for name, value in config.items() if not value]
+        settings = load_settings(env_file)
+        missing = [
+            name
+            for name, value in {
+                "LLM_BASE_URL": settings.llm_base_url,
+                "LLM_API_KEY": settings.llm_api_key,
+                "LLM_MODEL": settings.llm_model,
+            }.items()
+            if value is None
+        ]
         if missing:
             raise ValueError(f"缺少 LLM 配置：{', '.join(missing)}")
-        return cls(
-            base_url=config["LLM_BASE_URL"],
-            api_key=config["LLM_API_KEY"],
-            model=config["LLM_MODEL"],
-        )
+        return cls(settings.llm_base_url, settings.llm_api_key, settings.llm_model)
+
+
+def load_settings(env_file: Path | None = None, **overrides: object) -> Settings:
+    kwargs: dict[str, object] = dict(overrides)
+    if env_file is not None:
+        kwargs["_env_file"] = env_file
+    try:
+        return Settings(**kwargs)
+    except ValueError as error:
+        raise ValueError(f"配置无效：{error}") from error
 
 
 def load_workspace_root(
@@ -33,40 +69,16 @@ def load_workspace_root(
 ) -> tuple[Path, str]:
     if override is not None:
         return override.expanduser().resolve(), "cli"
-    value, source = _load_value("PCM_WORKSPACE_ROOT", env_file)
-    return Path(value).expanduser().resolve(), source
+    settings = load_settings(env_file)
+    source = "environment" if os.environ.get("PCM_WORKSPACE_ROOT") else "env_file"
+    if settings.pcm_workspace_root is None:
+        raise ValueError("缺少配置：PCM_WORKSPACE_ROOT")
+    return settings.pcm_workspace_root.expanduser().resolve(), source
 
 
 def load_template_repository(env_file: Path | None = None) -> tuple[str, str]:
-    return _load_value("PCM_TEMPLATE_REPOSITORY", env_file)
-
-
-def _load_value(name: str, env_file: Path | None = None) -> tuple[str, str]:
-    values = _read_env(env_file or Path(__file__).with_name(".env"))
-    if os.environ.get(name):
-        return os.environ[name], "environment"
-    if values.get(name):
-        return values[name], "env_file"
-    raise ValueError(f"缺少配置：{name}")
-
-
-def _read_env(path: Path) -> dict[str, str]:
-    if not path.is_file():
-        return {}
-
-    values: dict[str, str] = {}
-    for line_number, raw_line in enumerate(path.read_text().splitlines(), start=1):
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("export "):
-            line = line[7:].lstrip()
-        if "=" not in line:
-            raise ValueError(f"无效环境配置行：{path}:{line_number}")
-        name, value = line.split("=", 1)
-        name = name.strip()
-        value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-            value = value[1:-1]
-        values[name] = value
-    return values
+    settings = load_settings(env_file)
+    source = "environment" if os.environ.get("PCM_TEMPLATE_REPOSITORY") else "env_file"
+    if settings.pcm_template_repository is None:
+        raise ValueError("缺少配置：PCM_TEMPLATE_REPOSITORY")
+    return settings.pcm_template_repository, source

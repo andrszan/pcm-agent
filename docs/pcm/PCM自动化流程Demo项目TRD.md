@@ -470,7 +470,7 @@ AI-compatible 模型可以决定：
 
 #### 实现范围
 
-- 建立最小 `pcm-demo/` 工程和配置；
+- 步骤目录按业务自包含：已实现步骤的业务代码、测试和详细说明放在 `steps/step_xx_<name>/`；`common/` 只放两个及以上步骤真实复用的公共能力；
 - 实现文件、状态、命令、AI-compatible 和 Agent SDK 公共封装；
 - 实现统一步骤结果；
 - 实现 `run_step.py` 和只覆盖第 0～2 步的 `run_all.py`；

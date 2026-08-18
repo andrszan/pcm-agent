@@ -110,10 +110,17 @@ pcm-demo/
 │   └── steps/
 │
 ├── steps/
-│   ├── step_00_product_draft.py
-│   ├── step_01_create_workspace.py
-│   └── step_02_project_intake.py
-│   # 后续步骤在对应阶段设计确认后再新增
+│   ├── step_00_product_draft/
+│   │   ├── __init__.py
+│   │   ├── step.py
+│   │   ├── test_step.py
+│   │   └── README.md
+│   └── step_01_create_workspace/
+│       ├── __init__.py
+│       ├── workspace.py
+│       ├── project_identity.py
+│       ├── test_step.py
+│       └── README.md
 │
 ├── run_step.py
 ├── run_all.py
@@ -122,7 +129,13 @@ pcm-demo/
 └── workspace/
 ```
 
-目录可以在实现时按实际代码量合并。不要为了保持目录结构而创建无内容模块。
+目录可以在实现时按实际代码量合并，但已实现步骤的业务代码、测试和详细操作说明必须同置于对应步骤目录；不要为了保持未来步骤目录图而创建空模块。
+
+步骤测试随步骤目录保存，统一测试入口从 `steps/` 递归发现：
+
+```bash
+uv run python -m unittest discover -s steps -t . -p 'test*.py' -v
+```
 
 ## 六、公共封装
 

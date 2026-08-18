@@ -6,4 +6,5 @@ requires-python = ">=3.10"
 dependencies = [
     "claude-agent-sdk",
     "openai",
+    "pydantic-settings>=2.15,<3",
 ]

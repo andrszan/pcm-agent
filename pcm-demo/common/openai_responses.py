@@ -70,7 +70,7 @@ async def request_json_response(
     schema: dict[str, Any],
 ) -> str:
     client = AsyncOpenAI(
-        api_key=config.api_key,
+        api_key=config.api_key.get_secret_value(),
         base_url=config.base_url,
         timeout=120.0,
         max_retries=1,

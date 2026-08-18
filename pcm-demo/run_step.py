@@ -12,7 +12,7 @@ from common.files import sha256
 from common.state import create_run_dir, read_state, write_state, write_step_result
 from config import LLMConfig, load_template_repository, load_workspace_root
 from steps.step_00_product_draft import run as run_product_draft
-from steps.step_01_project_identity import extract_project_identity
+from steps.step_01_create_workspace import extract_project_identity
 from steps.step_01_create_workspace import (
     WorkspaceBlocked,
     clone_and_verify,

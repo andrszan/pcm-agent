@@ -7,23 +7,23 @@ import tempfile
 import unittest
 from pathlib import Path
 
-DEMO_ROOT = Path(__file__).resolve().parents[1]
+DEMO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(DEMO_ROOT))
 
 from common.files import write_json
 from common.openai_responses import request_json
 from config import load_template_repository, load_workspace_root
-from steps.step_01_project_identity import validate_identity
-from steps.step_01_create_workspace import (
+from steps.step_01_create_workspace.project_identity import validate_identity
+from steps.step_01_create_workspace.workspace import (
     WorkspaceBlocked,
     inspect_clone,
     parse_default_branch,
     prepare_staging,
     verify_prepared,
 )
-
-
 class WorkspaceStepTests(unittest.TestCase):
+    """第 1 步工作区发布测试。"""
+
     def test_json_write_replaces_complete_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "state.json"

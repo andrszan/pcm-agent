@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-DEMO_ROOT = Path(__file__).resolve().parents[1]
+DEMO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(DEMO_ROOT))
 
 from common.state import create_run_dir

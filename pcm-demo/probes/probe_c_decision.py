@@ -159,7 +159,7 @@ async def check_parser_retry() -> dict[str, Any]:
 async def probe(run_dir: Path) -> dict[str, Any]:
     config = LLMConfig.load()
     client = AsyncOpenAI(
-        api_key=config.api_key,
+        api_key=config.api_key.get_secret_value(),
         base_url=config.base_url,
         timeout=120.0,
         max_retries=1,
