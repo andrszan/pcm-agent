@@ -256,6 +256,7 @@ def main() -> int:
         return 2
 
     run_dir: Path | None = None
+    error_message = ""
     try:
         if args.step == 0:
             run_dir, result = run_step_zero(args)
@@ -268,23 +269,32 @@ def main() -> int:
             str(error),
             blocked={"reason": str(error), "required_inputs": [str(error)], "resume_step": 1},
         )
+        error_message = str(error)
     except (OSError, UnicodeError, RuntimeError, ValueError) as error:
         result = workspace_result(
             "failed",
             "第 1 步执行失败。",
             error={"type": type(error).__name__, "message": str(error)},
         )
+        error_message = f"{type(error).__name__}: {error}"
 
     if run_dir is not None and args.step == 1 and result["status"] != "success":
         state = read_state(run_dir)
-        state.update({"status": result["status"], "blocked": result["blocked"], "error": result["error"]})
+        state.update({"status": result["status"], "current_step": 1, "blocked": result["blocked"], "error": result["error"]})
         write_step_result(run_dir, 1, result)
         write_state(run_dir, state)
     elif run_dir is not None and args.step == 1:
         write_step_result(run_dir, 1, result)
 
     if run_dir is not None:
-        print(run_dir / "steps" / f"{args.step:02d}.json")
+        if result["status"] != "success":
+            print(
+                f"步骤 {args.step} {result['status']}：{error_message}\n"
+                f"详细结果：{run_dir / 'steps' / f'{args.step:02d}.json'}",
+                file=sys.stderr,
+            )
+        else:
+            print(run_dir / "steps" / f"{args.step:02d}.json")
     else:
         print(result["summary"], file=sys.stderr)
     return 0 if result["status"] == "success" else 1

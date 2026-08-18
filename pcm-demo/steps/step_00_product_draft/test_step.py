@@ -1,3 +1,5 @@
+"""第 0 步测试。"""
+
 from __future__ import annotations
 
 import sys

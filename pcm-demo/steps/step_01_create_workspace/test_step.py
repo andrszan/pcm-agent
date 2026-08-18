@@ -21,6 +21,8 @@ from steps.step_01_create_workspace.workspace import (
     prepare_staging,
     verify_prepared,
 )
+
+
 class WorkspaceStepTests(unittest.TestCase):
     """第 1 步工作区发布测试。"""
 
