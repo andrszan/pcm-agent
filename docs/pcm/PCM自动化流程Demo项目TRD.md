@@ -194,7 +194,7 @@ pcm-demo/
 
 `topic_name` 必须明确表达当前产品选题。`project_directory_name` 必须是单段小写 kebab-case；初稿已经给出仓库名或英文代号时优先提取，未给出时允许模型根据选题生成，并把来源和生成理由写入提取证据。初稿无法确定产品选题、API、结构解析或有限重试耗尽时返回 `failed`，不能猜测字段。
 
-产品工作区根目录的优先级为 CLI `--workspace-root`、进程环境 `PCM_WORKSPACE_ROOT`、`pcm-demo/.env` 中的同名配置。模板仓库从进程环境或 `pcm-demo/.env` 的 `PCM_TEMPLATE_REPOSITORY` 读取，单次运行不能覆盖。最终项目路径为 `<root>/<project_directory_name>`，调用方不直接传入最终项目路径。第 1 步 AI-compatible 调用使用 Responses API 的 `instructions`、`input` 和 `text.format` strict JSON Schema；服务不支持 `/responses` 或该 Schema 时返回 `failed`，不回退到 Chat Completions。
+产品工作区根目录的优先级为 CLI `--workspace-root`、进程环境 `PCM_WORKSPACE_ROOT`、`pcm-demo/.env` 中的同名配置，并且必须位于当前能力仓库之外，作为专门承载产品项目的独立父目录。模板仓库从进程环境或 `pcm-demo/.env` 的 `PCM_TEMPLATE_REPOSITORY` 读取，单次运行不能覆盖。最终项目路径为 `<root>/<project_directory_name>`，调用方不直接传入最终项目路径。第 1 步 AI-compatible 调用使用 Responses API 的 `instructions`、`input` 和 `text.format` strict JSON Schema；服务不支持 `/responses` 或该 Schema 时返回 `failed`，不回退到 Chat Completions。
 
 确定性发布顺序为：
 
@@ -202,11 +202,13 @@ pcm-demo/
 2. 在最终目录同级计算 `<project_directory_name>.pcm-tmp-<run-id>` 临时路径；
 3. 先用 Git 核验已配置模板仓库默认分支和读取权限，再执行 `git clone --depth 1`；
 4. 记录模板默认分支、实际分支、commit SHA 和 remote URL，并核验 `CLAUDE.md`、`AGENTS.md`、`project-intake` Skill、`frontend/` 与 `backend/` 等关键能力；
-5. 只在临时目录已证明属于当前 run 后删除其中的 `.git/`，删除原 `docs/` 内容后重建空 `docs/`，再按原始字节写入 `docs/产品初稿.md`；
-6. 核验 `.git/` 不存在、`docs/` 只含产品初稿、源和目标初稿哈希一致、源文件未变化且模板能力仍存在；
-7. 所有核验通过后，将同文件系统中的临时目录原子重命名为最终项目路径。
+5. 只在临时目录已证明属于当前 run 后删除其中的上游 `.git/`，删除原 `docs/` 内容后重建空 `docs/`，再按原始字节写入 `docs/产品初稿.md`；
+6. 核验上游 `.git/` 已删除、`docs/` 只含产品初稿、源和目标初稿哈希一致、源文件未变化且模板能力仍存在；
+7. 所有发布核验通过后，将同文件系统中的临时目录原子重命名为最终项目路径；
+8. 在最终项目根执行 `git init -b main`，不执行 `git add`、`git commit` 或 push；
+9. 核验 `git rev-parse --show-toplevel` 等于最终项目根、当前分支为 `main`、`HEAD` 尚不存在，并记录根仓库初始化证据。
 
-步骤对下游公开的 `outputs` 只包含最终项目根路径和 `docs/产品初稿.md`。第 1 步成功时 `state.json` 至少保存以下统一结构；完整命令结果放在步骤结果或脱敏日志中：
+步骤对下游公开的 `outputs` 仍只包含最终项目根路径和 `docs/产品初稿.md`；根 `.git/` 是第 1 步建立的项目边界，不作为文档产物。第 1 步成功时 `state.json` 至少保存以下统一结构；完整命令结果放在步骤结果或脱敏日志中：
 
 ```json
 {
@@ -231,19 +233,27 @@ pcm-demo/
     "actual_branch": "main",
     "commit_sha": "<sha>"
   },
-  "publication_phase": "published",
+  "publication_phase": "git_initialized",
+  "root_repository": {
+    "path": "/products/mendmark",
+    "branch": "main",
+    "head": null
+  },
   "checks": {
     "template_capabilities_present": true,
-    "git_removed": true,
+    "upstream_git_removed": true,
     "docs_reinitialized": true,
     "draft_hash_matches": true,
     "source_draft_unchanged": true,
-    "renamed_to_final_path": true
+    "renamed_to_final_path": true,
+    "root_git_initialized": true,
+    "root_git_is_final_path": true,
+    "root_git_has_no_commits": true
   }
 }
 ```
 
-失败时保留临时现场。恢复只续接状态能证明属于同一 run、同一模板和同一目标的完整 clone；不完整 clone、临时与最终目录同时存在、目录归属不明或证据冲突时不自动删除或覆盖。最终目录已经完整发布且证据一致时，可以确认既有成功而不重新 clone。
+失败时保留现场。恢复只续接状态能证明属于同一 run、同一模板和同一目标的完整 clone 或已发布最终目录；不完整 clone、临时与最终目录同时存在、目录归属不明或证据冲突时不自动删除或覆盖。最终目录已发布但根 `git init` 中断时，只有发布证据一致、根 `.git/` 不存在或仍是零提交 `main` 仓库，才允许续接或幂等确认根仓库初始化；已有 commit、Git 根指向其它目录或分支不一致时返回 `failed` 并保留现场。
 
 ### 3. Agent SDK 运行结果
 
@@ -458,7 +468,7 @@ PCM 在请求前读取该领域完整消息历史，追加当前 `user` 消息�
 - 实现统一步骤结果；
 - 实现 `run_step.py` 和只覆盖第 0～2 步的 `run_all.py`；
 - 实现第 0 步完整 PRD 无副作用跳过；
-- 实现第 1 步项目身份提取、固定模板浅克隆、初始化清理、产品初稿写入、原子发布和安全恢复；
+- 实现第 1 步项目身份提取、固定模板浅克隆、初始化清理、产品初稿写入、原子发布、根仓库 `git init -b main` 和安全恢复；
 - 实现第 2 步 `project-intake` 多轮决策与 session 恢复；
 - 验证能力仓库中的源 PRD 哈希不变。
 
@@ -473,11 +483,11 @@ PCM 在请求前读取该领域完整消息历史，追加当前 `user` 消息�
 #### 第 1 步完成条件
 
 - AI-compatible 模型从真实产品初稿取得明确的 `topic_name` 和合法的 `project_directory_name`；目录名为单段小写 kebab-case，提取或生成依据已记录；
-- 实际产品工作区根目录按 `--workspace-root`、进程环境、Demo `.env` 的优先级解析并记录来源；
+- 实际产品工作区根目录按 `--workspace-root`、进程环境、Demo `.env` 的优先级解析并记录来源，且位于当前能力仓库之外；
 - 固定模板仓库通过 `git clone --depth 1` 克隆到最终目录同级临时路径，实际默认分支、当前分支和 commit SHA 已记录；
 - 最终项目路径为 `<root>/<project_directory_name>`，由临时目录在全部核验通过后原子重命名生成；
-- 最终目录不含上游 `.git/`，模板关键能力仍存在，`docs/` 只包含 `产品初稿.md`；
-- `state.json` 记录源初稿绝对路径、完整内容和 SHA-256、项目属性、临时和最终路径、模板证据、当前发布阶段及核验结果；
+- 最终目录不含上游模板 Git 历史，模板关键能力仍存在，`docs/` 只包含 `产品初稿.md`；最终项目根已初始化为 `main` 分支的独立 Git 仓库且尚无 commit；
+- `state.json` 记录源初稿绝对路径、完整内容和 SHA-256、项目属性、临时和最终路径、模板证据、根仓库路径/分支/空 HEAD、当前发布阶段及核验结果；
 - 项目内 `docs/产品初稿.md` 与源初稿 SHA-256 一致，源初稿哈希保持不变；
 - 重复执行、归属不明目录、残留临时 clone、clone 或 rename 中断不会导致覆盖或误报成功，并可按已确认事实安全续接或明确阻塞。
 
@@ -506,7 +516,7 @@ PCM 在请求前读取该领域完整消息历史，追加当前 `user` 消息�
 
 后续设计在进入对应阶段前增量补充：
 
-1. **阶段 2：第 3～10 步**——初始化流程、项目工程、架构、UI/UX 框架和 Backlog；
+1. **阶段 2：第 3～10 步**——初始化流程、项目工程、架构、UI/UX 框架和 Backlog；其中第 7 步必须核验第 1 步已初始化且尚无 commit 的根仓库，不重复初始化根仓库，只为适用的 `frontend/`、`backend/` 建立各自 `main` 仓库，并在根 `.gitignore` 排除两者后分别完成三个仓库的首次本地提交；
 2. **阶段 3：第 11～19 步单需求循环**——先完整跑通一个需求，验证多仓库 Git、开发、审查、修复、合并和状态同步；
 3. **阶段 4：Backlog 循环与最终验收**——至少两个需求、测试阻塞恢复、最终项目检查以及 Demo 结论。
 
@@ -522,9 +532,9 @@ PCM 在请求前读取该领域完整消息历史，追加当前 `user` 消息�
 - Agent SDK 初始化消息与 ResultMessage 解析；
 - 权限拒绝；
 - Claude session ID 和 AI-compatible 决策历史分别保存与恢复；
-- 产品初稿身份提取、模板分支和 SHA 记录、固定模板浅克隆、同级临时目录与原子发布；
-- 上游 `.git/` 清理、`docs/` 重置、项目内初稿写入以及源文件不变；
-- 第 1 步发布中断后的现场保留、归属核验和安全恢复；
+- 产品初稿身份提取、模板分支和 SHA 记录、固定模板浅克隆、同级临时目录、原子发布与根仓库零提交初始化；
+- 上游 `.git/` 清理、`docs/` 重置、项目内初稿写入、最终根 `.git/` 初始化以及源文件不变；
+- 第 1 步 clone、发布或根仓库初始化中断后的现场保留、归属核验和安全恢复；
 - 第 0～2 步单独运行及串联运行。
 
 SDK 和模型调用使用真实服务完成至少一次集成验证。纯解析和状态逻辑可以使用固定本地样例做单元测试，但不得用 Mock 的模型成功响应替代阶段验收。
@@ -540,7 +550,7 @@ SDK 和模型调用使用真实服务完成至少一次集成验证。纯解析�
 - 结构化响应持续解析失败；
 - 目标 Skill 未加载；
 - session ID 存在但恢复失败；
-- 第 1 步的项目身份结构化响应持续无效、产品初稿无法确定选题、工作区根配置无效、目录归属不明、恢复证据冲突、Git 工具或临时网络异常、模板 clone、清理、初稿写入、核验、原子 rename 或证据持久化失败；
+- 第 1 步的项目身份结构化响应持续无效、产品初稿无法确定选题、工作区根位于当前能力仓库内部、工作区根配置无效、目录归属不明、恢复证据冲突、Git 工具或临时网络异常、模板 clone、清理、初稿写入、核验、原子 rename、根仓库初始化或证据持久化失败；
 - 文件、状态或哈希操作失败；
 - 步骤完成条件未满足且属于可修复实现错误。
 
@@ -559,7 +569,7 @@ SDK 和模型调用使用真实服务完成至少一次集成验证。纯解析�
 - 原 session 可用时优先恢复；
 - 已存在的局部产物先核验再继续，不自动删除或覆盖；
 - 阻塞解除后重新执行当前步骤的完成条件检查。
-- 第 1 步最终目录完整且证据匹配时确认既有成功；仅有归属明确且 clone 完整的临时目录时从最后可核验阶段续接；临时和最终目录同时存在、归属不明或证据冲突时保留现场并返回 `failed`。
+- 第 1 步最终目录、发布证据和根仓库证据均匹配时确认既有成功；仅有归属明确且 clone 完整的临时目录时从最后可核验阶段续接；最终目录已发布但根 `.git/` 缺失时续接 `git init -b main`；根仓库已有 commit、临时和最终目录同时存在、归属不明或证据冲突时保留现场并返回 `failed`。
 
 ## 十、配置与敏感信息
 
@@ -571,10 +581,9 @@ LLM_API_KEY=
 LLM_MODEL=
 PCM_WORKSPACE_ROOT=
 PCM_TEMPLATE_REPOSITORY=
-CLAUDE_MODEL=
 ```
 
-具体键名在实现前与现有环境统一，避免同时支持没有真实需要的别名。`--workspace-root` 可以覆盖 `PCM_WORKSPACE_ROOT`，实际采用的根目录及其来源必须写入运行状态。Claude Agent SDK 认证当前使用进程环境或既有 Claude 登录态，不从 Demo `.env` 读取，进入第 2 步前再按实际运行方式确认。实际 `.env` 必须 Git 忽略；`.env.example` 只保存键、公开默认值和安全占位说明。
+具体键名与现有环境统一，不同时支持没有真实需要的别名。`--workspace-root` 可以覆盖 `PCM_WORKSPACE_ROOT`，实际采用的根目录及其来源必须写入运行状态。Claude Agent SDK 的模型和认证继续使用 SDK/Claude Code 自身支持的进程环境或既有登录态，不由 Demo `.env` 另设 `CLAUDE_MODEL`；实际 `.env` 必须 Git 忽略，`.env.example` 只保存键、公开默认值和安全占位说明。
 
 日志不得记录：
 

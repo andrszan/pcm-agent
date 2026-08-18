@@ -44,7 +44,7 @@ Demo 只保留跑通完整流程必需的脚本、薄封装、JSON 状态和日�
 
 ## 三、黄金项目输入
 
-第一轮端到端验收使用现有完整产品初稿：
+第一轮端到端验收使用现有完整产品初稿，并使用当前能力仓库之外的独立 `PCM_WORKSPACE_ROOT`；该目录只承载被开发产品，不使用 `pcm-demo/workspace/` 或当前能力仓库的其它子目录作为产品工作区根。
 
 ```text
 docs/prd/修迹-产品需求文档-v1.md
@@ -60,7 +60,7 @@ docs/prd/修迹-产品需求文档-v1.md
 - 首版不依赖真实支付、地图、物流、即时聊天或自动诊断服务；
 - 可以通过本地测试、真实服务和浏览器完成验收。
 
-完整运行通过 `--product-draft` 接收源产品初稿，通过可选 `--workspace-root` 覆盖 `PCM_WORKSPACE_ROOT`。程序记录源路径、完整 UTF-8 内容和 SHA-256，从初稿提取项目选题和文件夹名，将 `PCM_TEMPLATE_REPOSITORY` 配置的开发管理模板浅克隆并初始化后发布到 `<workspace-root>/<project_directory_name>`，把初稿写为项目内的 `docs/产品初稿.md`。后续步骤只操作项目工作区，不修改当前能力仓库中的源初稿。
+完整运行通过 `--product-draft` 接收源产品初稿，通过可选 `--workspace-root` 覆盖 `PCM_WORKSPACE_ROOT`。`PCM_WORKSPACE_ROOT` 是当前能力仓库之外、专门承载产品项目的独立父目录。程序记录源路径、完整 UTF-8 内容和 SHA-256，从初稿提取项目选题和文件夹名，将 `PCM_TEMPLATE_REPOSITORY` 配置的开发管理模板浅克隆并初始化后发布到 `<workspace-root>/<project_directory_name>`，把初稿写为项目内的 `docs/产品初稿.md`，再在最终项目根执行 `git init -b main` 建立独立根仓库边界但不提交。后续步骤只操作项目工作区，不修改当前能力仓库中的源初稿。
 
 因为输入已经是完整产品初稿，第 0 步应确认输入充分后无副作用跳过；第 1 步将其发布为项目内 `docs/产品初稿.md`；第 2 步调用 `project-intake`，由 Agent 与决策模型完成必要的多轮对话并生成该 Skill 规定的产品定义文档。第 2 步只验证输入承接、能力运行和产物事实，不把黄金项目的具体业务或后续技术方案、Backlog 逻辑写入通用程序。源初稿只提供产品要求，不提供预生成的技术方案、Backlog、TRD、代码或验收结论，因此不会把目标实现作为隐藏答案交给 Agent。
 
@@ -76,17 +76,17 @@ Demo 计划位于当前工作区根目录：
 pcm-demo/
 ```
 
-它是 PCM 前置验证工具，不属于被开发项目的 `frontend/` 或 `backend/`。运行状态、步骤结果和日志保存在被 Git 忽略的 `pcm-demo/runs/<run-id>/`，只作为本地恢复数据，不提交实际 run 内容；实际被 Agent 开发的项目位于配置的产品工作区根目录中：
+它是 PCM 前置验证工具，不属于被开发项目的 `frontend/` 或 `backend/`。运行状态、步骤结果和日志保存在被 Git 忽略的 `pcm-demo/runs/<run-id>/`，只作为本地恢复数据，不提交实际 run 内容；实际被 Agent 开发的项目位于当前能力仓库之外、配置的独立产品工作区根目录中：
 
 ```text
 <PCM_WORKSPACE_ROOT>/<project_directory_name>/
 ```
 
-第 1 步在最终目录同级使用 `<project_directory_name>.pcm-tmp-<run-id>` 临时 clone，全部核验通过后原子发布。run ID 用于运行记录和临时目录归属，不作为最终项目文件夹名。
+第 1 步在最终目录同级使用 `<project_directory_name>.pcm-tmp-<run-id>` 临时 clone，全部发布核验通过后原子发布，再在最终项目根初始化 `main` 分支的根 Git 仓库但不提交。该 `.git/` 只建立项目边界并让 Claude Code 的项目根、trust 对象、SDK `cwd` 和项目 settings 归属一致；run ID 用于运行记录和临时目录归属，不作为最终项目文件夹名。
 
-Demo 不直接在当前 `pcm-agent-skills` 能力仓库中执行项目初始化、功能分支和合并，避免验证过程破坏当前仓库。
+Demo 不直接在当前 `pcm-agent-skills` 能力仓库中执行产品项目初始化、功能分支和合并，避免验证过程破坏当前仓库。产品项目根从第 1 步起具有自己的 `.git`，不能把当前能力仓库或其内部目录作为 `PCM_WORKSPACE_ROOT`。
 
-实现前应明确把 `pcm-demo/` 作为本工作区工具代码的例外边界；是否单独初始化 Git 不属于本次文档设计的强制要求。
+`pcm-demo/` 始终只是当前能力仓库中的工具代码；产品项目根必须位于独立 `PCM_WORKSPACE_ROOT`，并由第 1 步初始化自己的 Git 仓库。
 
 ## 五、最小目录结构
 
@@ -126,7 +126,7 @@ pcm-demo/
 ├── run_all.py
 │
 ├── runs/
-└── workspace/
+└── # 产品项目位于独立 PCM_WORKSPACE_ROOT，不在本目录内
 ```
 
 目录可以在实现时按实际代码量合并，但已实现步骤的业务代码、测试和详细操作说明必须同置于对应步骤目录；不要为了保持未来步骤目录图而创建空模块。
@@ -240,7 +240,7 @@ PCM_TEMPLATE_REPOSITORY=
 - Git、Python、Node.js、包管理器和浏览器等本机工具；
 - 修迹首版不需要的外部服务默认不提供。
 
-程序必须在开始运行时校验产品初稿存在且可读，记录源路径、完整 UTF-8 内容和 SHA-256。第 1 步从初稿提取选题和项目文件夹名，通过 Responses API 的 `instructions`、`input` 和 `text.format` strict JSON Schema 获取结构化结果；服务不支持该协议时明确失败，不回退到 Chat Completions。随后将 `PCM_TEMPLATE_REPOSITORY` 配置的模板浅克隆到最终目录同级临时目录，记录实际分支与 commit，删除上游 `.git/`，重置 `docs/` 并写入 `docs/产品初稿.md`，全部核验通过后原子发布到最终项目路径。源文件后续变化不得被静默接受；`--resume` 根据已保存内容、哈希、临时现场和发布证据继续。
+程序必须在开始运行时校验产品初稿存在且可读，并确认 `PCM_WORKSPACE_ROOT` 位于当前能力仓库之外，记录源路径、完整 UTF-8 内容和 SHA-256。第 1 步从初稿提取选题和项目文件夹名，通过 Responses API 的 `instructions`、`input` 和 `text.format` strict JSON Schema 获取结构化结果；服务不支持该协议时明确失败，不回退到 Chat Completions。随后将 `PCM_TEMPLATE_REPOSITORY` 配置的模板浅克隆到最终目录同级临时目录，记录实际分支与 commit，删除上游 `.git/`，重置 `docs/` 并写入 `docs/产品初稿.md`，全部发布核验通过后原子发布到最终项目路径，再执行 `git init -b main` 建立根仓库但不暂存、不提交。源文件后续变化不得被静默接受；`--resume` 根据已保存内容、哈希、临时现场、发布和根仓库证据继续。
 
 缺少不可替代资源时允许在运行中阻塞。
 
@@ -322,14 +322,22 @@ runs/<run-id>/
     "actual_branch": "main",
     "commit_sha": "<sha>"
   },
-  "publication_phase": "published",
+  "publication_phase": "git_initialized",
+  "root_repository": {
+    "path": "/products/mendmark",
+    "branch": "main",
+    "head": null
+  },
   "checks": {
     "template_capabilities_present": true,
-    "git_removed": true,
+    "upstream_git_removed": true,
     "docs_reinitialized": true,
     "draft_hash_matches": true,
     "source_draft_unchanged": true,
-    "renamed_to_final_path": true
+    "renamed_to_final_path": true,
+    "root_git_initialized": true,
+    "root_git_is_final_path": true,
+    "root_git_has_no_commits": true
   },
   "current_step": 14,
   "active_requirement": "REQ-003",
@@ -443,7 +451,7 @@ while True:
 3. 建立 `pcm-demo/` 和最小配置；
 4. 实现 AI-compatible 聊天封装；
 5. 实现命令、文件和 `state.json` 读写；
-6. 按已确认合同实现并真实验证第 1 步的项目身份提取、固定模板浅克隆、初始化清理、原子发布和安全恢复；
+6. 按已确认合同实现并真实验证第 1 步的项目身份提取、固定模板浅克隆、初始化清理、原子发布、根仓库零提交初始化和安全恢复；
 7. 实现 Claude Agent SDK 封装并完成一次指定目录调用；
 8. 建立统一步骤入口和结果格式；
 9. 只完成当前阶段的第 0～2 步及串联运行；
@@ -461,14 +469,14 @@ Demo 完成需要同时满足：
 3. AI-compatible 模型能够完成必要的语义决策；
 4. Claude Agent SDK 能在指定工作区调用项目 Skills、修改文件和执行验证；
 5. 上一步输出能够成为下一步输入；
-6. `run_all.py` 能从指定产品初稿开始执行第 0～10 步，第 1 步真实完成项目身份提取、固定模板浅克隆、模板分支和 SHA 记录、上游 `.git/` 清除、`docs/产品初稿.md` 写入及原子发布；
+6. `run_all.py` 能从指定产品初稿开始执行第 0～10 步，第 1 步真实完成项目身份提取、固定模板浅克隆、模板分支和 SHA 记录、上游 `.git/` 清除、`docs/产品初稿.md` 写入、原子发布及最终项目根 `git init -b main`；根仓库此时尚无 commit；
 7. 至少两个需求经过第 11～19 步，证明需求循环真实发生；
 8. 活动步骤内的修正和重新核验可以完成，不需要外层步骤回退；
 9. 至少验证一次人工补充资源后的 `--resume`，可以使用人为制造的非秘密测试阻塞；
 10. 所有 Backlog 需求完成后，项目最终检查通过；
 11. 最终生成的根仓库、前端和后端项目可以真实安装、构建、启动和验收；
 12. 输出一份简短的 Demo 结论，记录可行能力、失败点、成本耗时和正式 PCM 的设计输入；
-13. 完整运行前后，当前能力仓库中的 `docs/prd/修迹-产品需求文档-v1.md` 内容哈希保持不变，已发布项目的 `docs/产品初稿.md` 与其哈希一致；第 1 步至少真实验证一次失败现场保留和安全续接。
+13. 完整运行前后，当前能力仓库中的 `docs/prd/修迹-产品需求文档-v1.md` 内容哈希保持不变，已发布项目的 `docs/产品初稿.md` 与其哈希一致；第 1 步至少真实验证一次失败现场保留、根仓库初始化中断和安全续接。
 
 ## 十四、Demo 结论应回答的问题
 

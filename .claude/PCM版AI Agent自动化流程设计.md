@@ -181,14 +181,22 @@ PCM Demo 只保存支持继续运行所必需的状态：
     "actual_branch": "main",
     "commit_sha": "<sha>"
   },
-  "publication_phase": "published",
+  "publication_phase": "git_initialized",
+  "root_repository": {
+    "path": "/products/family-meal-planner",
+    "branch": "main",
+    "head": null
+  },
   "checks": {
     "template_capabilities_present": true,
-    "git_removed": true,
+    "upstream_git_removed": true,
     "docs_reinitialized": true,
     "draft_hash_matches": true,
     "source_draft_unchanged": true,
-    "renamed_to_final_path": true
+    "renamed_to_final_path": true,
+    "root_git_initialized": true,
+    "root_git_is_final_path": true,
+    "root_git_has_no_commits": true
   },
   "current_step": 12,
   "active_requirement": "REQ-002",
@@ -220,8 +228,8 @@ PCM Demo 只保存支持继续运行所必需的状态：
 8. Claude Agent SDK 的多轮上下文由其 session 保存，状态只记录稳定的领域键和 session ID；恢复后仍重新核验工作区文件和 Git 事实；
 9. AI-compatible 决策接口无服务端会话状态，PCM 按领域键将完整的 `system`、`user`、`assistant` 消息历史原子写入 `runs/<run-id>/conversations/<key>.json`，每轮携带该历史继续调用；不同步骤和不同活动需求使用独立历史，`state.json` 只记录文件引用和当前轮次；
 10. 决策历史只保存当前决策所需的脱敏内容，不保存密钥、完整环境变量或无关工具日志；首轮不建设数据库、向量记忆或摘要系统；
-11. 第 1 步恢复时重新核对产品初稿哈希、项目目录名、工作区根目录、配置的模板来源以及临时和最终目录事实；只有临时目录能由状态证明属于同一 run 且 clone 完整时才允许续接；
-12. 第 1 步最终目录已完整发布且证据一致时可确认既有成功；临时和最终目录同时存在、目录归属不明或证据冲突时返回 `failed` 并保留现场。
+11. 第 1 步恢复时重新核对产品初稿哈希、项目目录名、独立工作区根、配置的模板来源、临时和最终目录以及根仓库事实；只有临时目录能由状态证明属于同一 run 且 clone 完整，或最终目录能由发布证据证明属于同一 run 时才允许续接；
+12. 第 1 步最终目录、发布证据和零提交根仓库证据一致时可确认既有成功；最终目录已发布但根 `.git/` 缺失时续接 `git init -b main`；根仓库已有 commit、临时和最终目录同时存在、目录归属不明或证据冲突时返回 `failed` 并保留现场。
 
 ## 五、项目初始化流程
 
@@ -242,12 +250,14 @@ PCM Demo 只保存支持继续运行所必需的状态：
   1. 在产品工作区根目录中计算最终路径 `<root>/<project_directory_name>` 和同级临时路径 `<root>/<project_directory_name>.pcm-tmp-<run-id>`；
   2. 使用 `git clone --depth 1` 将配置的模板克隆到临时路径，记录默认分支、实际分支和 commit SHA；
   3. 核验模板关键能力存在后，删除临时目录中的上游 `.git/`，清空并保留 `docs/`，将输入初稿按原始字节写为 `docs/产品初稿.md`；
-  4. 核验 `.git/` 不存在、`docs/` 只包含产品初稿、初稿哈希一致、源初稿未改变且模板关键能力仍存在；
-  5. 全部核验通过后，将同级临时目录原子重命名为最终路径。
+  4. 核验上游 `.git/` 已删除、`docs/` 只包含产品初稿、初稿哈希一致、源初稿未改变且模板关键能力仍存在；
+  5. 全部发布核验通过后，将同级临时目录原子重命名为最终路径；
+  6. 在最终项目根执行 `git init -b main`，只建立根仓库边界，不执行 `git add`、`git commit` 或 push；
+  7. 核验最终目录的 Git 根就是自身、当前分支为 `main`、尚无 commit，并记录根仓库初始化证据。
 - 输出：最终项目根路径和 `<final_path>/docs/产品初稿.md`。
-- 完成条件：最终目录独立、可操作，模板来源和 commit 可追溯，没有误带上游 Git 历史，初始化后的 `docs/` 只含当前产品初稿，状态和文件事实一致。
-- 自动化说明：AI-compatible 调用使用 Responses API 的严格 JSON Schema 只提取项目身份；服务不支持该协议时明确失败，不回退到 Chat Completions。Git、路径、清理、哈希、核验和发布由 Python 程序确定性执行。最终路径必须原先不存在，不以复制少量能力文件代替完整模板 clone。
-- 阻塞与失败：缺少不可替代的模板仓库读取权限时返回 `blocked`；初稿无法确定选题、目录归属不明、AI API、结构解析、Git 工具、网络、clone、清理、写入、核验或 rename 的执行错误返回 `failed`。失败时保留临时现场，恢复时按已记录阶段安全续接，不自动删除归属不明内容。
+- 完成条件：最终目录独立、可操作，位于配置的独立产品工作区根中；模板来源和 commit 可追溯且未误带上游 Git 历史；最终项目根已经初始化为 `main` 分支的独立 Git 仓库但尚无 commit；初始化后的 `docs/` 只含当前产品初稿，状态和文件事实一致。
+- 自动化说明：`PCM_WORKSPACE_ROOT` 必须是当前能力仓库之外、专门承载产品项目的独立父目录。AI-compatible 调用使用 Responses API 的严格 JSON Schema 只提取项目身份；服务不支持该协议时明确失败，不回退到 Chat Completions。Git、路径、清理、哈希、发布和根仓库初始化由 Python 程序确定性执行。最终路径必须原先不存在，不以复制少量能力文件代替完整模板 clone。
+- 阻塞与失败：缺少不可替代的模板仓库读取权限时返回 `blocked`；初稿无法确定选题、工作区根位于当前能力仓库内部、目录归属不明、AI API、结构解析、Git 工具、网络、clone、清理、写入、核验、rename 或根仓库初始化错误返回 `failed`。失败时保留现场；若原子发布后 `git init` 中断，仅在最终目录与当前 run 发布证据一致时续接根仓库初始化，不自动删除或覆盖。
 
 ### 第 2 步：项目需求与产品定义
 
@@ -296,13 +306,18 @@ PCM Demo 只保存支持继续运行所必需的状态：
 - 完成条件：适用安装、构建、测试、启动和基础联调通过，留下待提交变更。
 - 自动化说明：发现模板残留或局部配置问题时在本步骤内继续修正和验证。
 
-### 第 7 步：初始化并提交三个仓库
+### 第 7 步：初始化前后端并提交三个仓库
 
 - 能力：显式 Git 脚本和 `commit-changes`。
-- 输入：根目录、前端和后端工程。
+- 输入：第 1 步已初始化但尚无提交的根仓库，以及完成项目化的前端和后端工程。
+- 执行动作：
+  1. 核验根目录 Git 根就是项目根、分支为 `main` 且尚无 commit，不重复执行根 `git init`；
+  2. 对适用的 `frontend/`、`backend/` 分别执行 `git init -b main`；
+  3. 核验根仓库 `.gitignore` 排除前后端独立仓库内容，不创建隐式 submodule 或误纳入 gitlink；
+  4. 按根、前端、后端三个仓库分别检查状态并调用 `commit-changes` 创建各自首次本地提交。
 - 输出：每个适用仓库的初始本地提交。
-- 完成条件：适用仓库位于 `main`，初始提交存在，工作树符合预期且没有跨仓误纳入内容。
-- 自动化说明：按仓库逐个初始化、检查和提交；不执行 push。
+- 完成条件：根仓库 Git 根为项目根，适用的前端、后端仓库 Git 根分别为 `frontend/`、`backend/`；三个仓库均位于 `main`、初始提交存在，工作树符合预期且没有跨仓误纳入内容。
+- 自动化说明：第 1 步只提前初始化根 Git 边界；本步骤完成三个仓库的首次提交，不执行 push。
 
 ### 第 8 步：工程架构设计
 
