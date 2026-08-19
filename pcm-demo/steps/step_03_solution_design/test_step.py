@@ -14,6 +14,7 @@ sys.path.insert(0, str(DEMO_ROOT))
 
 from common.claude_agent import ClaudeRunResult
 from common.state import read_state, write_state
+from common.files import write_json
 from run_step import main as run_step_main
 from steps.step_03_solution_design.step import (
     OUTPUTS,
@@ -47,6 +48,22 @@ class SolutionDesignTests(unittest.TestCase):
         requirements.mkdir(parents=True)
         (requirements / "项目需求说明.md").write_text("# 项目需求\n", encoding="utf-8")
         (requirements / "产品功能说明.md").write_text("# 产品功能\n", encoding="utf-8")
+        write_json(
+            run_dir / "steps/02.json",
+            {
+                "step": 2,
+                "name": "项目需求与产品定义",
+                "status": "success",
+                "summary": "完成",
+                "applicable": True,
+                "outputs": [
+                    "docs/requirements/项目需求说明.md",
+                    "docs/requirements/产品功能说明.md",
+                ],
+                "blocked": None,
+                "error": None,
+            },
+        )
         template_assets = root / "template-assets"
         template_assets.mkdir()
         (template_assets / "repositories.yaml").write_text(
@@ -162,7 +179,7 @@ class SolutionDesignTests(unittest.TestCase):
             self.assertEqual(len(calls), 2)
             self.assertIsNone(calls[0]["resume_session_id"])
             self.assertEqual(calls[1]["resume_session_id"], "session-3")
-            self.assertIn("明确同意", calls[1]["prompt"])
+            self.assertEqual(calls[1]["prompt"], "批准")
             self.assertIn(str(template_assets), calls[0]["prompt"])
             saved = read_state(run_dir)
             self.assertEqual(
@@ -332,7 +349,7 @@ class SolutionDesignTests(unittest.TestCase):
                 [message["role"] for message in history["messages"]],
                 ["system", "assistant", "user", "assistant", "user", "assistant"],
             )
-            self.assertIn("发送给 Claude Agent SDK 的指令", history["messages"][3]["content"])
+            self.assertNotIn("发送给 Claude Agent SDK 的指令", history["messages"][3]["content"])
             self.assertIn("已完成 solution-design", history["messages"][5]["content"])
             self.assertEqual(
                 read_state(run_dir)["decision_conversations"]["solution_design"]["turn"],
@@ -372,8 +389,7 @@ class SolutionDesignTests(unittest.TestCase):
         prompt = decision_prompt(
             {"action": "approve", "answer": "批准", "reason": "足够", "required_inputs": []}
         )
-        self.assertIn("等效开发者授权", prompt)
-        self.assertIn("明确同意", prompt)
+        self.assertEqual(prompt, "批准")
 
 
 if __name__ == "__main__":

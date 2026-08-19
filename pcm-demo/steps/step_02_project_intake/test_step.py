@@ -49,6 +49,19 @@ class ProjectIntakeTests(unittest.TestCase):
         draft = root / "draft.md"
         draft.write_text("# 产品初稿\n", encoding="utf-8")
         (workspace / "docs/产品初稿.md").write_bytes(draft.read_bytes())
+        write_json(
+            run_dir / "steps/01.json",
+            {
+                "step": 1,
+                "name": "建立项目工作区",
+                "status": "success",
+                "summary": "完成",
+                "applicable": True,
+                "outputs": ["docs/产品初稿.md"],
+                "blocked": None,
+                "error": None,
+            },
+        )
         (workspace / "CLAUDE.md").write_text("@AGENTS.md\n", encoding="utf-8")
         (workspace / "AGENTS.md").write_text("规则\n", encoding="utf-8")
         (workspace / ".claude/settings.json").write_text("{}\n", encoding="utf-8")
@@ -78,6 +91,7 @@ class ProjectIntakeTests(unittest.TestCase):
             "input": {
                 "source_path": str(draft),
                 "source_sha256": sha256(draft),
+                "published_path": str(workspace / "docs/产品初稿.md"),
             },
         }
         write_state(run_dir, state)
@@ -131,8 +145,7 @@ class ProjectIntakeTests(unittest.TestCase):
         prompt = decision_prompt(
             {"action": "approve", "answer": "批准", "reason": "足够", "required_inputs": []}
         )
-        self.assertIn("等效开发者授权", prompt)
-        self.assertIn("明确同意", prompt)
+        self.assertEqual(prompt, "批准")
 
     def test_missing_outputs_runs_decision_then_resumes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -175,7 +188,7 @@ class ProjectIntakeTests(unittest.TestCase):
             self.assertEqual(len(calls), 2)
             self.assertIsNone(calls[0]["resume_session_id"])
             self.assertEqual(calls[1]["resume_session_id"], "session-1")
-            self.assertIn("明确同意", calls[1]["prompt"])
+            self.assertIn("批准", calls[1]["prompt"])
             saved = read_state(run_dir)
             self.assertNotIn("pending_agent_prompt", saved.get("project_intake", {}))
             self.assertEqual(
@@ -194,8 +207,67 @@ class ProjectIntakeTests(unittest.TestCase):
             )
             self.assertEqual(history["messages"][4]["content"], "需要确认")
             self.assertIn('"action": "approve"', history["messages"][3]["content"])
-            self.assertIn("发送给 Claude Agent SDK 的指令", history["messages"][3]["content"])
+            self.assertNotIn("发送给 Claude Agent SDK 的指令", history["messages"][3]["content"])
             self.assertIn("已完成 project-intake", history["messages"][5]["content"])
+
+    def test_budget_result_continues_with_same_session(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory))
+            calls: list[dict] = []
+
+            async def fake_agent(prompt: str, **kwargs):
+                calls.append({"prompt": prompt, **kwargs})
+                if len(calls) == 1:
+                    current = ClaudeRunResult(
+                        init={
+                            "skills": ["project-intake"],
+                            "slash_commands": ["project-intake"],
+                        },
+                        text="预算达到上限前尚未完成",
+                        result_subtype="error_max_budget_usd",
+                        is_error=True,
+                        session_id="session-1",
+                        stop_reason="tool_use",
+                        num_turns=7,
+                        total_cost_usd=4.0,
+                        exception="Exception: Reached maximum budget ($4)",
+                    )
+                else:
+                    current = agent_result(session="session-1")
+                    for relative in OUTPUTS:
+                        path = workspace / relative
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_text("# 完成\n", encoding="utf-8")
+                kwargs["on_update"](current)
+                return current
+
+            async def fake_decision(messages, config):
+                decision = {
+                    "action": "continue",
+                    "answer": "继续",
+                    "reason": "已有 session 可恢复",
+                    "required_inputs": [],
+                }
+                return decision, 1, json.dumps(decision, ensure_ascii=False)
+
+            with patch(
+                "steps.step_02_project_intake.step.LLMConfig.load", return_value=object()
+            ):
+                outcome = asyncio.run(
+                    run(
+                        run_dir,
+                        state,
+                        agent_runner=fake_agent,
+                        decision_runner=fake_decision,
+                    )
+                )
+
+            self.assertEqual(outcome["status"], "success")
+            self.assertEqual(len(calls), 2)
+            self.assertIsNone(calls[0]["resume_session_id"])
+            self.assertEqual(calls[1]["resume_session_id"], "session-1")
+            self.assertEqual(calls[0]["max_budget_usd"], 4.0)
+            self.assertEqual(calls[1]["max_budget_usd"], 4.0)
 
     def test_structured_blocked_stops_step(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

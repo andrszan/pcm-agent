@@ -6,7 +6,7 @@
 
 只使用：
 
-- `docs/产品初稿.md`
+- `steps/01.json` 中相对于产品项目根的 `docs/产品初稿.md`
 - `CLAUDE.md`
 - `AGENTS.md`
 - `.claude/settings.json`

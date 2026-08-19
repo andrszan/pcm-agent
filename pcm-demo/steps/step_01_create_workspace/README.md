@@ -80,6 +80,8 @@ uv run python run_step.py \
 <PCM_WORKSPACE_ROOT>/<project_directory_name>/
 ```
 
+`steps/01.json` 的 `outputs` 使用相对于该产品项目根的路径，只记录 `docs/产品初稿.md`；产品项目根本身由运行状态中的 `workspace.final_path` 记录。
+
 ## 确定性操作
 
 1. 保存初稿源路径、完整 UTF-8 内容和 SHA-256；

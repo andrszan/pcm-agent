@@ -6,7 +6,7 @@ from typing import Any
 
 from common.claude_agent import ClaudeRunResult, run_claude
 from common.decision import SYSTEM_PROMPT, request_decision
-from common.files import sha256, write_json
+from common.files import resolve_workspace_output, sha256, write_json
 from common.state import write_state
 from config import LLMConfig
 
@@ -60,30 +60,45 @@ def _read_non_empty(path: Path) -> str:
     return content
 
 
-def validate_inputs(state: dict[str, Any], template_assets: Path) -> tuple[Path, dict[str, str]]:
+def validate_inputs(
+    run_dir: Path, state: dict[str, Any], template_assets: Path
+) -> tuple[Path, dict[str, str], list[Path]]:
     current_step = state.get("current_step")
     if current_step not in {2, 3} or (current_step == 2 and state.get("status") != "success"):
         raise RuntimeError("第 2 步尚未成功，不能执行第 3 步")
     workspace_value = state.get("workspace", {}).get("final_path")
     if not workspace_value:
         raise RuntimeError("运行状态缺少产品工作区路径")
-    workspace = Path(workspace_value)
+    workspace = Path(workspace_value).resolve()
     if not workspace.is_dir():
         raise RuntimeError(f"产品工作区不存在：{workspace}")
 
+    previous_result_path = run_dir / "steps" / "02.json"
+    try:
+        previous_result = json.loads(previous_result_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise RuntimeError("第 2 步结果不可读取") from error
+    previous_outputs = previous_result.get("outputs")
+    if (
+        previous_result.get("step") != 2
+        or previous_result.get("status") != "success"
+        or not isinstance(previous_outputs, list)
+        or not previous_outputs
+        or not all(isinstance(path, str) and path for path in previous_outputs)
+    ):
+        raise RuntimeError("第 2 步结果缺少可用产物")
+    requirement_paths = [
+        resolve_workspace_output(workspace, path) for path in previous_outputs
+    ]
     inputs = {
-        "docs/requirements/项目需求说明.md": _read_non_empty(
-            workspace / "docs/requirements/项目需求说明.md"
-        ),
-        "docs/requirements/产品功能说明.md": _read_non_empty(
-            workspace / "docs/requirements/产品功能说明.md"
-        ),
+        str(path): _read_non_empty(path)
+        for path in requirement_paths
     }
     if template_assets.is_symlink() or not template_assets.is_dir():
         raise RuntimeError(f"基础模板资产目录不存在或不可读：{template_assets}")
     for name in TEMPLATE_INPUTS:
-        inputs[name] = _read_non_empty(template_assets / name)
-    return workspace, inputs
+        inputs[str(template_assets / name)] = _read_non_empty(template_assets / name)
+    return workspace, inputs, requirement_paths
 
 
 def output_contents(workspace: Path) -> dict[str, str] | None:
@@ -230,29 +245,27 @@ def decision_context(
 
 
 def decision_prompt(decision: dict[str, Any]) -> str:
-    action = decision["action"]
-    if action == "approve":
-        return (
-            "作为 PCM 的等效开发者授权，我现在明确同意创建或更新 solution-design 的正式技术方案和基础工程来源结果。"
-            "请按已确认决定完成当前步骤。"
-        )
-    if action == "continue":
-        return "继续使用当前已有事实完成同一个 solution-design 步骤，不扩大输入范围。"
-    return f"PCM 决定：{decision['answer']}\n理由：{decision['reason']}\n请据此继续当前步骤。"
+    return decision["answer"]
 
 
-def initial_prompt(workspace: Path, template_assets: Path) -> str:
+def initial_prompt(
+    requirement_paths: list[Path], workspace: Path, template_assets: Path
+) -> str:
+    requirements = " ".join(
+        f"@./{path.relative_to(workspace).as_posix()}" for path in requirement_paths
+    )
+    return f"/solution-design {requirements} @{template_assets}"
+
+
+def resume_prompt(
+    requirement_paths: list[Path], workspace: Path, template_assets: Path
+) -> str:
+    requirements = " ".join(
+        f"@./{path.relative_to(workspace).as_posix()}" for path in requirement_paths
+    )
     return (
-        "/solution-design 请基于第 2 步产品定义和必需的基础模板资产完成当前 PCM 第 3 步。\n"
-        f"产品工作区：{workspace}\n"
-        f"基础模板资产入口：{template_assets}\n"
-        "请读取 docs/requirements/项目需求说明.md、docs/requirements/产品功能说明.md，"
-        "以及模板入口中的 repositories.yaml、templates.yaml 和本次选型所需的候选模板说明。\n"
-        "完成总体技术方案和前后端基础模板选型后，在获得 PCM 等效开发者确认时写入："
-        "docs/design/技术方案.md 和 docs/design/基础工程来源.json。\n"
-        "基础工程来源 JSON 必须包含 frontend、backend 两个对象，每个对象至少包含 "
-        "target_path、repository_id、template_id、template_path、adoption 字段。"
-        "本步骤不获取、复制或组装模板内容，不处理项目化、工程架构、Backlog 或具体业务实现。"
+        f"请重新读取 {requirements} 和 @{template_assets}，"
+        "核验当前事实并继续完成本步骤。"
     )
 
 
@@ -265,7 +278,7 @@ async def run(
     decision_runner=request_decision,
 ) -> dict[str, Any]:
     template_assets = template_assets.resolve()
-    workspace, inputs = validate_inputs(state, template_assets)
+    workspace, inputs, requirement_paths = validate_inputs(run_dir, state, template_assets)
     existing_outputs = output_contents(workspace)
     previous_result = state.get("solution_design", {}).get("last_agent_result", {})
     if (
@@ -279,7 +292,7 @@ async def run(
         return result(
             "success",
             "solution-design 已生成技术方案，确认既有成功。",
-            outputs=[str(workspace / relative) for relative in OUTPUTS],
+            outputs=[relative.as_posix() for relative in OUTPUTS],
         )
 
     design = state.setdefault("solution_design", {})
@@ -296,9 +309,9 @@ async def run(
     existing_session = state.get("claude_sessions", {}).get(CONVERSATION_KEY)
     pending = design.pop("pending_agent_prompt", None)
     prompt = pending or (
-        initial_prompt(workspace, template_assets)
+        initial_prompt(requirement_paths, workspace, template_assets)
         if not existing_session
-        else "重新核验当前产品定义、模板资产和 solution-design 产物事实，继续完成当前步骤。"
+        else resume_prompt(requirement_paths, workspace, template_assets)
     )
 
     if not existing_session:
@@ -320,15 +333,16 @@ async def run(
         save_agent_update(run_dir, state, run_result)
         if not run_result.result_subtype:
             raise RuntimeError(run_result.exception or "Agent SDK 未返回 ResultMessage")
-        if run_result.exception and run_result.result_subtype not in {
-            "error_max_turns",
-            "error_max_budget_usd",
-        }:
+        recoverable_subtypes = {"error_max_turns", "error_max_budget_usd"}
+        if (
+            run_result.exception
+            and run_result.result_subtype not in recoverable_subtypes
+        ):
             raise RuntimeError(run_result.exception)
-        if run_result.is_error and run_result.result_subtype not in {
-            "error_max_turns",
-            "error_max_budget_usd",
-        }:
+        if (
+            run_result.is_error
+            and run_result.result_subtype not in recoverable_subtypes
+        ):
             raise RuntimeError(f"Agent SDK 执行失败：{run_result.result_subtype}")
         init = run_result.init or {}
         if SKILL_NAME not in {str(item) for item in init.get("skills") or []}:
@@ -350,7 +364,7 @@ async def run(
             return result(
                 "success",
                 "solution-design 已生成总体技术方案和基础工程来源选择结果。",
-                outputs=[str(workspace / relative) for relative in OUTPUTS],
+                outputs=[relative.as_posix() for relative in OUTPUTS],
             )
 
         session_id = state.get("claude_sessions", {}).get(CONVERSATION_KEY)
@@ -368,7 +382,7 @@ async def run(
         messages.append(
             {
                 "role": "assistant",
-                "content": f"{raw}\n\n发送给 Claude Agent SDK 的指令：\n{prompt}",
+                "content": raw,
             }
         )
         current_turn = (

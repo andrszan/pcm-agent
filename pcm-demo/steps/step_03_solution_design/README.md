@@ -4,7 +4,7 @@
 
 ## 输入
 
-- 已成功完成第 2 步的 `run-id`；
+- 第 2 步 `steps/02.json` 中相对于产品项目根的两份产品定义文档；
 - 包含 `repositories.yaml`、`templates.yaml` 和对应候选模板目录的基础模板资产入口。
 
 ## 运行

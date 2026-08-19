@@ -6,7 +6,7 @@ from typing import Any
 
 from common.claude_agent import ClaudeRunResult, run_claude
 from common.decision import SYSTEM_PROMPT, request_decision
-from common.files import sha256, write_json
+from common.files import resolve_workspace_output, sha256, write_json
 from common.state import write_state
 from config import LLMConfig
 from steps.step_01_create_workspace import inspect_root_repository
@@ -21,10 +21,7 @@ OUTPUTS = (
     Path("docs/requirements/产品功能说明.md"),
 )
 MAX_DECISION_ROUNDS = 6
-INITIAL_AGENT_PROMPT = (
-    "/project-intake 请阅读 docs/产品初稿.md 和项目规则，通过必要的多轮讨论形成该 Skill "
-    "规定的默认产品定义文档。只处理本步骤输入，不读取技术方案、Backlog、TRD 或代码。"
-)
+PROJECT_INTAKE_MAX_BUDGET_USD = 4.0
 COMPLETION_MESSAGE = (
     "已完成 project-intake：两份正式产品定义文档已生成并通过文件事实核验。"
 )
@@ -67,12 +64,12 @@ def trust_project(workspace: Path) -> None:
     write_json(claude_json, data)
 
 
-def validate_inputs(state: dict[str, Any]) -> tuple[Path, Path]:
+def validate_inputs(run_dir: Path, state: dict[str, Any]) -> tuple[Path, Path]:
     if state.get("current_step") not in {1, 2} or state.get("publication_phase") != "git_initialized":
         raise RuntimeError("第 1 步尚未成功发布并初始化根 Git 仓库")
-    workspace = Path(state["workspace"]["final_path"])
-    root = Path(state["workspace"]["root"])
-    staging = Path(state["workspace"]["staging_path"])
+    workspace = Path(state["workspace"]["final_path"]).resolve()
+    root = Path(state["workspace"]["root"]).resolve()
+    staging = Path(state["workspace"]["staging_path"]).resolve()
     if workspace.parent != root or staging.exists():
         raise RuntimeError("第 1 步发布现场或路径证据不一致")
     checks = state.get("checks", {})
@@ -94,13 +91,36 @@ def validate_inputs(state: dict[str, Any]) -> tuple[Path, Path]:
     root_repository = inspect_root_repository(workspace)
     if state.get("root_repository") != root_repository:
         raise RuntimeError("第 1 步根 Git 仓库与运行记录不一致")
-    draft = workspace / "docs/产品初稿.md"
-    if not workspace.is_dir() or workspace.is_symlink() or not draft.is_file():
+    previous_result_path = run_dir / "steps" / "01.json"
+    try:
+        previous_result = json.loads(previous_result_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise RuntimeError("第 1 步结果不可读取") from error
+    previous_outputs = previous_result.get("outputs")
+    if (
+        previous_result.get("step") != 1
+        or previous_result.get("status") != "success"
+        or not isinstance(previous_outputs, list)
+        or len(previous_outputs) != 1
+        or not isinstance(previous_outputs[0], str)
+        or not previous_outputs[0]
+    ):
+        raise RuntimeError("第 1 步结果缺少可用产物")
+    draft = resolve_workspace_output(workspace, previous_outputs[0])
+    if draft != workspace.resolve() / "docs/产品初稿.md":
+        raise RuntimeError("第 1 步产物与运行状态不一致")
+    if not workspace.is_dir() or workspace.is_symlink() or draft.is_symlink() or not draft.is_file():
         raise RuntimeError("第 1 步发布的项目工作区或产品初稿不存在")
     source = Path(state["input"]["source_path"])
     expected_hash = state["input"]["source_sha256"]
     if not source.is_file() or sha256(source) != expected_hash or sha256(draft) != expected_hash:
         raise RuntimeError("源产品初稿或项目内产品初稿与运行记录不一致")
+    published_path = state.get("input", {}).get("published_path")
+    if (
+        not isinstance(published_path, str)
+        or Path(published_path).resolve() != draft.resolve()
+    ):
+        raise RuntimeError("第 1 步 published_path 与产物结果不一致")
     return workspace, draft
 
 
@@ -237,16 +257,17 @@ def decision_context(
     )
 
 
+def initial_prompt(draft: Path, workspace: Path) -> str:
+    return f"/project-intake @./{draft.relative_to(workspace).as_posix()}"
+
+
+def resume_prompt(draft: Path, workspace: Path) -> str:
+    reference = draft.relative_to(workspace).as_posix()
+    return f"请重新读取 @./{reference}，核验当前事实并继续完成本步骤。"
+
+
 def decision_prompt(decision: dict[str, Any]) -> str:
-    action = decision["action"]
-    if action == "approve":
-        return (
-            "作为 PCM 的等效开发者授权，我现在明确同意创建或更新 "
-            "project-intake 的正式产品定义文档。请按已确认决定完成当前步骤。"
-        )
-    if action == "continue":
-        return "继续使用当前已有事实完成同一个 project-intake 步骤，不扩大输入范围。"
-    return f"PCM 决定：{decision['answer']}\n理由：{decision['reason']}\n请据此继续当前步骤。"
+    return decision["answer"]
 
 
 async def run(
@@ -256,7 +277,7 @@ async def run(
     agent_runner=run_claude,
     decision_runner=request_decision,
 ) -> dict[str, Any]:
-    workspace, draft = validate_inputs(state)
+    workspace, draft = validate_inputs(run_dir, state)
     existing_outputs = output_contents(workspace)
     previous_result = state.get("project_intake", {}).get("last_agent_result", {})
     if (
@@ -270,7 +291,7 @@ async def run(
         return result(
             "success",
             "project-intake 已生成产品定义文档，确认既有成功。",
-            outputs=[str(workspace / relative) for relative in OUTPUTS],
+            outputs=[relative.as_posix() for relative in OUTPUTS],
         )
     trust_project(workspace)
     state.update({"current_step": STEP, "status": "running", "blocked": None, "error": None})
@@ -281,9 +302,9 @@ async def run(
         prompt = pending
     else:
         prompt = (
-            INITIAL_AGENT_PROMPT
+            initial_prompt(draft, workspace)
             if not existing_session
-            else "重新核验当前产品初稿和 project-intake 产物事实，继续完成当前步骤。"
+            else resume_prompt(draft, workspace)
         )
     if not existing_session:
         append_initial_agent_prompt(run_dir, state, prompt)
@@ -298,15 +319,22 @@ async def run(
             cwd=workspace,
             skill=SKILL_NAME,
             resume_session_id=state.get("claude_sessions", {}).get(CONVERSATION_KEY),
+            max_budget_usd=PROJECT_INTAKE_MAX_BUDGET_USD,
             on_update=lambda update: save_agent_update(run_dir, state, update),
         )
         save_agent_update(run_dir, state, run_result)
-        if run_result.exception or not run_result.result_subtype:
+        if not run_result.result_subtype:
             raise RuntimeError(run_result.exception or "Agent SDK 未返回 ResultMessage")
-        if run_result.is_error and run_result.result_subtype not in {
-            "error_max_turns",
-            "error_max_budget_usd",
-        }:
+        recoverable_subtypes = {"error_max_turns", "error_max_budget_usd"}
+        if (
+            run_result.exception
+            and run_result.result_subtype not in recoverable_subtypes
+        ):
+            raise RuntimeError(run_result.exception)
+        if (
+            run_result.is_error
+            and run_result.result_subtype not in recoverable_subtypes
+        ):
             raise RuntimeError(f"Agent SDK 执行失败：{run_result.result_subtype}")
         init = run_result.init or {}
         if SKILL_NAME not in {str(item) for item in init.get("skills") or []}:
@@ -315,14 +343,6 @@ async def run(
             str(item) for item in init.get("slash_commands") or []
         }:
             raise RuntimeError("Agent SDK 未加载 project-intake slash command")
-        if run_result.exception or not run_result.result_subtype:
-            raise RuntimeError(run_result.exception or "Agent SDK 未返回 ResultMessage")
-        if run_result.is_error and run_result.result_subtype not in {
-            "error_max_turns",
-            "error_max_budget_usd",
-        }:
-            raise RuntimeError(f"Agent SDK 执行失败：{run_result.result_subtype}")
-
         outputs = output_contents(workspace)
         messages = load_conversation(run_dir, state)
         if (
@@ -330,8 +350,8 @@ async def run(
             and not run_result.is_error
             and outputs is not None
         ):
-            validate_inputs(state)
-            paths = [str(workspace / relative) for relative in OUTPUTS]
+            validate_inputs(run_dir, state)
+            paths = [relative.as_posix() for relative in OUTPUTS]
             append_completion(run_dir, state, messages, run_result.text)
             state.setdefault("project_intake", {}).pop("pending_agent_prompt", None)
             state.update({"status": "success", "blocked": None, "error": None})
@@ -352,7 +372,7 @@ async def run(
         messages.append(
             {
                 "role": "assistant",
-                "content": f"{raw}\n\n发送给 Claude Agent SDK 的指令：\n{prompt}",
+                "content": raw,
             }
         )
         current_turn = (

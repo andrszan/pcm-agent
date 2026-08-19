@@ -362,7 +362,7 @@ runs/<run-id>/
 }
 ```
 
-不保存完整工作流历史。每一步的详细输入和结果分别写入 `steps/`，日志写入 `logs/`；只有无服务端会话状态的 AI-compatible 决策模型需要把完整消息历史写入 `conversations/`。
+每一步的详细输入和结果分别写入 `steps/`；步骤结果中的 `outputs` 统一使用相对于产品项目根 `state.workspace.final_path` 的路径，实际跨步骤产物从前一步结果的 `outputs` 读取并核验；日志写入 `logs/`。`conversations/` 保存完整、脱敏的编排历史，包括初始 Agent 指令、Agent 结果、当前决策事实、结构化决策、转发指令和完成标记；`state.json` 只保存历史文件引用和当前轮次。
 
 ## 十、运行方式
 

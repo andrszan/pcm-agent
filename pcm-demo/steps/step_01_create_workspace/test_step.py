@@ -10,7 +10,7 @@ from pathlib import Path
 DEMO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(DEMO_ROOT))
 
-from common.files import write_json
+from common.files import resolve_workspace_output, write_json
 from common.openai_responses import request_json
 from config import (
     CAPABILITY_REPOSITORY_ROOT,
@@ -38,6 +38,19 @@ class WorkspaceStepTests(unittest.TestCase):
             write_json(path, {"new": True})
             self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"new": True})
             self.assertFalse((path.parent / ".state.json.tmp").exists())
+
+    def test_workspace_output_path_must_stay_relative_to_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory) / "workspace"
+            workspace.mkdir()
+            self.assertEqual(
+                resolve_workspace_output(workspace, "docs/产品初稿.md"),
+                workspace.resolve() / "docs/产品初稿.md",
+            )
+            with self.assertRaisesRegex(ValueError, "相对于产品工作区"):
+                resolve_workspace_output(workspace, "/tmp/产品初稿.md")
+            with self.assertRaisesRegex(ValueError, "超出产品工作区"):
+                resolve_workspace_output(workspace, "../产品初稿.md")
 
     def test_identity_contract(self) -> None:
         identity = validate_identity(

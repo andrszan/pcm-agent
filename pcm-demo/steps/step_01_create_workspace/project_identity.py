@@ -27,7 +27,7 @@ PROJECT_IDENTITY_SCHEMA = {
     ],
     "additionalProperties": False,
 }
-SYSTEM_PROMPT = """你负责从产品初稿提取第 1 步建立工作区所需的最小项目身份。
+SYSTEM_PROMPT = """你负责从产品初稿提取建立工作区所需的最小项目身份。
 
 只返回一个 JSON 对象，字段必须为：
 - topic_name：能够明确表达当前产品选题的非空中文或英文字符串

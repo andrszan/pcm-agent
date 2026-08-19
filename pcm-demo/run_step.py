@@ -252,7 +252,7 @@ def complete_step_one(
     return run_dir, workspace_result(
         "success",
         "已从固定模板发布独立产品项目工作区，并初始化零提交根 Git 仓库。",
-        outputs=[str(final_path), str(published_draft)],
+        outputs=["docs/产品初稿.md"],
     )
 
 

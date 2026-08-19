@@ -57,7 +57,7 @@ Python 编排器负责确定性操作、两类会话的衔接和最终步骤状�
 - `cwd`：本次运行的独立项目工作区根目录；
 - `system_prompt`：使用 `claude_code` preset，不能依赖 SDK 的最小默认 prompt；
 - `skills`：按当前步骤启用明确的 Skill，或在能力探针中使用 `"all"` 核对发现结果；
-- `max_turns` 和 `max_budget_usd`：探针与步骤分别设置有限上限，防止开放式任务无界运行；
+- `max_turns` 和 `max_budget_usd`：探针与步骤分别设置有限上限，防止开放式任务无界运行；第 2 步 `project-intake` 和第 3 步 `solution-design` 当前单次调用预算均为 `$4`；
 - `resume`：需要继续特定历史会话时使用已保存的 session ID。
 
 正式步骤不传入 `permission_mode`、`tools`、`allowed_tools` 或 `disallowed_tools`，也不为每一步重新定义权限档位。`setting_sources` 保持 SDK/Claude Code 默认加载语义，使项目 `.claude/settings.json` 中的 `permissions.defaultMode`、`allow`、`ask`、`deny` 及插件配置作为统一项目配置生效。若未来某一步确有覆盖项目配置的特殊理由，必须先在该步合同中说明并单独确认，不能沿用探针限制。
@@ -210,7 +210,7 @@ pcm-demo/
 8. 在最终项目根执行 `git init -b main`，不执行 `git add`、`git commit` 或 push；
 9. 核验 `git rev-parse --show-toplevel` 等于最终项目根、当前分支为 `main`、`HEAD` 尚不存在，并记录根仓库初始化证据。
 
-步骤对下游公开的 `outputs` 仍只包含最终项目根路径和 `docs/产品初稿.md`；根 `.git/` 是第 1 步建立的项目边界，不作为文档产物。第 1 步成功时 `state.json` 至少保存以下统一结构；完整命令结果放在步骤结果或脱敏日志中：
+步骤结果中的 `outputs` 统一记录相对于产品项目根 `state.workspace.final_path` 的非空相对路径；下游步骤必须以该根目录解析并核验，拒绝绝对路径、越出根目录的 `..` 路径和符号链接。第 1 步对下游公开的 `outputs` 为 `docs/产品初稿.md`；工作区根和发布副本的绝对路径仍分别保存在 `state.workspace.final_path` 与 `state.input.published_path` 中。根 `.git/` 是第 1 步建立的项目边界，不作为文档产物。第 1 步成功时 `state.json` 至少保存以下统一结构；完整命令结果放在步骤结果或脱敏日志中：
 
 ```json
 {
@@ -274,7 +274,7 @@ exception
 处理规则：
 
 - 只有 `result_subtype == "success"` 时读取最终 `result`；
-- `error_max_turns` 和 `error_max_budget_usd` 记录 session ID，供步骤判断继续、失败或阻塞；
+- `error_max_turns` 和 `error_max_budget_usd` 记录 session ID，供步骤恢复原 session 继续；即使 SDK 在产生该 ResultMessage 后又抛出异常，也以已取得的可恢复 subtype 为准，不把它误判为普通执行失败；
 - `error_during_execution` 视为 SDK 执行错误；
 - 单次 `query()` 在产生错误结果后仍可能抛异常，封装必须保留此前已经收到的 ResultMessage；
 - 连接或子进程在 ResultMessage 之前失败时，session ID 可以为空；
@@ -356,9 +356,9 @@ Claude Agent SDK 与 AI-compatible 决策模型使用不同的历史机制：
 - `--resume` 重新读取 `state.json`、原工作区和当前步骤，再通过 `resume=<session-id>` 继续；恢复后先要求 Agent 重新核验相关文件和 Git 事实；
 - 探针 B 已确认同一台机器上可由新进程使用原 session ID 恢复完整对话；恢复不会冻结文件内容，重新调用 `Read` 会得到工作区当前值；第 2 步使用默认 Claude Code 用户配置目录恢复 session 和插件状态；
 - session 文件缺失或无法恢复时，不静默新建会话冒充恢复成功，当前步骤返回 `failed`；
-- AI-compatible 接口不依赖服务端 conversation 或 response ID。PCM 按领域键把完整 `system`、`user`、`assistant` 消息历史原子写入 `runs/<run-id>/conversations/<key>.json`，每次调用携带该历史；
-- 不同步骤和不同活动需求使用独立领域键，避免上下文污染；`state.json` 只保存历史文件引用和当前轮次，不复制完整消息；
-- 决策历史只保存当前决策所需的脱敏内容，不保存密钥、完整环境变量或无关工具日志；首轮不建设数据库、向量记忆或摘要系统。
+- AI-compatible 接口不依赖服务端 conversation 或 response ID。PCM 按领域键把完整、脱敏的编排消息历史原子写入 `runs/<run-id>/conversations/<key>.json`，每次调用携带该历史；历史至少保留初始发给 Claude Agent SDK 的指令、每轮 Agent 的结果、决策模型收到的当前事实、完整结构化决策、转发给 Agent 的指令以及完成标记，确保恢复和审计时能够还原流程起点与每次取舍；
+- 不同步骤和不同活动需求使用独立领域键，避免上下文污染；`state.json` 只保存历史文件引用和当前轮次，不复制完整消息；每一步的实际输入和产物交接从前一步 `steps/<step>.json` 的 `outputs` 读取并核验，不从固定路径猜测上一步结果；
+- 完整编排历史只保存当前流程所需的脱敏内容，不保存密钥、完整环境变量或无关工具日志；首轮不建设数据库、向量记忆或摘要系统。
 
 ## 六、程序化决策循环
 
@@ -405,7 +405,7 @@ AI-compatible 模型可以决定所有能够基于当前输入、项目事实、
 - 当前可用资源清单；
 - 当前文件、命令或 Git 的必要事实摘要。
 
-PCM 在请求前读取该领域完整消息历史，追加当前 `user` 消息；收到结构化响应后追加完整 `assistant` 消息并原子保存，再把决定发送给原 Claude session。不得只保存最后一个 `action`，否则恢复后会丢失此前取舍；也不把完整 Agent transcript 原样转发给决策模型。
+PCM 在请求前读取该领域完整编排历史，保留此前的 Agent 指令、Agent 结果和已作出的决定，再追加当前 `user` 决策上下文；收到结构化响应后，将完整原始 JSON 作为 `assistant` 消息原子保存，并把其中的 `answer` 作为下一条用户指令发送给原 Claude session。`answer` 已经包含实际转发内容，不在同一历史消息中重复拼接一份 Agent 指令。不得只保存最后一个 `action`，也不得丢失初始任务和 Agent 当前问题；Agent 的完整流程消息可以作为交接记录保存，但发送给决策模型的本轮上下文仍只包含当前决策所需的最小事实，不发送无关 transcript。
 
 不发送密钥、完整 `.env`、无关仓库内容或可由程序直接判断的原始大段日志。
 
