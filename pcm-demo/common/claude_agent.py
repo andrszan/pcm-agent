@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from claude_agent_sdk import (
@@ -36,6 +38,46 @@ def filtered_env() -> dict[str, str]:
     return env
 
 
+def load_plugins(cwd: Path) -> list[dict[str, str]]:
+    project_root = cwd.resolve()
+    lock_path = project_root / "plugins-lock.json"
+    try:
+        data = json.loads(lock_path.read_text(encoding="utf-8"))
+    except FileNotFoundError as error:
+        raise RuntimeError(f"缺少 Claude Plugin 锁文件：{lock_path}") from error
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise RuntimeError(f"Claude Plugin 锁文件不可读取：{lock_path}") from error
+    if data.get("version") != 1 or not isinstance(data.get("plugins"), list):
+        raise RuntimeError("Claude Plugin 锁文件格式无效")
+
+    plugins: list[dict[str, str]] = []
+    seen_ids: set[str] = set()
+    for item in data["plugins"]:
+        if not isinstance(item, dict):
+            raise RuntimeError("Claude Plugin 锁文件包含无效条目")
+        plugin_id = item.get("id")
+        relative_path = item.get("path")
+        if (
+            not isinstance(plugin_id, str)
+            or not plugin_id
+            or plugin_id in seen_ids
+            or not isinstance(relative_path, str)
+            or not relative_path
+        ):
+            raise RuntimeError("Claude Plugin 锁文件包含重复或无效条目")
+        path = Path(relative_path)
+        if path.is_absolute():
+            raise RuntimeError(f"Claude Plugin 路径必须是相对路径：{relative_path}")
+        resolved = (project_root / path).resolve()
+        if resolved != project_root and project_root not in resolved.parents:
+            raise RuntimeError(f"Claude Plugin 路径越出项目根目录：{relative_path}")
+        if path.is_symlink() or not resolved.is_dir():
+            raise RuntimeError(f"Claude Plugin 目录不存在或无效：{relative_path}")
+        seen_ids.add(plugin_id)
+        plugins.append({"type": "local", "path": str(resolved)})
+    return plugins
+
+
 async def run_claude(
     prompt: str,
     *,
@@ -53,7 +95,8 @@ async def run_claude(
     options = ClaudeAgentOptions(
         cwd=cwd,
         system_prompt={"type": "preset", "preset": "claude_code"},
-        skills=[skill],
+        skills="all",
+        plugins=load_plugins(cwd),
         max_turns=max_turns,
         max_budget_usd=max_budget_usd,
         resume=resume_session_id,
