@@ -1,0 +1,2 @@
+# Third-party Claude Agent Plugin snapshots preserve upstream whitespace
+.agents/plugins/** whitespace=-trailing-space
