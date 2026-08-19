@@ -317,7 +317,6 @@ async def run(
         run_result = await agent_runner(
             prompt,
             cwd=workspace,
-            skill=SKILL_NAME,
             resume_session_id=state.get("claude_sessions", {}).get(CONVERSATION_KEY),
             max_budget_usd=PROJECT_INTAKE_MAX_BUDGET_USD,
             on_update=lambda update: save_agent_update(run_dir, state, update),

@@ -82,7 +82,6 @@ async def run_claude(
     prompt: str,
     *,
     cwd: Path,
-    skill: str,
     resume_session_id: str | None = None,
     max_turns: int = 12,
     max_budget_usd: float = 2.0,
