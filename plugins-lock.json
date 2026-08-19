@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "plugins": [
+    {
+      "id": "codex@openai-codex",
+      "name": "codex",
+      "version": "1.0.6",
+      "provider": "openai-codex",
+      "path": ".agents/plugins/codex"
+    },
+    {
+      "id": "context7@claude-plugins-official",
+      "name": "context7",
+      "version": "2dc97c0d12ab",
+      "provider": "claude-plugins-official",
+      "path": ".agents/plugins/context7"
+    },
+    {
+      "id": "playwright@claude-plugins-official",
+      "name": "playwright",
+      "version": "2dc97c0d12ab",
+      "provider": "claude-plugins-official",
+      "path": ".agents/plugins/playwright"
+    },
+    {
+      "id": "ponytail@ponytail",
+      "name": "ponytail",
+      "version": "4.8.4",
+      "provider": "ponytail",
+      "path": ".agents/plugins/ponytail"
+    },
+    {
+      "id": "taste-skill@taste-skill",
+      "name": "taste-skill",
+      "version": "1.0.0",
+      "provider": "taste-skill",
+      "path": ".agents/plugins/taste-skill"
+    },
+    {
+      "id": "ui-ux-pro-max@ui-ux-pro-max-skill",
+      "name": "ui-ux-pro-max",
+      "version": "2.11.0",
+      "provider": "ui-ux-pro-max-skill",
+      "path": ".agents/plugins/ui-ux-pro-max"
+    },
+    {
+      "id": "typescript-lsp@claude-plugins-official",
+      "name": "typescript-lsp",
+      "version": "1.0.0",
+      "provider": "claude-plugins-official",
+      "path": ".agents/plugins/typescript-lsp"
+    },
+    {
+      "id": "pyright-lsp@claude-plugins-official",
+      "name": "pyright-lsp",
+      "version": "1.0.0",
+      "provider": "claude-plugins-official",
+      "path": ".agents/plugins/pyright-lsp"
+    },
+    {
+      "id": "skill-creator@claude-plugins-official",
+      "name": "skill-creator",
+      "version": "2dc97c0d12ab",
+      "provider": "claude-plugins-official",
+      "path": ".agents/plugins/skill-creator"
+    }
+  ]
+}

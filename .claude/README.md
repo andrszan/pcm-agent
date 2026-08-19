@@ -6,7 +6,15 @@
 
 本目录只定义**能力**；具体的先后顺序、重复、跳过、分支、合并和停止条件属于人工流程。默认人工流程见 [`AI Agent开发流程设计.md`](./AI%20Agent开发流程设计.md)。
 
-## 2. 独立性原则
+## 2. 受控 Claude Agent SDK Plugins
+
+模板根目录的 `.agents/plugins/` 保存由维护者管理的本地 Plugin 快照，根目录 `plugins-lock.json` 是 PCM 通过 Claude Agent SDK 加载 Plugin 的唯一清单。每个条目的 `path` 必须指向一个 Plugin root，版本、提供方和来源标识随快照更新同步维护。
+
+SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/plugins/cache/`；`pcm-demo/common/claude_agent.py` 会读取产品项目根的 `plugins-lock.json`，校验路径仍位于项目根内且目录存在，再把每个 Plugin root 显式传给 `ClaudeAgentOptions.plugins`。Plugin 变更后应创建新的 Agent SDK session，并从 `SystemMessage(init)` 核对实际加载的 `plugins`、`skills` 和 `slash_commands`；SDK 不使用 CLI 的 `/reload-plugin` 作为热加载接口。
+
+项目 `.claude/settings.json` 中的 `enabledPlugins` 继续服务人工 Claude Code CLI 的启用声明，不替代 `plugins-lock.json`，也不负责下载、安装或解析 Plugin 路径。更新 Plugin 时先更新 `.agents/plugins/<plugin>` 快照，再同步 `plugins-lock.json` 的版本和提供方信息；不得写入用户目录绝对路径、密钥或 Marketplace cache 路径。
+
+### 2.1 独立性原则
 
 - 每个 Skill 必须能在没有其它自定义 Skill 时完成自身职责。
 - Skill 不写死固定上游或下游，不自动调用其它自定义 Skill，不依赖另一 Skill 的专属过程产物。

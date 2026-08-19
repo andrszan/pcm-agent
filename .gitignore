@@ -39,3 +39,9 @@ target-*/
 
 # Claude worktrees
 .claude/worktrees/
+
+# Claude Agent Plugin runtime files
+.agents/plugins/**/.in_use/
+.agents/plugins/**/__pycache__/
+.agents/plugins/**/*.pyc
+.agents/plugins/**/.orphaned_at
