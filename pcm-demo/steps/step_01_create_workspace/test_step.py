@@ -172,6 +172,50 @@ class WorkspaceStepTests(unittest.TestCase):
         self.assertEqual(calls[0]["max_output_tokens"], 512)
         self.assertEqual(calls[0]["text"]["format"]["type"], "json_schema")
 
+    def test_responses_request_reports_status_error_details(self) -> None:
+        import httpx
+        import openai
+
+        class Responses:
+            async def create(self, **kwargs: object) -> object:
+                response = httpx.Response(
+                    403,
+                    headers={"x-request-id": "header-request-id"},
+                    request=httpx.Request("POST", "https://example.invalid/responses"),
+                )
+                raise openai.APIStatusError(
+                    "Forbidden",
+                    response=response,
+                    body={
+                        "request_id": "body-request-id",
+                        "error": {
+                            "code": "PERMISSION_DENIED",
+                            "message": "quota exhausted; api_key=should-not-appear",
+                        },
+                    },
+                )
+
+        class Client:
+            responses = Responses()
+
+        with self.assertRaisesRegex(RuntimeError, "HTTP 403") as raised:
+            __import__("asyncio").run(
+                request_json(
+                    Client(),
+                    model="test-model",
+                    instructions="system",
+                    input_text="input",
+                    schema_name="test_schema",
+                    schema={"type": "object", "additionalProperties": False},
+                )
+            )
+        message = str(raised.exception)
+        self.assertIn("PERMISSION_DENIED", message)
+        self.assertIn("body-request-id", message)
+        self.assertIn("quota exhausted", message)
+        self.assertIn("api_key=[REDACTED]", message)
+        self.assertNotIn("should-not-appear", message)
+
     def test_default_branch_parser(self) -> None:
         output = "ref: refs/heads/main\tHEAD\nabc\tHEAD"
         self.assertEqual(parse_default_branch(output), "main")
