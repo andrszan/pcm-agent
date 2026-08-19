@@ -12,23 +12,28 @@ from common.files import sha256
 from common.state import create_run_dir, read_state, write_state, write_step_result
 from config import LLMConfig, load_template_repository, load_workspace_root
 from steps.step_00_product_draft import run as run_product_draft
-from steps.step_01_create_workspace import extract_project_identity
 from steps.step_01_create_workspace import (
     WorkspaceBlocked,
     clone_and_verify,
+    extract_project_identity,
     initialize_root_repository,
     inspect_clone,
     inspect_root_repository,
     prepare_staging,
     publish,
-    result as workspace_result,
     verify_clone,
     verify_prepared,
     verify_published_content,
 )
+from steps.step_01_create_workspace import (
+    result as workspace_result,
+)
 from steps.step_02_project_intake import ProjectIntakeBlocked
 from steps.step_02_project_intake import result as project_intake_result
 from steps.step_02_project_intake import run as run_project_intake
+from steps.step_03_solution_design import SolutionDesignBlocked
+from steps.step_03_solution_design import result as solution_design_result
+from steps.step_03_solution_design import run as run_solution_design
 
 DEMO_ROOT = Path(__file__).resolve().parent
 
@@ -38,6 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--step", type=int, required=True)
     parser.add_argument("--product-draft", "--prd", dest="product_draft", type=Path)
     parser.add_argument("--workspace-root", type=Path)
+    parser.add_argument("--template-assets", type=Path)
     parser.add_argument("--run-id")
     return parser.parse_args()
 
@@ -303,7 +309,7 @@ def run_step_zero(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
 
 def main() -> int:
     args = parse_args()
-    if args.step not in {0, 1, 2}:
+    if args.step not in {0, 1, 2, 3}:
         print(f"步骤尚未实现：{args.step}", file=sys.stderr)
         return 2
 
@@ -315,11 +321,32 @@ def main() -> int:
         elif args.step == 1:
             run_dir, state, draft_path = load_or_create_step_one_run(args)
             run_dir, result = complete_step_one(args, run_dir, state, draft_path)
-        else:
+        elif args.step == 2:
             if not args.run_id:
                 raise ValueError("第 2 步需要 --run-id")
             run_dir = run_dir_for(args.run_id)
             run_dir, result = asyncio.run(run_step_two(args))
+        else:
+            if not args.run_id:
+                raise ValueError("第 3 步需要 --run-id")
+            if args.template_assets is None:
+                raise ValueError("第 3 步需要 --template-assets")
+            run_dir = run_dir_for(args.run_id)
+            state = read_state(run_dir)
+            result = asyncio.run(
+                run_solution_design(run_dir, state, args.template_assets.resolve())
+            )
+    except SolutionDesignBlocked as error:
+        result = solution_design_result(
+            "blocked",
+            str(error),
+            blocked={
+                "reason": str(error),
+                "required_inputs": error.required_inputs,
+                "resume_step": 3,
+            },
+        )
+        error_message = str(error)
     except ProjectIntakeBlocked as error:
         result = project_intake_result(
             "blocked",
@@ -339,7 +366,12 @@ def main() -> int:
         )
         error_message = str(error)
     except Exception as error:
-        result_factory = project_intake_result if args.step == 2 else workspace_result
+        if args.step == 3:
+            result_factory = solution_design_result
+        elif args.step == 2:
+            result_factory = project_intake_result
+        else:
+            result_factory = workspace_result
         result = result_factory(
             "failed",
             f"第 {args.step} 步执行失败。",
@@ -347,7 +379,7 @@ def main() -> int:
         )
         error_message = f"{type(error).__name__}: {error}"
 
-    if run_dir is not None and args.step in {1, 2}:
+    if run_dir is not None and args.step in {1, 2, 3}:
         if result["status"] != "success":
             state = read_state(run_dir)
             state.update(

@@ -514,6 +514,14 @@ PCM 在请求前读取该领域完整消息历史，追加当前 `user` 消息�
 - 源 PRD 前后哈希一致；
 - 没有以 Stub 或固定结果代替真实 Agent 与文件行为。
 
+### 第 3 步实现与验收
+
+- 第 3 步通过 `--template-assets <目录>` 接收必需的基础模板资产入口；入口必须提供可读的 `repositories.yaml` 和 `templates.yaml`，实际路径和两份索引哈希写入运行状态；
+- 步骤显式调用 `solution-design`，复用第 2 步的 Claude Agent session、AI-compatible 决策历史和当前步骤恢复模式，但使用独立领域键 `solution_design`；
+- 程序只核验第 2 步产品定义、模板资产入口以及 `docs/design/技术方案.md`、`docs/design/基础工程来源.json` 两份输出；来源 JSON 至少给出前端、后端目标路径、仓库、模板、模板路径和采用方式，供第 4 步确定性组装使用；
+- 真实运行已确认 `solution-design` 和对应 slash command 从默认 Claude Code 用户配置成功加载，预算上限后可使用原 session 继续；最终 Agent 正常结束，两份产物真实存在，步骤结果为 `success`，重复运行可幂等确认成功；
+- 第 3 步不获取、复制或组装模板内容，不初始化前后端仓库，也不提交或 push。
+
 ### 后续阶段边界
 
 后续设计在进入对应阶段前增量补充：
