@@ -185,7 +185,17 @@ class ProjectIntakeTests(unittest.TestCase):
             history = json.loads(
                 (run_dir / "conversations/project_intake.json").read_text(encoding="utf-8")
             )
-            self.assertEqual([item["role"] for item in history["messages"]], ["system", "user", "assistant"])
+            self.assertEqual(
+                [item["role"] for item in history["messages"]],
+                ["system", "assistant", "user", "assistant", "user", "assistant"],
+            )
+            self.assertTrue(
+                history["messages"][1]["content"].startswith("/project-intake")
+            )
+            self.assertEqual(history["messages"][4]["content"], "需要确认")
+            self.assertIn('"action": "approve"', history["messages"][3]["content"])
+            self.assertIn("发送给 Claude Agent SDK 的指令", history["messages"][3]["content"])
+            self.assertIn("已完成 project-intake", history["messages"][5]["content"])
 
     def test_structured_blocked_stops_step(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -260,7 +270,18 @@ class ProjectIntakeTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "执行失败"):
                 asyncio.run(run(run_dir, state, agent_runner=fake_agent))
             self.assertTrue(called)
-            self.assertFalse((run_dir / "conversations/project_intake.json").exists())
+            history = json.loads(
+                (run_dir / "conversations/project_intake.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(
+                [item["role"] for item in history["messages"]],
+                ["system", "assistant"],
+            )
+            self.assertTrue(
+                history["messages"][1]["content"].startswith("/project-intake")
+            )
 
     def test_resume_session_id_mismatch_fails(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
