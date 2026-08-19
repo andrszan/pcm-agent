@@ -83,7 +83,13 @@ class ProjectIntakeTests(unittest.TestCase):
         write_state(run_dir, state)
         return run_dir, workspace, state
 
-    def test_existing_success_is_idempotent(self) -> None:
+    def test_agent_does_not_override_config_dir(self) -> None:
+        from common.claude_agent import filtered_env
+
+        with patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": "/custom"}, clear=False):
+            env = filtered_env()
+        self.assertNotIn("CLAUDE_CONFIG_DIR", env)
+
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))
             for relative in OUTPUTS:

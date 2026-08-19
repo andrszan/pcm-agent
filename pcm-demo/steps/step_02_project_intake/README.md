@@ -16,7 +16,9 @@
 
 ## 权限
 
-步骤不传 `permission_mode`、`tools`、`allowed_tools`、`disallowed_tools` 或 `setting_sources`，使用项目 `.claude/settings.json` 和 Claude Code 默认加载语义。
+第 2 步使用默认 Claude Code 用户配置目录，因此共享本机认证、已安装插件、marketplace、Skill 和 session。步骤不设置 `CLAUDE_CONFIG_DIR`，也不复制默认用户配置。
+
+步骤不传 `permission_mode`、`tools`、`allowed_tools` 或 `disallowed_tools`，也不主动设置 `CLAUDE_CONFIG_DIR` 或 `setting_sources`，使用项目 `.claude/settings.json` 和 Claude Code 默认加载语义。
 
 ## 输出
 

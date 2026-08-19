@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from claude_agent_sdk import (
@@ -29,11 +28,11 @@ class ClaudeRunResult:
     exception: str | None
 
 
-def filtered_env(config_dir: Path) -> dict[str, str]:
+def filtered_env() -> dict[str, str]:
     env = dict(os.environ)
     if env.get("ANTHROPIC_API_KEY"):
         env.pop("ANTHROPIC_AUTH_TOKEN", None)
-    env["CLAUDE_CONFIG_DIR"] = str(config_dir)
+    env.pop("CLAUDE_CONFIG_DIR", None)
     return env
 
 
@@ -42,7 +41,6 @@ async def run_claude(
     *,
     cwd: Path,
     skill: str,
-    config_dir: Path,
     resume_session_id: str | None = None,
     max_turns: int = 12,
     max_budget_usd: float = 2.0,
@@ -59,7 +57,7 @@ async def run_claude(
         max_turns=max_turns,
         max_budget_usd=max_budget_usd,
         resume=resume_session_id,
-        env=filtered_env(config_dir),
+        env=filtered_env(),
     )
 
     try:

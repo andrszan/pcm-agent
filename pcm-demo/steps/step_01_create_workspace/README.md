@@ -61,6 +61,7 @@ uv run python run_step.py \
 
 ## 第 0→1 串联
 
+第 2 步使用默认 Claude Code 用户配置、认证、插件、Skill 和 session；第 1 步只负责为产品路径建立项目 Git 边界，不创建独立 Claude 配置目录。
 ```bash
 uv run python run_step.py \
   --step 0 \

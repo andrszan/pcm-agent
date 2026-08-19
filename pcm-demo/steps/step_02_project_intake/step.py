@@ -49,8 +49,8 @@ def result(
     }
 
 
-def trust_project(config_dir_path: Path, workspace: Path) -> None:
-    claude_json = config_dir_path / ".claude.json"
+def trust_project(workspace: Path) -> None:
+    claude_json = Path.home() / ".claude.json"
     data: dict[str, Any] = {}
     if claude_json.is_file():
         data = json.loads(claude_json.read_text(encoding="utf-8"))
@@ -236,9 +236,7 @@ async def run(
             "project-intake 已生成产品定义文档，确认既有成功。",
             outputs=[str(workspace / relative) for relative in OUTPUTS],
         )
-    run_config_dir = run_dir / "claude-config"
-    run_config_dir.mkdir(parents=True, exist_ok=True)
-    trust_project(run_config_dir, workspace)
+    trust_project(workspace)
     state.update({"current_step": STEP, "status": "running", "blocked": None, "error": None})
     write_state(run_dir, state)
     existing_session = state.get("claude_sessions", {}).get(CONVERSATION_KEY)
@@ -262,11 +260,17 @@ async def run(
             prompt,
             cwd=workspace,
             skill=SKILL_NAME,
-            config_dir=run_config_dir,
             resume_session_id=state.get("claude_sessions", {}).get(CONVERSATION_KEY),
             on_update=lambda update: save_agent_update(run_dir, state, update),
         )
         save_agent_update(run_dir, state, run_result)
+        if run_result.exception or not run_result.result_subtype:
+            raise RuntimeError(run_result.exception or "Agent SDK 未返回 ResultMessage")
+        if run_result.is_error and run_result.result_subtype not in {
+            "error_max_turns",
+            "error_max_budget_usd",
+        }:
+            raise RuntimeError(f"Agent SDK 执行失败：{run_result.result_subtype}")
         init = run_result.init or {}
         if SKILL_NAME not in {str(item) for item in init.get("skills") or []}:
             raise RuntimeError("Agent SDK 未加载 project-intake Skill")
