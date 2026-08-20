@@ -10,7 +10,12 @@ from typing import Any
 
 from common.files import sha256
 from common.state import create_run_dir, read_state, write_state, write_step_result
-from config import LLMConfig, load_template_repository, load_workspace_root
+from config import (
+    LLMConfig,
+    load_template_catalog_path,
+    load_template_repository,
+    load_workspace_root,
+)
 from steps.step_00_product_draft import run as run_product_draft
 from steps.step_01_create_workspace import (
     WorkspaceBlocked,
@@ -43,7 +48,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--step", type=int, required=True)
     parser.add_argument("--product-draft", "--prd", dest="product_draft", type=Path)
     parser.add_argument("--workspace-root", type=Path)
-    parser.add_argument("--template-assets", type=Path)
+    parser.add_argument("--catalog-path", type=Path)
     parser.add_argument("--run-id")
     return parser.parse_args()
 
@@ -329,12 +334,19 @@ def main() -> int:
         else:
             if not args.run_id:
                 raise ValueError("第 3 步需要 --run-id")
-            if args.template_assets is None:
-                raise ValueError("第 3 步需要 --template-assets")
-            run_dir = run_dir_for(args.run_id)
-            state = read_state(run_dir)
+            candidate_run_dir = run_dir_for(args.run_id)
+            if not candidate_run_dir.is_dir():
+                raise ValueError(f"运行记录不存在：{args.run_id}")
+            state = read_state(candidate_run_dir)
+            run_dir = candidate_run_dir
+            catalog_path, catalog_source = load_template_catalog_path(args.catalog_path)
             result = asyncio.run(
-                run_solution_design(run_dir, state, args.template_assets.resolve())
+                run_solution_design(
+                    run_dir,
+                    state,
+                    catalog_path,
+                    catalog_source=catalog_source,
+                )
             )
     except SolutionDesignBlocked as error:
         result = solution_design_result(

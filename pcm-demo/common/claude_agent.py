@@ -98,6 +98,8 @@ async def run_claude(
         plugins=load_plugins(cwd),
         max_turns=max_turns,
         max_budget_usd=max_budget_usd,
+        effort="low",
+        thinking={"type": "disabled"},
         resume=resume_session_id,
         env=filtered_env(),
     )
