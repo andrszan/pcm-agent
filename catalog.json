@@ -1,47 +1,50 @@
 {
   "schema_version": 1,
   "repositories": {
-    "frontend": {
+    "pcm-frontend-templates": {
       "git_url": "https://github.com/andrszan/pcm-frontend-templates.git",
       "default_branch": "main",
-      "name": "pcm-frontend-templates",
-      "description": "PCM Frontend Templates",
+      "description": "PCM 前端模板仓库",
       "templates": [
         {
           "id": "nextjs-shadcn-web-app",
           "path": "templates/nextjs-shadcn-web-app",
+          "project_type": "frontend",
           "name": "Next.js + shadcn/ui 前端项目起点",
           "description": "面向独立 Web 应用起步的业务无关 Next.js App Router 项目起点。"
         },
         {
           "id": "vite-react-shadcn-spa",
           "path": "templates/vite-react-shadcn-spa",
+          "project_type": "frontend",
           "name": "Vite + React + shadcn/ui 单页应用项目起点",
           "description": "面向不需要服务端渲染的 Web 应用起步的业务无关 Vite React SPA 项目起点。"
         }
       ]
     },
-    "python": {
+    "pcm-python-templates": {
       "git_url": "https://github.com/andrszan/pcm-python-templates.git",
       "default_branch": "main",
-      "name": "pcm-python-templates",
-      "description": "PCM Python Templates",
+      "description": "PCM Python 模板仓库",
       "templates": [
         {
           "id": "fastapi-sqlalchemy-mysql-api",
           "path": "templates/fastapi-sqlalchemy-mysql-api",
+          "project_type": "backend",
           "name": "FastAPI + SQLAlchemy + MySQL API 项目起点",
           "description": "面向独立 MySQL API 服务起步的业务无关同步 FastAPI 项目起点。"
         },
         {
           "id": "fastapi-sqlalchemy-postgresql-api",
           "path": "templates/fastapi-sqlalchemy-postgresql-api",
+          "project_type": "backend",
           "name": "FastAPI + SQLAlchemy + PostgreSQL API 项目起点",
           "description": "面向独立 PostgreSQL API 服务起步的业务无关同步 FastAPI 项目起点。"
         },
         {
           "id": "fastapi-sqlalchemy-postgresql-async-api",
           "path": "templates/fastapi-sqlalchemy-postgresql-async-api",
+          "project_type": "backend",
           "name": "FastAPI + SQLAlchemy + PostgreSQL Async API 项目起点",
           "description": "面向异步 PostgreSQL API 服务起步的业务无关 FastAPI 项目起点。"
         }
