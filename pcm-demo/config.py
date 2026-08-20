@@ -15,7 +15,6 @@ class Settings(BaseSettings):
     llm_api_key: SecretStr | None = Field(default=None, validation_alias="LLM_API_KEY", repr=False)
     llm_model: str | None = Field(default=None, validation_alias="LLM_MODEL")
     pcm_workspace_root: Path | None = Field(default=None, validation_alias="PCM_WORKSPACE_ROOT")
-    pcm_template_catalog: Path | None = Field(default=None, validation_alias="PCM_TEMPLATE_CATALOG")
     pcm_template_repository: str | None = Field(default=None, validation_alias="PCM_TEMPLATE_REPOSITORY")
 
     model_config = SettingsConfigDict(
@@ -39,7 +38,7 @@ class LLMConfig:
         return f"LLMConfig(base_url={self.base_url!r}, api_key=SecretStr('**********'), model={self.model!r})"
 
     @classmethod
-    def load(cls, env_file: Path | None = None) -> LLMConfig:
+    def load(cls, env_file: Path | None = None) -> "LLMConfig":
         settings = load_settings(env_file)
         missing = [
             name
@@ -84,18 +83,6 @@ def load_workspace_root(
     if settings.pcm_workspace_root is None:
         raise ValueError("缺少配置：PCM_WORKSPACE_ROOT")
     return validate_workspace_root(settings.pcm_workspace_root), source
-
-
-def load_template_catalog_path(
-    override: Path | None = None, env_file: Path | None = None
-) -> tuple[Path, str]:
-    if override is not None:
-        return override.expanduser().absolute(), "cli"
-    settings = load_settings(env_file)
-    source = "environment" if os.environ.get("PCM_TEMPLATE_CATALOG") else "env_file"
-    if settings.pcm_template_catalog is None:
-        raise ValueError("缺少配置：PCM_TEMPLATE_CATALOG")
-    return settings.pcm_template_catalog.expanduser().absolute(), source
 
 
 def load_template_repository(env_file: Path | None = None) -> tuple[str, str]:
