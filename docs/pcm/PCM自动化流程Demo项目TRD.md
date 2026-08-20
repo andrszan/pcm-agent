@@ -516,17 +516,19 @@ PCM 在请求前读取该领域完整编排历史，保留此前的 Agent 指令
 
 ### 第 3 步实现与验收
 
-- 第 3 步通过 `--template-assets <目录>` 接收必需的基础模板资产入口；入口必须提供可读的 `repositories.yaml` 和 `templates.yaml`，实际路径和两份索引哈希写入运行状态；
-- 步骤显式调用 `solution-design`，复用第 2 步的 Claude Agent session、AI-compatible 决策历史和当前步骤恢复模式，但使用独立领域键 `solution_design`；
-- 程序只核验第 2 步产品定义、模板资产入口以及 `docs/design/技术方案.md`、`docs/design/基础工程来源.json` 两份输出；来源 JSON 至少给出前端、后端目标路径、仓库、模板、模板路径和采用方式，供第 4 步确定性组装使用；
-- 真实运行已确认 `solution-design` 和对应 slash command 从默认 Claude Code 用户配置成功加载，预算上限后可使用原 session 继续；最终 Agent 正常结束，两份产物真实存在，步骤结果为 `success`，重复运行可幂等确认成功；
-- 第 3 步不获取、复制或组装模板内容，不初始化前后端仓库，也不提交或 push。
+- 第 3 步通过 `--catalog-path <catalog.json>` 或配置 `PCM_TEMPLATE_CATALOG` 接收单一模板候选目录；优先级为 CLI、进程环境、`pcm-demo/.env`。文件必须是可读、非符号链接的 JSON，包含固定的 `schema_version`、仓库和模板定位信息；实际路径、SHA-256 和 schema version 写入运行状态，恢复时不得静默切换 catalog；
+- 步骤显式调用 `solution-design`，使用独立的 `solution_design` Claude Agent session。Agent 读取第 2 步产品定义和本次 catalog，完成 `docs/design/技术方案.md`，并在最终自然语言回复中明确报告 frontend 和 backend 的 `repository_id`、`template_id`、`adoption`；不要求 Agent 输出 JSON，也不要求生成独立来源文件；
+- 编排器调用现有 OpenAI-compatible Responses API，把 Agent 最终回复和完整 catalog 交给 strict JSON Schema 的专用选型裁决。裁决模型只能提取和判断 Agent 已经明确作出的选择，不得依据需求、模板名称或 catalog 候选替 Agent 补选、猜测 ID 或改变采用方式；缺少一端、结论含糊、多个候选未收敛或采用方式不明确时返回 `continue`，恢复同一 Agent session；
+- Python 不解析 Agent 自然语言，只校验结构化 `repository_id`、`template_id` 的 catalog 引用和归属，并从 catalog 原值补齐 `target_path`、仓库名称、Git URL、默认分支和模板路径。frontend 的目标目录固定为 `frontend`，backend 的目标目录固定为 `backend`，但仓库 ID 以 catalog 为准，当前 Python 后端仓库 ID 为 `python`；
+- 第 3 步的工作区产物只有 `docs/design/技术方案.md`。最终机器交接写入 `runs/<run-id>/steps/03.json` 顶层 `template_selection`，至少包含经补齐的 frontend/backend 目标路径、仓库、分支、模板路径和采用方式；不再生成或读取 `docs/design/基础工程来源.json`，也不把完整交接对象重复写入 `state.json`；
+- 成功必须同时满足 Agent SDK 正常结束、目标 Skill 和 slash command 已加载、技术方案真实存在、Responses 裁决批准、Python catalog 引用校验通过，以及 `steps/03.json.template_selection` 可供第 4 步直接读取。幂等重跑还必须核验 catalog 身份和既有步骤结果，旧 YAML 状态或旧来源文件不能作为新合同的成功证据；
+- 第 3 步不获取、复制或组装模板内容，不初始化前后端仓库，也不提交或 push。第 4 步尚未实现，本次只建立其稳定输入合同。
 
 ### 后续阶段边界
 
 后续设计在进入对应阶段前增量补充：
 
-1. **阶段 2：第 3～10 步**——初始化流程、项目工程、架构、UI/UX 框架和 Backlog；第 3 步先使用第 2 步产品定义、当前工程事实、必需的基础模板资产和开发约束调用 `solution-design`，输出总体技术方案与基础工程来源选择结果；模板内容的获取和组装由第 4 步负责；其中第 7 步必须核验第 1 步已初始化且尚无 commit 的根仓库，不重复初始化根仓库，只为适用的 `frontend/`、`backend/` 建立各自 `main` 仓库，并在根 `.gitignore` 排除两者后分别完成三个仓库的首次本地提交；
+1. **阶段 2：第 3～10 步**——初始化流程、项目工程、架构、UI/UX 框架和 Backlog；第 3 步先使用第 2 步产品定义、当前工程事实、`catalog.json` 和开发约束调用 `solution-design`，输出总体技术方案，并把经 Responses API 提取和程序校验的前后端模板选择写入 `steps/03.json.template_selection`；模板内容的获取和组装由第 4 步负责，且第 4 步只读取该稳定交接对象，不从技术方案或会话历史重新推断；其中第 7 步必须核验第 1 步已初始化且尚无 commit 的根仓库，不重复初始化根仓库，只为适用的 `frontend/`、`backend/` 建立各自 `main` 仓库，并在根 `.gitignore` 排除两者后分别完成三个仓库的首次本地提交；
 2. **阶段 3：第 11～19 步单需求循环**——先完整跑通一个需求，验证多仓库 Git、开发、审查、修复、合并和状态同步；
 3. **阶段 4：Backlog 循环与最终验收**——至少两个需求、测试阻塞恢复、最终项目检查以及 Demo 结论。
 
@@ -590,10 +592,11 @@ LLM_BASE_URL=
 LLM_API_KEY=
 LLM_MODEL=
 PCM_WORKSPACE_ROOT=
+PCM_TEMPLATE_CATALOG=
 PCM_TEMPLATE_REPOSITORY=
 ```
 
-具体键名与现有环境统一，不同时支持没有真实需要的别名。`--workspace-root` 可以覆盖 `PCM_WORKSPACE_ROOT`，实际采用的根目录及其来源必须写入运行状态。Claude Agent SDK 的模型和认证继续使用 SDK/Claude Code 自身支持的进程环境或既有登录态，不由 Demo `.env` 另设 `CLAUDE_MODEL`；实际 `.env` 必须 Git 忽略，`.env.example` 只保存键、公开默认值和安全占位说明。
+具体键名与现有环境统一，不同时支持没有真实需要的别名。`--workspace-root` 可以覆盖 `PCM_WORKSPACE_ROOT`；第 3 步的 `--catalog-path` 可以覆盖 `PCM_TEMPLATE_CATALOG`，两者实际采用的路径及其来源都必须写入运行状态。`PCM_TEMPLATE_REPOSITORY` 只用于第 1 步发布开发管理模板，与第 3 步的模板候选 catalog 分工独立。Claude Agent SDK 的模型和认证继续使用 SDK/Claude Code 自身支持的进程环境或既有登录态，不由 Demo `.env` 另设 `CLAUDE_MODEL`；实际 `.env` 必须 Git 忽略，`.env.example` 只保存键、公开默认值和安全占位说明。
 
 日志不得记录：
 
@@ -613,7 +616,7 @@ PCM_TEMPLATE_REPOSITORY=
 5. 探针 B 已确认同机、稳定工作区路径下的跨进程 session 恢复；跨机器或工作区迁移仍不属于首轮范围；
 6. 探针 C 已确认当前 OpenAI-compatible 服务支持约定 JSON 结构、普通决策和外部资源阻塞；模型或服务变化时需重新运行探针；
 7. 第 2 步只在确定性文件检查后，把 Skill 运行产生的当前问题和最小必要事实交给决策模型，不增加独立 completion judge；步骤成功以 Agent 正常完成和 Skill 规定产物真实存在为准；
-8. 第 3 步的基础模板资产是必需输入，来源和读取入口由本次运行提供；第 3 步只输出总体技术方案和基础工程来源选择结果，第 4 步负责模板内容的获取与组装；
+8. 第 3 步的 `catalog.json` 是必需输入，路径优先级、身份记录、Agent 自然语言选型汇报、Responses API 结构化裁决、Python 引用校验和 `steps/03.json.template_selection` 交接合同已经确认；第 4 步负责模板内容的获取与组装，尚未实现；
 9. 后续开发步骤所需浏览器通道和外部审查能力。
 
 这些事项不妨碍阶段 0 开始，但对应探针未通过前不得进入依赖它的业务步骤。每个新步骤实现前还必须先对照原手稿和当前流程设计，与开发者确认详细合同并同步本文；文档未一致前不得开始实现。

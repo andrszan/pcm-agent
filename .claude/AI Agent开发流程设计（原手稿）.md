@@ -24,17 +24,16 @@
 目标：需要进行多次对话和决策，直到完成输出文档的编写。
 
 
-第4步：技术方案，使用 `solution-design` skill。
+第4步（当前 PCM Demo 对应第3步）：技术方案，使用 `solution-design` skill。
 输入：
 - 第2步的产出文档（路径）。[`项目需求文档`,`产品功能文档`]
-- 模板仓库的 repositories.yaml、templates.yaml 和契约/说明文档文档（这些文件来源于基础模板仓库管理项目：git@gitlab.com:baiyiyu/andrszan/pcm-repository/pcm-template-projects.git）
+- 模板目录 `catalog.json` 及当前项目的开发约束、工程事实。
 输出：
-- 技术方案文档
-- 模板仓库前端/后端基础项目选型组合结果。
-目标：需要进行多次对话和决策，直到完成输出文档的编写和获取选型组合结果。（人的话，是会直接从字面意思理解是哪些个项目，然后去操作。但是如果是PCM系统程序设计的话，就需要一个方案了，最终要的是固定的json格式数据）
+- 技术方案文档；
+- 前端、后端基础项目选型组合结果，作为步骤结果中的机器交接数据。
+目标：需要进行多次对话和决策，直到输出文档完成，并且 Agent 在最终自然语言回复中明确说明前后端各自的仓库、模板和采用方式。PCM 编排器再使用 OpenAI-compatible Responses API 对该回复和 `catalog.json` 做结构化判断，确认选型明确且确实存在于目录中后，将补齐的结果写入 `steps/03.json` 的 `template_selection`。不要求 Agent 直接输出 JSON，也不在产品工作区生成单独的基础工程来源 JSON 文件。
 
-
-第5步：操作。去拉取模板仓库的git项目，然后获取到对应的前后端仓库的基础选型项目文件夹，复制为当前项目的 frontend 和 backend 文件夹。示例(前端仓库 + python后端仓库)：
+第5步（当前 PCM Demo 对应第4步）：操作。根据第3步步骤结果中的 `template_selection` 拉取模板仓库，然后获取对应的前后端基础项目文件夹，复制为当前项目的 frontend 和 backend 文件夹。示例(前端仓库 + python后端仓库)：
 ```bash
 # 删除根目录下已有的frontend，backend文件夹（里面都只有 .gitkeep 一个文件）
 rm -rf ./frontend ./backend

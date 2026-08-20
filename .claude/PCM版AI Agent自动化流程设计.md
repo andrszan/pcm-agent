@@ -278,16 +278,17 @@ PCM Demo 只保存支持继续运行所必需的状态：
 ### 第 3 步：总体技术方案
 
 - 能力：`solution-design`。
-- 输入：第 2 步产品定义、当前工程事实、必需的基础模板资产和开发约束。
-- 输出：总体技术方案和基础工程来源选择结果。
-- 完成条件：系统边界、技术选择、交付单元、协作关系和主要风险已经确定，且前后端基础模板选型结果可以供第 4 步组装基础工程使用。
-- 自动化说明：基础模板资产是本步骤的必需输入；方案比较和选择由 AI 决策能力完成，程序只负责承接输入、调用 Skill、保存结果并判断输出是否存在。模板内容的获取、复制和组装由后续第 4 步处理。
-- 阻塞与失败：缺少当前环境无法取得的必需模板资产读取权限时返回 `blocked`；输入、模型、Skill、文件或状态处理错误返回 `failed`。
-- 恢复：恢复第 3 步原 Claude session 和同一领域的决策历史，继续处理当前方案，不跳到第 4 步。
+- 输入：第 2 步产品定义、当前工程事实、开发约束和 `catalog.json` 路径。路径优先级为 CLI `--catalog-path`、进程环境 `PCM_TEMPLATE_CATALOG`、`pcm-demo/.env` 同名配置；运行状态保存路径、SHA-256 和 `schema_version`。
+- 输出：总体技术方案文件，以及步骤结果 `steps/03.json` 中的 `template_selection` 机器交接对象。
+- Agent 职责：读取本次 catalog 并完成技术判断，最终自然语言回复必须明确报告 frontend 和 backend 的 `repository_id`、`template_id`、`adoption`；不要求 Agent 输出 JSON，也不要求生成 `docs/design/基础工程来源.json`。
+- 编排职责：使用 OpenAI-compatible Responses API 读取 Agent 最终回复和 catalog，判断 Agent 是否已经明确作出选择；对结构化 ID 做 catalog 引用校验，并从 catalog 补齐仓库名称、Git 地址、默认分支和模板路径。编排器不得根据需求或 catalog 替 Agent 补选。
+- 完成条件：技术方案 Markdown 存在且可读，前后端选择均明确、属于 catalog 中对应仓库，并已写入 `steps/03.json.template_selection`，供第 4 步直接读取。
+- 自动化说明：第 3 步不获取、复制或组装模板内容，不初始化前后端仓库。选择含糊、缺少一端或 catalog 引用无效时继续恢复同一 Agent session；只有不可替代外部资源缺失时返回 `blocked`，其余输入、模型、结构化判断、文件或状态问题返回 `failed`。
+- 恢复：恢复第 3 步原 Claude session，重新读取同一 catalog 身份和当前工作区事实，继续处理当前方案，不跳到第 4 步。
 
 ### 第 4 步：组装基础工程
 
-- 输入：总体技术方案和确定的工程来源。
+- 输入：只读取第 3 步成功结果 `steps/03.json.template_selection`。
 - 输出：放入 `frontend/`、`backend/` 等目标位置的基础工程。
 - 完成条件：目录完整、来源明确，没有嵌套上游 `.git` 或临时模板目录。
 - 自动化说明：使用确定性文件和 Git 命令完成，不要求 AI 直接搬运目录。

@@ -62,7 +62,9 @@ docs/prd/修迹-产品需求文档-v1.md
 
 完整运行通过 `--product-draft` 接收源产品初稿，通过可选 `--workspace-root` 覆盖 `PCM_WORKSPACE_ROOT`。`PCM_WORKSPACE_ROOT` 是当前能力仓库之外、专门承载产品项目的独立父目录。程序记录源路径、完整 UTF-8 内容和 SHA-256，从初稿提取项目选题和文件夹名，将 `PCM_TEMPLATE_REPOSITORY` 配置的开发管理模板浅克隆并初始化后发布到 `<workspace-root>/<project_directory_name>`，把初稿写为项目内的 `docs/产品初稿.md`，再在最终项目根执行 `git init -b main` 建立独立根仓库边界但不提交。后续步骤只操作项目工作区，不修改当前能力仓库中的源初稿。
 
-第 3 步只在第 2 步成功后执行。它使用第 2 步生成的产品定义、当前工程事实、开发约束和必需的基础模板资产，调用 `solution-design` 完成总体技术方案及前后端基础模板选型。模板资产是后续第 4 步组装基础工程的必要输入，不提供模板资产时不能完成第 3 步。第 3 步只负责承接输入、调用 Skill、保存技术方案和基础工程来源结果；不在本步骤获取、复制或组装模板内容，也不提前处理项目化、架构、Backlog 或具体业务逻辑。
+第 3 步只在第 2 步成功后执行。它使用第 2 步生成的产品定义、当前工程事实、开发约束和本次运行提供的 `catalog.json`，调用 `solution-design` 完成总体技术方案及前后端基础模板选型。Agent 在最终自然语言回复中明确报告前后端各自的 `repository_id`、`template_id` 和采用方式；PCM 编排器再调用 OpenAI-compatible Responses API，基于该回复和 catalog 判断选择是否明确，并以 strict JSON Schema 得到结构化最小选择。程序只对结构化 ID 做 catalog 引用校验，并从 catalog 补齐仓库名称、Git 地址、默认分支和模板路径。
+
+第 3 步的产品工作区产物只有 `docs/design/技术方案.md`；经校验的机器交接数据直接写入运行结果 `runs/<run-id>/steps/03.json` 的 `template_selection`，不生成 `docs/design/基础工程来源.json`，也不把完整选型对象重复写入 `state.json`。第 4 步未来只读取该步骤结果进行模板获取和组装；第 3 步本身不获取、复制或组装模板内容，不初始化前后端仓库，也不提前处理项目化、架构、Backlog 或具体业务逻辑。
 
 完整 Demo 默认只承诺实现 PRD 中“E.1 当前必须实现”的首版范围。“E.2 重要增强”和“E.3 未来扩展”不得自动进入首轮 Backlog，除非它们是完成 E.1 闭环不可缺少的条件。
 
@@ -224,17 +226,18 @@ LLM_BASE_URL=
 LLM_API_KEY=
 LLM_MODEL=
 PCM_WORKSPACE_ROOT=
+PCM_TEMPLATE_CATALOG=
 PCM_TEMPLATE_REPOSITORY=
 ```
 
-如果 Claude Agent SDK 通过当前环境的其他认证方式运行，按实际支持方式配置，不伪造凭据。Demo `.env` 当前只负责 `LLM_*`、工作区根目录和模板仓库配置；SDK 认证继续使用进程环境或既有 Claude 登录态，进入第 2 步前再确认具体加载方式。
+如果 Claude Agent SDK 通过当前环境的其他认证方式运行，按实际支持方式配置，不伪造凭据。Demo `.env` 负责 `LLM_*`、工作区根目录、第 3 步模板 catalog 和第 1 步开发管理模板仓库配置；SDK 认证继续使用进程环境或既有 Claude 登录态。
 
 完整运行的输入包括：
 
 - 现有产品初稿路径；
 - 产品工作区根目录，优先使用 CLI `--workspace-root` 覆盖，其次读取 `PCM_WORKSPACE_ROOT`；
+- `PCM_TEMPLATE_CATALOG` 配置的模板候选目录 JSON；第 3 步也可由 CLI `--catalog-path` 覆盖，优先级为 CLI、进程环境、`pcm-demo/.env`；
 - `PCM_TEMPLATE_REPOSITORY` 配置的开发管理模板仓库 GitLab SSH 读取权限；
-- 可用基础模板或脚手架来源；
 - AI-compatible 模型配置；
 - Claude Agent SDK 认证和运行环境；
 - Git、Python、Node.js、包管理器和浏览器等本机工具；
