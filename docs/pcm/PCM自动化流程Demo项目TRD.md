@@ -514,16 +514,6 @@ PCM 在请求前读取该领域完整编排历史，保留此前的 Agent 指令
 - 源 PRD 前后哈希一致；
 - 没有以 Stub 或固定结果代替真实 Agent 与文件行为。
 
-### 第 3 步实现与验收
-
-- 第 3 步通过 `--catalog-path <catalog.json>` 或配置 `PCM_TEMPLATE_CATALOG` 接收单一模板候选目录；优先级为 CLI、进程环境、`pcm-demo/.env`。文件必须是可读、非符号链接的 JSON，包含固定的 `schema_version`、仓库和模板定位信息；实际路径、SHA-256 和 schema version 写入运行状态，恢复时不得静默切换 catalog；
-- 步骤显式调用 `solution-design`，使用独立的 `solution_design` Claude Agent session。Agent 读取第 2 步产品定义和本次 catalog，完成 `docs/design/技术方案.md`，并在最终自然语言回复中明确报告 frontend 和 backend 的 `repository_id`、`template_id`、`adoption`；不要求 Agent 输出 JSON，也不要求生成独立来源文件；
-- 编排器调用现有 OpenAI-compatible Responses API，把 Agent 最终回复和完整 catalog 交给 strict JSON Schema 的专用选型裁决。裁决模型只能提取和判断 Agent 已经明确作出的选择，不得依据需求、模板名称或 catalog 候选替 Agent 补选、猜测 ID 或改变采用方式；缺少一端、结论含糊、多个候选未收敛或采用方式不明确时返回 `continue`，恢复同一 Agent session；
-- Python 不解析 Agent 自然语言，只校验结构化 `repository_id`、`template_id` 的 catalog 引用和归属，并从 catalog 原值补齐 `target_path`、仓库名称、Git URL、默认分支和模板路径。frontend 的目标目录固定为 `frontend`，backend 的目标目录固定为 `backend`，但仓库 ID 以 catalog 为准，当前 Python 后端仓库 ID 为 `python`；
-- 第 3 步的工作区产物只有 `docs/design/技术方案.md`。最终机器交接写入 `runs/<run-id>/steps/03.json` 顶层 `template_selection`，至少包含经补齐的 frontend/backend 目标路径、仓库、分支、模板路径和采用方式；不再生成或读取 `docs/design/基础工程来源.json`，也不把完整交接对象重复写入 `state.json`；
-- 成功必须同时满足 Agent SDK 正常结束、目标 Skill 和 slash command 已加载、技术方案真实存在、Responses 裁决批准、Python catalog 引用校验通过，以及 `steps/03.json.template_selection` 可供第 4 步直接读取。幂等重跑还必须核验 catalog 身份和既有步骤结果，旧 YAML 状态或旧来源文件不能作为新合同的成功证据；
-- 第 3 步不获取、复制或组装模板内容，不初始化前后端仓库，也不提交或 push。第 4 步尚未实现，本次只建立其稳定输入合同。
-
 ### 后续阶段边界
 
 后续设计在进入对应阶段前增量补充：

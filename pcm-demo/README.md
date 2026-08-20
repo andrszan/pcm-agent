@@ -7,7 +7,6 @@
 - [第 0 步：形成产品初稿](steps/step_00_product_draft/README.md)
 - [第 1 步：建立项目工作区](steps/step_01_create_workspace/README.md)
 - [第 2 步：项目需求与产品定义](steps/step_02_project_intake/README.md)
-- [第 3 步：总体技术方案](steps/step_03_solution_design/README.md)
 
 每个步骤的业务代码、测试和详细运行说明都在对应步骤目录中。根 README 只提供导航。
 
