@@ -32,6 +32,8 @@ from steps.step_02_project_intake import ProjectIntakeBlocked
 from steps.step_02_project_intake import result as project_intake_result
 from steps.step_02_project_intake import run as run_project_intake
 from steps.step_03_foundation_selection import run as run_foundation_selection
+from steps.step_04_assemble_foundation import run as run_assemble_foundation
+from steps.step_04_assemble_foundation.step import result as assembly_result
 
 DEMO_ROOT = Path(__file__).resolve().parent
 
@@ -282,6 +284,15 @@ async def run_step_three(args: argparse.Namespace) -> tuple[Path, dict[str, Any]
     )
 
 
+def run_step_four(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
+    if not args.run_id:
+        raise ValueError("第 4 步需要 --run-id")
+    run_dir = run_dir_for(args.run_id)
+    if not run_dir.is_dir():
+        raise ValueError(f"运行记录不存在：{args.run_id}")
+    return run_dir, run_assemble_foundation(run_dir, read_state(run_dir))
+
+
 def sha256_bytes(data: bytes) -> str:
     import hashlib
 
@@ -318,7 +329,7 @@ def run_step_zero(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
 
 def main() -> int:
     args = parse_args()
-    if args.step not in {0, 1, 2, 3}:
+    if args.step not in {0, 1, 2, 3, 4}:
         print(f"步骤尚未实现：{args.step}", file=sys.stderr)
         return 2
 
@@ -337,7 +348,10 @@ def main() -> int:
                 run_dir = run_dir_for(args.run_id)
                 run_dir, result = asyncio.run(run_step_two(args))
             else:
-                run_dir, result = asyncio.run(run_step_three(args))
+                if args.step == 3:
+                    run_dir, result = asyncio.run(run_step_three(args))
+                else:
+                    run_dir, result = run_step_four(args)
     except ProjectIntakeBlocked as error:
         result = project_intake_result(
             "blocked",
@@ -357,7 +371,12 @@ def main() -> int:
         )
         error_message = str(error)
     except Exception as error:  # noqa: BLE001 - 顶层入口必须将所有步骤异常转换为结果。
-        result_factory = project_intake_result if args.step == 2 else workspace_result
+        if args.step == 2:
+            result_factory = project_intake_result
+        elif args.step == 4:
+            result_factory = assembly_result
+        else:
+            result_factory = workspace_result
         result = result_factory(
             "failed",
             f"第 {args.step} 步执行失败。",

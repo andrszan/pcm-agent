@@ -2,7 +2,7 @@
   "schema_version": 1,
   "repositories": {
     "pcm-frontend-templates": {
-      "git_url": "https://github.com/andrszan/pcm-frontend-templates.git",
+      "git_url": "git@gitlab.com:baiyiyu/andrszan/pcm-repository/pcm-frontend-templates.git",
       "default_branch": "main",
       "description": "PCM 前端模板仓库",
       "templates": [
@@ -23,7 +23,7 @@
       ]
     },
     "pcm-python-templates": {
-      "git_url": "https://github.com/andrszan/pcm-python-templates.git",
+      "git_url": "git@gitlab.com:baiyiyu/andrszan/pcm-repository/pcm-python-templates.git",
       "default_branch": "main",
       "description": "PCM Python 模板仓库",
       "templates": [
