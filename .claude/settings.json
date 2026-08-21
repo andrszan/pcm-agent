@@ -40,7 +40,7 @@
     "context7@claude-plugins-official": true,
     "playwright@claude-plugins-official": true,
     "ponytail@ponytail": true,
-    "taste-skill@taste-skill": true,
+    "taste-skill@taste-skill": false,
     "ui-ux-pro-max@ui-ux-pro-max-skill": true,
     "typescript-lsp@claude-plugins-official": true,
     "pyright-lsp@claude-plugins-official": true,

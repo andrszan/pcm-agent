@@ -30,13 +30,6 @@
       "path": ".agents/plugins/ponytail"
     },
     {
-      "id": "taste-skill@taste-skill",
-      "name": "taste-skill",
-      "version": "1.0.0",
-      "provider": "taste-skill",
-      "path": ".agents/plugins/taste-skill"
-    },
-    {
       "id": "ui-ux-pro-max@ui-ux-pro-max-skill",
       "name": "ui-ux-pro-max",
       "version": "2.11.0",
