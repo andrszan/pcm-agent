@@ -14,14 +14,15 @@ PCM 自动化流程接收一份产品初稿；资料不足时先形成产品初�
 产品初稿
 → 建立产品项目工作区
 → 产品定义
+→ 基础工程选型
+→ 基础工程组装
+→ 项目准备核验
+→ 基础工程项目化
 → 总体技术方案
-→ 基础工程准备与项目化
 → 工程架构和 UI/UX 框架
 → Backlog 拆分
-→ 逐需求形成 TRD
-→ 实现、验证和体验审查
-→ 提交、合并和状态同步
-→ 重复开发剩余需求
+→ 阶段一：逐需求形成 TRD、实现、验证、状态收尾、复盘和合并
+→ 阶段二：全项目级集成产品体验审计、候选分流、修复回归和完整复审
 → 项目最终验收
 ```
 
@@ -46,8 +47,10 @@ PCM 编排器按既定顺序执行步骤，不把“返回第 N 步”设计成�
 
 PCM 步骤可以顺序调用多个 Skill，但不改变 Skill 自身职责。例如：
 
-- `ui-ux-framework after` 仍只负责审查和报告，不直接实现代码；
-- 审查发现实现问题时，步骤编排器恢复原 `dev-workflow` 会话修复；
+- `ui-ux-framework` 只负责建立、校正或演进跨需求稳定的产品级 UI/UX 框架，不负责单需求设计或开发后验收；
+- `trd-design` 与 `dev-workflow` 共同保证单个正式需求的产品体验设计、真实运行、浏览器交互和真实渲染结果验收；阶段一不调用 `product-experience-audit`；
+- `product-experience-audit` 只在阶段二的完整审计轮次由外层显式调度；它只返回候选、重复项、覆盖缺口和高影响边界，不创建或修改 canonical Backlog、正式需求或 TRD，不分配正式 ID，也不自动调用需求化、开发、提交或其它能力；
+- `session-rule-retrospective` 只在原开发 session 中增量修改 `.claude/rules/`，不暂存、提交、建分支或合并；
 - 需要更新活动 TRD 时，步骤编排器调用负责设计或维护活动 TRD 的能力；
 - `commit-changes` 仍是唯一负责精确暂存和本地提交的 Skill；
 - 建分支、切换分支和合并仍由 PCM 的显式 Git 脚本执行。
@@ -62,7 +65,7 @@ PCM 步骤可以顺序调用多个 Skill，但不改变 Skill 自身职责。例
 | `blocked` | 缺少模型和当前环境无法取得的不可替代外部资源 | 保存进度并停止，等待外部资源补齐 |
 | `failed` | 程序、SDK、命令或执行发生错误 | 保存错误并停止，修复后重试当前步骤 |
 
-不单独建设复杂的回退、补偿或状态转移模型。步骤内部可以循环调用、修正和重新验证，但对外只暴露上述结果。
+不单独建设复杂的回退、补偿或状态转移模型。步骤内部可以循环调用、修正和重新验证，但对外只暴露上述结果。审计 Skill 回复中的“已完成”“部分完成且有覆盖缺口”或“不适用”是审计内容，不会成为外层第四种 `status`。
 
 ### 4. AI 负责全部可完成的语义决策，程序负责确定性操作
 
@@ -131,6 +134,8 @@ Demo 和默认 PCM 流程只进行本地文件修改、测试、构建、服务�
 
 ```json
 {
+  "phase": "project_initialization",
+  "current_node": "project:02_intake",
   "step": 2,
   "name": "项目需求与产品定义",
   "status": "success",
@@ -182,12 +187,7 @@ PCM Demo 只保存支持继续运行所必需的状态：
     "commit_sha": "<sha>"
   },
   "publication_phase": "git_initialized",
-  "root_repository": {
-    "path": "/products/family-meal-planner",
-    "branch": "main",
-    "head": null
-  },
-  "checks": {
+  "initialization_evidence": {
     "template_capabilities_present": true,
     "upstream_git_removed": true,
     "docs_reinitialized": true,
@@ -196,16 +196,46 @@ PCM Demo 只保存支持继续运行所必需的状态：
     "renamed_to_final_path": true,
     "root_git_initialized": true,
     "root_git_is_final_path": true,
-    "root_git_has_no_commits": true
+    "root_git_initially_had_no_commits": true
   },
-  "current_step": 12,
+  "applicable_repositories": ["root", "frontend", "backend"],
+  "repositories": {
+    "root": {
+      "path": "/products/family-meal-planner",
+      "branch": "feat/req-002",
+      "head": "<step-17-root-commit-sha>"
+    },
+    "frontend": {
+      "path": "/products/family-meal-planner/frontend",
+      "branch": "main",
+      "head": "<frontend-main-sha>"
+    },
+    "backend": {
+      "path": "/products/family-meal-planner/backend",
+      "branch": "main",
+      "head": "<backend-main-sha>"
+    }
+  },
+  "phase": "phase_1_requirement_development",
+  "current_node": "requirement:19_merge_root",
   "active_requirement": "REQ-002",
   "completed_requirements": ["REQ-001"],
+  "requirement_cycle": {
+    "root_requirement_branch": "feat/req-002",
+    "development_session": "session-id",
+    "step_17_commit": "<step-17-root-commit-sha>",
+    "step_18": {
+      "outcome": "no_change",
+      "commit": null
+    },
+    "step_19_merge_evidence": null,
+    "return_node_after_completion": "phase_1:select_requirement"
+  },
   "claude_sessions": {
     "project_intake": "session-id",
-    "REQ-002:trd": "session-id",
-    "REQ-002:development": "session-id"
+    "REQ-002:trd": "session-id"
   },
+  "phase_two": null,
   "decision_conversations": {
     "project_intake": {
       "path": "conversations/project_intake.json",
@@ -216,20 +246,52 @@ PCM Demo 只保存支持继续运行所必需的状态：
 }
 ```
 
-恢复规则：
+上例是第 18 步已经得到 `no_change`、准备执行第 19 步的阶段一快照；初始化证据只记录首次发布事实，`repositories` 始终反映恢复时重新核验的当前仓库状态。未进入阶段二时 `phase_two` 必须为 `null`。
 
-1. 每个步骤开始前记录当前步骤；
-2. 步骤成功后保存结果并进入下一步；
-3. 阻塞或失败时保存原因并退出；
-4. 使用 `--resume <run-id>` 加载原工作区和运行状态；
-5. 恢复时重新执行当前步骤，不直接跳到下一步；
-6. 若当前步骤已有 Claude session，优先恢复原会话；
-7. 若步骤中途异常，重新核验当前文件和 Git 事实后重跑当前步骤；
-8. Claude Agent SDK 的多轮上下文由其 session 保存，状态只记录稳定的领域键和 session ID；恢复后仍重新核验工作区文件和 Git 事实；
-9. AI-compatible 决策接口无服务端会话状态，PCM 按领域键将完整、脱敏的编排消息历史原子写入 `runs/<run-id>/conversations/<key>.json`，包括初始 Agent 指令、Agent 结果、当前决策事实、结构化决策、转发指令和完成标记；每轮携带该历史继续调用；不同步骤和不同活动需求使用独立历史，`state.json` 只记录文件引用和当前轮次；
-10. 每一步的实际输入和产物交接从前一步 `steps/<step>.json` 的 `outputs` 读取并核验，不从固定路径猜测；完整编排历史只保存当前流程所需的脱敏内容，不保存密钥、完整环境变量或无关工具日志；首轮不建设数据库、向量记忆或摘要系统；
-11. 第 1 步恢复时重新核对产品初稿哈希、项目目录名、独立工作区根、配置的模板来源、临时和最终目录以及根仓库事实；只有临时目录能由状态证明属于同一 run 且 clone 完整，或最终目录能由发布证据证明属于同一 run 时才允许续接；
-12. 第 1 步最终目录、发布证据和零提交根仓库证据一致时可确认既有成功；最终目录已发布但根 `.git/` 缺失时续接 `git init -b main`；根仓库已有 commit、临时和最终目录同时存在、目录归属不明或证据冲突时返回 `failed` 并保留现场。
+在阶段二审计和候选分流节点中，`requirement_cycle` 为 `null`；阶段二只保存当前审计轮和候选处理所需的最小状态：
+
+```json
+{
+  "phase": "phase_2_full_product_audit",
+  "current_node": "phase_2:route_candidates",
+  "applicable_repositories": ["root", "frontend", "backend"],
+  "requirement_cycle": null,
+  "phase_two": {
+    "audit": {
+      "version_fingerprint": {
+        "root": "<root-main-sha>",
+        "frontend": "<frontend-main-sha>",
+        "backend": "<backend-main-sha>"
+      },
+      "session": "session-id",
+      "result": "<完整审计输出引用>",
+      "verified_candidates": "<经核验候选引用>",
+      "duplicates": "<重复或未纳入项引用>",
+      "coverage_gaps": "<覆盖缺口引用>",
+      "high_impact_boundaries": "<高影响边界引用>"
+    },
+    "candidate_routing": null,
+    "pooling_evidence": null
+  }
+}
+```
+
+上例是全项目审计已成功并原子推进到候选分流节点的阶段二快照，因此审计结果已经存在，而 `candidate_routing` 和 `pooling_evidence` 仍为 `null`；它们只在各自节点成功后写入并推进到下一节点。
+
+不适用的交付单元不进入 `applicable_repositories`，并在对应步骤结果中显式记录 `not-applicable`；后续版本指纹、分支、验证和工作树检查只遍历该列表。阶段二处理已入池需求时临时使用 `phase: phase_2_requirement_remediation` 和 `requirement_cycle`，并将 `return_node_after_completion` 记录为 `phase_2:regress_and_reaudit`；第 19 步完成后返回阶段二，而不是重新进入阶段一选取普通需求。
+
+恢复与幂等规则：
+
+1. 每个节点开始前保存 `phase`、`current_node` 和已核验输入；节点成功后原子保存输出、事实证据和下一节点；阻塞或失败时保存原因并退出。
+2. 使用 `--resume <run-id>` 加载原工作区和状态；恢复时只重跑当前节点，先重新核验文件、分支、提交、工作树和外部条件，不依据历史文字直接跳过。
+3. 已有 Claude Agent SDK session 时优先恢复：第 13 步恢复 TRD session，第 15 步和第 18 步恢复同一 `development_session`。第 18 步恢复前必须确认根仓库仍是同一需求分支，且 diff 仅允许位于 `.claude/rules/`。
+4. 第 17 步以根需求分支上的状态同步提交为幂等锚点；第 18 步只接受 `no_change` 或 `committed` 两种结果：前者不提交，后者记录精确提交；两者成功时都原子推进 `current_node` 到第 19 步。第 19 步以根 `main` 合并提交和根仓库及适用交付单元的分支、提交、工作树检查作为合并证据。已存在且与记录一致的事实可确认成功，冲突或归属不明则返回 `failed` 并保留现场。
+5. 阶段二每轮审计先记录 `applicable_repositories` 中各仓库 `main` 的版本指纹和独立 SDK session。相同且工作树清楚的指纹恢复原审计或读取已持久化结果，不重复制造候选；修复合并后版本指纹变化，才建立新的全项目复审轮次。
+6. 候选分流和入池均保存证据引用。恢复时按候选的稳定事实、已有归属和正式 ID 检查，已入池的候选不得再次分配 ID；入池分支、提交或合并证据冲突时返回 `failed`，不猜测补写 Backlog。
+7. Claude Agent SDK 的多轮上下文由其 session 保存，状态只记录稳定的领域键和 session ID；AI-compatible 决策接口按领域键将完整、脱敏的编排消息历史原子写入 `runs/<run-id>/conversations/<key>.json`，每轮携带该历史继续调用。不同阶段和活动需求使用独立历史，`state.json` 只记录文件引用和当前轮次。
+8. 每一步的实际输入和产物交接从前一步 `steps/<step>.json` 的 `outputs` 读取并核验，不从固定路径猜测；完整编排历史只保存当前流程所需的脱敏内容，不保存密钥、完整环境变量或无关工具日志；首轮不建设数据库、向量记忆或摘要系统。
+9. 第 1 步恢复时重新核对产品初稿哈希、项目目录名、独立工作区根、配置的模板来源、临时和最终目录以及根仓库事实；只有临时目录能由状态证明属于同一 run 且 clone 完整，或最终目录能由发布证据证明属于同一 run 时才允许续接。
+10. 第 1 步最终目录、发布证据和零提交根仓库证据一致时可确认既有成功；最终目录已发布但根 `.git/` 缺失时续接 `git init -b main`；根仓库已有 commit、临时和最终目录同时存在、目录归属不明或证据冲突时返回 `failed` 并保留现场。
 
 ## 五、项目初始化流程
 
@@ -269,34 +331,56 @@ PCM Demo 只保存支持继续运行所必需的状态：
   3. Agent 提出问题、确认或取舍时，PCM 把当前问题和最小必要事实交给 AI-compatible 决策模型；决策模型处理所有能基于当前输入、工作区、工具和资源完成的决定，并把结果作为原人工调度者的等效授权返回原 Agent session，包括满足 Skill 对“开发者明确同意”的确认要求；
   4. 持续对话直至 Skill 完成产品定义产物，或因不可替代外部资源缺失而阻塞；
   5. 程序核验 Skill 规定的输出文件真实存在且可读。
-- 输出：`project-intake` 生成的项目需求说明和产品功能说明、Claude Agent session ID、完整编排历史及步骤结果。
-- 完成条件：目标 Skill 已加载并显式调用；Agent 正常完成；规定的产品定义产物真实存在且可读；Claude session、完整编排历史和步骤结果均已持久化；没有外部资源阻塞。
-- 自动化说明：第 2 步只保证 `project-intake` 使用当前输入正常运行并产生产物，不提前处理技术方案、Backlog 或黄金样例的具体业务逻辑。已有目标文档由 Skill 按自身更新规则处理，其他文档存在不构成阻塞。
+- 输出：`project-intake` 生成的项目需求说明和产品功能说明，明确最终产品范围、非目标、用户语言、首次成功结果、复杂度取舍和需要尽早验证的高风险假设；同时保存 Claude Agent session ID、完整编排历史及步骤结果。
+- 完成条件：目标 Skill 已加载并显式调用；目标用户、最终产品范围、核心流程、关键约束和待确认事项已经收敛；规定产物真实存在且可读；Claude session、完整编排历史和步骤结果均已持久化；没有外部资源阻塞。
+- 自动化说明：第 2 步只负责产品定义，不决定具体开发排期。AI 可以提出合并或删除不必要复杂度，但不能因实现困难静默缩小最终范围，也不提前处理技术方案、Backlog 或实现逻辑。
 - 阻塞与失败：只有缺少模型和当前环境无法取得的不可替代外部资源时返回 `blocked`；SDK、模型、Skill 加载、结构解析、文件读写、状态或对话历史持久化失败时返回 `failed`。
 - 恢复：重新核验工作区输入和输出事实，优先恢复 `project_intake` Claude session，并加载同一领域键下的完整决策历史继续当前步骤；不把历史文字结论代替当前文件事实。
 
-### 第 3 步：总体技术方案
+### 第 3 步：基础工程选型
 
-- 能力：`solution-design`。
-- 输入：第 2 步产品定义、当前工程事实、开发约束和 `catalog.json` 路径。路径优先级为 CLI `--catalog-path`、进程环境 `PCM_TEMPLATE_CATALOG`、`pcm-demo/.env` 同名配置；运行状态保存路径、SHA-256 和 `schema_version`。
-- 输出：总体技术方案文件，以及步骤结果 `steps/03.json` 中的 `template_selection` 机器交接对象。
-- Agent 职责：读取本次 catalog 并完成技术判断，最终自然语言回复必须明确报告 frontend 和 backend 的 `repository_id`、`template_id`、`adoption`；不要求 Agent 输出 JSON，也不要求生成 `docs/design/基础工程来源.json`。
-- 编排职责：使用 OpenAI-compatible Responses API 读取 Agent 最终回复和 catalog，判断 Agent 是否已经明确作出选择；对结构化 ID 做 catalog 引用校验，并从 catalog 补齐仓库名称、Git 地址、默认分支和模板路径。编排器不得根据需求或 catalog 替 Agent 补选。
-- 完成条件：技术方案 Markdown 存在且可读，前后端选择均明确、属于 catalog 中对应仓库，并已写入 `steps/03.json.template_selection`，供第 4 步直接读取。
-- 自动化说明：第 3 步不获取、复制或组装模板内容，不初始化前后端仓库。选择含糊、缺少一端或 catalog 引用无效时继续恢复同一 Agent session；只有不可替代外部资源缺失时返回 `blocked`，其余输入、模型、结构化判断、文件或状态问题返回 `failed`。
-- 恢复：恢复第 3 步原 Claude session，重新读取同一 catalog 身份和当前工作区事实，继续处理当前方案，不跳到第 4 步。
+- 能力：`foundation-selection`。
+- 输入：第 2 步产品定义、开发约束和 `catalog.json`。`catalog.json` 必须可读，运行状态保存其路径、SHA-256 和 `schema_version`。
+- 输出：步骤结果 `steps/03.json` 中的固定纯 JSON 选型对象，以及 Agent session 和完整编排历史。
+- Agent 职责：只读取产品资料和本次 `catalog.json`，从 `repositories[*].templates[*]` 中选择适用的前端和后端模板；每个成功选项必须原样带出模板 `id`、所属仓库的 `git_url`/`default_branch`、模板 `path` 和选择 `reason`。
+- 输出格式：成功时只能返回以下 JSON 对象，不得有任何其它文本、Markdown 或代码围栏：
+
+```json
+{
+  "frontend": {
+    "id": "",
+    "git_url": "",
+    "default_branch": "",
+    "path": "",
+    "reason": ""
+  },
+  "backend": {
+    "id": "",
+    "git_url": "",
+    "default_branch": "",
+    "path": "",
+    "reason": ""
+  }
+}
+```
+
+  项目明确不需要某一端时，对应值为 `null`。资料不可读、候选不匹配或无法安全完成选择时，只返回 `{"error":"具体原因"}`，不输出部分选型。
+- 编排职责：校验 Agent 返回值是单个合法 JSON 对象；校验成功对象中的每个 `id`、`git_url`、`default_branch`、`path` 均与同一 `catalog.json` 中的真实模板和所属仓库一致；不得根据需求或 catalog 替 Agent 补选，不得把 JSON 外的自然语言当作结果。
+- 完成条件：纯 JSON 通过解析和 schema 校验，前端/后端字段（或明确的 `null`）齐全，所有成功选项属于本次 `catalog.json`，并已写入 `steps/03.json.template_selection`，供第 4 步直接读取。
+- 自动化说明：本步骤不获取、复制或组装模板内容，不初始化前后端仓库。返回错误对象、JSON 解析失败、字段缺失、catalog 引用无效或状态异常时恢复同一 Agent session；只有不可替代外部资源缺失时返回 `blocked`，其余输入、模型、文件或状态问题返回 `failed`。
+- 恢复：恢复本步骤原 Claude session，重新读取同一 `catalog.json` 身份和当前工作区事实，继续处理当前选型，不跳到第 4 步。
 
 ### 第 4 步：组装基础工程
 
 - 输入：只读取第 3 步成功结果 `steps/03.json.template_selection`。
-- 输出：放入 `frontend/`、`backend/` 等目标位置的基础工程。
-- 完成条件：目录完整、来源明确，没有嵌套上游 `.git` 或临时模板目录。
-- 自动化说明：使用确定性文件和 Git 命令完成，不要求 AI 直接搬运目录。
+- 输出：放入适用目标目录的基础工程。
+- 完成条件：目录完整、来源明确，没有嵌套上游 `.git` 或临时模板目录，实际交付单元与选型结果一致。
+- 自动化说明：使用确定性文件和 Git 命令完成，不要求 AI 直接搬运目录，也不在本步骤重新选择模板。
 
 ### 第 5 步：核验项目准备状态
 
 - 能力：`project-readiness`。
-- 输入：产品定义、技术方案、工程目录和当前资源。
+- 输入：产品定义、基础工程选型结论、已组装工程和当前资源。
 - 输出：项目准备清单。
 - 完成条件：当前开发必需项均为 `ready` 或 `not-applicable`。
 - 自动化说明：缺少可由本机生成的配置时在本步骤补齐；缺少不可替代外部资源时返回 `blocked`。
@@ -304,181 +388,249 @@ PCM Demo 只保存支持继续运行所必需的状态：
 ### 第 6 步：项目化基础工程
 
 - 能力：`project-bootstrap`。
-- 输入：基础工程、产品定义、技术方案和准备清单。
-- 输出：完成项目身份、基础配置、文档和最小联调的工程。
+- 输入：基础工程、产品定义、基础工程选型结论和准备清单；已有项目可另外提供既有技术方案。
+- 输出：完成项目身份、基础配置、文档和最小联调的工程。用户可见项目只落实已经确认的品牌、视觉和交互事实；尚无产品级体验方向时保持中性、可替换的基础样式，不把模板默认配色、字体、首页或组件外观认定为产品设计。
 - 完成条件：适用安装、构建、测试、启动和基础联调通过，留下待提交变更。
 - 自动化说明：发现模板残留或局部配置问题时在本步骤内继续修正和验证。
 
-### 第 7 步：初始化前后端并提交三个仓库
+### 第 7 步：总体技术方案
+
+- 能力：`solution-design`。
+- 输入：产品定义、已组装并完成项目化的当前工程事实、开发约束和第 3 步已确认的基础工程选型。
+- 输出：总体技术方案文件、Claude Agent session ID、完整编排历史及步骤结果。
+- 完成条件：方案 Markdown 存在且可读，系统边界、主要技术选择、交付单元、跨单元协作、关键风险和未决事项已经确认，并与当前工程事实一致。
+- 自动化说明：本步骤基于已组装和项目化后的工程事实进行总体设计，不重新进行模板选型或组装；文档、模型、文件或状态问题在本步骤失败，外部不可替代资源缺失时返回 `blocked`。
+
+### 第 8 步：初始化并提交适用仓库
 
 - 能力：显式 Git 脚本和 `commit-changes`。
-- 输入：第 1 步已初始化但尚无提交的根仓库，以及完成项目化的前端和后端工程。
-- 执行动作：
-  1. 核验根目录 Git 根就是项目根、分支为 `main` 且尚无 commit，不重复执行根 `git init`；
-  2. 对适用的 `frontend/`、`backend/` 分别执行 `git init -b main`；
-  3. 核验根仓库 `.gitignore` 排除前后端独立仓库内容，不创建隐式 submodule 或误纳入 gitlink；
-  4. 按根、前端、后端三个仓库分别检查状态并调用 `commit-changes` 创建各自首次本地提交。
-- 输出：每个适用仓库的初始本地提交。
-- 完成条件：根仓库 Git 根为项目根，适用的前端、后端仓库 Git 根分别为 `frontend/`、`backend/`；三个仓库均位于 `main`、初始提交存在，工作树符合预期且没有跨仓误纳入内容。
-- 自动化说明：第 1 步只提前初始化根 Git 边界；本步骤完成三个仓库的首次提交，不执行 push。
+- 输入：第 1 步已初始化但尚无提交的根仓库，以及完成项目化的适用工程。
+- 执行动作：核验根目录 Git 边界和 `main`，为适用的独立交付单元初始化 Git，分别检查忽略规则和秘密，并按仓库创建首次本地提交。
+- 输出：每个适用仓库的初始本地提交，以及作为后续仓库遍历单一事实源的 `applicable_repositories`。
+- 完成条件：根仓库和适用交付单元仓库均位于 `main`、初始提交存在、工作树符合预期且没有跨仓误纳入内容。
+- 自动化说明：不执行 push。
 
-### 第 8 步：工程架构设计
+### 第 9 步：工程架构设计（按需）
 
 - 能力：`engineering-architecture`。
-- 输入：产品定义、技术方案和当前工程事实。
+- 适用：当前工程惯例不足以判断文件和依赖归属，存在跨模块、跨交付单元或共享边界不确定性，或已有结构明显漂移时。简单项目能够由现有结构稳定指导后续开发时，可以无副作用跳过，待真实需求暴露变化点后再执行。
+- 输入：产品定义、总体技术方案和当前工程事实。
 - 输出：工程架构文档。
 - 完成条件：分层、模块边界、目录职责、依赖方向和演进条件能够指导后续实现。
 - 自动化说明：文档在本步骤内持续修正；完成后对根仓库调用 `commit-changes`。
 
-### 第 9 步：产品级 UI/UX 框架
+### 第 10 步：产品级 UI/UX 框架
 
-- 能力：`ui-ux-framework bootstrap`。
-- 输入：产品定义、技术方案、工程事实和已有 UI 资产。
-- 输出：产品级 UI/UX 框架，或明确的不适用结论。
-- 完成条件：产品表面、信息架构、Shell、导航和共享体验约束已经确认。
-- 自动化说明：需要的方案选择由 AI 决策能力完成；适用文档完成后提交根仓库。
+- 能力：`ui-ux-framework`。
+- 适用：项目尚无能够指导后续需求的产品级框架，现有框架明显失真，或当前问题会改变产品表面、主导航、Shell、全局视觉语义、共享组件语义或客户定制边界。
+- 输入：产品定义、总体技术方案、工程事实和调用方提供的相关设计资料。
+- 输出：按项目文档约定维护的产品级 UI/UX 框架，或明确的不适用结论。
+- 完成条件：产品表面、信息架构、Shell、导航和跨需求体验约束已经确认；高影响决定已经取得确认；没有把单需求设计或页面实现混入框架。
+- 自动化说明：这是按需的项目级能力，不是每个需求的固定前置步骤；适用文档完成后提交根仓库。
 
-### 第 10 步：拆分 Backlog
+### 第 11 步：拆分 Backlog
 
 - 能力：`requirement-breakdown`。
-- 输入：产品定义、总体方案、工程架构和 UI/UX 框架。
-- 输出：Backlog 总览和需求详情卡。
-- 完成条件：需求具有明确产品结果、范围、依赖、验收方向和建议顺序，至少有一个需求可开始。
-- 自动化说明：完成后提交根仓库，进入单需求开发循环。
+- 输入：产品定义、总体方案、适用的工程架构和 UI/UX 框架结论，以及当前工程事实。
+- 输出：完整覆盖最终产品范围的 Backlog 总览和需求详情卡，以及由一个或多个完整正式需求组成的首条验证切片。
+- 完成条件：需求具有明确产品结果、范围、依赖、验收方向和建议顺序；已检查可以合并、删除或推迟确认的复杂度；首条验证切片能够尽早验证关键假设，并明确尚未覆盖的最终范围。它不是 MVP、半完成需求、Mock 演示或范围缩减。
+- 自动化说明：完成后提交根仓库，进入阶段一；首条验证切片只是 Backlog 的建议顺序，不触发产品体验审计。
 
-## 六、单需求开发循环
+## 六、阶段一：逐需求开发
 
-第 11～19 步针对一个活动需求执行。第 19 步完成后，如果 Backlog 仍有可开发需求，继续选择下一个需求并重复循环。
+阶段一只执行第 12～19 步。`trd-design` 与 `dev-workflow` 对每个正式需求完成需求级体验设计、实现和真实验收；不调用 `product-experience-audit`。首条验证切片、局部改动、单页面、单需求、内测或发布前这些局部时点均不单独触发审计。只有当前已知正式范围内全部需求完成第 19 步后，才进入阶段二。
 
-### 第 11 步：选择需求并建立根仓库需求分支
+### 第 12 步：选择需求并建立根仓库需求分支
 
-- 输入：Backlog、三个仓库当前状态和已完成需求。
-- 输出：唯一活动需求和根仓库需求分支。
-- 完成条件：依赖满足、需求范围明确、根仓库从最新 `main` 建立正确分支。
-- 自动化说明：AI 选择满足依赖且建议顺序最靠前的需求；Git 动作由脚本执行。
+- 输入：根仓库 `main` 的 Backlog、`applicable_repositories` 中各仓库的 `main` 基线和已完成需求。
+- 输出：唯一活动需求、根仓库需求分支和开始前仓库事实。
+- 完成条件：依赖满足、需求范围明确，根仓库从最新 `main` 建立正确分支。
+- 自动化说明：AI 选择满足依赖且建议顺序最靠前的需求；Git 脚本记录 `root_requirement_branch`。
 
-### 第 12 步：形成最终活动 TRD
+### 第 13 步：形成最终活动 TRD
 
-- 能力：`trd-design` 和适用的 `ui-ux-framework before`。
-- 输入：活动需求、产品资料、总体方案、工程架构和当前代码事实。
-- 输出：可直接指导实现的最终活动 TRD。
-- 完成条件：范围、行为、技术方案、验证场景和适用 UI/UX 设计已经收敛。
-- 自动化说明：当前 TRD 可以在本步骤内直接修改；完成后提交根仓库需求分支。
+- 能力：`trd-design`。
+- 输入：活动需求、产品资料、总体方案、适用的工程架构和 UI/UX 框架结论、当前代码事实，以及其它相关产品或设计资料。
+- 输出：可直接指导实现的最终活动 TRD 和 TRD session。
+- 完成条件：范围、行为、技术方案、验证场景和需求级用户体验设计已经收敛；用户可见需求已检查能否删除或合并步骤、字段、决策和跳转，并明确用户术语、内容主次、主要行动、关键文案意图、状态与恢复。
+- 自动化说明：`trd-design` 独立完成单需求体验设计。核心任务、信息架构、状态表达或视觉方向存在多个实质方案，且实现后返工成本明显时，外层允许在本步骤取得任务流、关键状态草图、可抛弃原型或真实项目窄范围预览等最低成本证据；不固定工具或过程产物。若 TRD 暴露跨需求产品体验骨架问题，外层可以在本步骤处理 `ui-ux-framework`，但不拆出审计步骤。活动 TRD 可在本步骤内修正，完成后精确提交根仓库需求分支。
 
-### 第 13 步：建立代码仓库需求分支
+### 第 14 步：建立代码仓库需求分支
 
-- 输入：最终 TRD 和代码仓库状态。
+- 输入：最终 TRD 和代码仓库 `main` 状态。
 - 输出：所有受影响代码仓库的功能分支。
-- 完成条件：受影响仓库位于从最新 `main` 创建的正确功能分支，不受影响仓库不机械建分支。
-- 自动化说明：由脚本分析 TRD 结论和仓库状态后执行 Git 命令。
+- 完成条件：受影响仓库从最新 `main` 建立正确功能分支；不受影响仓库不机械建分支。
+- 自动化说明：脚本依据 TRD 和仓库事实执行，并记录各仓分支基线。
 
-### 第 14 步：实现与验证
+### 第 15 步：实现与验证
 
 - 能力：`dev-workflow` 和按仓库调用的 `commit-changes`。
 - 输入：最终活动 TRD、受影响仓库和当前开发环境。
-- 输出：实现代码、测试和真实验证证据、本地提交。
-- 完成条件：`dev-workflow` 完成适用测试、构建、运行、联调、浏览器验收和独立审查，受影响仓库变更已经提交。
-- 自动化说明：实现和验证问题在本步骤内持续修复；不可替代资源缺失时阻塞并保存开发 session。
-
-### 第 15 步：开发后 UI/UX 审查与修正
-
-- 能力：`ui-ux-framework after`、原 `dev-workflow` 会话，以及必要时负责活动设计文档的能力。
-- 输入：活动 TRD、分支完整差异、真实页面和已有验证证据。
-- 输出：通过、不适用或完成修正后的审查结论。
-- 完成条件：审查通过或明确不适用，所有纳入当前范围的阻断和高优先级问题已经解决并重新验证。
-- 自动化说明：
-  1. `after` 只审查和报告；
-  2. 实现问题由步骤编排器恢复原开发 session 修复；
-  3. 活动 TRD 或当前设计文档需要局部修正时，由步骤编排器在当前步骤内调用负责能力更新，再恢复实现和验证；
-  4. 每轮修正后重新执行 `after`；
-  5. 外层步骤始终停留在第 15 步，不回退步骤编号；
-  6. 缺少模型和当前环境无法取得的不可替代外部资源时返回 `blocked`；其它取舍由 AI 决策能力处理，输入或本地状态错误返回 `failed`。
+- 输出：实现代码、测试、真实验证证据、代码仓本地提交和 `development_session`。
+- 完成条件：`dev-workflow` 完成适用测试、构建、运行、联调、浏览器交互、实际读取的真实渲染结果验收及独立审查；受影响仓库变更已精确提交。
+- 自动化说明：实现和验证问题在本步骤内持续修复。涉及 UI 时必须实际读取代表性截图判断任务简化、文案和视觉层级，不能以 DOM、组件代码或操作成功代替；无适用 UI 变化时不机械执行视觉检查。不可替代资源缺失时阻塞并保存开发 session。
 
 ### 第 16 步：合并代码仓库并在 `main` 最终验证
 
 - 输入：受影响代码仓库的功能分支和验证证据。
 - 输出：代码仓库 `main` 上的合并结果和最终验证结果。
 - 完成条件：功能分支提交完整，合并成功，相关测试和检查在 `main` 上通过。
-- 自动化说明：按仓库顺序执行；冲突或验证失败时停留在本步骤处理，未解决时返回 `failed` 或 `blocked`。
+- 自动化说明：按仓库顺序执行；冲突、验证失败或仓库事实不清楚时停留在本步骤修复或返回 `failed`，不进入状态收尾。
 
-### 第 17 步：同步需求最终状态
+### 第 17 步：同步需求最终状态并提交根需求分支
 
 - 能力：负责活动文档维护的 Agent 和 `commit-changes`。
 - 输入：代码仓库 `main` 的真实合并和验证结果。
-- 输出：更新后的活动 TRD、Backlog 总览和需求详情卡。
-- 完成条件：文档状态、代码结果和验证证据一致，并已提交到根仓库需求分支。
-- 自动化说明：未完成或仍有阻塞时不得标记完成。
+- 输出：更新后的活动 TRD、Backlog 总览和需求详情卡，以及根需求分支提交。
+- 完成条件：文档状态、代码结果和验证证据一致；状态同步变更已经精确提交到 `root_requirement_branch`，并记录 `step_17_commit`。
+- 自动化说明：未完成或仍有阻塞时不得标记完成。当前需求若使首条验证切片闭环，本步骤同时只基于切片内各需求的 `dev-workflow` 证据记录已验证假设、实际结果、仍未验证范围及对后续产品定义、UI/UX 框架、Backlog 或顺序的影响；不调用 `product-experience-audit`，也不把切片结论表述为全产品结论。第 17 步提交是第 18、19 步恢复的固定锚点。
 
-### 第 18 步：合并根仓库并检查全局状态
-
-- 输入：根仓库需求分支和三个仓库当前事实。
-- 输出：根仓库 `main` 合并结果和全局状态检查。
-- 完成条件：根仓库合并成功，三个仓库分支、提交和工作树状态符合预期。
-- 自动化说明：根仓库最后合并，确保最终文档建立在代码已经合并和验证的事实之上。
-
-### 第 19 步：复盘本次执行规则
+### 第 18 步：在原开发 session 复盘执行规则
 
 - 能力：`session-rule-retrospective`、显式 Git 脚本和适用的 `commit-changes`。
-- 输入：本需求开发 session、失败记录、修复过程和用户纠正证据。
-- 输出：必要的规则增量，或“无需沉淀”的结论。
-- 完成条件：有真实复用价值的规则已经提交并合并，或确认没有规则需要修改。
-- 自动化说明：完成后结束当前需求，清理活动需求状态，并检查是否还有下一个需求。
+- 输入：同一需求的 `development_session`、失败记录、修复过程、AI 决策记录和已核验的纠正证据。
+- 执行动作：确认根仓库仍位于同一 `root_requirement_branch` 后，恢复原 `dev-workflow` Claude Agent SDK session 执行 `session-rule-retrospective`；程序只允许该次调用修改根仓库 `.claude/rules/`。
+- 输出：必要的规则增量，或 `no_change`；有增量时输出同一根需求分支上的精确提交。
+- 完成条件：复盘结果已通过 Skill 的准入和去重标准；无规则变更时记录 `step_18.outcome: no_change` 并成功结束且不提交；有规则变更时仅提交 `.claude/rules/`，记录 `step_18.outcome: committed` 和提交 SHA。
+- 自动化说明：不创建复盘分支，不修改代码、Backlog、TRD 或其它文件。任何越界 diff、session 不可恢复或根分支事实冲突都返回 `failed`，不以新会话或新分支替代原会话。
 
-## 七、Backlog 循环与项目结束
+### 第 19 步：最后合并根仓库并检查适用仓库
 
-PCM 不只执行一次第 11～19 步，而是持续循环：
+- 输入：已完成第 17、18 步的根仓库需求分支，以及 `applicable_repositories` 中各仓库的当前事实。
+- 输出：根仓库 `main` 合并结果和全部适用仓库的全局状态检查证据。
+- 完成条件：根需求分支最后合并到根仓库 `main`；根仓库及各适用交付单元的分支、提交和工作树均符合预期，并已保存 `step_19_merge_evidence`。
+- 自动化说明：根仓库最后合并，确保最终文档和规则都建立在代码已合并且已验证的事实之上。成功后清理活动需求状态；尚有可开发正式需求时继续阶段一。
+
+## 七、阶段二：全项目级集成产品体验审计与迭代
+
+### 1. 进入条件、范围和运行条件
+
+阶段一完成当前已知正式范围内全部需求的第 12～19 步后，才可进入阶段二。进入前重新核验根仓库及 `applicable_repositories` 中各适用交付单元均在清楚的 `main` 事实，且产品是完整可集成运行的版本。
+
+外层编排器从产品定义、正式 Backlog、已完成 TRD、当前代码、路由、测试和可运行行为建立审计范围，至少包含：当前正式范围内全部主要用户任务、主要用户角色和跨页面闭环；多个真实产品表面或模块；可访问环境、虚构测试身份、可复位数据和清理方式；代表性桌面及窄屏和适用辅助技术路径；允许写入及禁止资金、外发、生产数据和其它高影响副作用；已有验收、UI/UX 框架和限制。
+
+范围以用户任务、状态和风险表达，不以单页清单代替。单页面、单需求、首条验证切片或局部改动不满足阶段二入口，不能触发审计。缺少主要任务不可替代的环境、角色、数据、真实浏览器能力或安全边界时，先在当前节点补齐；无法取得时返回 `blocked`，不降级成静态审查。
+
+### 2. 独立 SDK session 执行完整审计
+
+外层在独立的 Claude Agent SDK session 中显式调用一次 `product-experience-audit`，输入上述完整范围、运行条件、`applicable_repositories` 中各仓库的 `main` 版本事实和现有证据。每次审计轮次只针对一个清楚的完整集成版本；这些适用仓库的 `main` commit SHA 共同构成 `version_fingerprint`。
+
+Skill 从真实任务出发执行声明范围内的动态审计，实际读取代表性截图并收集相称的交互、状态、网络或可访问性证据。它只返回经核验候选、重复或未纳入项、覆盖缺口和高影响边界；不修改业务代码、产品定义、TRD 或 canonical Backlog，不创建正式需求或 ID，不暂存、提交或自动串联其它能力。PCM 将原始输出引用、审计 session、版本指纹及四类结果保存到阶段二状态；这是外层运行证据，不要求 Skill 创建过程文档。
+
+完整审计的完成条件是：实际覆盖当前正式范围内全部主要任务和多个产品表面/模块，且能明确区分已覆盖范围、候选、重复项、覆盖缺口和高影响边界。只浏览入口、只看截图、只走 happy path，或仅依据单需求证据均不算完成。
+
+### 3. 外层分流、需求化和入池
+
+审计 Skill 结束后，外层调度会话基于审计证据、已有 Backlog 和产品事实逐项分流，并保存 `candidate_routing`：
+
+- 已有需求、同一用户障碍或共同根因已有归属的，记录重复或向已有活动项补充证据，不新建需求；
+- 误判、没有用户影响依据、纯主观偏好、价值或时机不足的，记录不纳入及理由；
+- 证据不足或有覆盖缺口的，先补齐环境、身份、数据或动态证据后再判断，不把疑点写入正式 Backlog；
+- 能以删除、合并、减少步骤、调整默认值或复用现有模式解决的，优先需求化最小可验证改动；
+- 证据充分、用户结果和验收方向清楚的 Bug、可用性缺陷、适配性/可访问性问题和边界明确的改进，进入正式需求化；
+- 改变产品目标、核心任务、品牌方向、安全、隐私、不可逆兼容或外部副作用的高影响边界，由 AI 决策模型基于事实决定范围、处理路径或不纳入理由并记录。AI 不能安全决定或资源不足时，只有不可替代外部资源缺失才返回 `blocked`；不新增人工审批节点。
+
+需求化由外层完成，不由审计 Skill完成。单个内聚候选可按既有 Backlog 结构形成正式需求；需要合并、拆分、排序或重算依赖时，外层显式调用 `requirement-breakdown`；需要更新权威产品定义时，外层显式调用 `project-intake`。候选在用户结果、范围、证据、依赖和验收方向齐全前不得获得正式 ID。
+
+符合准入条件的候选在根仓库最新 `main` 上通过一次短期入池分支写入正式 Backlog：创建分支，新增 ID、总览项和详情卡，检查依赖和顺序，调用 `commit-changes` 精确提交，再显式合并回根 `main`。外层保存入池分支、提交、合并和工作树检查作为 `pooling_evidence`。入池仅创建后续可选择的需求，不创建活动 TRD、代码分支或完成状态。
+
+### 4. 复用需求循环、针对原发现回归和完整复审
+
+每个已入池的正式需求都从根仓库最新 `main` 完整复用第 12～19 步：新建活动 TRD、开发、代码合并、状态同步、原 session 规则复盘和最后根仓库合并。该复用期间仍不调用 `product-experience-audit`，也不回写已归档的历史需求。
+
+每个修复完成后，外层针对原候选执行回归：重走原复现任务、受影响状态及相邻跨页面路径，核验原障碍已消失且未引入新的任务断点。该回归证据保存至对应候选分流记录；已有单元测试、单需求验收或实现者结论不能替代它。
+
+一批已入池需求完成及其原发现回归后，使用修复后 `applicable_repositories` 中各仓库的 `main` 版本指纹开启下一审计轮，在新的独立 SDK session 再次执行完整产品审计，覆盖最初全部主要任务和本轮受影响任务。新出现且符合政策的候选继续分流、入池和开发；重复项、不纳入项或不阻断完成的设计机会不触发无穷循环。新发现关键覆盖缺口必须补验，不能复用旧版本证据。
+
+### 5. 阶段二完成条件
+
+阶段二只有同时满足以下条件才成功结束：
+
+1. 最新完整审计版本来自 `applicable_repositories` 中各仓库清楚的 `main` 事实，并已覆盖当前正式范围内全部主要用户任务以及多个产品表面/模块；
+2. 适用动态任务已在真实浏览器和真实开发/测试服务执行，主要界面和关键状态有实际读取的代表性截图和相称动态证据；
+3. 经核验候选、重复项、未纳入项、覆盖缺口和高影响边界均已保存并完成分流；
+4. 所有自动入池的正式需求均完成第 12～19 步，并通过针对原发现的体验回归；
+5. 最后一轮完整复审没有新增符合需求化政策的候选，也没有未处理的高信心阻断或高优先级问题；
+6. 与主要任务有关的环境、角色、数据、视口、辅助技术和动态证据覆盖缺口已经关闭；
+7. `applicable_repositories` 中各仓库均位于预期 `main`，工作树无意外变更，最终结果和仍适用的限制已经汇总。
+
+阶段二完成只表示当前正式范围内的完整集成体验已按当前事实收束，不代表产品永远没有新的改进机会，也不以未来人工反馈降低本阶段标准。
+
+## 八、循环、结束和运行方式
+
+PCM 先完成阶段一，再运行阶段二；阶段二新入池需求仍复用第 12～19 步，而非在审计 Skill 中直接修复：
 
 ```python
-while True:
-    requirement = select_next_ready_requirement()
-    if requirement is None:
-        break
-    run_requirement_cycle(requirement)
+class StopRun(Exception):
+    def __init__(self, result):
+        self.result = result
+
+
+def require_success(result):
+    persist_node_result(result)
+    if result.status != "success":
+        raise StopRun(result)
+    return result.output
+
+
+def run_all():
+    try:
+        require_success(run_phase_one_until_no_known_formal_requirement())
+        require_success(enter_phase_two())
+
+        while True:
+            audit = require_success(run_full_product_audit_in_independent_session())
+            routed = require_success(route_audit_candidates(audit))
+            require_success(resolve_required_coverage_gaps(routed))
+            pooled_requirements = require_success(
+                productize_and_pool_eligible_candidates(routed)
+            )
+
+            for requirement in pooled_requirements:
+                require_success(run_requirement_cycle_steps_12_to_19(requirement))
+                require_success(regress_original_audit_finding(requirement))
+
+            if phase_two_completion_conditions_met(
+                audit, routed, pooled_requirements
+            ):
+                return success_result()
+
+    except StopRun as stopped:
+        return stopped.result
 ```
 
-项目可以结束的最低条件：
+所有节点统一返回 `success`、`blocked` 或 `failed`。`require_success()` 先原子持久化当前结果；任何非 `success` 立即停止外层运行，不继续候选分流、Backlog 入池、需求开发或回归，也不以循环重试掩盖阻塞和失败。
 
-1. Backlog 中不存在仍应开发的未完成需求；
-2. 所有纳入范围的需求均有与代码事实一致的最终状态；
-3. 根仓库、前端和后端均位于预期 `main`；
-4. 工作树没有意外未提交变更；
-5. 最终安装、构建、测试和启动检查通过；
-6. 前后端真实联调和关键用户流程浏览器验收通过；
-7. 最终结果和未解决限制已经汇总。
+项目最终结束的最低条件是阶段一和阶段二均完成：不存在仍应开发的正式需求；所有纳入范围的需求状态与代码事实一致；`applicable_repositories` 中各仓库均在预期 `main` 且工作树清楚；适用的最终安装、构建、测试、启动和真实联调通过；关键用户流程浏览器验收及阶段二最终完整审计通过；最终结果和未解决限制已汇总。项目最终检查属于总流程收口，不新增复杂业务步骤编号。
 
-项目最终检查属于总流程收口，不新增复杂业务步骤编号。
-
-## 八、一键运行和单步运行
-
-PCM Demo 同时支持：
+PCM Demo 支持一键、单步、区间和恢复运行，并复用同一批节点函数：
 
 ```bash
-# 单独验证一步
+# 单独验证步骤节点
 python -m steps.step_02_project_intake --run-id <run-id>
 
-# 从产品初稿完整执行
+# 从产品初稿完整执行阶段一和阶段二
 python run_all.py \
   --product-draft "../docs/prd/修迹-产品需求文档-v1.md" \
   --workspace-root "/path/to/products"
 
-# 从阻塞或失败位置继续
+# 从阻塞或失败的 phase/current_node 恢复
 python run_all.py --resume <run-id>
 
-# 调试指定区间
+# 调试阶段一步骤区间，或指定阶段二节点
 python run_all.py --run-id <run-id> --from-step 11 --to-step 15
+python run_all.py --run-id <run-id> --from-node phase_2:audit
 ```
-
-单步运行、区间运行和一键运行复用同一批步骤函数，不维护三套实现。
 
 ## 九、停止条件
 
-出现以下情况时保存进度并停止：
+出现以下情况时保存 `phase`、`current_node`、已完成范围、证据和继续命令并停止：
 
-- 不可替代的外部资源、账号、服务、设备、审批或数据缺失；
-- 用户已有修改与自动化任务发生无法安全处理的冲突；
-- Git 分支、提交、合并或工作树事实不清楚；
-- 测试、构建、真实联调或浏览器验收仍失败；
-- 模型、Claude Agent SDK、子进程或必要工具持续执行失败；
-- 当前步骤无法在已有事实内安全完成。
+- 缺少模型和当前环境无法取得的不可替代外部资源、账号、服务、设备、授权或数据：返回 `blocked`；
+- Git 分支、提交、合并、工作树、版本指纹、候选归属或入池证据冲突或不清楚；
+- 测试、构建、真实联调、浏览器验收、审计回归或完整复审仍失败；
+- 主要任务缺少真实环境、测试身份、可复位数据、真实浏览器或安全边界，且不能补齐；
+- 模型、Claude Agent SDK、子进程、必要工具、状态持久化或结构化输出持续执行失败；
+- 当前节点无法在已有事实内安全完成。
 
-停止结果必须说明：当前步骤、已完成范围、阻塞或错误、已尝试动作、保留的工作区和继续命令。
+除不可替代外部资源外，上述情况返回 `failed`，修复现场后重试当前节点。高影响取舍、候选分流和产品化由 AI 决策模型依照事实完成，不作为 `blocked` 或人工审批节点。停止结果必须说明当前阶段和节点、已完成范围、阻塞或错误、已尝试动作、保留现场、证据缺口和继续命令。
