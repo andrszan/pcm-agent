@@ -1,19 +1,25 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from pydantic import BaseModel, SecretStr
 
 DEMO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(DEMO_ROOT))
 
 from common.files import resolve_workspace_output, write_json
-from common.openai_responses import request_json
+from common.openai_responses import ResponsesAccessError, parse_response
 from config import (
     CAPABILITY_REPOSITORY_ROOT,
+    LLMConfig,
     load_template_repository,
     load_workspace_root,
 )
@@ -158,39 +164,57 @@ class WorkspaceStepTests(unittest.TestCase):
                 else:
                     os.environ["PCM_TEMPLATE_REPOSITORY"] = previous
 
-    def test_responses_request_uses_output_text(self) -> None:
+    def test_responses_parse_uses_pydantic_models(self) -> None:
         calls: list[dict[str, object]] = []
 
+        class InputModel(BaseModel):
+            text: str
+
+        class OutputModel(BaseModel):
+            value: str
+
         class Responses:
-            async def create(self, **kwargs: object) -> object:
+            async def parse(self, **kwargs: object) -> object:
                 calls.append(kwargs)
-                return type("Response", (), {"status": "completed", "output_text": "{}"})()
+                return SimpleNamespace(
+                    status="completed",
+                    output_parsed=OutputModel(value="ok"),
+                )
 
         class Client:
             responses = Responses()
 
-        content = __import__("asyncio").run(
-            request_json(
-                Client(),
-                model="test-model",
-                instructions="system",
-                input_text="input",
-                schema_name="test_schema",
-                schema={"type": "object", "additionalProperties": False},
-            )
-        )
-        self.assertEqual(content, "{}")
-        self.assertEqual(calls[0]["instructions"], "system")
-        self.assertEqual(calls[0]["input"], "input")
-        self.assertEqual(calls[0]["max_output_tokens"], 512)
-        self.assertEqual(calls[0]["text"]["format"]["type"], "json_schema")
+            async def close(self) -> None:
+                return None
 
-    def test_responses_request_reports_status_error_details(self) -> None:
+        config = LLMConfig("https://example.invalid", SecretStr("secret"), "test-model")
+        with patch("common.openai_responses.AsyncOpenAI", return_value=Client()):
+            result = asyncio.run(
+                parse_response(
+                    config,
+                    system_prompt="Extract the value.",
+                    input_model=InputModel(text="input"),
+                    output_model=OutputModel,
+                    max_retries=0,
+                )
+            )
+        self.assertEqual(result, OutputModel(value="ok"))
+        self.assertIs(calls[0]["text_format"], OutputModel)
+        self.assertEqual(calls[0]["input"][0]["role"], "system")
+        self.assertIn('"text":"input"', calls[0]["input"][1]["content"])
+
+    def test_responses_parse_reports_access_error_details(self) -> None:
         import httpx
         import openai
 
+        class InputModel(BaseModel):
+            text: str
+
+        class OutputModel(BaseModel):
+            value: str
+
         class Responses:
-            async def create(self, **kwargs: object) -> object:
+            async def parse(self, **kwargs: object) -> object:
                 response = httpx.Response(
                     403,
                     headers={"x-request-id": "header-request-id"},
@@ -211,17 +235,20 @@ class WorkspaceStepTests(unittest.TestCase):
         class Client:
             responses = Responses()
 
-        with self.assertRaisesRegex(RuntimeError, "HTTP 403") as raised:
-            __import__("asyncio").run(
-                request_json(
-                    Client(),
-                    model="test-model",
-                    instructions="system",
-                    input_text="input",
-                    schema_name="test_schema",
-                    schema={"type": "object", "additionalProperties": False},
+            async def close(self) -> None:
+                return None
+
+        config = LLMConfig("https://example.invalid", SecretStr("secret"), "test-model")
+        with patch("common.openai_responses.AsyncOpenAI", return_value=Client()):
+            with self.assertRaisesRegex(ResponsesAccessError, "HTTP 403") as raised:
+                asyncio.run(
+                    parse_response(
+                        config,
+                        system_prompt="Extract the value.",
+                        input_model=InputModel(text="input"),
+                        output_model=OutputModel,
+                    )
                 )
-            )
         message = str(raised.exception)
         self.assertIn("PERMISSION_DENIED", message)
         self.assertIn("body-request-id", message)

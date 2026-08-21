@@ -339,36 +339,11 @@ PCM Demo 只保存支持继续运行所必需的状态：
 
 ### 第 3 步：基础工程选型
 
-- 能力：`foundation-selection`。
-- 输入：第 2 步产品定义、开发约束和 `catalog.json`。`catalog.json` 必须可读，运行状态保存其路径、SHA-256 和 `schema_version`。
-- 输出：步骤结果 `steps/03.json` 中的固定纯 JSON 选型对象，以及 Agent session 和完整编排历史。
-- Agent 职责：只读取产品资料和本次 `catalog.json`，从 `repositories[*].templates[*]` 中选择适用的前端和后端模板；每个成功选项必须原样带出模板 `id`、所属仓库的 `git_url`/`default_branch`、模板 `path` 和选择 `reason`。
-- 输出格式：成功时只能返回以下 JSON 对象，不得有任何其它文本、Markdown 或代码围栏：
-
-```json
-{
-  "frontend": {
-    "id": "",
-    "git_url": "",
-    "default_branch": "",
-    "path": "",
-    "reason": ""
-  },
-  "backend": {
-    "id": "",
-    "git_url": "",
-    "default_branch": "",
-    "path": "",
-    "reason": ""
-  }
-}
-```
-
-  项目明确不需要某一端时，对应值为 `null`。资料不可读、候选不匹配或无法安全完成选择时，只返回 `{"error":"具体原因"}`，不输出部分选型。
-- 编排职责：校验 Agent 返回值是单个合法 JSON 对象；校验成功对象中的每个 `id`、`git_url`、`default_branch`、`path` 均与同一 `catalog.json` 中的真实模板和所属仓库一致；不得根据需求或 catalog 替 Agent 补选，不得把 JSON 外的自然语言当作结果。
-- 完成条件：纯 JSON 通过解析和 schema 校验，前端/后端字段（或明确的 `null`）齐全，所有成功选项属于本次 `catalog.json`，并已写入 `steps/03.json.template_selection`，供第 4 步直接读取。
-- 自动化说明：本步骤不获取、复制或组装模板内容，不初始化前后端仓库。返回错误对象、JSON 解析失败、字段缺失、catalog 引用无效或状态异常时恢复同一 Agent session；只有不可替代外部资源缺失时返回 `blocked`，其余输入、模型、文件或状态问题返回 `failed`。
-- 恢复：恢复本步骤原 Claude session，重新读取同一 `catalog.json` 身份和当前工作区事实，继续处理当前选型，不跳到第 4 步。
+- 执行方式：Python 将产品定义和 catalog 候选构造成 Pydantic 输入模型，使用代码内的 system prompt 调用 OpenAI Python SDK `responses.parse(..., text_format=FoundationSelectionResult)`，取得 Pydantic 输出后直接保存；不调用 `foundation-selection` Skill 或 Claude Agent SDK。
+- 输入：第 2 步结果中记录的项目需求说明、产品功能说明，以及本次 `catalog.json` 中的前端和后端候选。system prompt 只描述选型功能、输入、输出和约束，不包含步骤编号、PCM、Skill 或其它外层编排背景。
+- 输出：Pydantic `FoundationSelectionResult`，其中 `frontend`、`backend` 分别为完整模板选择或 `null`；每个选择直接包含 `id`、`git_url`、`default_branch`、`path` 和 `reason`。程序使用 `model_dump()` 将该结果写入 `steps/03.json.template_selection`。
+- 完成条件：SDK 成功返回 `output_parsed`，步骤结果已经写入，状态推进到 `project:04_assemble_foundation`。本步骤不获取、复制或组装模板，不初始化前后端仓库。
+- 失败与恢复：输入文件、catalog、Pydantic 解析或 Responses API 调用失败时保存简短脱敏错误并停留在当前步骤；已有成功结果且状态已推进到第 4 步时直接复用，不建立模型 session 或额外恢复状态机。
 
 ### 第 4 步：组装基础工程
 

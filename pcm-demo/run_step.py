@@ -12,23 +12,26 @@ from common.files import sha256
 from common.state import create_run_dir, read_state, write_state, write_step_result
 from config import LLMConfig, load_template_repository, load_workspace_root
 from steps.step_00_product_draft import run as run_product_draft
-from steps.step_01_create_workspace import extract_project_identity
 from steps.step_01_create_workspace import (
     WorkspaceBlocked,
     clone_and_verify,
+    extract_project_identity,
     initialize_root_repository,
     inspect_clone,
     inspect_root_repository,
     prepare_staging,
     publish,
-    result as workspace_result,
     verify_clone,
     verify_prepared,
     verify_published_content,
 )
+from steps.step_01_create_workspace import (
+    result as workspace_result,
+)
 from steps.step_02_project_intake import ProjectIntakeBlocked
 from steps.step_02_project_intake import result as project_intake_result
 from steps.step_02_project_intake import run as run_project_intake
+from steps.step_03_foundation_selection import run as run_foundation_selection
 
 DEMO_ROOT = Path(__file__).resolve().parent
 
@@ -38,6 +41,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--step", type=int, required=True)
     parser.add_argument("--product-draft", "--prd", dest="product_draft", type=Path)
     parser.add_argument("--workspace-root", type=Path)
+    parser.add_argument("--catalog-path", type=Path)
     parser.add_argument("--run-id")
     return parser.parse_args()
 
@@ -267,6 +271,17 @@ async def run_step_two(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
     return run_dir, await run_project_intake(run_dir, state)
 
 
+async def run_step_three(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
+    if not args.run_id:
+        raise ValueError("第 3 步需要 --run-id")
+    run_dir = run_dir_for(args.run_id)
+    if not run_dir.is_dir():
+        raise ValueError(f"运行记录不存在：{args.run_id}")
+    return run_dir, await run_foundation_selection(
+        run_dir, read_state(run_dir), catalog_path=args.catalog_path
+    )
+
+
 def sha256_bytes(data: bytes) -> str:
     import hashlib
 
@@ -303,7 +318,7 @@ def run_step_zero(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
 
 def main() -> int:
     args = parse_args()
-    if args.step not in {0, 1, 2}:
+    if args.step not in {0, 1, 2, 3}:
         print(f"步骤尚未实现：{args.step}", file=sys.stderr)
         return 2
 
@@ -316,10 +331,13 @@ def main() -> int:
             run_dir, state, draft_path = load_or_create_step_one_run(args)
             run_dir, result = complete_step_one(args, run_dir, state, draft_path)
         else:
-            if not args.run_id:
-                raise ValueError("第 2 步需要 --run-id")
-            run_dir = run_dir_for(args.run_id)
-            run_dir, result = asyncio.run(run_step_two(args))
+            if args.step == 2:
+                if not args.run_id:
+                    raise ValueError("第 2 步需要 --run-id")
+                run_dir = run_dir_for(args.run_id)
+                run_dir, result = asyncio.run(run_step_two(args))
+            else:
+                run_dir, result = asyncio.run(run_step_three(args))
     except ProjectIntakeBlocked as error:
         result = project_intake_result(
             "blocked",
@@ -338,7 +356,7 @@ def main() -> int:
             blocked={"reason": str(error), "required_inputs": [str(error)], "resume_step": 1},
         )
         error_message = str(error)
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001 - 顶层入口必须将所有步骤异常转换为结果。
         result_factory = project_intake_result if args.step == 2 else workspace_result
         result = result_factory(
             "failed",
@@ -346,6 +364,10 @@ def main() -> int:
             error={"type": type(error).__name__, "message": str(error)},
         )
         error_message = f"{type(error).__name__}: {error}"
+
+    if result["status"] != "success" and not error_message:
+        detail = result.get("blocked") or result.get("error") or {}
+        error_message = str(detail.get("reason") or detail.get("message") or result["summary"])
 
     if run_dir is not None and args.step in {1, 2}:
         if result["status"] != "success":

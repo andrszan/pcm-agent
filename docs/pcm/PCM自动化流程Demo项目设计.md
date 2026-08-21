@@ -2,7 +2,7 @@
 
 > 本文定义正式 PCM 开发前的轻量 Python 验证项目。Demo 的目的不是提前实现正式 PCM，而是用可独立运行、可串联的一组脚本，真实验证 [`PCM 程序化调度的 AI Agent 产品开发流程`](../../.claude/PCM版AI%20Agent自动化流程设计.md)。
 >
-> 截至 2026-08-21，阶段 0 技术探针以及业务第 0～2 步已经实现并真实验证。上位流程从第 3 步起发生重大调整，已完成部分不受影响；第 3 步及以后按新版流程重新逐步讨论合同、更新活动 TRD、实现和验证，旧第 3 步设计与实现不再作为后续基础。
+> 截至 2026-08-21，阶段 0 技术探针以及业务第 0～3 步已经实现并真实验证。第 3 步直接使用 OpenAI Python SDK `responses.parse` 和 Pydantic 输入输出模型完成基础工程选型，不调用或修改 `foundation-selection` Skill。下一步从第 4 步基础工程组装继续逐步讨论和实现。
 
 ## 一、验证目标
 
@@ -45,15 +45,16 @@ python run_all.py \
 - 第 0 步：黄金输入已经是完整产品初稿时，无副作用跳过；
 - 第 1 步：从固定开发管理模板发布独立产品项目工作区，并初始化零提交根 Git 仓库；
 - 第 2 步：显式调用 `project-intake`，通过 AI-compatible 决策循环收敛产品定义，并保存 Claude session 与完整决策历史；
-- `run_step.py` 对第 0～2 步的单步运行、步骤结果和本地恢复状态。
+- 第 3 步：将产品定义和 catalog 构造成 Pydantic 输入，使用代码内 system prompt 调用 `responses.parse`，将 `output_parsed` 直接保存为稳定选型结果；
+- `run_step.py` 对第 0～3 步提供单步运行入口。
 
-“已完成至第 2 步”表示业务步骤实现已到第 2 步，不自动声明新版完整初始化阶段或整个阶段验收完成。当前代码仍只接受第 0、1、2 步；未实现步骤必须继续明确返回“步骤尚未实现”，不得返回业务 `success`。
+“已完成至第 3 步”不自动声明完整初始化阶段完成。当前代码接受第 0～3 步，第 4 步及以后仍明确返回“步骤尚未实现”。
 
 ### 2. 从第 3 步起的重大变化
 
 旧设计把第 3 步定义为“总体技术方案兼基础模板选型”，并把单需求循环放在第 11～19 步。新版流程已经整体重排：
 
-- 第 3 步只负责 `foundation-selection` 基础工程选型；
+- 第 3 步只负责基础工程选型，直接调用 AI-compatible Responses API，不调用 `foundation-selection` Skill；
 - 第 4～6 步依次完成基础工程组装、项目准备核验和基础工程项目化；
 - 第 7 步才调用 `solution-design` 形成总体技术方案；
 - 第 8 步初始化适用交付单元仓库，并为根仓库和各适用仓库创建首次本地提交；
@@ -62,16 +63,16 @@ python run_all.py \
 - 阶段一单需求循环改为第 12～19 步；
 - 所有当前正式需求完成后，不直接结束，而是进入新增的阶段二全项目级集成产品体验审计与修复闭环。
 
-旧第 3 步的自然语言选型汇报、二次 Responses API 抽取、总体技术方案产物和相关实现均不沿用。第 3 步及以后必须按新编号和职责重新讨论，不根据旧实现做兼容性补丁。
+旧第 3 步的自然语言选型汇报、二次 Responses API 抽取、总体技术方案产物和相关实现均不沿用；新版第 3 步已经按 Pydantic `responses.parse` 重写。第 4 步及以后继续按新编号和职责逐步讨论，不根据旧实现做兼容性补丁。
 
 ### 3. 开发协作边界
 
 “PCM 运行时自动决策”和“Demo 新步骤开发前确认合同”是两个不同层次：
 
 - PCM 运行时不增加逐步人工审批；所有可由当前输入、事实、工具和资源完成的决策由 AI-compatible 模型处理；
-- Demo 开发时，从第 3 步起仍先对照原手稿、当前流程设计和活动 TRD，与开发者确认该步的输入、输出、前置条件、操作、完成条件及失败、阻塞和恢复边界；
-- 合同确认后先更新并提交设计文档，再实现、真实验证和提交代码；
-- 本次只同步新版完整流程和阶段边界，不提前完成第 3 步代码设计或实现。
+- Demo 开发时，先对照原手稿、当前流程设计和活动 TRD，与开发者确认该步的输入、输出、前置条件、操作、完成条件及失败、阻塞和恢复边界；
+- 合同确认后先实现代码并通过测试和真实验证，再将实际实现同步到设计文档并提交；
+- 当前只完成到第 3 步，不提前实现第 4 步以后能力。
 
 ## 三、明确不做
 
@@ -147,7 +148,7 @@ pcm-demo/runs/<run-id>/
 
 ## 六、当前最小实现结构
 
-截至第 2 步，已跟踪结构为：
+截至第 3 步，已跟踪结构为：
 
 ```text
 pcm-demo/
@@ -170,7 +171,8 @@ pcm-demo/
 ├── steps/
 │   ├── step_00_product_draft/
 │   ├── step_01_create_workspace/
-│   └── step_02_project_intake/
+│   ├── step_02_project_intake/
+│   └── step_03_foundation_selection/
 └── run_step.py
 ```
 
@@ -210,7 +212,7 @@ AI-compatible 模型代表原人工调度者，负责所有可基于当前输入
 
 它不直接获得整个工作区和 Shell 权限。Python 编排器提供当前决定所需的最小事实，并按领域键持久化完整、脱敏的编排历史。只有不可替代外部资源缺失时才返回 `blocked`；输入、结构、状态或调用错误返回 `failed`。
 
-第 1 步项目身份提取继续使用 Responses API 的 strict JSON Schema。第 3 步不再通过“Agent 自然语言回复 + 决策模型二次抽取”取得模板选择；新版第 3 步由目标 Agent 直接返回固定纯 JSON，再由程序校验。
+第 1 步项目身份提取、AI-compatible 决策和第 3 步选型统一使用 OpenAI Python SDK `responses.parse`。每个调用将权威输入构造成 Pydantic 模型，将 Pydantic 输出类型传给 `text_format`，直接使用 `response.output_parsed`，不手写 JSON Schema、不解析原始 JSON 字符串。第 3 步使用代码内 system prompt，不调用 Skill 或 Claude Agent SDK。
 
 ### 2. Claude Agent SDK
 
@@ -265,7 +267,7 @@ Python 负责确定性操作和最终状态裁决：
 | 0 | 形成产品初稿 | 简短选题时形成初稿；完整初稿无副作用跳过 | 产品初稿或跳过证据 |
 | 1 | 建立项目工作区 | 固定模板浅克隆、清理、发布、根仓库零提交初始化 | 独立产品工作区、`docs/产品初稿.md` |
 | 2 | 项目需求与产品定义 | 显式调用 `project-intake` 收敛最终产品范围 | 产品定义文档、session 与决策历史 |
-| 3 | 基础工程选型 | 调用 `foundation-selection`，从本次 catalog 选择适用模板 | `steps/03.json.template_selection` |
+| 3 | 基础工程选型 | 使用 Pydantic 输入输出和 `responses.parse` 从本次 catalog 选择适用模板 | `steps/03.json.template_selection` |
 | 4 | 组装基础工程 | 只消费第 3 步稳定选型，确定性获取和组装模板 | 适用前后端基础工程 |
 | 5 | 核验项目准备状态 | 调用 `project-readiness` 补齐可生成条件并核验资源 | 准备清单 |
 | 6 | 项目化基础工程 | 调用 `project-bootstrap` 落实项目身份、配置和最小联调 | 可安装、构建、测试和启动的工程 |
@@ -275,16 +277,16 @@ Python 负责确定性操作和最终状态裁决：
 | 10 | 产品级 UI/UX 框架（按需） | 调用 `ui-ux-framework` 建立跨需求稳定体验框架 | 适用时形成 UI/UX 框架并通过 `commit-changes` 提交根仓库；否则记录不适用证据 |
 | 11 | 拆分 Backlog | 调用 `requirement-breakdown` 覆盖最终产品范围 | Backlog 总览、详情卡、首条验证切片，并通过 `commit-changes` 提交根仓库后进入阶段一 |
 
-第 3 步的上位流程合同已经改变，但具体 Demo 代码合同仍须在下一次讨论中确认。当前已明确的边界是：
+第 3 步已经按以下边界实现并验证：
 
-- 输入只包括第 2 步产品定义、开发约束和本次 `catalog.json`；
-- 运行状态需要记录 catalog 路径、来源、SHA-256 和 `schema_version`；
-- Agent 成功时只返回固定结构的单一纯 JSON 对象，前端或后端不适用时对应值为 `null`；
-- 每个选择直接包含 `id`、`git_url`、`default_branch`、`path` 和 `reason`；
-- 无法完成选择时返回单一 `{"error":"具体原因"}` 对象，不输出部分选型；
-- 编排器只做 JSON、schema 和 catalog 引用校验，不从自然语言补选或补字段；
-- 本步骤不生成总体技术方案，不获取、复制或组装模板，不初始化前后端仓库；
-- 第 4 步只读取 `steps/03.json.template_selection`，不从技术方案、会话历史或固定路径重新推断。
+- 输入只包括第 2 步结果引用的两份产品定义和本次 `catalog.json`；
+- Python 使用 Pydantic 模型读取产品资料、catalog 仓库和候选模板；
+- system prompt 直接定义在步骤代码中，只描述基础工程选型任务，不包含步骤编号、PCM、Skill 或编排背景；
+- 调用 OpenAI Python SDK `responses.parse`，以 `FoundationSelectionResult` 作为 `text_format`；
+- 模型直接返回完整的前端和后端选择，包括 `id`、`git_url`、`default_branch`、`path` 和 `reason`，不适用的一端为 `null`；
+- 程序直接保存 `response.output_parsed.model_dump()`，不手写 JSON Schema、不执行 `json.loads()` 或第二套字段校验；
+- 本步骤不调用或修改 `foundation-selection` Skill，不创建 Claude session，不获取或组装模板；
+- 第 4 步只读取 `steps/03.json.template_selection`。
 
 ### 阶段一：第 12～19 步逐需求开发
 
@@ -366,20 +368,22 @@ phase_2:audit
 - `blocked`：缺少模型和当前环境无法取得的不可替代外部资源；
 - `failed`：输入、程序、SDK、模型、命令、Git、解析、文件、验证或状态发生错误。
 
-目标结果结构包含当前阶段和节点：
+步骤结果保存当前步骤的业务结果；阶段和下一节点保存在运行状态中。第 3 步成功结果示例：
 
 ```json
 {
-  "phase": "project_initialization",
-  "current_node": "project:03_foundation_selection",
   "step": 3,
   "name": "基础工程选型",
   "status": "success",
-  "summary": "基础工程模板选择已经完成并通过 catalog 引用校验",
+  "summary": "基础工程模板选择已完成。",
   "applicable": true,
   "outputs": [],
   "blocked": null,
-  "error": null
+  "error": null,
+  "template_selection": {
+    "frontend": {},
+    "backend": {}
+  }
 }
 ```
 
@@ -387,15 +391,7 @@ phase_2:audit
 
 ### 2. 状态演进
 
-当前第 0～2 步实现使用 `current_step`。新版流程包含阶段一循环和不带数字步骤的阶段二节点，因此在实现第 3 步前，需要单独讨论并把恢复锚点演进为：
-
-```text
-phase
-current_node
-step（仅业务步骤节点适用）
-```
-
-目标状态还需要按进入阶段逐步增加：
+第 0～2 步继续使用 `current_step`。第 3 步成功时在状态中同时写入 `phase: project_initialization`、`current_node: project:04_assemble_foundation`、`step: 4` 和兼容字段 `current_step: 4`。阶段一循环和阶段二具名节点所需的完整恢复协议仍在进入对应阶段时增量实现：
 
 - `applicable_repositories` 和各仓库当前事实；
 - 阶段一 `requirement_cycle`，包括根需求分支、开发 session、第 17～19 步提交与合并证据；
@@ -480,16 +476,15 @@ python run_all.py --run-id <run-id> --from-node phase_2:audit
 
 ## 十二、后续实现顺序
 
-1. 保持第 0～2 步已验证行为不变；
-2. 本次先同步新版流程到总体设计、活动 TRD 和项目记忆；
-3. 下一次只讨论新版第 3 步 `foundation-selection` 的 Demo 详细合同；
-4. 合同至少确认输入身份、catalog schema、Agent 调用、固定 JSON、程序校验、步骤结果、失败、阻塞、恢复和当前状态迁移；
-5. 确认后先更新并提交相关设计文档，再实现和真实验证第 3 步；
-6. 第 3 步验收通过后，以相同方式逐步讨论第 4 步，不提前实现第 4～19 步或阶段二空壳；
-7. 每个阶段只根据真实运行发现补充最小公共能力；
-8. 阶段一先完整跑通一个正式需求，再验证至少第二个真实需求；
-9. 阶段二先在完整集成版本上跑通一次审计、分流、入池、修复回归和完整复审；
-10. 最后使用《修迹》产品初稿执行完整端到端运行，并确认源初稿哈希未变化。
+1. 保持第 0～3 步已验证行为不变；
+2. 第 3 步已完成 Pydantic 重写、32 项全量测试、真实 `responses.parse` 选型和真实决策探针验证；
+3. 下一次先讨论第 4 步基础工程组装合同；
+4. 合同确认后先实现代码并通过测试和真实验证，再同步设计文档并提交；
+5. 不提前实现第 5～19 步或阶段二空壳；
+6. 每个阶段只根据真实运行发现补充最小公共能力；
+7. 阶段一先完整跑通一个正式需求，再验证至少第二个真实需求；
+8. 阶段二先在完整集成版本上跑通一次审计、分流、入池、修复回归和完整复审；
+9. 最后使用《修迹》产品初稿执行完整端到端运行，并确认源初稿哈希未变化。
 
 ## 十三、完成标准
 

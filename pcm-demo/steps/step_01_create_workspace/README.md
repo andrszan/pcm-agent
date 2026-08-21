@@ -9,7 +9,7 @@
 需要：
 
 - Python 3.10+、`uv`、`git`；
-- OpenAI-compatible 服务支持 `POST /v1/responses` 和 `text.format` strict JSON Schema；
+- OpenAI-compatible 服务支持 `POST /v1/responses` 以及 Python SDK `responses.parse` 的 Pydantic 结构化输出；
 - 当前用户具备 `PCM_TEMPLATE_REPOSITORY` 的 Git SSH 读取权限；
 - `PCM_WORKSPACE_ROOT` 已存在、可写，且位于当前能力仓库之外；
 - 目标项目目录尚不存在。
@@ -47,7 +47,7 @@ Demo 输入为本地产品初稿路径；正式 PCM 将来可把初稿字符串�
 
 `project_directory_name` 必须是小写 kebab-case。初稿没有明确名称时允许模型生成，并记录来源和理由。
 
-身份提取使用 OpenAI Responses API：`instructions`、`input`、`text.format` strict JSON Schema，结果从 `response.output_text` 读取。当前服务不支持 Responses 或 strict JSON Schema 时返回 `failed`，不会回退 Chat Completions。
+身份提取将产品初稿构造成 Pydantic 输入模型，并使用 OpenAI Python SDK `responses.parse(..., text_format=ProjectIdentity)`；结果直接从 `response.output_parsed` 取得，不手写 JSON Schema 或解析原始 JSON 字符串。
 
 ## 单独运行
 

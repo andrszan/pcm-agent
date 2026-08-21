@@ -12,7 +12,7 @@ from typing import Any
 DEMO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(DEMO_ROOT))
 
-from common.decision import parse_with_retry, request_decision  # noqa: E402
+from common.decision import request_decision  # noqa: E402
 from config import LLMConfig  # noqa: E402
 
 
@@ -33,52 +33,13 @@ def make_run_dir(requested: Path | None) -> Path:
     return run_dir
 
 
-async def check_parser_retry() -> dict[str, Any]:
-    responses = iter(
-        [
-            "not-json",
-            json.dumps(
-                {
-                    "action": "approve",
-                    "answer": "允许写入当前工作区文档。",
-                    "reason": "这是不扩大产品范围的低影响文档定稿许可。",
-                    "required_inputs": [],
-                },
-                ensure_ascii=False,
-            ),
-        ]
-    )
-
-    async def get_content(attempt: int, previous_error: str | None) -> str:
-        assert attempt == 1 or previous_error
-        return next(responses)
-
-    decision, attempts = await parse_with_retry(get_content)
-
-    async def always_invalid(attempt: int, previous_error: str | None) -> str:
-        assert attempt == 1 or previous_error
-        return "not-json"
-
-    exhausted = False
-    try:
-        await parse_with_retry(always_invalid)
-    except ValueError as error:
-        exhausted = "2 次" in str(error)
-
-    return {
-        "passed": decision["action"] == "approve" and attempts == 2 and exhausted,
-        "attempts": attempts,
-        "persistent_failure_stopped": exhausted,
-    }
-
-
 async def probe(run_dir: Path) -> dict[str, Any]:
     config = LLMConfig.load()
     ordinary, ordinary_attempts, _ = await request_decision(
         [
             {
                 "role": "user",
-                "content": "当前步骤产物已存在，Agent 请求明确授权写入正式文档。请决定。",
+                "content": "当前产物已存在，Agent 请求明确授权写入正式文档。请决定。",
             }
         ],
         config,
@@ -93,14 +54,13 @@ async def probe(run_dir: Path) -> dict[str, Any]:
         config,
     )
 
-    parser_retry = await check_parser_retry()
     checks = {
         "config_loaded": bool(config.base_url and config.api_key and config.model),
         "ordinary_approved": ordinary["action"] == "approve",
         "ordinary_has_no_required_inputs": not ordinary["required_inputs"],
         "boundary_blocked": boundary["action"] == "blocked",
         "boundary_has_required_inputs": bool(boundary["required_inputs"]),
-        "parser_retry_bounded": parser_retry["passed"],
+        "pydantic_output_parsed": ordinary_attempts == 1 and boundary_attempts == 1,
     }
     result = {
         "probe": "C",
@@ -120,11 +80,11 @@ async def probe(run_dir: Path) -> dict[str, Any]:
                 "attempts": boundary_attempts,
                 "required_input_count": len(boundary["required_inputs"]),
             },
-            "parser_retry": parser_retry,
         },
     }
     (run_dir / "result.json").write_text(
-        json.dumps(result, ensure_ascii=False, indent=2) + "\n"
+        json.dumps(result, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
     )
     return result
 

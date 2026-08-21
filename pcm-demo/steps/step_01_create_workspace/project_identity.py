@@ -1,92 +1,61 @@
 from __future__ import annotations
 
-import json
-import re
-from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, Literal
 
-from common.openai_responses import request_json_response
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from common.openai_responses import parse_response
 from config import LLMConfig
 
-NAME_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-PROJECT_IDENTITY_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "topic_name": {"type": "string"},
-        "project_directory_name": {"type": "string"},
-        "directory_name_source": {"type": "string", "enum": ["source", "generated"]},
-        "reason": {"type": "string"},
-        "blocked_reason": {"type": ["string", "null"]},
-    },
-    "required": [
-        "topic_name",
-        "project_directory_name",
-        "directory_name_source",
-        "reason",
-        "blocked_reason",
-    ],
-    "additionalProperties": False,
-}
-SYSTEM_PROMPT = """你负责从产品初稿提取建立工作区所需的最小项目身份。
+SYSTEM_PROMPT = """从产品初稿中提取建立项目工作区所需的最小身份信息。
 
-只返回一个 JSON 对象，字段必须为：
-- topic_name：能够明确表达当前产品选题的非空中文或英文字符串
-- project_directory_name：单段小写 kebab-case 文件夹名，只能包含小写字母、数字和连字符
-- directory_name_source：source 或 generated；初稿明确给出仓库名或英文代号时用 source，否则可根据选题生成并用 generated
-- reason：目录名提取或生成的简短依据
-- blocked_reason：如果初稿无法确定明确选题，填写原因；否则必须为 null
+优先使用初稿已经明确给出的仓库名或英文代号。只有初稿没有提供目录名时，才根据产品选题生成单段小写 kebab-case 名称。如果初稿无法确定明确的产品选题，在 blocked_reason 中说明原因。不要扩展无关产品属性。"""
 
-不要扩展产品属性，不要输出 JSON 之外的文字。"""
+
+class ProjectIdentityInput(BaseModel):
+    product_draft: str = Field(min_length=1)
+
+
+class ProjectIdentity(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    topic_name: str = Field(min_length=1)
+    project_directory_name: str = Field(
+        min_length=1,
+        pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$",
+    )
+    directory_name_source: Literal["source", "generated"]
+    reason: str = Field(min_length=1)
+    blocked_reason: str | None
+
+    @field_validator("topic_name", "project_directory_name", "reason")
+    @classmethod
+    def strip_required_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("字段不能为空")
+        return value.strip()
+
+    @field_validator("blocked_reason")
+    @classmethod
+    def strip_blocked_reason(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not value.strip():
+            raise ValueError("blocked_reason 必须是非空字符串或 null")
+        return value.strip()
 
 
 def validate_identity(data: Any) -> dict[str, Any]:
-    if not isinstance(data, dict) or set(data) != set(PROJECT_IDENTITY_SCHEMA["required"]):
-        raise ValueError("项目身份字段不符合约定")
-    if data["blocked_reason"] is not None:
-        if not isinstance(data["blocked_reason"], str) or not data["blocked_reason"].strip():
-            raise ValueError("blocked_reason 必须是非空字符串或 null")
-        return data
-    if not isinstance(data["topic_name"], str) or not data["topic_name"].strip():
-        raise ValueError("topic_name 必须是非空字符串")
-    if not isinstance(data["project_directory_name"], str) or not NAME_PATTERN.fullmatch(
-        data["project_directory_name"]
-    ):
-        raise ValueError("project_directory_name 必须是小写 kebab-case")
-    if data["directory_name_source"] not in {"source", "generated"}:
-        raise ValueError("directory_name_source 不符合约定")
-    if not isinstance(data["reason"], str) or not data["reason"].strip():
-        raise ValueError("reason 必须是非空字符串")
-    return data
-
-
-async def parse_with_retry(
-    get_content: Callable[[int, str | None], Awaitable[str]], *, max_attempts: int = 2
-) -> tuple[dict[str, Any], int]:
-    error: str | None = None
-    for attempt in range(1, max_attempts + 1):
-        content = await get_content(attempt, error)
-        try:
-            return validate_identity(json.loads(content)), attempt
-        except (json.JSONDecodeError, ValueError) as exception:
-            error = f"{type(exception).__name__}: {exception}"
-    raise ValueError(f"项目身份在 {max_attempts} 次内持续无效")
+    return ProjectIdentity.model_validate(data).model_dump()
 
 
 async def extract_project_identity(
     product_draft: str, config: LLMConfig
 ) -> tuple[dict[str, Any], int]:
-    async def get_content(attempt: int, previous_error: str | None) -> str:
-        repair = (
-            ""
-            if previous_error is None
-            else f"\n上一次响应无效：{previous_error}。请严格按 JSON 合同重新回答。"
-        )
-        return await request_json_response(
-            config,
-            instructions=SYSTEM_PROMPT,
-            input_text=product_draft + repair,
-            schema_name="project_identity",
-            schema=PROJECT_IDENTITY_SCHEMA,
-        )
-
-    return await parse_with_retry(get_content)
+    identity = await parse_response(
+        config,
+        system_prompt=SYSTEM_PROMPT,
+        input_model=ProjectIdentityInput(product_draft=product_draft),
+        output_model=ProjectIdentity,
+    )
+    return identity.model_dump(), 1
