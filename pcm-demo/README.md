@@ -9,6 +9,7 @@
 - [第 2 步：项目需求与产品定义](steps/step_02_project_intake/README.md)
 - [第 3 步：基础工程选型](steps/step_03_foundation_selection/README.md)
 - [第 4 步：组装基础工程](steps/step_04_assemble_foundation/README.md)
+- [第 5 步：核验项目准备状态](steps/step_05_project_readiness/README.md)
 
 每个步骤的业务代码、测试和详细运行说明都在对应步骤目录中。根 README 只提供导航。
 

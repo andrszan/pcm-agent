@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     pcm_workspace_root: Path | None = Field(default=None, validation_alias="PCM_WORKSPACE_ROOT")
     pcm_template_catalog: Path | None = Field(default=None, validation_alias="PCM_TEMPLATE_CATALOG")
     pcm_template_repository: str | None = Field(default=None, validation_alias="PCM_TEMPLATE_REPOSITORY")
+    pcm_dev_resource_list: Path | None = Field(default=None, validation_alias="PCM_DEV_RESOURCE_LIST")
 
     model_config = SettingsConfigDict(
         env_file=DEFAULT_ENV_FILE,
@@ -104,3 +105,19 @@ def load_template_repository(env_file: Path | None = None) -> tuple[str, str]:
     if settings.pcm_template_repository is None:
         raise ValueError("缺少配置：PCM_TEMPLATE_REPOSITORY")
     return settings.pcm_template_repository, source
+
+
+def load_dev_resource_list(env_file: Path | None = None) -> tuple[Path, str]:
+    settings = load_settings(env_file)
+    source = "environment" if os.environ.get("PCM_DEV_RESOURCE_LIST") else "env_file"
+    path = settings.pcm_dev_resource_list
+    if path is None:
+        raise ValueError("缺少配置：PCM_DEV_RESOURCE_LIST")
+    if not path.is_absolute():
+        raise ValueError("PCM_DEV_RESOURCE_LIST 必须是绝对路径")
+    if path.is_symlink():
+        raise ValueError("PCM_DEV_RESOURCE_LIST 不能是符号链接")
+    resolved = path.resolve()
+    if not resolved.is_file() or resolved.is_symlink() or not os.access(resolved, os.R_OK):
+        raise ValueError("PCM_DEV_RESOURCE_LIST 必须是可读的普通文件")
+    return resolved, source

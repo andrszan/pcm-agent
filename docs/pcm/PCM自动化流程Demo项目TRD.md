@@ -7,7 +7,7 @@
 > - [`PCM 自动化流程 Demo 项目设计`](./PCM自动化流程Demo项目设计.md)：定义 Demo 的目标、范围、黄金输入和最终完成标准；
 > - [`PCM 程序化调度的 AI Agent 产品开发流程`](../../.claude/PCM版AI%20Agent自动化流程设计.md)：定义第 0～19 步、阶段一、阶段二的流程语义、职责边界和停止条件。
 >
-> 截至 2026-08-22，技术探针以及业务第 0～4 步已经实现并真实验证。第 3 步采用代码内 system prompt、Pydantic 输入输出模型和 OpenAI Python SDK `responses.parse`；第 4 步只消费其选型结果，使用确定性 Git 和文件操作组装基础工程。代码、测试和真实验证完成后，本文同步当前实现事实。
+> 截至 2026-08-22，技术探针以及业务第 0～5 步已经实现并真实验证。第 3 步使用 Pydantic `responses.parse` 完成选型，第 4 步使用确定性 Git 和文件操作组装基础工程，第 5 步显式调用 `project-readiness`，由 Agent 使用可信开发资源补齐本地配置、执行真实核验并形成准备清单。代码、测试和真实验证完成后，本文同步当前实现事实。
 
 ## 一、目标、当前范围与状态
 
@@ -17,7 +17,7 @@ Demo 继续采用增量实施，不一次创建完整流程空壳：
 
 1. **技术阶段 0：能力探针**——已完成。验证 Claude Agent SDK、项目 Skills、权限策略、session 恢复和 AI-compatible 结构化决策在本机真实可用；
 2. **技术阶段 1：最小骨架与第 0～2 步**——业务步骤已实现。打通完整初稿输入、独立产品项目工作区发布和 `project-intake` 产品定义；
-3. **技术阶段 2：第 3～11 步**——第 3、4 步已完成；第 5～11 步待逐步讨论和实现。按新版顺序完成基础工程选型、组装、准备核验、项目化、总体技术方案、仓库首次提交、按需架构与 UI/UX 框架、Backlog；
+3. **技术阶段 2：第 3～11 步**——第 3～5 步已完成；第 6～11 步待逐步讨论和实现。按新版顺序完成基础工程选型、组装、准备核验、项目化、总体技术方案、仓库首次提交、按需架构与 UI/UX 框架、Backlog；
 4. **技术阶段 3：阶段一第 12～19 步**——待逐步讨论和实现。先完整跑通一个正式需求，再验证第二个真实需求及多仓库循环；
 5. **技术阶段 4：阶段二完整审计与最终收口**——待逐步讨论和实现。验证全项目体验审计、候选分流、需求化入池、修复回归、完整复审和最终验收。
 
@@ -27,18 +27,19 @@ Demo 继续采用增量实施，不一次创建完整流程空壳：
 
 当前代码已经实现：
 
-- `run_step.py` 的第 0～4 步单步入口；
+- `run_step.py` 的第 0～5 步单步入口；
 - 第 0 步完整产品初稿无副作用跳过；
 - 第 1 步项目身份提取、固定模板浅克隆、清理、原子发布和零提交根仓库初始化；
 - 第 2 步 `project-intake` 多轮决策、项目 trust 处理、Claude session 和 AI-compatible 决策历史恢复；
 - 第 3 步 Pydantic 输入建模、代码内 system prompt、`responses.parse` 结构化输出和结果保存；
 - 第 4 步选型交接校验、run-owned 临时目录、模板 shallow clone 与来源核验、payload 准备后发布、结果和状态持久化、失败恢复与幂等复用；
+- 第 5 步产品定义/选型/组装交接核验、`project-readiness` session 与决策恢复、可信资源路径输入、被忽略配置、准备清单、预算/turn 上限恢复、成功结果与状态恢复及幂等复用；
 - 公共 OpenAI Responses 封装已经统一为 Pydantic `input_model`、`output_model` 和 `output_parsed`；
 - 各步骤目录内的测试和说明。
 
 当前尚未实现：
 
-- 第 5 步及以后任何新版步骤；
+- 第 6 步及以后任何新版步骤；
 - `run_all.py` 完整串联入口；
 - 阶段一循环和阶段二具名节点所需的完整状态协议；
 - `applicable_repositories`、阶段一需求循环状态和阶段二状态。
@@ -49,11 +50,12 @@ Demo 继续采用增量实施，不一次创建完整流程空壳：
 
 本轮按照“先代码、测试和真实验证，再同步文档”的顺序完成：
 
-- 保持第 3 步 Pydantic `responses.parse` 选型实现；
-- 新增第 4 步局部模块、README 和 `unittest`，不新增依赖、缓存、Manifest、目录树指纹或多阶段事务状态机；
-- 将 `run_step.py` 扩展为第 0～4 步同步单步入口；
-- 运行第 4 步专属 12 项测试、全量 44 项测试、AST/`compileall` 与 `git diff --check`；
-- 使用修迹 run 完成真实 GitLab SSH 模板组装与幂等复用，并同步本文和上位设计。
+- 保持第 3、4 步既有实现不变；
+- 新增第 5 步局部模块、README 和 `unittest`，不新增依赖、资源解析器、准备清单 schema 或通用步骤框架；
+- 将 `run_step.py` 扩展为第 0～5 步单步入口；
+- 新增 `PCM_DEV_RESOURCE_LIST`，只校验绝对路径、普通文件和可读性，不读取或持久化资源内容；
+- 运行第 5 步专属 12 项测试、全量 56 项测试、`compileall` 与 `git diff --check`；
+- 使用修迹 run 恢复同一 Claude session，真实完成 PostgreSQL、MinIO、前后端本地配置和准备清单核验，并同步本文和上位设计。
 
 ### 4. 本阶段继续不做
 
@@ -154,7 +156,7 @@ SDK session 保存 Agent 对话、工具调用和结果；工作区文件与 Git
 
 ### 1. 命令行入口
 
-- `run_step.py`：当前运行已经实现的第 0～4 步；实际命令和配置说明以 `pcm-demo/README.md` 及各步骤 README 为准；
+- `run_step.py`：当前运行已经实现的第 0～5 步；实际命令和配置说明以 `pcm-demo/README.md` 及各步骤 README 为准；
 - `run_all.py`：尚未实现；需要串联已实现步骤和节点时再建立；
 - 未实现步骤必须明确返回“步骤尚未实现”的程序错误，不得返回业务 `success`；
 - 单步、区间、完整运行和恢复最终必须复用相同步骤或节点函数；
@@ -177,7 +179,8 @@ pcm-demo/
 │   ├── step_01_create_workspace/
 │   ├── step_02_project_intake/
 │   ├── step_03_foundation_selection/
-│   └── step_04_assemble_foundation/
+│   ├── step_04_assemble_foundation/
+│   └── step_05_project_readiness/
 └── run_step.py
 ```
 
@@ -204,7 +207,7 @@ pcm-demo/
 - `blocked`：缺少模型和当前环境无法取得的不可替代外部资源；
 - `failed`：程序、SDK、模型、命令、解析、文件、Git、验证或状态发生错误。
 
-第 0～4 步结果继续使用统一的步骤字段；`phase/current_node` 作为运行状态中的恢复位置保存，不重复写入每个步骤结果：
+第 0～5 步结果继续使用统一的步骤字段；`phase/current_node` 作为运行状态中的恢复位置保存，不重复写入每个步骤结果：
 
 ```json
 {
@@ -424,8 +427,9 @@ Claude Agent SDK 与 AI-compatible 决策模型使用不同的历史机制：
 - 第一次收到 init 或最终 ResultMessage 时更新 session ID；阻塞、turn 上限或预算上限发生时仍保存已取得的 session ID；
 - 恢复时重新读取 `state.json`、原工作区和当前节点，再通过 `resume=<session-id>` 继续；恢复后的第一项任务是重新核验相关文件和 Git 事实；
 - session 文件缺失或无法恢复时，不静默新建会话冒充恢复成功，当前节点返回 `failed`；
-- AI-compatible 接口不依赖服务端 conversation 或 response ID；PCM 按领域键把完整、脱敏的编排消息历史原子写入 `runs/<run-id>/conversations/<key>.json`，每次调用携带该历史；
-- 历史至少保留初始 Agent 指令、每轮 Agent 结果、决策模型收到的当前事实、完整结构化决策、转发给 Agent 的指令和完成标记；
+- AI-compatible 接口不依赖服务端 conversation 或 response ID；PCM 默认按领域键把完整、脱敏的编排消息历史原子写入 `runs/<run-id>/conversations/<key>.json`，每次调用携带该历史；
+- 普通语义决策历史至少保留初始 Agent 指令、每轮 Agent 结果、决策模型收到的当前事实、完整结构化决策、转发给 Agent 的指令和完成标记；
+- 当步骤直接向 Agent 提供可信真实凭据，且决策模型只需判断继续、批准或阻塞时，可以在该步合同中采用秘密最小化历史：原始 Agent 文本和决策自由文本只用于当轮调用，不持久化；历史只保存初始任务、终止语义、清单存在性、action 和固定恢复意图，具体领域上下文由原 Claude session 与当前工作区事实保留。第 5 步采用该例外；
 - 不同步骤、不同正式需求和不同阶段二审计轮使用独立领域键，避免上下文污染；
 - `state.json` 只保存历史文件引用、当前轮次和恢复所需事实，不复制完整消息；
 - 完整编排历史只保存当前流程所需的脱敏内容，不保存密钥、完整环境变量或无关工具日志；首轮不建设数据库、向量记忆或摘要系统。
@@ -480,7 +484,7 @@ AI-compatible 模型可以决定所有能够基于当前输入、项目事实、
 
 第 2 步的权威输入仅包括第 1 步发布的产品初稿、项目规则与配置、当前 `project-intake` 对话和该 Skill 已生成的产品定义产物；工作区中的技术方案、Backlog、TRD、代码和其它无关文档不作为本步骤决策输入，其存在也不构成阻塞。
 
-PCM 在请求前读取该领域完整编排历史，追加当前 `user` 决策上下文；收到结构化响应后，将完整原始 JSON 作为 `assistant` 消息原子保存，并把其中的 `answer` 作为下一条用户指令发送给原 Claude session。不得只保存最后一个 `action`，也不得丢失初始任务和 Agent 当前问题。
+PCM 在请求前读取该领域已持久化的脱敏编排历史，追加当前 `user` 决策上下文；普通步骤保存完整结构化决定并把 `answer` 作为下一条用户指令发送给原 Claude session。采用秘密最小化历史的步骤只持久化已确认的安全字段和固定恢复意图，原始 Agent/决策自由文本不落盘，恢复依赖原 Claude session 和重新读取的当前工作区事实。
 
 不发送密钥、完整 `.env`、无关仓库内容或可由程序直接判断的原始大段日志。
 
@@ -639,11 +643,35 @@ PCM 在请求前读取该领域完整编排历史，追加当前 `user` 决策�
 
 当前状态：第 4 步专属 12 项测试和第 0～4 步全量 44 项测试通过，Python 语法检查、`compileall` 和 `git diff --check` 通过。修迹 run 使用 GitLab SSH 成功组装前端 `vite-react-shadcn-spa`（`main` SHA `a31db6deb85ab29f2d2253413dd362293a96325f`）和后端 `fastapi-sqlalchemy-postgresql-async-api`（`main` SHA `49ff842fcd330387f2fbdd1e9a43884e05894697`），均与远端 `main` 一致；最终目录无嵌套 `.git` 和临时目录，根仓库仍是零提交 `main`，黄金初稿哈希未变化。首次错误 HTTPS 来源运行返回 `failed` 且未修改目标；修正为 SSH 后同 run 依据 marker 安全恢复成功，再次运行幂等复用。
 
-### 第 5～11 步：项目初始化与项目级设计
+### 第 5 步：核验项目准备状态
+
+执行方式：在产品项目根通过 Claude Agent SDK 显式调用 `project-readiness`；Python 只负责交接、session、决策循环、产物与状态，不解析开发资源或准备清单条目。
+
+实现合同：
+
+- 状态必须位于 `project:05_verify_readiness`；重新核验根 Git，并读取成功的 `steps/02.json`、`steps/03.json` 和 `steps/04.json`。第 2 步的两个输出必须是工作区内非空普通文件；第 3 步使用 `FoundationSelectionResult` 校验；第 4 步复用既有来源、目标和临时目录核验；
+- `PCM_DEV_RESOURCE_LIST` 必须是可读、非符号链接普通文件的绝对路径。Python 不读取内容、不复制到 state、日志或步骤结果，只把路径作为可信开发资源引用交给 Agent；
+- 初始 prompt 显式调用 `/project-readiness`，引用第 2 步实际产品定义、适用组装工程、完整模板选择和资源清单路径；两份产品定义是当前产品范围权威来源；
+- 调用方已授权直接创建或更新 `docs/requirements/项目准备清单.md`。Agent 可以原样读取可信资源、创建项目专用开发/测试数据库和桶、写入被 Git 忽略的实际 `.env` 并使用工具验证；不得泄露秘密或执行 Git 暂存、提交、分支、合并、push；
+- 本步骤只判断进入基础工程项目化前的外部资源、访问条件和本地配置。依赖安装、构建、测试、启动、最小联调、独立 Git 初始化、业务实现和完整验收属于后续工作，不作为当前准备阻塞；
+- 每轮从 init 核验实际 cwd、`project-readiness` Skill 和 slash command；保存 session、Agent 终止语义、固定恢复提示和秘密最小化决策历史。Agent 原始文本与决策自由文本只临时提供给本轮调用，不持久化；
+- 单次 Agent 上限为 24 turns、`$8`，最多 6 轮决策。`error_max_turns` 和 `error_max_budget_usd` 必须有 session 并恢复原会话；只有 Agent 正常 `success`、决策 `approve` 且准备清单是工作区内非空普通文件时才成功；
+- `blocked` 只来自决策模型确认的不可替代外部资源缺失；其它输入、路径、状态、SDK、Skill、session、文件或决策错误为 `failed`；
+- 成功先写 `steps/05.json`，再推进到 `project:06_bootstrap_foundation`。若结果已成功而下一节点状态写入中断，重跑从成功结果恢复推进；成功现场完整时幂等复用而不再调用 Agent。
+
+输出：
+
+- `docs/requirements/项目准备清单.md`；
+- `state.json` 中的 `claude_sessions.project_readiness`；
+- `runs/<run-id>/conversations/project_readiness.json`；
+- `steps/05.json`。
+
+当前状态：第 5 步专属 12 项和第 0～5 步全量 56 项测试通过，`compileall` 与 `git diff --check` 通过。修迹真实运行首次达到旧 `$4`/12 turns 上限后停留原 session；调整到 `$8`/24 turns 并恢复后，Agent 创建并验证 PostgreSQL 项目角色、开发库和测试库，验证 JSONB 读写，创建并验证 MinIO 开发桶和测试桶，生成权限为 `600` 且被 Git 忽略的 `backend/.env` 与 `frontend/.env.local`，更新准备清单并确认当前开发无阻塞。最终 Agent `subtype: success`、session ID 保持一致，状态推进到第 6 步，重复执行幂等复用；决策历史未保存 Agent 原始文本，也未包含资源清单中的密码、secret 或 API Key 值。
+
+### 第 6～11 步：项目初始化与项目级设计
 
 | 步骤 | 能力或执行方式 | 输入重点 | 输出与完成边界 |
 | --- | --- | --- | --- |
-| 5 核验项目准备状态 | `project-readiness` | 产品定义、选型、已组装工程、当前资源 | 当前开发必需项均为 `ready` 或 `not-applicable`；可生成配置在本步补齐 |
 | 6 项目化基础工程 | `project-bootstrap` | 基础工程、产品定义、选型、准备清单 | 项目身份、基础配置、文档、最小联调完成；适用安装、构建、测试和启动通过 |
 | 7 总体技术方案 | `solution-design` | 产品定义、已组装并项目化的工程事实、开发约束、选型 | 总体技术方案与当前工程一致，不重新选型或组装 |
 | 8 初始化并提交适用仓库 | 显式 Git 脚本、`commit-changes` | 第 1 步零提交根仓库、完成项目化的适用工程 | 根仓库和适用交付单元各有首次本地提交，形成 `applicable_repositories` |
@@ -741,7 +769,7 @@ PCM 在请求前读取该领域完整编排历史，追加当前 `user` 决策�
 
 ### 1. 当前状态事实
 
-当前第 0～4 步已经同时使用 `current_step` 和必要的 `phase/current_node`；第 1 步保存 `root_repository`、`checks` 和发布阶段，第 2 步保存 `claude_sessions` 与 `decision_conversations`，第 3、4 步分别保存选型交接与组装来源证据，能够支持现有单步运行、失败恢复和成功幂等复用。
+当前第 0～5 步已经同时使用 `current_step` 和必要的 `phase/current_node`；第 1 步保存 `root_repository`、`checks` 和发布阶段，第 2 步保存 `claude_sessions` 与 `decision_conversations`，第 3、4 步分别保存选型交接与组装来源证据，第 5 步保存 `project_readiness` session、最小脱敏决策历史和准备清单引用，能够支持现有单步运行、预算/turn 上限恢复、成功写入中断恢复和幂等复用。
 
 新版流程增加：
 
@@ -772,6 +800,17 @@ PCM 在请求前读取该领域完整编排历史，追加当前 `user` 决策�
   "current_node": "project:05_verify_readiness",
   "step": 5,
   "current_step": 5
+}
+```
+
+第 5 步成功后已经推进到：
+
+```json
+{
+  "phase": "project_initialization",
+  "current_node": "project:06_bootstrap_foundation",
+  "step": 6,
+  "current_step": 6
 }
 ```
 
@@ -827,20 +866,21 @@ PCM 在请求前读取该领域完整编排历史，追加当前 `user` 决策�
 
 ### 3. 恢复与幂等规则
 
-1. 每个节点开始前保存 `phase/current_node` 和已核验输入；成功后原子保存输出、事实证据和下一节点；
+1. 每个节点开始前保存 `phase/current_node` 和已核验输入；成功时先写当前步骤结果，再推进下一节点状态；
 2. `--resume <run-id>` 只重跑当前节点，先重新核验文件、分支、提交、工作树、版本指纹和外部条件；
 3. 已有 Claude session 时优先恢复；session 不可恢复时返回 `failed`，不静默新建；
-4. 第 17 步状态同步提交是第 18、19 步恢复锚点；
-5. 第 18 步只接受 `no_change` 或 `committed`，且只允许根仓库 `.claude/rules/` 变更；
-6. 第 19 步以根 `main` 合并提交和所有适用仓库检查作为完成证据；
-7. 阶段二每轮审计记录 `version_fingerprint` 和独立 session；相同清楚指纹恢复既有审计，不重复制造候选；
-8. 候选分流和入池保存稳定证据；已入池候选不得重复分配 ID；
-9. 阶段二修复需求临时使用 `phase_2_requirement_remediation` 和 `requirement_cycle`，并设置 `return_node_after_completion: phase_2:regress_and_reaudit`；
-10. 每一步实际输入从前一步结果读取并核验，不从固定路径猜测；
-11. 第 1 步继续使用现有发布阶段事实安全恢复；
-12. 路径、目录、分支、提交、合并、版本指纹、候选归属或入池证据冲突时保留现场并返回 `failed`。
+4. 第 5 步若 `steps/05.json` 已成功而状态仍停留第 5 步，核验清单和 Agent 成功事实后恢复推进到第 6 步；预算或 turn 上限恢复同一 session，成功现场完整时不再次调用 Agent；
+5. 第 17 步状态同步提交是第 18、19 步恢复锚点；
+6. 第 18 步只接受 `no_change` 或 `committed`，且只允许根仓库 `.claude/rules/` 变更；
+7. 第 19 步以根 `main` 合并提交和所有适用仓库检查作为完成证据；
+8. 阶段二每轮审计记录 `version_fingerprint` 和独立 session；相同清楚指纹恢复既有审计，不重复制造候选；
+9. 候选分流和入池保存稳定证据；已入池候选不得重复分配 ID；
+10. 阶段二修复需求临时使用 `phase_2_requirement_remediation` 和 `requirement_cycle`，并设置 `return_node_after_completion: phase_2:regress_and_reaudit`；
+11. 每一步实际输入从前一步结果读取并核验，不从固定路径猜测；
+12. 第 1 步继续使用现有发布阶段事实安全恢复；
+13. 路径、目录、分支、提交、合并、版本指纹、候选归属或入池证据冲突时保留现场并返回 `failed`。
 
-第 3 步已经完成 `current_step` 到 `phase/current_node` 的兼容推进；第 4 步真实验证了同一 run 在失败后停留 `project:04_assemble_foundation`，修正外部来源后安全恢复并推进到 `project:05_verify_readiness`。既有本地 run 的目录名与 state `run_id` 不一致时不新增无关限制，临时目录归属仍以 state 中的 run ID、产品路径和 marker 核验。
+第 3 步已经完成 `current_step` 到 `phase/current_node` 的兼容推进；第 4 步真实验证了组装失败现场恢复并推进到 `project:05_verify_readiness`；第 5 步真实验证了预算上限后恢复原 session、成功结果与下一节点状态恢复以及成功幂等复用，并推进到 `project:06_bootstrap_foundation`。既有本地 run 的目录名与 state `run_id` 不一致时不新增无关限制，临时目录归属仍以 state 中的 run ID、产品路径和 marker 核验。
 
 ## 十、测试与验证策略
 
@@ -850,7 +890,7 @@ PCM 在请求前读取该领域完整编排历史，追加当前 `user` 决策�
 
 - 配置和敏感信息不泄露；
 - JSON、Markdown、状态和 SHA-256 读写；
-- 第 0～4 步状态转换；
+- 第 0～5 步状态转换；
 - Agent SDK 初始化消息与 ResultMessage 解析；
 - 探针权限拒绝；
 - Claude session ID 和 AI-compatible 决策历史分别保存与恢复；
@@ -860,13 +900,15 @@ PCM 在请求前读取该领域完整编排历史，追加当前 `user` 决策�
 - 第 2 步目标 Skill、plugins、trust、输入边界、决策循环、产物和恢复；
 - 第 3 步 Pydantic 输入输出、`responses.parse` 调用参数、结构化结果直接保存、脱敏失败、真实 API 选型和成功结果复用；
 - 第 4 步严格占位保护、run-owned marker、唯一仓库浅 clone、来源 SHA、路径与符号链接边界、payload 后发布、`null` 端、失败现场保留、安全重试、部分发布拒绝覆盖、成功幂等复用和普通 Git 错误脱敏；
-- 第 4 步专属 12 项与第 0～4 步全量 44 项测试、真实 GitLab SSH 组装、远端 `main` SHA 比对、无嵌套 `.git`、临时目录清理、零提交根仓库和黄金初稿哈希不变。
+- 第 4 步专属 12 项与真实 GitLab SSH 组装、远端 `main` SHA 比对、无嵌套 `.git`、临时目录清理、零提交根仓库和黄金初稿哈希不变；
+- 第 5 步可信资源绝对路径、产品定义/选型/组装交接、Skill 与 cwd、session 一致性、预算/turn 上限恢复、清单路径与符号链接边界、决策历史不保存 Agent 原文、成功写入中断恢复、CLI 损坏状态、blocked/failed 和幂等复用；
+- 第 5 步专属 12 项与第 0～5 步全量 56 项测试、真实 PostgreSQL 项目角色和开发/测试库、JSONB 读写、MinIO 开发/测试桶、被忽略的前后端配置、同 session 恢复和准备清单无阻塞结论。
 
 ### 2. 后续增量风险
 
 进入对应步骤后再增加最小真实验证：
 
-- 第 5～8 步：准备清单、安装/构建/测试/启动、最小联调、仓库初始化和首次提交；
+- 第 6～8 步：安装/构建/测试/启动、最小联调、仓库初始化和首次提交；
 - 第 9～11 步：按需判定、项目级文档、Backlog 完整覆盖和提交；
 - 第 12～19 步：多仓库分支、提交、合并、开发 session、规则复盘、状态同步和恢复；
 - 阶段二：真实完整运行、主要任务覆盖、独立审计 session、版本指纹、候选去重、入池幂等、原发现回归和完整复审。
@@ -922,6 +964,7 @@ LLM_MODEL=
 PCM_WORKSPACE_ROOT=
 PCM_TEMPLATE_CATALOG=
 PCM_TEMPLATE_REPOSITORY=
+PCM_DEV_RESOURCE_LIST=
 ```
 
 配置职责：
@@ -930,6 +973,7 @@ PCM_TEMPLATE_REPOSITORY=
 - `PCM_WORKSPACE_ROOT` 是独立产品项目父目录；
 - `PCM_TEMPLATE_REPOSITORY` 只用于第 1 步开发管理模板；
 - `PCM_TEMPLATE_CATALOG` 只用于第 3 步基础工程候选；
+- `PCM_DEV_RESOURCE_LIST` 只用于第 5 步可信开发资源清单，必须是可读普通文件的绝对路径；Python 不读取资源内容，Agent 可按项目规则原样使用；
 - Claude Agent SDK 模型与认证继续使用 SDK/Claude Code 的环境或既有登录态，不另设 `CLAUDE_MODEL`。
 
 优先级：
@@ -937,6 +981,7 @@ PCM_TEMPLATE_REPOSITORY=
 - `--workspace-root` 可覆盖 `PCM_WORKSPACE_ROOT`；
 - 第 3 步未来的 `--catalog-path` 可覆盖 `PCM_TEMPLATE_CATALOG`；
 - 两者优先级均为 CLI、进程环境、`pcm-demo/.env`；
+- `PCM_DEV_RESOURCE_LIST` 由进程环境或 `pcm-demo/.env` 提供，不设置单次 CLI 覆盖；
 - `PCM_TEMPLATE_REPOSITORY` 单次运行不可覆盖。
 
 实际 `.env` 必须 Git 忽略；`.env.example` 只保存键、公开默认值和安全占位说明。
@@ -955,7 +1000,7 @@ PCM_TEMPLATE_REPOSITORY=
 
 1. Agent SDK、捆绑 Claude Code 或模型版本变化时，需重新记录并复核相关探针；
 2. `/project-intake` 已验证，其它目标 Skill 的实际调用名、参数、plugin namespace 和 init 发现结果需逐步验证；
-3. `run_all.py` 在何时建立，以及第 0～4 步现有入口如何与新节点协议复用；
+3. `run_all.py` 在何时建立，以及第 0～5 步现有入口如何与新节点协议复用；
 4. 第 8 步如何从实际交付单元形成 `applicable_repositories`，以及根仓库忽略规则和各仓首次提交合同；
 5. 第 9、10 步按需判定如何基于真实工程事实实现，而不机械生成文档；
 6. 阶段一受影响仓库识别、分支命名、合并顺序、主分支最终验证和第 17～19 步幂等锚点；
@@ -963,4 +1008,4 @@ PCM_TEMPLATE_REPOSITORY=
 8. 阶段二审计结果、候选分流、入池和原发现回归证据的最小持久化格式；
 9. 相同 `version_fingerprint` 的恢复、不同指纹的完整复审以及避免无穷循环的确定性边界。
 
-这些未决事项不影响已完成第 0～4 步。每个新步骤先对照原手稿、当前流程设计和活动 TRD 与开发者确认详细合同；确认后先实现代码并通过测试和真实验证，再将实际实现同步到设计文档并提交。该协作要求不改变 PCM 运行时由 AI-compatible 模型完成可决策事项、仅因不可替代外部资源而阻塞的自动化原则。
+这些未决事项不影响已完成第 0～5 步。每个新步骤先对照原手稿、当前流程设计和活动 TRD 与开发者确认详细合同；确认后先实现代码并通过测试和真实验证，再将实际实现同步到设计文档并提交。该协作要求不改变 PCM 运行时由 AI-compatible 模型完成可决策事项、仅因不可替代外部资源而阻塞的自动化原则。
