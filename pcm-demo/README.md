@@ -11,6 +11,7 @@
 - [第 4 步：组装基础工程](steps/step_04_assemble_foundation/README.md)
 - [第 5 步：核验项目准备状态](steps/step_05_project_readiness/README.md)
 - [第 6 步：项目化基础工程](steps/step_06_project_bootstrap/README.md)
+- [第 7 步：总体技术方案](steps/step_07_solution_design/README.md)
 
 每个步骤的业务代码、测试和详细运行说明都在对应步骤目录中。根 README 只提供导航。
 
