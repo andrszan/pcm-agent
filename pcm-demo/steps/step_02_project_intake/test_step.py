@@ -18,7 +18,6 @@ from steps.step_01_create_workspace import initialize_root_repository
 from steps.step_02_project_intake.step import (
     OUTPUTS,
     ProjectIntakeBlocked,
-    decision_context,
     decision_prompt,
     run,
 )
@@ -128,19 +127,6 @@ class ProjectIntakeTests(unittest.TestCase):
             self.assertEqual(outcome["status"], "success")
             self.assertIn("确认既有成功", outcome["summary"])
 
-        with tempfile.TemporaryDirectory() as directory:
-            run_dir, workspace, _ = self.make_run(Path(directory))
-            (workspace / "docs/技术方案.md").write_text("不应读取的唯一标记", encoding="utf-8")
-            context = decision_context(
-                workspace,
-                workspace / "docs/产品初稿.md",
-                "Agent 结果",
-                None,
-            )
-            self.assertNotIn("不应读取的唯一标记", context)
-            self.assertIn("产品初稿", context)
-            self.assertTrue(run_dir.is_dir())
-
     def test_approve_is_explicit_developer_authorization(self) -> None:
         prompt = decision_prompt(
             {"action": "approve", "answer": "批准", "reason": "足够", "required_inputs": []}
@@ -155,7 +141,9 @@ class ProjectIntakeTests(unittest.TestCase):
             async def fake_agent(prompt: str, **kwargs):
                 calls.append({"prompt": prompt, **kwargs})
                 update = kwargs["on_update"]
-                current = agent_result(session="session-1")
+                current = agent_result(
+                    session="session-1", text=f"Agent 第 {len(calls)} 轮回答"
+                )
                 update(current)
                 if len(calls) == 2:
                     for relative in OUTPUTS:
@@ -205,9 +193,14 @@ class ProjectIntakeTests(unittest.TestCase):
             self.assertTrue(
                 history["messages"][1]["content"].startswith("/project-intake")
             )
-            self.assertEqual(history["messages"][4]["content"], "需要确认")
+            self.assertEqual(history["messages"][2]["content"], "Agent 第 1 轮回答")
             self.assertIn('"action": "approve"', history["messages"][3]["content"])
             self.assertNotIn("发送给 Claude Agent SDK 的指令", history["messages"][3]["content"])
+            self.assertEqual(history["messages"][4]["content"], "Agent 第 2 轮回答")
+            self.assertNotIn(
+                "allowed_inputs",
+                json.dumps(history["messages"], ensure_ascii=False),
+            )
             self.assertIn("已完成 project-intake", history["messages"][5]["content"])
 
     def test_budget_result_continues_with_same_session(self) -> None:

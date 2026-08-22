@@ -228,35 +228,6 @@ def append_completion(
     save_conversation(run_dir, state, messages)
 
 
-def decision_context(
-    workspace: Path,
-    draft: Path,
-    agent_text: str,
-    outputs: dict[str, str] | None,
-) -> str:
-    allowed = {
-        "docs/产品初稿.md": draft.read_text(encoding="utf-8"),
-        "CLAUDE.md": (workspace / "CLAUDE.md").read_text(encoding="utf-8"),
-        "AGENTS.md": (workspace / "AGENTS.md").read_text(encoding="utf-8"),
-        ".claude/settings.json": (workspace / ".claude/settings.json").read_text(
-            encoding="utf-8"
-        ),
-    }
-    if outputs:
-        allowed.update(outputs)
-    return json.dumps(
-        {
-            "step": STEP,
-            "name": NAME,
-            "completion": "project-intake 正常结束且两份默认产物真实存在并可读",
-            "allowed_inputs": allowed,
-            "agent_result": agent_text,
-            "outputs_present": outputs is not None,
-        },
-        ensure_ascii=False,
-    )
-
-
 def initial_prompt(draft: Path, workspace: Path) -> str:
     return f"/project-intake @./{draft.relative_to(workspace).as_posix()}"
 
@@ -363,7 +334,7 @@ async def run(
         messages.append(
             {
                 "role": "user",
-                "content": decision_context(workspace, draft, run_result.text, outputs),
+                "content": run_result.text,
             }
         )
         decision, _, raw = await decision_runner(messages, LLMConfig.load())

@@ -328,7 +328,7 @@ PCM Demo 只保存支持继续运行所必需的状态：
 - 执行动作：
   1. 在项目工作区中通过 Claude Agent SDK 显式调用 `project-intake`；
   2. 不在步骤代码中重复设置 `permission_mode`、`tools`、`allowed_tools` 或 `disallowed_tools`，由项目 `.claude/settings.json` 及 Claude Code 默认设置加载语义统一决定权限和工具行为；
-  3. Agent 提出问题、确认或取舍时，PCM 把当前问题和最小必要事实交给 AI-compatible 决策模型；决策模型处理所有能基于当前输入、工作区、工具和资源完成的决定，并把结果作为原人工调度者的等效授权返回原 Agent session，包括满足 Skill 对“开发者明确同意”的确认要求；
+  3. Agent 提出问题、确认或取舍时，PCM 将 Claude Agent SDK 返回的本轮完整回答原样作为决策历史中的 `user` 内容交给 AI-compatible 决策模型，不再拼接步骤元数据、完成条件、项目文件全文、产物状态或其它程序内部上下文；只有当前回答未包含且决策确实依赖的流程外事实，才补充该项最小必要事实。决策模型处理所有能基于当前输入、工作区、工具和资源完成的决定，并把结果作为原人工调度者的等效授权返回原 Agent session，包括满足 Skill 对“开发者明确同意”的确认要求；
   4. 持续对话直至 Skill 完成产品定义产物，或因不可替代外部资源缺失而阻塞；
   5. 程序核验 Skill 规定的输出文件真实存在且可读。
 - 输出：`project-intake` 生成的项目需求说明和产品功能说明，明确最终产品范围、非目标、用户语言、首次成功结果、复杂度取舍和需要尽早验证的高风险假设；同时保存 Claude Agent session ID、完整编排历史及步骤结果。
