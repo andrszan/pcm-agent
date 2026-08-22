@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import sys
 import tempfile
@@ -12,20 +13,26 @@ DEMO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(DEMO_ROOT))
 
 from common.claude_agent import ClaudeRunResult
+from common.decision import AgentDecision
 from common.files import sha256, write_json
 from common.state import read_state, write_state
 from steps.step_01_create_workspace import initialize_root_repository
 from steps.step_02_project_intake.step import (
     OUTPUTS,
+    PROJECT_INTAKE_DECISION_SYSTEM_PROMPT,
     ProjectIntakeBlocked,
-    decision_prompt,
+    initial_prompt,
     run,
 )
 
 
-def agent_result(*, session: str = "session-1", text: str = "需要确认") -> ClaudeRunResult:
+def agent_result(*, cwd: Path, session: str = "session-1", text: str = "需要确认") -> ClaudeRunResult:
     return ClaudeRunResult(
-        init={"skills": ["project-intake"], "slash_commands": ["project-intake"]},
+        init={
+            "cwd": str(cwd),
+            "skills": ["project-intake"],
+            "slash_commands": ["project-intake"],
+        },
         text=text,
         result_subtype="success",
         is_error=False,
@@ -34,6 +41,21 @@ def agent_result(*, session: str = "session-1", text: str = "需要确认") -> C
         num_turns=1,
         total_cost_usd=0.1,
         exception=None,
+    )
+
+
+def decision(
+    verdict: str,
+    *,
+    answer: str = "",
+    reason: str = "已核验",
+    required_inputs: list[str] | None = None,
+) -> AgentDecision:
+    return AgentDecision(
+        verdict=verdict,
+        answer=answer,
+        reason=reason,
+        required_inputs=required_inputs or [],
     )
 
 
@@ -96,191 +118,108 @@ class ProjectIntakeTests(unittest.TestCase):
         write_state(run_dir, state)
         return run_dir, workspace, state
 
-    def test_agent_does_not_override_config_dir(self) -> None:
-        from common.claude_agent import filtered_env
+    def write_outputs(self, workspace: Path) -> None:
+        for relative in OUTPUTS:
+            path = workspace / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("# 完成\n", encoding="utf-8")
 
-        with patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": "/custom"}, clear=False):
-            env = filtered_env()
-        self.assertNotIn("CLAUDE_CONFIG_DIR", env)
+    def test_initial_prompt_describes_only_authority_outputs_and_boundary(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            _, workspace, _ = self.make_run(Path(directory))
+            prompt = initial_prompt(workspace / "docs/产品初稿.md", workspace)
 
+        self.assertEqual(prompt.splitlines()[0], "/project-intake @./docs/产品初稿.md")
+        self.assertIn("产品初稿为当前产品定义的权威输入", prompt)
+        for output in OUTPUTS:
+            self.assertIn(output.as_posix(), prompt)
+        self.assertIn("只处理产品定义文档", prompt)
+        for forbidden in ("第 2 步", "第2步", "PCM", "节点", "阶段", "调用 Skill"):
+            self.assertNotIn(forbidden, prompt)
+            self.assertNotIn(forbidden, PROJECT_INTAKE_DECISION_SYSTEM_PROMPT)
+
+    def test_completed_then_repair_then_completed_uses_same_session_and_raw_reply(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))
-            for relative in OUTPUTS:
-                path = workspace / relative
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text("# 完成\n", encoding="utf-8")
-            state.update(
-                {
-                    "status": "success",
-                    "claude_sessions": {"project_intake": "session-1"},
-                    "project_intake": {
-                        "last_agent_result": {"subtype": "success", "is_error": False}
-                    },
-                }
-            )
-            write_state(run_dir, state)
+            calls: list[dict[str, object]] = []
+            decision_inputs: list[list[dict[str, str]]] = []
 
-            async def unexpected_agent(*args, **kwargs):
-                raise AssertionError("既有成功不应再次调用 Agent")
-
-            outcome = asyncio.run(run(run_dir, state, agent_runner=unexpected_agent))
-            self.assertEqual(outcome["status"], "success")
-            self.assertIn("确认既有成功", outcome["summary"])
-
-    def test_approve_is_explicit_developer_authorization(self) -> None:
-        prompt = decision_prompt(
-            {"action": "approve", "answer": "批准", "reason": "足够", "required_inputs": []}
-        )
-        self.assertEqual(prompt, "批准")
-
-    def test_missing_outputs_runs_decision_then_resumes(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            run_dir, workspace, state = self.make_run(Path(directory))
-            calls: list[dict] = []
-
-            async def fake_agent(prompt: str, **kwargs):
+            async def fake_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
                 calls.append({"prompt": prompt, **kwargs})
-                update = kwargs["on_update"]
-                current = agent_result(
-                    session="session-1", text=f"Agent 第 {len(calls)} 轮回答"
-                )
-                update(current)
                 if len(calls) == 2:
-                    for relative in OUTPUTS:
-                        path = workspace / relative
-                        path.parent.mkdir(parents=True, exist_ok=True)
-                        path.write_text("# 完成\n", encoding="utf-8")
+                    self.write_outputs(workspace)
+                current = agent_result(
+                    cwd=workspace,
+                    text=f"完整 Agent 原文 {len(calls)}",
+                )
+                kwargs["on_update"](current)  # type: ignore[index, operator]
                 return current
 
-            async def fake_decision(messages, config):
-                return (
-                    {"action": "approve", "answer": "批准", "reason": "输入足够", "required_inputs": []},
-                    1,
-                    json.dumps(
-                        {"action": "approve", "answer": "批准", "reason": "输入足够", "required_inputs": []},
-                        ensure_ascii=False,
-                    ),
-                )
+            outcomes = iter(
+                [
+                    decision("completed", reason="文档已经完成"),
+                    decision("completed", reason="修复后的文档已完成"),
+                ]
+            )
 
-            with patch("steps.step_02_project_intake.step.LLMConfig.load", return_value=object()):
+            async def fake_decision(
+                messages: list[dict[str, str]],
+                config: object,
+                *,
+                system_prompt: str,
+            ) -> tuple[dict[str, object], int, str]:
+                self.assertEqual(system_prompt, PROJECT_INTAKE_DECISION_SYSTEM_PROMPT)
+                decision_inputs.append(copy.deepcopy(messages))
+                current = next(outcomes)
+                return current.model_dump(), 1, current.model_dump_json()
+
+            with patch("steps.step_02_project_intake.step.trust_project"):
                 outcome = asyncio.run(
                     run(
                         run_dir,
                         state,
                         agent_runner=fake_agent,
                         decision_runner=fake_decision,
+                        config_loader=lambda: object(),
                     )
                 )
 
             self.assertEqual(outcome["status"], "success")
             self.assertEqual(len(calls), 2)
-            self.assertIsNone(calls[0]["resume_session_id"])
+            self.assertTrue(str(calls[0]["prompt"]).startswith("/project-intake"))
             self.assertEqual(calls[1]["resume_session_id"], "session-1")
-            self.assertIn("批准", calls[1]["prompt"])
+            self.assertIn("请生成或补全两份非空正式产品定义文档", str(calls[1]["prompt"]))
+            self.assertEqual(decision_inputs[0][-1], {"role": "user", "content": "完整 Agent 原文 1"})
             saved = read_state(run_dir)
-            self.assertNotIn("pending_agent_prompt", saved.get("project_intake", {}))
-            self.assertEqual(
-                saved["decision_conversations"]["project_intake"],
-                {"path": "conversations/project_intake.json", "turn": 1},
-            )
+            self.assertEqual((saved["status"], saved["current_step"]), ("success", 2))
+            self.assertNotIn("pending_agent_prompt", saved["project_intake"])
             history = json.loads(
                 (run_dir / "conversations/project_intake.json").read_text(encoding="utf-8")
-            )
-            self.assertEqual(
-                [item["role"] for item in history["messages"]],
-                ["system", "assistant", "user", "assistant", "user", "assistant"],
-            )
-            self.assertTrue(
-                history["messages"][1]["content"].startswith("/project-intake")
-            )
-            self.assertEqual(history["messages"][2]["content"], "Agent 第 1 轮回答")
-            self.assertIn('"action": "approve"', history["messages"][3]["content"])
-            self.assertNotIn("发送给 Claude Agent SDK 的指令", history["messages"][3]["content"])
-            self.assertEqual(history["messages"][4]["content"], "Agent 第 2 轮回答")
-            self.assertNotIn(
-                "allowed_inputs",
-                json.dumps(history["messages"], ensure_ascii=False),
-            )
-            self.assertIn("已完成 project-intake", history["messages"][5]["content"])
+            )["messages"]
+            self.assertEqual(history[2], {"role": "user", "content": "完整 Agent 原文 1"})
+            self.assertEqual(json.loads(history[3]["content"])["verdict"], "completed")
+            self.assertIn("请生成或补全两份非空正式产品定义文档", history[4]["content"])
+            self.assertEqual(history[-2], {"role": "user", "content": "完整 Agent 原文 2"})
+            self.assertEqual(json.loads(history[-1]["content"])["verdict"], "completed")
 
-    def test_budget_result_continues_with_same_session(self) -> None:
+    def test_blocked_decision_maps_to_existing_exception(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))
-            calls: list[dict] = []
 
-            async def fake_agent(prompt: str, **kwargs):
-                calls.append({"prompt": prompt, **kwargs})
-                if len(calls) == 1:
-                    current = ClaudeRunResult(
-                        init={
-                            "skills": ["project-intake"],
-                            "slash_commands": ["project-intake"],
-                        },
-                        text="预算达到上限前尚未完成",
-                        result_subtype="error_max_budget_usd",
-                        is_error=True,
-                        session_id="session-1",
-                        stop_reason="tool_use",
-                        num_turns=7,
-                        total_cost_usd=4.0,
-                        exception="Exception: Reached maximum budget ($4)",
-                    )
-                else:
-                    current = agent_result(session="session-1")
-                    for relative in OUTPUTS:
-                        path = workspace / relative
-                        path.parent.mkdir(parents=True, exist_ok=True)
-                        path.write_text("# 完成\n", encoding="utf-8")
-                kwargs["on_update"](current)
+            async def fake_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
+                current = agent_result(cwd=workspace, text="需要一个外部账号")
+                kwargs["on_update"](current)  # type: ignore[index, operator]
                 return current
 
-            async def fake_decision(messages, config):
-                decision = {
-                    "action": "continue",
-                    "answer": "继续",
-                    "reason": "已有 session 可恢复",
-                    "required_inputs": [],
-                }
-                return decision, 1, json.dumps(decision, ensure_ascii=False)
-
-            with patch(
-                "steps.step_02_project_intake.step.LLMConfig.load", return_value=object()
-            ):
-                outcome = asyncio.run(
-                    run(
-                        run_dir,
-                        state,
-                        agent_runner=fake_agent,
-                        decision_runner=fake_decision,
-                    )
+            async def fake_decision(messages, config, *, system_prompt):
+                current = decision(
+                    "blocked",
+                    reason="环境没有外部账号",
+                    required_inputs=["提供外部账号"],
                 )
+                return current.model_dump(), 1, current.model_dump_json()
 
-            self.assertEqual(outcome["status"], "success")
-            self.assertEqual(len(calls), 2)
-            self.assertIsNone(calls[0]["resume_session_id"])
-            self.assertEqual(calls[1]["resume_session_id"], "session-1")
-            self.assertEqual(calls[0]["max_budget_usd"], 4.0)
-            self.assertEqual(calls[1]["max_budget_usd"], 4.0)
-
-    def test_structured_blocked_stops_step(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            run_dir, _, state = self.make_run(Path(directory))
-
-            async def fake_agent(prompt: str, **kwargs):
-                current = agent_result()
-                kwargs["on_update"](current)
-                return current
-
-            async def fake_decision(messages, config):
-                decision = {
-                    "action": "blocked",
-                    "answer": "需要真实账号",
-                    "reason": "环境无法取得",
-                    "required_inputs": ["PAYMENT_ACCOUNT"],
-                }
-                return decision, 1, json.dumps(decision, ensure_ascii=False)
-
-            with patch("steps.step_02_project_intake.step.LLMConfig.load", return_value=object()):
+            with patch("steps.step_02_project_intake.step.trust_project"):
                 with self.assertRaises(ProjectIntakeBlocked) as raised:
                     asyncio.run(
                         run(
@@ -288,86 +227,90 @@ class ProjectIntakeTests(unittest.TestCase):
                             state,
                             agent_runner=fake_agent,
                             decision_runner=fake_decision,
+                            config_loader=lambda: object(),
                         )
                     )
-            self.assertEqual(raised.exception.required_inputs, ["PAYMENT_ACCOUNT"])
 
-    def test_skill_must_be_loaded(self) -> None:
+            self.assertEqual(str(raised.exception), "环境没有外部账号")
+            self.assertEqual(raised.exception.required_inputs, ["提供外部账号"])
+
+    def test_existing_success_reuses_domain_facts_without_agent_marker(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            run_dir, _, state = self.make_run(Path(directory))
-
-            async def fake_agent(prompt: str, **kwargs):
-                return ClaudeRunResult(
-                    init={"skills": [], "slash_commands": []},
-                    text="",
-                    result_subtype="success",
-                    is_error=False,
-                    session_id="session-1",
-                    stop_reason="end_turn",
-                    num_turns=1,
-                    total_cost_usd=0.1,
-                    exception=None,
-                )
-
-            with self.assertRaisesRegex(RuntimeError, "未加载 project-intake Skill"):
-                asyncio.run(run(run_dir, state, agent_runner=fake_agent))
-
-    def test_sdk_error_result_fails_without_decision(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            run_dir, _, state = self.make_run(Path(directory))
-            called = False
-
-            async def fake_agent(prompt: str, **kwargs):
-                nonlocal called
-                called = True
-                return ClaudeRunResult(
-                    init={"skills": ["project-intake"], "slash_commands": ["project-intake"]},
-                    text="",
-                    result_subtype="error_during_execution",
-                    is_error=True,
-                    session_id="session-1",
-                    stop_reason=None,
-                    num_turns=1,
-                    total_cost_usd=0.1,
-                    exception=None,
-                )
-
-            with self.assertRaisesRegex(RuntimeError, "执行失败"):
-                asyncio.run(run(run_dir, state, agent_runner=fake_agent))
-            self.assertTrue(called)
-            history = json.loads(
-                (run_dir / "conversations/project_intake.json").read_text(
-                    encoding="utf-8"
-                )
+            run_dir, workspace, state = self.make_run(Path(directory))
+            self.write_outputs(workspace)
+            write_json(
+                run_dir / "steps/02.json",
+                {
+                    "step": 2,
+                    "name": "项目需求与产品定义",
+                    "status": "success",
+                    "summary": "已完成。",
+                    "applicable": True,
+                    "outputs": [path.as_posix() for path in OUTPUTS],
+                    "blocked": None,
+                    "error": None,
+                },
             )
-            self.assertEqual(
-                [item["role"] for item in history["messages"]],
-                ["system", "assistant"],
-            )
-            self.assertTrue(
-                history["messages"][1]["content"].startswith("/project-intake")
-            )
-
-    def test_resume_session_id_mismatch_fails(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            run_dir, _, state = self.make_run(Path(directory))
-            state["claude_sessions"] = {"project_intake": "old-session"}
+            state.update({"status": "success", "current_step": 2})
             write_state(run_dir, state)
 
-            async def fake_agent(prompt: str, **kwargs):
-                update = kwargs["on_update"]
-                current = agent_result(session="new-session")
-                update(current)
-                return current
+            async def unexpected_agent(*args: object, **kwargs: object) -> ClaudeRunResult:
+                raise AssertionError("已有成功不应再次调用 Agent")
 
-            with self.assertRaisesRegex(RuntimeError, "session ID 不一致"):
-                asyncio.run(run(run_dir, state, agent_runner=fake_agent))
+            outcome = asyncio.run(run(run_dir, state, agent_runner=unexpected_agent))
 
+        self.assertEqual(outcome["status"], "success")
+        self.assertEqual(outcome["outputs"], [path.as_posix() for path in OUTPUTS])
+
+    def test_legacy_completion_record_remains_read_only_compatible(self) -> None:
+        legacy_completion = "已完成 project-intake：两份正式产品定义文档已生成并通过文件事实核验。"
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory))
+            self.write_outputs(workspace)
+            state.update(
+                {
+                    "current_step": 2,
+                    "status": "running",
+                    "decision_conversations": {
+                        "project_intake": {
+                            "path": "conversations/project_intake.json",
+                            "turn": 1,
+                        }
+                    },
+                }
+            )
+            (run_dir / "conversations").mkdir()
+            write_json(
+                run_dir / "conversations/project_intake.json",
+                {
+                    "messages": [
+                        {"role": "system", "content": PROJECT_INTAKE_DECISION_SYSTEM_PROMPT},
+                        {"role": "assistant", "content": "历史初始指令"},
+                        {"role": "user", "content": "历史 Agent 原文"},
+                        {"role": "assistant", "content": legacy_completion},
+                    ]
+                },
+            )
+            write_state(run_dir, state)
+
+            async def unexpected_agent(*args: object, **kwargs: object) -> ClaudeRunResult:
+                raise AssertionError("兼容历史完成记录不应调用 Agent")
+
+            with patch("steps.step_02_project_intake.step.trust_project"):
+                outcome = asyncio.run(run(run_dir, state, agent_runner=unexpected_agent))
+
+        self.assertEqual(outcome["status"], "success")
+
+    def test_invalid_source_input_fails_before_agent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))
             (workspace / "docs/产品初稿.md").write_text("changed", encoding="utf-8")
+
+            async def unexpected_agent(*args: object, **kwargs: object) -> ClaudeRunResult:
+                raise AssertionError("输入核验失败不应调用 Agent")
+
             with self.assertRaisesRegex(RuntimeError, "初稿.*不一致"):
-                asyncio.run(run(run_dir, state))
+                asyncio.run(run(run_dir, state, agent_runner=unexpected_agent))
 
 
 if __name__ == "__main__":

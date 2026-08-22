@@ -4,24 +4,29 @@
 
 - 运行状态位于 `project:07_solution_design`，产品根仍是第 1 步初始化的独立 Git `main` 仓库。
 - `steps/02.json` 引用两份工作区内非空、非符号链接的产品定义文档。
-- `steps/04.json` 提供实际适用工程、模板 ID、路径、分支、commit SHA 和组装证据；传给 Agent 的来源信息经过脱敏投影。
+- `steps/04.json` 提供实际适用工程、模板 ID、路径、分支、commit SHA 和组装证据；用于提示的白名单投影不含 `git_url` 或 `origin`。
 - `steps/05.json` 成功，且 `docs/requirements/项目准备清单.md` 存在并可读取。
 - `steps/06.json` 成功，且其 `outputs` 与第 4 步实际适用工程一致。
-- 适用工程内部的 README、manifest、锁文件、配置、代码和测试由 Agent 按当前现场读取，不由 Python 重复建模。
+
+适用工程内部的 README、manifest、锁文件、配置、代码和测试由 Agent 为支撑方案主张按需读取；本步骤不要求或假定全仓扫描。
 
 ## 行为
 
-在产品项目根新建独立 Claude session，显式调用 `/solution-design`。Agent 负责读取当前工程事实，创建或更新 `docs/design/技术方案.md`，明确系统边界、主要技术选择、交付单元、跨单元协作、关键风险和待确认事项，并区分当前事实、已确认决定、目标状态和假设。
+在产品项目根新建或恢复 Claude session，首条提示第一行固定为 `/solution-design`。正文只描述授权范围、权威产品定义、准备清单、实际工程、白名单组装事实、产物和约束，不包含步骤号、PCM 节点或外层编排语义。
 
-本步骤不重新选择或组装模板，不实现业务功能，不修改业务代码、配置、迁移或基础设施，不设计具体需求或工程目录架构，也不初始化、暂存、提交、建分支、合并或推送 Git。风险、假设和待确认事项可以保留，不因它们存在而阻塞完成。
+Agent 创建或更新唯一固定产物 `docs/design/技术方案.md`，并区分当前工程事实、已确认决定、目标状态、假设和待确认事项；说明系统边界、交付单元、数据所有权、依赖方向、跨单元协作、主要技术取舍、风险和恢复语义。不得重新选择或组装模板，不得实施业务功能、修改业务代码、工程配置、迁移或基础设施，也不得执行 Git 写操作。风险、假设和正常的未来待决事项可以保留，不因此阻塞完成。
 
-每轮 Agent 完整回复都交给专属 AI-compatible 决策模型。决策只允许：
+完整 Agent 回复、待裁决文本和新 run 的决策输入均按原文保存在 Git 忽略的 run 目录；不再对第 7 步回复做脱敏替换。Agent 仍必须遵守项目规则，不得主动披露秘密、完整 `.env` 或无关认证信息。
 
-- `completed`：固定技术方案文档已真实写入，Agent 回复说明方案已完成并与工程事实核对；
-- `continue`：文档、设计内容或事实核对仍有可由当前工程和资料解决的缺口；
-- `blocked`：只用于当前环境无法取得的不可替代外部资源。
+## 统一决策与恢复
 
-Python 不解析 Markdown 章节或判断技术方案本身，只核验固定文档是非空普通文件、Agent session/cwd/Skill 边界、前序交接、根仓暂存区为空且适用工程没有新增嵌套 Git；Agent 完整回复在落盘和发送给决策模型前会按敏感信息模式脱敏。
+完整真实 Agent 回复先保存为对话 `user` 消息，再由步骤专属精简 decision system prompt 生成统一 `AgentDecision`：
+
+- `continue` 的 `answer` 原样恢复同一 session；`blocked` 只用于当前环境无法取得的不可替代外部资源。
+- `completed` 后程序重验前序交接、session/cwd/Skill 边界、根仓暂存区和适用工程嵌套 Git，并确认固定方案文件为非空普通文件。文档缺失或为空时，会追加固定文档修复提示并继续同一 session；交接或 Git 边界冲突为 `failed`。
+- `error_max_turns` 与 `error_max_budget_usd` 在拥有 session 和非空回复时可裁决，但必须恢复一次正常 `success` 才能最终完成。400/429/500、连接、CLI/进程、无 `ResultMessage`、`terminal_reason` 为 `aborted_streaming` 或 `aborted_tools`，以及 `success` 下未知终止原因均在裁决前为 `failed`；其它 SDK/API 错误同样失败，不使用外层自定义 HTTP 重试。
+
+`conversations/solution_design.json` 的尾部是调度真相：`user` 尾部先裁决，`continue` 尾部执行 answer，`completed` 尾部先核验，`blocked` 尾部停止；显式从 `blocked` 重跑才重新核验。状态只保留 session、对话路径、最后一次 Agent 终止摘要和短暂待写入原文；不再写 `pending_agent_prompt`、决策轮次或 Python 完成声明。旧 `action` 与旧完成 sentinel 只读兼容，旧记录不会转换回写；旧 `action` 非 `blocked` 时映射为 `continue`，若其 `answer` 为空则使用固定安全兼容 continue 提示，绝不将旧控制 JSON 发给 Agent。
 
 ## 输出与恢复
 
@@ -29,16 +34,24 @@ Python 不解析 Markdown 章节或判断技术方案本身，只核验固定文
 
 - `steps/07.json.outputs` 固定为 `docs/design/技术方案.md`；
 - 保存 `claude_sessions.solution_design`；
-- 保存 `conversations/solution_design.json` 中的初始指令、Agent 完整回复、结构化决定和固定完成声明；
+- 保存完整的 `conversations/solution_design.json`；
 - 先写步骤结果，再将状态推进到 `project:08_initialize_repositories`。
 
-恢复时：
+即使没有适用基础工程，仍需生成总体技术方案，不无副作用跳过。已有成功结果、完成决定或状态推进中断时，重新核验文档和交接后补写或复用成功；完整成功状态不再次调用 Agent 或决策模型。步骤结果和 `run_step.py` 三态保持不变。
 
-- 已保存 Agent 回复但未决策：先恢复决策，不重复调用 Agent；
-- 已保存 `continue`：将其 `answer` 原样发回同一 session；
-- 已保存 `blocked`：直接恢复阻塞；
-- 已保存 `completed` 或固定完成声明但状态推进中断：重新核验文档和交接后补写或复用成功结果；
-- 状态已经推进到第 8 步节点：核验完整成功现场后幂等复用，不再次调用 Agent 或决策模型。
+## 隔离真实验证
+
+新 run `agent-loop-step7-20260822T190149Z` 在外部复制工作区执行，未修改既有 `step01-mendmark`。新 `solution_design` session `e8000375-2698-4ccf-9927-ccb9ca627ca2` 的 init 已确认产品根 cwd、`solution-design` Skill、slash command 和 Fable 模型。
+
+首次调用因 Agent 尝试内置 Explore 子代理而遇到环境内部未识别模型并超时，未产生 `ResultMessage`；公共循环按错误边界保留 session 与初始 conversation，未推进步骤。随后仅在隔离 run 的历史中追加“不使用子代理、直接使用工具完成”的普通 assistant 提示，并从同一 session 恢复。该提示不在生产初始 prompt 中，也不表示公共循环缺陷。
+
+恢复后 Agent 正常 `success`（44 turns，约 `$3.800742`），生成约 44 KB 的技术方案。AI-compatible 决策对同一真实回复第一次返回 YAML 风格结构；当时唯一格式重试提示要求花括号、双引号并禁止 YAML，第二次返回严格 JSON `completed`。当前 `common/decision.py` 已把相同的严格 JSON、首尾花括号、双引号、禁止 YAML 约束同时附加到首次请求和唯一格式重试；步骤专属 system prompt 仍只说明领域完成条件。测试包装器随后只对隔离副本将技术方案置空，验证程序返回固定 `DESIGN_REPAIR_PROMPT`：公共循环保留首次真实 `completed` JSON、追加普通 assistant repair 提示并恢复同一已保存 session；Agent 补回非空文档，第二次真实决策再次为 `completed`。
+
+最终 `steps/07.json` 为 `success`，状态推进到 `project:08_initialize_repositories`，对话尾部为 `completed`，无旧 completion sentinel 或 `pending_agent_prompt`。文档置空 failpoint 仅用于本次 repair 验证，不在生产代码中。
+
+Probe C 保留早期成功证据 `probe-c-20260822T185623Z`：普通决定为 `continue`（attempts=2），外部支付资源为 `blocked`（attempts=1），且输出经 Pydantic 解析；后续两次最终验证按合同失败（唯一格式重试后仍带“验证：”前缀的非 JSON `ValidationError`、ordinary 成功后 boundary Responses `status=incomplete`），未添加第三次重试或手写解析。
+
+当前公共决策层会在首次请求与唯一格式重试均附加严格 JSON、首尾花括号、双引号、禁止 YAML 约束，步骤 system prompt 仍只负责领域条件。更新后的真实复跑 `probe-c-20260822T200038Z` 通过：ordinary `continue`（attempts=1）、boundary `blocked`（attempts=1）。该单次复验不消除服务格式/完成状态波动，重复稳定性仍待验证。
 
 ## 运行
 

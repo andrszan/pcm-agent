@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from collections.abc import Callable
@@ -28,6 +29,10 @@ class ClaudeRunResult:
     num_turns: int | None
     total_cost_usd: float | None
     exception: str | None
+    api_error_status: int | None = None
+    terminal_reason: str | None = None
+    has_errors: bool = False
+    exception_type: str | None = None
 
 
 def filtered_env() -> dict[str, str]:
@@ -78,6 +83,13 @@ def load_plugins(cwd: Path) -> list[dict[str, str]]:
     return plugins
 
 
+def _api_error_status(value: Any) -> int | None:
+    status = getattr(value, "api_error_status", None)
+    if isinstance(status, int) and not isinstance(status, bool):
+        return status
+    return None
+
+
 async def run_claude(
     prompt: str,
     *,
@@ -91,6 +103,8 @@ async def run_claude(
     result: ResultMessage | None = None
     texts: list[str] = []
     exception: str | None = None
+    exception_type: str | None = None
+    api_error_status: int | None = None
     options = ClaudeAgentOptions(
         cwd=cwd,
         system_prompt={"type": "preset", "preset": "claude_code"},
@@ -152,10 +166,18 @@ async def run_claude(
                             num_turns=result.num_turns,
                             total_cost_usd=result.total_cost_usd,
                             exception=None,
+                            api_error_status=_api_error_status(result),
+                            terminal_reason=result.terminal_reason,
+                            has_errors=bool(result.errors) or result.is_error,
                         )
                     )
+    except asyncio.CancelledError:
+        exception = "CancelledError"
+        exception_type = "CancelledError"
     except Exception as error:  # SDK may raise after yielding a ResultMessage.
         exception = f"{type(error).__name__}: {error}"
+        exception_type = type(error).__name__
+        api_error_status = _api_error_status(error)
 
     final_session_id = (result.session_id if result else None) or (init or {}).get("session_id")
     observed_session_ids = {
@@ -170,6 +192,7 @@ async def run_claude(
             f"恢复 session ID 不一致：期望 {resume_session_id}，实际 "
             f"{', '.join(sorted(observed_session_ids))}"
         )
+        exception_type = "SessionMismatchError"
     final_text = result.result if result and not result.is_error and result.result else "\n".join(texts)
     return ClaudeRunResult(
         init=init,
@@ -181,4 +204,9 @@ async def run_claude(
         num_turns=result.num_turns if result else None,
         total_cost_usd=result.total_cost_usd if result else None,
         exception=exception,
+        api_error_status=(_api_error_status(result) if result else None) or api_error_status,
+        terminal_reason=result.terminal_reason if result else None,
+        has_errors=bool(exception)
+        or (bool(result.errors) or result.is_error if result else True),
+        exception_type=exception_type,
     )

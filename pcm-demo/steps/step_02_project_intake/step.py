@@ -4,8 +4,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-from common.claude_agent import ClaudeRunResult, run_claude
-from common.decision import SYSTEM_PROMPT, request_decision
+from common.agent_decision_loop import AgentDecisionLoopSpec, run_agent_decision_loop
+from common.claude_agent import run_claude
+from common.decision import request_decision
 from common.files import resolve_workspace_output, sha256, write_json
 from common.state import write_state
 from config import LLMConfig
@@ -15,15 +16,33 @@ STEP = 2
 NAME = "项目需求与产品定义"
 CONVERSATION_KEY = "project_intake"
 SKILL_NAME = "project-intake"
-CONVERSATION_PATH = Path("conversations/project_intake.json")
 OUTPUTS = (
     Path("docs/requirements/项目需求说明.md"),
     Path("docs/requirements/产品功能说明.md"),
 )
 MAX_DECISION_ROUNDS = 6
+PROJECT_INTAKE_MAX_TURNS = 12
 PROJECT_INTAKE_MAX_BUDGET_USD = 4.0
-COMPLETION_MESSAGE = (
-    "已完成 project-intake：两份正式产品定义文档已生成并通过文件事实核验。"
+
+PROJECT_INTAKE_DECISION_SYSTEM_PROMPT = """根据当前产品定义工作和 Agent 对话填写 verdict、answer、reason 与 required_inputs。
+
+completed 表示两份正式产品定义文档已经生成，且当前事实足以确认其非空并可用；answer 必须为空，required_inputs 必须为空数组。
+continue 表示还需向自动化开发者给出明确指令以澄清产品或完成、修复这两份文档；answer 必须是非空指令，required_inputs 必须为空数组。
+blocked 仅表示缺少当前环境无法取得的真实外部账号、凭据、私有数据、客户授权、专用设备、素材、付费服务或线下动作；answer 必须为空，required_inputs 必须列出非空解除条件。
+
+AI-compatible 模型代表自动化开发者，可对当前资料足以支持的产品和执行事项作出决定；资料歧义或存在多种合理方案时应选择合理方案继续，不得因此 blocked。reason 说明决定依据。直接输出结构化结果，不要使用 Markdown 或代码围栏。"""
+
+DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
+    key=CONVERSATION_KEY,
+    state_key="project_intake",
+    skill_name=SKILL_NAME,
+    max_decision_rounds=MAX_DECISION_ROUNDS,
+    max_turns=PROJECT_INTAKE_MAX_TURNS,
+    max_budget_usd=PROJECT_INTAKE_MAX_BUDGET_USD,
+    decision_system_prompt=PROJECT_INTAKE_DECISION_SYSTEM_PROMPT,
+    legacy_completion_messages=(
+        "已完成 project-intake：两份正式产品定义文档已生成并通过文件事实核验。",
+    ),
 )
 
 
@@ -125,120 +144,60 @@ def validate_inputs(run_dir: Path, state: dict[str, Any]) -> tuple[Path, Path]:
 
 
 def output_contents(workspace: Path) -> dict[str, str] | None:
+    """返回可用正式文档；缺失或空文件可修复，路径异常必须失败。"""
+
     contents: dict[str, str] = {}
+    incomplete = False
     for relative in OUTPUTS:
-        path = workspace / relative
-        if path.is_symlink() or not path.is_file():
-            return None
-        content = path.read_text(encoding="utf-8")
+        current = workspace
+        for index, part in enumerate(relative.parts):
+            current /= part
+            if current.is_symlink():
+                raise RuntimeError("产品定义产物路径不能包含符号链接")
+            if index < len(relative.parts) - 1 and current.exists() and not current.is_dir():
+                raise RuntimeError("产品定义产物父路径与预期目录冲突")
+        if not current.exists():
+            incomplete = True
+            continue
+        if not current.is_file():
+            raise RuntimeError("产品定义产物不是普通文件")
+        try:
+            content = current.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as error:
+            raise RuntimeError("产品定义产物不可读取") from error
         if not content.strip():
-            return None
-        contents[str(relative)] = content
-    return contents
+            incomplete = True
+            continue
+        contents[relative.as_posix()] = content
+    return None if incomplete else contents
 
 
-def safe_result(run: ClaudeRunResult) -> dict[str, Any]:
-    return {
-        "subtype": run.result_subtype,
-        "is_error": run.is_error,
-        "stop_reason": run.stop_reason,
-        "session_id": run.session_id,
-        "num_turns": run.num_turns,
-        "total_cost_usd": run.total_cost_usd,
-        "exception": run.exception,
-    }
-
-
-def save_agent_update(run_dir: Path, state: dict[str, Any], run: ClaudeRunResult) -> None:
-    previous_session = state.get("claude_sessions", {}).get(CONVERSATION_KEY)
-    if previous_session and run.session_id and previous_session != run.session_id:
-        raise RuntimeError(
-            f"恢复 session ID 不一致：期望 {previous_session}，实际 {run.session_id}"
-        )
-    if run.session_id:
-        state.setdefault("claude_sessions", {})[CONVERSATION_KEY] = run.session_id
-    intake = state.setdefault("project_intake", {})
-    if run.init:
-        skills = {str(item) for item in run.init.get("skills") or []}
-        commands = {str(item) for item in run.init.get("slash_commands") or []}
-        intake["skill_loaded"] = SKILL_NAME in skills
-        intake["slash_command_loaded"] = SKILL_NAME in commands
-        intake["init"] = {
-            key: run.init.get(key)
-            for key in ("cwd", "model", "permissionMode", "claude_code_version")
-        }
-    if run.result_subtype:
-        intake["last_agent_result"] = safe_result(run)
-    write_state(run_dir, state)
-
-
-def load_conversation(run_dir: Path, state: dict[str, Any]) -> list[dict[str, str]]:
-    reference = state.get("decision_conversations", {}).get(CONVERSATION_KEY)
-    if reference is None:
-        return [{"role": "system", "content": SYSTEM_PROMPT}]
-    if set(reference) != {"path", "turn"} or reference["path"] != str(CONVERSATION_PATH):
-        raise RuntimeError("决策历史引用不符合约定")
-    data = json.loads((run_dir / CONVERSATION_PATH).read_text(encoding="utf-8"))
-    messages = data.get("messages")
-    if not isinstance(messages, list) or not messages:
-        raise RuntimeError("决策历史内容不符合约定")
-    return messages
-
-
-def save_conversation(
-    run_dir: Path,
-    state: dict[str, Any],
-    messages: list[dict[str, str]],
-    *,
-    decision_turn: int | None = None,
-) -> None:
-    path = run_dir / CONVERSATION_PATH
-    path.parent.mkdir(exist_ok=True)
-    write_json(path, {"messages": messages})
-    if decision_turn is None:
-        decision_turn = (
-            state.get("decision_conversations", {})
-            .get(CONVERSATION_KEY, {})
-            .get("turn", 0)
-        )
-    state.setdefault("decision_conversations", {})[CONVERSATION_KEY] = {
-        "path": str(CONVERSATION_PATH),
-        "turn": decision_turn,
-    }
-    write_state(run_dir, state)
-
-
-def append_initial_agent_prompt(
-    run_dir: Path, state: dict[str, Any], prompt: str
-) -> None:
-    messages = load_conversation(run_dir, state)
-    if len(messages) == 1:
-        messages.append({"role": "assistant", "content": prompt})
-        save_conversation(run_dir, state, messages)
-
-
-def append_completion(
-    run_dir: Path,
-    state: dict[str, Any],
-    messages: list[dict[str, str]],
-    agent_text: str,
-) -> None:
-    messages.append({"role": "user", "content": agent_text})
-    messages.append({"role": "assistant", "content": COMPLETION_MESSAGE})
-    save_conversation(run_dir, state, messages)
+def verify_existing_intake_success(run_dir: Path) -> dict[str, Any]:
+    try:
+        existing = json.loads((run_dir / "steps" / "02.json").read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise RuntimeError("第 2 步成功结果不可读取") from error
+    if (
+        existing.get("step") != STEP
+        or existing.get("status") != "success"
+        or existing.get("outputs") != [path.as_posix() for path in OUTPUTS]
+    ):
+        raise RuntimeError("第 2 步成功结果不可复用")
+    return existing
 
 
 def initial_prompt(draft: Path, workspace: Path) -> str:
-    return f"/project-intake @./{draft.relative_to(workspace).as_posix()}"
-
-
-def resume_prompt(draft: Path, workspace: Path) -> str:
     reference = draft.relative_to(workspace).as_posix()
-    return f"请重新读取 @./{reference}，核验当前事实并继续完成本步骤。"
+    outputs = "\n".join(f"- `{path.as_posix()}`" for path in OUTPUTS)
+    return f"""/project-intake @./{reference}
+以产品初稿为当前产品定义的权威输入，持续澄清并形成以下两份非空正式文档：
+{outputs}
+只处理产品定义文档，不要处理后续工程实现。"""
 
 
-def decision_prompt(decision: dict[str, Any]) -> str:
-    return decision["answer"]
+def completion_repair_prompt() -> str:
+    paths = "、".join(path.as_posix() for path in OUTPUTS)
+    return f"请生成或补全两份非空正式产品定义文档：{paths}。"
 
 
 async def run(
@@ -247,113 +206,58 @@ async def run(
     *,
     agent_runner=run_claude,
     decision_runner=request_decision,
+    config_loader=LLMConfig.load,
 ) -> dict[str, Any]:
     workspace, draft = validate_inputs(run_dir, state)
     existing_outputs = output_contents(workspace)
-    previous_result = state.get("project_intake", {}).get("last_agent_result", {})
     if (
-        state.get("status") == "success"
-        and previous_result.get("subtype") == "success"
-        and previous_result.get("is_error") is False
+        state.get("current_step") == STEP
+        and state.get("status") == "success"
         and existing_outputs is not None
+        and (run_dir / "steps" / "02.json").is_file()
     ):
-        state.setdefault("project_intake", {}).pop("pending_agent_prompt", None)
-        write_state(run_dir, state)
-        return result(
-            "success",
-            "project-intake 已生成产品定义文档，确认既有成功。",
-            outputs=[relative.as_posix() for relative in OUTPUTS],
-        )
+        return verify_existing_intake_success(run_dir)
+
     trust_project(workspace)
-    state.update({"current_step": STEP, "status": "running", "blocked": None, "error": None})
-    write_state(run_dir, state)
-    existing_session = state.get("claude_sessions", {}).get(CONVERSATION_KEY)
-    pending = state.get("project_intake", {}).pop("pending_agent_prompt", None)
-    if pending:
-        prompt = pending
-    else:
-        prompt = (
-            initial_prompt(draft, workspace)
-            if not existing_session
-            else resume_prompt(draft, workspace)
+    if state.get("status") != "blocked":
+        state.update(
+            {"current_step": STEP, "status": "running", "blocked": None, "error": None}
         )
-    if not existing_session:
-        append_initial_agent_prompt(run_dir, state, prompt)
-
-    for _ in range(MAX_DECISION_ROUNDS + 1):
-        pending = state.get("project_intake", {}).pop("pending_agent_prompt", None)
-        if pending:
-            prompt = pending
-            write_state(run_dir, state)
-        run_result = await agent_runner(
-            prompt,
-            cwd=workspace,
-            resume_session_id=state.get("claude_sessions", {}).get(CONVERSATION_KEY),
-            max_budget_usd=PROJECT_INTAKE_MAX_BUDGET_USD,
-            on_update=lambda update: save_agent_update(run_dir, state, update),
-        )
-        save_agent_update(run_dir, state, run_result)
-        if not run_result.result_subtype:
-            raise RuntimeError(run_result.exception or "Agent SDK 未返回 ResultMessage")
-        recoverable_subtypes = {"error_max_turns", "error_max_budget_usd"}
-        if (
-            run_result.exception
-            and run_result.result_subtype not in recoverable_subtypes
-        ):
-            raise RuntimeError(run_result.exception)
-        if (
-            run_result.is_error
-            and run_result.result_subtype not in recoverable_subtypes
-        ):
-            raise RuntimeError(f"Agent SDK 执行失败：{run_result.result_subtype}")
-        init = run_result.init or {}
-        if SKILL_NAME not in {str(item) for item in init.get("skills") or []}:
-            raise RuntimeError("Agent SDK 未加载 project-intake Skill")
-        if SKILL_NAME not in {
-            str(item) for item in init.get("slash_commands") or []
-        }:
-            raise RuntimeError("Agent SDK 未加载 project-intake slash command")
-        outputs = output_contents(workspace)
-        messages = load_conversation(run_dir, state)
-        if (
-            run_result.result_subtype == "success"
-            and not run_result.is_error
-            and outputs is not None
-        ):
-            validate_inputs(run_dir, state)
-            paths = [relative.as_posix() for relative in OUTPUTS]
-            append_completion(run_dir, state, messages, run_result.text)
-            state.setdefault("project_intake", {}).pop("pending_agent_prompt", None)
-            state.update({"status": "success", "blocked": None, "error": None})
-            write_state(run_dir, state)
-            return result("success", "project-intake 已生成产品定义文档。", outputs=paths)
-
-        session_id = state.get("claude_sessions", {}).get(CONVERSATION_KEY)
-        if not session_id:
-            raise RuntimeError("Agent 未完成且没有可恢复的 session ID")
-        messages.append(
-            {
-                "role": "user",
-                "content": run_result.text,
-            }
-        )
-        decision, _, raw = await decision_runner(messages, LLMConfig.load())
-        prompt = decision_prompt(decision)
-        messages.append(
-            {
-                "role": "assistant",
-                "content": raw,
-            }
-        )
-        current_turn = (
-            state.get("decision_conversations", {})
-            .get(CONVERSATION_KEY, {})
-            .get("turn", 0)
-        )
-        save_conversation(run_dir, state, messages, decision_turn=current_turn + 1)
-        if decision["action"] == "blocked":
-            raise ProjectIntakeBlocked(decision["reason"], decision["required_inputs"])
-        state.setdefault("project_intake", {})["pending_agent_prompt"] = prompt
         write_state(run_dir, state)
 
-    raise RuntimeError("project-intake 决策循环达到上限仍未产生产物")
+    def verify_completed() -> str | None:
+        validate_inputs(run_dir, state)
+        if output_contents(workspace) is None:
+            return completion_repair_prompt()
+        return None
+
+    decision = await run_agent_decision_loop(
+        run_dir,
+        state,
+        workspace,
+        DECISION_LOOP_SPEC,
+        initial_prompt(draft, workspace),
+        verify_completed,
+        agent_runner=agent_runner,
+        decision_runner=decision_runner,
+        config_loader=config_loader,
+    )
+    if decision.verdict == "blocked":
+        raise ProjectIntakeBlocked(decision.reason, decision.required_inputs)
+    if decision.verdict != "completed":
+        raise RuntimeError("Agent 决策循环未返回完成或阻塞结论")
+
+    state.update(
+        {
+            "status": "success",
+            "current_step": STEP,
+            "blocked": None,
+            "error": None,
+        }
+    )
+    write_state(run_dir, state)
+    return result(
+        "success",
+        "project-intake 已生成产品定义文档。",
+        outputs=[relative.as_posix() for relative in OUTPUTS],
+    )

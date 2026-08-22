@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 DEMO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(DEMO_ROOT))
@@ -17,41 +17,37 @@ from common.state import read_state, write_state
 from steps.step_01_create_workspace import initialize_root_repository
 from steps.step_03_foundation_selection.step import TemplateSelection
 from steps.step_07_solution_design.step import (
-    COMPLETION_MESSAGE,
     CURRENT_NODE,
+    DECISION_LOOP_SPEC,
     DESIGN_PATH,
+    DESIGN_REPAIR_PROMPT,
+    LEGACY_COMPLETION_MESSAGES,
     NEXT_NODE,
     SOLUTION_DESIGN_MAX_BUDGET_USD,
     SOLUTION_DESIGN_MAX_TURNS,
     SolutionDesignBlocked,
-    SolutionDesignDecision,
-    request_solution_design_decision,
     run,
-    successful_agent,
 )
 
 
 def agent_result(
     *,
     cwd: Path,
-    session: str | None = "session-1",
+    session: str = "session-1",
     text: str = "总体方案完整回复",
-    subtype: str = "success",
-    is_error: bool = False,
-    exception: str | None = None,
     skills: list[str] | None = None,
 ) -> ClaudeRunResult:
     loaded = ["solution-design"] if skills is None else skills
     return ClaudeRunResult(
         init={"cwd": str(cwd), "skills": loaded, "slash_commands": loaded},
         text=text,
-        result_subtype=subtype,
-        is_error=is_error,
+        result_subtype="success",
+        is_error=False,
         session_id=session,
         stop_reason="end_turn",
         num_turns=1,
         total_cost_usd=0.1,
-        exception=exception,
+        exception=None,
     )
 
 
@@ -171,20 +167,25 @@ class SolutionDesignTests(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("# 总体技术方案\n\n存在风险和待确认事项。\n", encoding="utf-8")
 
-    def test_completed_decision_succeeds_and_is_idempotent(self) -> None:
+    def test_completed_repair_resumes_same_session_and_is_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))
             calls: list[dict] = []
+            system_prompts: list[str] = []
 
             async def fake_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
                 calls.append({"prompt": prompt, **kwargs})
-                self.write_design(kwargs["cwd"])  # type: ignore[arg-type]
-                current = agent_result(cwd=kwargs["cwd"])  # type: ignore[arg-type, index]
+                if len(calls) == 2:
+                    self.write_design(workspace)
+                current = agent_result(
+                    cwd=kwargs["cwd"], text=f"总体方案回复 {len(calls)}"  # type: ignore[arg-type, index]
+                )
                 kwargs["on_update"](current)  # type: ignore[index, operator]
                 return current
 
-            async def completed(messages, config):
-                self.assertEqual(messages[-1]["content"], "总体方案完整回复")
+            async def completed(messages, config, *, system_prompt):
+                self.assertEqual(messages[-1]["content"], f"总体方案回复 {len(system_prompts) + 1}")
+                system_prompts.append(system_prompt)
                 return decision("completed")
 
             outcome = self.run_step(
@@ -195,16 +196,31 @@ class SolutionDesignTests(unittest.TestCase):
                 config_loader=lambda: object(),
             )
             self.assertEqual(outcome["outputs"], [DESIGN_PATH.as_posix()])
-            self.assertIn("/solution-design", calls[0]["prompt"])
-            self.assertIn("docs/requirements/项目需求说明.md", calls[0]["prompt"])
-            self.assertIn("@./frontend", calls[0]["prompt"])
-            self.assertIn("系统边界", calls[0]["prompt"])
-            self.assertNotIn("git_url", calls[0]["prompt"])
-            self.assertNotIn("origin", calls[0]["prompt"])
-            self.assertNotIn("第 7 步", calls[0]["prompt"])
-            self.assertNotIn("PCM", calls[0]["prompt"])
+            self.assertEqual(len(calls), 2)
+            self.assertIsNone(calls[0]["resume_session_id"])
+            self.assertEqual(calls[1]["resume_session_id"], "session-1")
+            self.assertEqual(calls[1]["prompt"], DESIGN_REPAIR_PROMPT)
+            prompt = calls[0]["prompt"]
+            self.assertTrue(prompt.startswith("/solution-design\n"))
+            self.assertIn("docs/requirements/项目需求说明.md", prompt)
+            self.assertIn("docs/design/技术方案.md", prompt)
+            self.assertIn("系统上下文与边界", prompt)
+            self.assertIn("不得实现或修改业务代码", prompt)
+            for forbidden in (
+                "git_url",
+                "origin",
+                "第 7 步",
+                "PCM",
+                "节点",
+                "阶段",
+                "调用Skill",
+                "扫描所有README/manifest/代码",
+                "README、manifest、锁文件、配置、代码、测试",
+            ):
+                self.assertNotIn(forbidden, prompt)
             self.assertEqual(calls[0]["max_turns"], SOLUTION_DESIGN_MAX_TURNS)
             self.assertEqual(calls[0]["max_budget_usd"], SOLUTION_DESIGN_MAX_BUDGET_USD)
+            self.assertEqual(system_prompts, [DECISION_LOOP_SPEC.decision_system_prompt] * 2)
 
             saved = read_state(run_dir)
             self.assertEqual((saved["step"], saved["current_node"]), (8, NEXT_NODE))
@@ -213,13 +229,18 @@ class SolutionDesignTests(unittest.TestCase):
             )["messages"]
             self.assertEqual(
                 [item["role"] for item in history],
-                ["system", "assistant", "user", "assistant", "assistant"],
+                ["system", "assistant", "user", "assistant", "assistant", "user", "assistant"],
             )
-            self.assertEqual(json.loads(history[-2]["content"])["verdict"], "completed")
-            self.assertEqual(history[-1]["content"], COMPLETION_MESSAGE)
+            self.assertEqual(json.loads(history[-1]["content"])["verdict"], "completed")
+            self.assertNotIn(LEGACY_COMPLETION_MESSAGES[0], [item["content"] for item in history])
+
+            saved.pop("solution_design", None)
+            saved.pop("claude_sessions", None)
+            saved.pop("decision_conversations", None)
+            write_state(run_dir, saved)
 
             async def unexpected(*args, **kwargs):
-                raise AssertionError("成功复用不应调用 Agent 或决策模型")
+                raise AssertionError("既有成功不应调用 Agent 或决策模型")
 
             reused = self.run_step(
                 run_dir,
@@ -230,203 +251,50 @@ class SolutionDesignTests(unittest.TestCase):
             self.assertEqual(reused["status"], "success")
             self.assertIn("确认既有成功", reused["summary"])
 
-    def test_agent_reply_is_redacted_before_persistence_and_decision(self) -> None:
+    def test_agent_reply_is_preserved_without_redaction(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))
+            agent_text = 'token=top-secret password="json-password" clientSecret=camel-secret'
+
+            async def interrupted_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
+                current = agent_result(cwd=kwargs["cwd"], text=agent_text)  # type: ignore[arg-type, index]
+                kwargs["on_update"](current)  # type: ignore[index, operator]
+                raise OSError("模拟进程中断")
+
+            with self.assertRaisesRegex(RuntimeError, "Agent SDK 执行异常"):
+                self.run_step(
+                    run_dir,
+                    state,
+                    agent_runner=interrupted_agent,
+                    config_loader=lambda: object(),
+                )
+            saved = read_state(run_dir)
+            self.assertEqual(saved["solution_design"]["pending_agent_text"], agent_text)
+            self.write_design(workspace)
             observed: list[str] = []
 
-            async def fake_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
-                self.write_design(kwargs["cwd"])  # type: ignore[arg-type]
-                current = agent_result(
-                    cwd=kwargs["cwd"],  # type: ignore[arg-type, index]
-                    text='api_key=super-secret "password": "json-secret" "clientSecret":"camel-secret" postgresql://db-user:db-secret@example.invalid/db https://user:password@example.invalid/repo',
-                )
-                kwargs["on_update"](current)  # type: ignore[index, operator]
-                return current
-
-            async def completed(messages, config):
+            async def completed(messages, config, *, system_prompt):
                 observed.append(messages[-1]["content"])
                 return decision("completed")
 
-            self.run_step(
-                run_dir,
-                state,
-                agent_runner=fake_agent,
-                decision_runner=completed,
-                config_loader=lambda: object(),
-            )
-            self.assertNotIn("super-secret", observed[0])
-            self.assertNotIn("json-secret", observed[0])
-            self.assertNotIn("camel-secret", observed[0])
-            self.assertNotIn("db-user:db-secret", observed[0])
-            self.assertNotIn("user:password", observed[0])
-            history = (run_dir / "conversations/solution_design.json").read_text(
-                encoding="utf-8"
-            )
-            self.assertNotIn("super-secret", history)
-            self.assertNotIn("json-secret", history)
-            self.assertNotIn("camel-secret", history)
-            self.assertNotIn("db-user:db-secret", history)
-            self.assertNotIn("user:password", history)
-
-    def test_staged_changes_are_rejected(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            run_dir, workspace, state = self.make_run(Path(directory))
-
-            async def fake_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
-                self.write_design(kwargs["cwd"])  # type: ignore[arg-type]
-                (workspace / "README.md").write_text("staged\n", encoding="utf-8")
-                import subprocess
-
-                subprocess.run(
-                    ["git", "add", "README.md"],
-                    cwd=workspace,
-                    check=True,
-                    capture_output=True,
-                )
-                current = agent_result(cwd=kwargs["cwd"])  # type: ignore[arg-type, index]
-                kwargs["on_update"](current)  # type: ignore[index, operator]
-                return current
-
-            with self.assertRaisesRegex(RuntimeError, "不得暂存"):
-                self.run_step(
-                    run_dir,
-                    state,
-                    agent_runner=fake_agent,
-                    decision_runner=lambda messages, config: _async_value(decision("completed")),
-                    config_loader=lambda: object(),
-                )
-
-    def test_success_requires_session_id(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            run_dir, workspace, state = self.make_run(Path(directory))
-
-            async def fake_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
-                self.write_design(kwargs["cwd"])  # type: ignore[arg-type]
-                current = agent_result(
-                    cwd=kwargs["cwd"],  # type: ignore[arg-type, index]
-                    session=None,
-                )
-                kwargs["on_update"](current)  # type: ignore[index, operator]
-                return current
-
-            with self.assertRaisesRegex(RuntimeError, "session ID"):
-                self.run_step(
-                    run_dir,
-                    state,
-                    agent_runner=fake_agent,
-                    decision_runner=lambda messages, config: _async_value(decision("completed")),
-                    config_loader=lambda: object(),
-                )
-
-    def test_invalid_session_type_does_not_count_as_success(self) -> None:
-        state = {
-            "claude_sessions": {"solution_design": 1},
-            "solution_design": {
-                "last_agent_result": {"subtype": "success", "is_error": False}
-            },
-        }
-        self.assertFalse(successful_agent(state))
-
-    def test_continue_resumes_same_session(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            run_dir, workspace, state = self.make_run(Path(directory))
-            calls: list[dict] = []
-
-            async def fake_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
-                calls.append({"prompt": prompt, **kwargs})
-                self.write_design(kwargs["cwd"])  # type: ignore[arg-type]
-                current = agent_result(
-                    cwd=kwargs["cwd"],  # type: ignore[arg-type, index]
-                    text=f"总体方案回复 {len(calls)}",
-                )
-                kwargs["on_update"](current)  # type: ignore[index, operator]
-                return current
-
-            decisions = iter(
-                [
-                    decision("continue", answer="继续核对工程事实", reason="仍缺少事实核验"),
-                    decision("completed"),
-                ]
-            )
-
-            async def fake_decision(messages, config):
-                return next(decisions)
-
-            outcome = self.run_step(
-                run_dir,
-                state,
-                agent_runner=fake_agent,
-                decision_runner=fake_decision,
-                config_loader=lambda: object(),
-            )
-            self.assertEqual(outcome["status"], "success")
-            self.assertEqual(len(calls), 2)
-            self.assertIsNone(calls[0]["resume_session_id"])
-            self.assertEqual(calls[1]["resume_session_id"], "session-1")
-            self.assertEqual(calls[1]["prompt"], "继续核对工程事实")
-
-    def test_completed_decision_requires_document(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            run_dir, _, state = self.make_run(Path(directory))
-
-            async def fake_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
-                current = agent_result(cwd=kwargs["cwd"])  # type: ignore[arg-type, index]
-                kwargs["on_update"](current)  # type: ignore[index, operator]
-                return current
-
-            with self.assertRaisesRegex(RuntimeError, "技术方案文档"):
-                self.run_step(
-                    run_dir,
-                    state,
-                    agent_runner=fake_agent,
-                    decision_runner=lambda messages, config: _async_value(decision("completed")),
-                    config_loader=lambda: object(),
-                )
-
-    def test_saved_agent_reply_is_decided_before_agent(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            run_dir, workspace, state = self.make_run(Path(directory))
-            self.write_design(workspace)
-            state.update(
-                {
-                    "claude_sessions": {"solution_design": "session-1"},
-                    "solution_design": {
-                        "last_agent_result": {"subtype": "success", "is_error": False},
-                        "pending_agent_text": "已保存的总体方案回复",
-                    },
-                    "decision_conversations": {
-                        "solution_design": {
-                            "path": "conversations/solution_design.json",
-                            "turn": 0,
-                        }
-                    },
-                }
-            )
-            write_state(run_dir, state)
-            (run_dir / "conversations").mkdir()
-            write_json(
-                run_dir / "conversations/solution_design.json",
-                {"messages": [{"role": "system", "content": "system"}, {"role": "assistant", "content": "initial"}]},
-            )
-
             async def unexpected_agent(*args, **kwargs):
-                raise AssertionError("应先恢复已保存回复的决策")
-
-            async def completed(messages, config):
-                self.assertEqual(messages[-1]["content"], "已保存的总体方案回复")
-                return decision("completed")
+                raise AssertionError("已保存回复应先进入决策")
 
             outcome = self.run_step(
                 run_dir,
-                state,
+                saved,
                 agent_runner=unexpected_agent,
                 decision_runner=completed,
                 config_loader=lambda: object(),
             )
             self.assertEqual(outcome["status"], "success")
+            self.assertEqual(observed, [agent_text])
+            history = json.loads(
+                (run_dir / "conversations/solution_design.json").read_text(encoding="utf-8")
+            )["messages"]
+            self.assertIn({"role": "user", "content": agent_text}, history)
 
-    def test_blocked_decision_is_preserved(self) -> None:
+    def test_blocked_decision_preserves_fixed_document_output(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))
             self.write_design(workspace)
@@ -435,20 +303,52 @@ class SolutionDesignTests(unittest.TestCase):
                 current = agent_result(cwd=kwargs["cwd"])  # type: ignore[arg-type, index]
                 kwargs["on_update"](current)  # type: ignore[index, operator]
                 return current
+
+            async def blocked(messages, config, *, system_prompt):
+                return decision(
+                    "blocked",
+                    reason="缺少不可替代授权",
+                    required_inputs=["外部授权"],
+                )
 
             with self.assertRaises(SolutionDesignBlocked) as raised:
                 self.run_step(
                     run_dir,
                     state,
                     agent_runner=fake_agent,
-                    decision_runner=lambda messages, config: _async_value(
-                        decision("blocked", reason="缺少不可替代授权", required_inputs=["外部授权"])
-                    ),
+                    decision_runner=blocked,
                     config_loader=lambda: object(),
                 )
             self.assertEqual(raised.exception.required_inputs, ["外部授权"])
+            self.assertEqual(raised.exception.outputs, [DESIGN_PATH.as_posix()])
 
-    def test_no_applicable_engine_still_requires_solution_design(self) -> None:
+    def test_staged_changes_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory))
+
+            async def fake_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
+                self.write_design(workspace)
+                (workspace / "README.md").write_text("# 项目\n", encoding="utf-8")
+                subprocess.run(
+                    ["git", "add", "README.md"], cwd=workspace, check=True, capture_output=True
+                )
+                current = agent_result(cwd=kwargs["cwd"])  # type: ignore[arg-type, index]
+                kwargs["on_update"](current)  # type: ignore[index, operator]
+                return current
+
+            async def completed(messages, config, *, system_prompt):
+                return decision("completed")
+
+            with self.assertRaisesRegex(RuntimeError, "完成核验失败"):
+                self.run_step(
+                    run_dir,
+                    state,
+                    agent_runner=fake_agent,
+                    decision_runner=completed,
+                    config_loader=lambda: object(),
+                )
+
+    def test_no_applicable_engine_still_generates_fixed_document(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory), applicable=False)
             calls = 0
@@ -456,51 +356,23 @@ class SolutionDesignTests(unittest.TestCase):
             async def fake_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
                 nonlocal calls
                 calls += 1
-                self.write_design(kwargs["cwd"])  # type: ignore[arg-type]
+                self.write_design(workspace)
                 current = agent_result(cwd=kwargs["cwd"])  # type: ignore[arg-type, index]
                 kwargs["on_update"](current)  # type: ignore[index, operator]
                 return current
+
+            async def completed(messages, config, *, system_prompt):
+                return decision("completed")
 
             outcome = self.run_step(
                 run_dir,
                 state,
                 agent_runner=fake_agent,
-                decision_runner=lambda messages, config: _async_value(decision("completed")),
+                decision_runner=completed,
                 config_loader=lambda: object(),
             )
-            self.assertEqual(outcome["status"], "success")
             self.assertEqual(calls, 1)
             self.assertEqual(outcome["outputs"], [DESIGN_PATH.as_posix()])
-
-    def test_structured_decision_retries_invalid_json_once(self) -> None:
-        prompts: list[str] = []
-
-        async def fake_request(messages, config, *, system_prompt, output_model):
-            prompts.append(system_prompt)
-            if len(prompts) == 1:
-                SolutionDesignDecision.model_validate_json("verdict: continue")
-            return decision("continue", answer="继续完成方案", reason="仍需核对")
-
-        with patch(
-            "steps.step_07_solution_design.step.request_decision",
-            new=fake_request,
-        ):
-            recovered = asyncio.run(
-                request_solution_design_decision(
-                    [{"role": "user", "content": "方案待核对"}],
-                    object(),  # type: ignore[arg-type]
-                )
-            )
-        self.assertEqual(recovered[0]["verdict"], "continue")
-        self.assertEqual(len(prompts), 2)
-        self.assertIn("上一次响应不是有效 JSON", prompts[1])
-
-
-def _async_value(value):
-    async def result():
-        return value
-
-    return result()
 
 
 if __name__ == "__main__":

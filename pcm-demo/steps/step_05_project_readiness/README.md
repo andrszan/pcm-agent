@@ -3,24 +3,31 @@
 ## 输入
 
 - 运行状态位于 `project:05_verify_readiness`，且产品根 Git 仓库与状态记录一致。
-- `steps/02.json` 为成功结果，包含两份可解析到产品工作区内、非空且非符号链接的产品定义文件。
-- `steps/03.json` 为成功结果，`template_selection` 可由 `FoundationSelectionResult` 校验。
-- `steps/04.json` 为成功结果，已组装工程、来源证据和临时目录现场均与选型和状态一致。
-- `PCM_DEV_RESOURCE_LIST` 已配置为可读普通文件的绝对路径。
+- `steps/02.json` 成功，引用两份位于产品工作区内、非空且非符号链接的产品定义文件。
+- `steps/03.json` 成功，`template_selection` 可由 `FoundationSelectionResult` 校验；传入提示的选型仅投影 `applicable`、`id`、`default_branch`、`path`、`reason`，不传 `git_url` 或 `origin`。
+- `steps/04.json` 成功，已组装工程、来源证据和临时目录现场均与选型和状态一致。
+- `PCM_DEV_RESOURCE_LIST` 是可读普通文件的绝对路径。
 
 ## 行为
 
-以同一 Claude session 调用 `/project-readiness`。初始提示引用第 2 步实际产品定义产物、已组装工程、完整模板选择 JSON 与开发资源清单路径。调用方已授权直接生成或更新清单；Agent 可读取可信资源清单、创建项目专用开发/测试数据库和桶、写入被忽略的实际 `.env` 并用工具验证，但不得泄露秘密或执行 Git 暂存、提交、推送。
+在产品项目根显式调用 `/project-readiness`。首条提示第一行保留 slash command，正文只描述产品定义、实际工程、选型公开事实、可信资源清单和项目准备核验边界；不包含步骤号、PCM 节点或其它外层编排语义。
 
-本步骤只判断进入基础工程项目化前的外部资源、访问条件和本地配置。依赖安装、构建、测试、启动、独立 Git 初始化、业务实现和完整验收属于后续工作，不作为当前准备阻塞。
+调用方已授权创建或更新 `docs/requirements/项目准备清单.md`。Agent 可读取可信资源清单、创建项目专用开发/测试数据库和桶、写入被忽略的实际 `.env` 并以工具核验；不得创建生产资源、泄露秘密或执行 Git 暂存、提交、分支、合并、推送。依赖安装、构建、测试、启动、独立 Git 初始化、业务实现和完整验收属于后续工作，不作为当前准备阻塞。
 
-每轮保存 Agent 初始化信息、终止语义和 session。Agent 未达到完成条件时，将其完整真实回复作为 `user` 消息写入决策历史，再保存 `request_decision` 返回的完整结构化 JSON 作为 `assistant` 消息，并把其中的 `answer` 原样发送给同一 Agent session 和保存为恢复提示。Agent 正常结束且清单有效时，不再调用决策模型，直接保存最后一次 Agent 完整回复和固定完成声明。单次 Agent 上限为 24 turns、`$8`；同一历史累计最多执行 6 轮决策，预算或 turn 上限恢复同一 session。历史尾部的 Agent 回复、决策 JSON、blocked 决定和完成声明均作为跨进程恢复锚点，不重复调用或重复写入。
+## 统一决策与恢复
 
-## 输出与恢复
+每次 Agent 调用保存 init 核验、session 和安全的终止摘要；完整真实 Agent 回复先作为决策历史 `user` 消息保存，再交给步骤专属决策 system prompt 生成统一 `AgentDecision`：
 
-成功产物为 `docs/requirements/项目准备清单.md`，`steps/05.json.outputs` 只记录该相对路径。步骤先写成功结果，再将状态推进到 `project:06_bootstrap_foundation`。若结果已成功而状态写入中断，重跑会核验清单与 Agent 成功事实后恢复推进；完整成功状态会直接复用，不再次调用 Agent。
+- `continue` 的非空 `answer` 原样发给同一 session；它是内部循环，不产生步骤结果。
+- `completed` 后程序重新核验前序交接和非空普通清单。清单可安全补完时，向同一 session 追加固定清单修复提示后继续；交接、路径或文件类型冲突为 `failed`。
+- `blocked` 只表示当前环境不可取得的真实账号、凭据、私有数据、授权、专用设备、素材、付费服务或线下动作；CLI 保持原有三态结果格式，并在清单已存在时保留其输出引用。
+- `error_max_turns`、`error_max_budget_usd` 只在有 session 和非空回复时进入裁决；最终完成前必须恢复一次正常 `success`。400/429/500、连接、CLI/进程、无 `ResultMessage` 与其它 SDK/API 错误返回 `failed`，没有外层自定义 HTTP 重试。
 
-决策为 `blocked` 时，CLI 将结果写为 `blocked`；若清单已经存在，输出仍会包含其相对路径。`answer`、`continue`，或清单尚不存在时的 `approve` 会保存提示，并在同一 session 中恢复。其它异常由 CLI 写为 `failed`，保留可恢复现场。
+`conversations/project_readiness.json` 尾部是唯一调度真相：`user` 尾部先裁决，结构化 `continue` 尾部执行 answer，`completed` 尾部先核验，`blocked` 尾部停止；显式从 `blocked` 重跑才重新核验。状态不再写 `pending_agent_prompt`、决策轮次或 Python 完成声明，只保留 session、对话路径引用、最后一次 Agent 终止摘要和短暂的待写入 Agent 原文。旧 `action` 和旧完成 sentinel 仅只读兼容，既有对话不会转换回写。
+
+## 输出与幂等
+
+成功产物为 `docs/requirements/项目准备清单.md`，`steps/05.json.outputs` 只记录该相对路径。步骤先写成功结果，再推进到 `project:06_bootstrap_foundation`。若结果已成功而状态写入中断，重跑会重新核验清单与领域事实后推进；完整成功状态直接复用，不再次调用 Agent。
 
 ## 运行
 

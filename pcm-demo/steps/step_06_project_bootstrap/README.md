@@ -4,35 +4,31 @@
 
 - 运行状态位于 `project:06_bootstrap_foundation`，产品根仍是零提交 `main`。
 - `steps/02.json` 引用两份工作区内非空、非符号链接的产品定义文档。
-- `steps/04.json` 提供实际适用工程目录、模板来源和组装证据；第 3 步选型只用于核验该组装事实。
+- `steps/04.json` 提供实际适用工程目录和组装证据；第 3 步选型只用于核验该组装事实。
 - `steps/05.json` 成功，且 `docs/requirements/项目准备清单.md` 存在并可读取。
 - 适用工程内部的 README、manifest、锁文件、配置、代码和测试由 Agent 按当前现场读取，不由 Python 重复建模。
 
 ## 行为
 
-在产品项目根新建独立 Claude session，显式调用 `/project-bootstrap`。Agent 负责有限范围项目化：落实项目身份、基础配置、README、必要的共享视觉基线和模板测试迁移；经引用检查处理误导性的模板残留；按现有锁文件执行适用安装、检查、测试、构建、启动、真实浏览器检查和基础联调。
+在产品项目根新建或恢复 Claude session，首条提示以 `/project-bootstrap` 开始。正文只描述领域输入、范围、输出和约束：向 Agent 传递产品定义、准备清单、实际适用工程以及白名单化组装事实中的 `target`、模板 ID、分支、相对路径和 commit SHA；不传可能带凭据的 `git_url` 或 `origin`，不包含步骤号、PCM 节点或外层编排背景。
 
-本步骤不重选或重新组装模板，不实现业务功能、总体技术方案或工程架构，不初始化前后端独立 Git 仓库，也不暂存、提交、建分支、合并或推送。Python 不重复执行 Agent 的安装、构建和联调逻辑，只核验前序交接、适用目录、根仓库仍为零提交 `main`、没有暂存内容且适用工程没有提前出现 `.git`。
+Agent 负责有限范围项目化：项目身份、基础配置、README、必要共享视觉基线、模板测试迁移、经引用检查的误导残留，以及适用的真实安装、检查、测试、构建、启动、浏览器检查和基础联调。不得实现业务功能、总体技术方案或工程架构，不得初始化独立 Git 仓库、暂存、提交、建分支、合并或推送。Python 只核验前序交接、根仓零提交 `main`、暂存区为空及适用工程没有提前出现 `.git`。
 
-Agent 每轮完整回复都交给 AI-compatible 决策模型。步骤专属结构化决定只允许：
+## 统一决策与恢复
 
-- `completed`：完整回复已证明所有项目化完成条件满足；
-- `continue`：保存完整 `answer` 并恢复同一 Claude session 继续；
-- `blocked`：只用于当前环境无法取得的不可替代外部资源。
+每轮完整真实 Agent 回复都会保存为对话的 `user` 消息，并由步骤专属精简 decision system prompt 产生统一 `AgentDecision`：
 
-单次 Agent 上限为 48 turns、`$16`，同一历史累计最多 8 轮决定。预算或 turn 上限保存并恢复同一 session。历史保存初始指令、每轮 Agent 完整回复、每次结构化决定和固定完成声明。
+- `continue` 的 `answer` 原样恢复同一 session；`blocked` 仅表示不可替代外部资源；其它决策或运行错误为 `failed`。
+- `completed` 后仍由程序重验交接、目录和 Git 边界，并核验产品根 README。README 缺失或为空时，追加固定修复提示并在同一 session 继续；边界冲突不会修补或覆盖，直接 `failed`。
+- `error_max_turns`、`error_max_budget_usd` 有 session 和非空回复时可进入裁决，但必须在后续正常 `success` 后才可最终完成。400/429/500、连接、CLI/进程、无 `ResultMessage` 和其它 SDK/API 错误为 `failed`；无外层自定义 HTTP 重试。
+
+对话尾部决定恢复动作：`user` 先裁决，`continue` 执行 answer，`completed` 先核验，`blocked` 停止；从 `blocked` 显式重跑才重新核验。状态仅保存 session、对话路径、最后一次 Agent 终止摘要和短暂待写入原文，不再写 `pending_agent_prompt`、决策轮次或 Python 完成声明。旧 `action` 和旧完成 sentinel 仅保持只读兼容。
 
 ## 输出与恢复
 
-成功时 `steps/06.json.outputs` 记录第 4 步实际适用工程目录，先写步骤结果，再推进到 `project:07_solution_design`。如果没有适用基础工程，则无副作用跳过并记录 `applicable: false`。
+成功时 `steps/06.json.outputs` 记录第 4 步实际适用工程目录，先写步骤结果，再推进到 `project:07_solution_design`。如果没有适用基础工程，仍核验根 Git 和暂存区后以 `applicable: false` 无副作用跳过；该语义保持不变。
 
-恢复时：
-
-- 已保存 Agent 回复但未决策：先恢复决策，不重复调用 Agent；
-- 已保存 `continue`：原样恢复其 `answer`；
-- 已保存 `blocked`：直接恢复阻塞；
-- 已保存 `completed` 或固定完成声明但状态推进中断：重新核验目录和 Git 边界后写入或复用成功结果；
-- 状态已经推进到下一节点：核验完整成功现场后幂等复用，不再次调用 Agent 或决策模型。
+已有成功结果、完成决定或状态推进中断时，先重验工程和 Git 事实再补写或复用成功；完整成功状态不再次调用 Agent 或决策模型。步骤结果格式与 `run_step.py` 的 `success` / `blocked` / `failed` 三态不变。
 
 ## 运行
 

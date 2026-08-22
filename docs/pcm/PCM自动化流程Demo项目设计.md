@@ -2,7 +2,7 @@
 
 > 本文定义正式 PCM 开发前的轻量 Python 验证项目。Demo 的目的不是提前实现正式 PCM，而是用可独立运行、可串联的一组脚本，真实验证 [`PCM 程序化调度的 AI Agent 产品开发流程`](../../.claude/PCM版AI%20Agent自动化流程设计.md)。
 >
-> 截至 2026-08-22，阶段 0 技术探针以及业务第 0～7 步已经实现并真实验证。第 3 步使用 Pydantic `responses.parse` 完成基础工程选型，第 4 步以确定性 Git 和文件操作组装工程，第 5 步显式调用 `project-readiness` 完成资源准备，第 6 步显式调用 `project-bootstrap`，通过专属结构化完成裁决、同 session 恢复、真实安装、构建、测试、启动、浏览器和最小联调完成工程项目化，第 7 步显式调用 `solution-design`，通过专属结构化完成裁决、同 session 恢复和固定技术方案文档核验完成总体技术方案。下一步先讨论第 8 步初始化并提交适用仓库合同。
+> 重构前，阶段 0 技术探针以及业务第 0～7 步已真实运行：第 3 步以 Pydantic `responses.parse` 完成基础工程选型，第 4 步以确定性 Git 和文件操作组装工程，第 5 步完成资源准备，第 6 步完成真实安装、构建、测试、启动、浏览器和最小联调，第 7 步生成固定总体技术方案，并已推进至第 8 步待讨论的“初始化并提交适用仓库”合同。本次第 2/5/6/7 步改接薄公共 Agent 决策循环后，隔离 run `agent-loop-step7-20260822T190149Z` 已以新的 `solution_design` session 真实验证公共循环的第 7 步：保留无 Result 环境错误并同 session 恢复、正常结果裁决、结构化格式重试、完成核验修复和状态推进均已通过；隔离副本未修改既有 `step01-mendmark`。该新证据只覆盖重构后第 7 步，不把旧 run 或未重跑步骤误记为新循环的真实证据。
 
 ## 一、验证目标
 
@@ -44,12 +44,13 @@ python run_all.py \
 - 阶段 0 三个技术探针：Claude Agent SDK 与项目能力加载、同机跨进程 session 恢复、OpenAI-compatible 结构化决策；
 - 第 0 步：黄金输入已经是完整产品初稿时，无副作用跳过；
 - 第 1 步：从固定开发管理模板发布独立产品项目工作区，并初始化零提交根 Git 仓库；
-- 第 2 步：显式调用 `project-intake`，通过 AI-compatible 决策循环收敛产品定义，并保存 Claude session 与完整决策历史；
+- 第 2 步：显式调用 `project-intake`，通过公共 `AgentDecision` 循环收敛产品定义，并保存 Claude session 与完整决策历史；
 - 第 3 步：将产品定义和 catalog 构造成 Pydantic 输入，使用代码内 system prompt 调用 `responses.parse`，将 `output_parsed` 直接保存为稳定选型结果；
 - 第 4 步：只读取第 3 步结果，以浅 clone、来源核验、临时 payload 和原子 rename 组装选中的模板目录，保存实际来源证据并推进到第 5 步；
-- 第 5 步：显式调用 `project-readiness`，把第 2 步产品定义、第 3 步选型、当前已组装工程和 `PCM_DEV_RESOURCE_LIST` 指向的可信开发资源交给 Agent；Agent 补齐被忽略配置、执行真实资源核验并生成准备清单，Python 保存 session、完整编排历史并推进到第 6 步；
-- 第 6 步：显式调用 `project-bootstrap`，把产品定义、第 4 步实际组装工程和第 5 步准备清单交给 Agent；Agent 完成项目身份、基础配置、模板残留、真实安装、构建、测试、启动、浏览器和最小联调，AI-compatible 模型以步骤专属 Pydantic 结果裁决 `completed/continue/blocked`，Python 核验目录与 Git 边界并推进到第 7 步；
-- 第 7 步：显式调用 `solution-design`，把产品定义、项目准备清单、实际适用工程和脱敏组装事实交给 Agent；Agent 生成总体技术方案，AI-compatible 模型以步骤专属 Pydantic 结果裁决 `completed/continue/blocked`，Python 核验固定非空文档和前序交接并推进到第 8 步；
+- 第 5 步：显式调用 `project-readiness`，把第 2 步产品定义、最小选型投影、当前已组装工程和 `PCM_DEV_RESOURCE_LIST` 指向的可信开发资源交给 Agent；Agent 补齐被忽略配置、执行真实资源核验并生成准备清单；
+- 第 6 步：显式调用 `project-bootstrap`，把产品定义、第 4 步实际组装工程和第 5 步准备清单交给 Agent；Agent 负责项目身份、基础配置、模板残留和真实工程验证，Python 核验目录与 Git 边界；
+- 第 7 步：显式调用 `solution-design`，把产品定义、项目准备清单和实际适用工程交给 Agent；Agent 生成总体技术方案，Python 核验固定非空文档和前序交接；第 7 步回复及新 run 的决策输入保留完整原文于 Git 忽略的 run 目录；
+- 第 2/5/6/7 步共用薄公共循环：每轮完整真实 Agent 回复均先进入 `AgentDecision(completed/continue/blocked)`，`completed` 后才由步骤程序核验。
 - `run_step.py` 对第 0～7 步提供单步运行入口。
 
 “已完成至第 7 步”不自动声明完整初始化阶段完成。当前代码接受第 0～7 步；第 8 步及以后仍明确返回“步骤尚未实现”。
@@ -163,6 +164,7 @@ pcm-demo/
 ├── README.md
 ├── config.py
 ├── common/
+│   ├── agent_decision_loop.py
 │   ├── claude_agent.py
 │   ├── decision.py
 │   ├── files.py
@@ -192,11 +194,13 @@ pcm-demo/
 - 阶段二使用具名节点，但不强行伪装成新的业务步骤编号；
 - 目录可以按实际代码量合并，不为未来步骤创建空模块。
 
-统一测试入口继续从 `steps/` 递归发现：
+统一测试入口从 `pcm-demo/` 根递归发现公共循环和步骤测试：
 
 ```bash
-uv run python -m unittest discover -s steps -t . -p 'test*.py' -v
+uv run python -m unittest discover -s . -t . -p 'test*.py' -v
 ```
+
+当前全量为 83 项，其中公共循环为 23 项。
 
 ## 七、执行架构与职责
 
@@ -218,7 +222,7 @@ uv run python -m unittest discover -s steps -t . -p 'test*.py' -v
 
 AI-compatible 模型代表原人工调度者，负责所有可基于当前输入、项目事实、工具和已提供资源完成的产品、技术、文档、流程与执行决策，包括回答、批准、继续、方案选择、候选分流和需求化取舍。
 
-它不直接获得整个工作区和 Shell 权限。Python 编排器提供当前决定所需的最小事实，并按领域键持久化完整、脱敏的编排历史。只有不可替代外部资源缺失时才返回 `blocked`；输入、结构、状态或调用错误返回 `failed`。
+它不直接获得整个工作区和 Shell 权限。Python 编排器只提供当前决定所需的最小事实，并按领域键持久化完整编排历史。run 目录受 Git 忽略保护；Agent 仍不得主动披露秘密。只有不可替代外部资源缺失时才返回 `blocked`；输入、结构、状态或调用错误返回 `failed`。
 
 第 1 步项目身份提取、AI-compatible 决策和第 3 步选型统一使用 OpenAI Python SDK `responses.parse`。每个调用将权威输入构造成 Pydantic 模型，将 Pydantic 输出类型传给 `text_format`，直接使用 `response.output_parsed`，不手写 JSON Schema、不解析原始 JSON 字符串。第 3 步使用代码内 system prompt，不调用 Skill 或 Claude Agent SDK。
 
@@ -300,21 +304,25 @@ Python 负责确定性操作和最终状态裁决：
 
 修迹真实验证使用 GitLab SSH 来源：前端 `vite-react-shadcn-spa` 的 `main` SHA 为 `a31db6deb85ab29f2d2253413dd362293a96325f`，后端 `fastapi-sqlalchemy-postgresql-async-api` 的 `main` SHA 为 `49ff842fcd330387f2fbdd1e9a43884e05894697`，均与 `ls-remote` 一致。两端完整、无嵌套 `.git` 和临时目录，根仓库仍零提交 `main`，源 PRD 和项目内初稿 SHA-256 均为 `d7d9b8054b226ef2abf730cfb29e59b30d5e39d68eb9121ded22a16750414fee`。首次 HTTPS 来源错误为 `failed`，目标未覆盖且临时现场保留；改为 SSH 后同 run 依据 marker 安全清理并成功，第二次执行 0.809 秒幂等复用。
 
-第 5 步只确定性核验第 2、3、4 步交接、产品根 Git、组装现场和 `PCM_DEV_RESOURCE_LIST` 路径，再在产品项目根显式调用 `/project-readiness`。初始 prompt 只描述准备核验领域任务：两份产品定义是当前范围权威来源，模板选择和实际工程为技术事实，可信资源清单可由 Agent 原样读取；Agent 可以创建项目专用开发/测试数据库和对象存储桶、写入被忽略的实际 `.env` 并执行真实工具核验。依赖安装、构建、测试、启动、独立 Git 初始化、业务实现和完整验收属于后续工作，不作为当前准备阻塞。Python 不解析资源清单或准备清单状态；它保存 Claude session，以及由 Agent 完整真实回复和 AI-compatible 决策模型完整结构化回复交替组成的编排历史。Agent 正常 `success` 且清单存在时直接追加最后一次 Agent 回复和固定完成声明；预算或 turn 上限恢复同一 session；成功结果先落盘、下一节点状态随后写入，若中断可由成功结果恢复推进。
+第 5 步只确定性核验第 2、3、4 步交接、产品根 Git、组装现场和 `PCM_DEV_RESOURCE_LIST` 路径，再在产品项目根显式调用 `/project-readiness`。初始提示以 slash command 开始，正文只描述准备核验领域：两份产品定义是当前范围权威输入，实际工程和**最小选型投影**是技术事实（不传 `git_url`、`origin`），可信资源清单可由 Agent 原样读取；后续依赖安装、构建、测试、启动、独立 Git 初始化、业务实现和完整验收不作为当前准备阻塞。公共循环保存完整 Agent 原文并统一裁决，完成后才核验非空清单。
 
-修迹真实运行曾在旧 `$4`/12 turns 上限后恢复同一 session，完成 PostgreSQL、MinIO 和本地配置准备；本次修正对话历史后，由于这些资源已就绪，新 `project_readiness` session 一轮即正常完成。生成的历史严格为 `system → assistant 初始 Agent 指令 → user Agent 完整真实回复 → assistant 固定完成声明`，`decision_turn: 0`、完成声明唯一且没有占位内容。未完成分支的自动化测试同时验证 `user Agent 完整回复 → assistant request_decision 返回的完整结构化 JSON` 的多轮交替、完整 `answer` 转发和跨进程恢复。步骤最终推进到 `project:06_bootstrap_foundation`，随后幂等复用不再调用 Agent。
+**重构前真实运行事实。** 修迹项目曾完成 PostgreSQL、MinIO 与本地配置准备，并在旧 session 语义下推进到第 6 步；该业务事实保留。旧历史中的固定完成声明和 `decision_turn` 属于旧协议，不是新循环会写入的状态。
 
-第 6 步只从前序结果读取两份产品定义、第 4 步实际适用工程与脱敏后的组装来源、第 5 步准备清单；工程内部 README、manifest、锁文件、配置、代码和测试由 Agent 按现场读取。初始 prompt 显式调用 `/project-bootstrap`，不包含步骤编号、PCM 节点或其它编排背景，也不向 Agent 或决策模型传递可能带凭据的 `git_url`、`origin`。Agent 负责有限项目化和真实安装、检查、测试、构建、启动、浏览器及基础联调；Python 不重复执行这些领域工作，只核验前序交接、根仓仍是零提交 `main`、暂存区为空、适用目录存在且没有提前初始化 `.git`。
+第 6 步只从前序结果读取两份产品定义、第 4 步实际适用工程与白名单化组装来源、第 5 步准备清单；工程内部事实由 Agent 按现场读取。初始提示以 `/project-bootstrap` 开始，正文不包含步骤编号、PCM 节点或其它外层编排背景，也不向 Agent 或决策模型传递可能带凭据的 `git_url`、`origin`。Agent 负责有限项目化和真实工程验证；Python 只核验前序交接、根仓零提交 `main`、暂存区和嵌套 Git 边界。没有适用工程时的无副作用跳过保持不变。
 
-每轮 Agent 完整回复都由步骤专属 Pydantic `BootstrapDecision` 裁决为 `completed`、`continue` 或 `blocked`；普通 `ResultMessage.success` 不直接代表步骤成功。单次 Agent 上限为 48 turns、`$16`，累计最多 8 轮裁决；预算、turn 或连接中断后恢复原 session。AI-compatible 服务首次返回 YAML 风格文本导致结构化解析失败，步骤为该专属裁决增加一次严格 JSON 限定重试；恢复后保存原始 `continue`，将“确认执行”发送给同一 session，第二次连接中断仍由决策模型要求继续，第三轮 Agent 回复完成前后端工程。完成后补查发现产品根 README 仍保留通用模板身份，遂在同一历史追加纠正性 `continue`，原 session 只补齐根 README 和链接复验，第 5 次裁决最终 `completed`。
+**重构前真实运行事实。** 修迹项目曾完成前后端项目化、安装、检查、测试、构建、真实启动、浏览器检查和基础联调，并推进到第 7 步；根 README 收口、根仓零提交、无 staged、适用工程无 `.git` 均为历史交付证据。旧专属裁决、格式重试和连接恢复的叙述不代表本次公共循环已被真实新 session 验证。
 
 修迹真实项目化将产品根 README 收口为 MendMark 项目总说明，将前端收口为 `mendmark-web`、后端收口为 `mendmark-api`，同步公开配置、基础页面、健康检查与模板测试，保留有效基础设施并未实现业务功能。前端 `pnpm install --frozen-lockfile`、lint、type-check、10 项测试、build 和 1 项 Playwright E2E 通过；后端锁定、`uv sync --locked`、Ruff、15 项含 PostgreSQL `SELECT 1` 的测试和 `uv build` 通过；真实 Uvicorn/Vite、`/health`、`/ready`、OpenAPI、浏览器健康联调、375px 窄视口、控制台和网络检查通过。临时服务已停止，实际 `.env` 仍被忽略且权限为 `600`，根仓仍为零提交 `main`、无 staged，前后端无 `.git`。状态推进到 `project:07_solution_design`，成功复用耗时约 1 秒且不再调用 Agent。
 
-第 7 步只从前序结果读取两份产品定义、第 5 步项目准备清单、第 4 步实际适用工程和脱敏组装来源，以及第 6 步成功结果；适用工程内部的 README、manifest、锁文件、配置、代码和测试由 Agent 按现场读取。初始 prompt 显式调用 `/solution-design`，只授权创建或更新固定的 `docs/design/技术方案.md`，不包含步骤编号、PCM 节点或其它编排背景，不传递可能带凭据的 `git_url` 或 `origin`。Agent 负责区分当前事实、已确认决定、目标状态、假设和待确认事项，明确系统边界、主要技术选择、交付单元、跨单元协作、风险和恢复语义；不重新选型、组装模板、实现业务、修改代码或执行 Git 写操作。
+第 7 步只从前序结果读取两份产品定义、第 5 步项目准备清单、第 4 步实际适用工程和白名单组装来源，以及第 6 步成功结果；工程内部事实由 Agent 按需读取，**不要求全仓扫描**。初始提示以 `/solution-design` 开始，只授权创建或更新 `docs/design/技术方案.md`，不包含步骤编号、PCM 节点或其它编排背景，不传递 `git_url` 或 `origin`。Agent 不重新选型、组装模板、实现业务、修改业务代码或执行 Git 写操作。新 run 的完整回复、pending 文本与决策输入保留原文于 Git 忽略目录；仍禁止 Agent 主动披露秘密。
 
-每轮 Agent 完整回复都由步骤专属 Pydantic `SolutionDesignDecision` 裁决为 `completed`、`continue` 或 `blocked`；风险、假设和正常的未来待决事项不构成阻塞。普通 `ResultMessage.success` 不直接代表步骤成功，Python 只核验固定方案文档为非空普通文件、前序交接和 Agent session/cwd/Skill 边界。单次 Agent 上限为 48 turns、`$16`，累计最多 8 轮裁决；结构化响应最多严格 JSON 重试一次，预算、turn 或连接中断后恢复同一 session。成功先写 `steps/07.json`，再推进到 `project:08_initialize_repositories`；没有适用基础工程时仍需生成总体技术方案，不无副作用跳过。
+公共循环使第 2/5/6/7 步共享 `AgentDecision(completed/continue/blocked)`、对话尾部恢复与 SDK 错误边界：`completed` 后才执行步骤核验，若固定产物可安全补完则追加普通修复提示并继续同一 session，否则失败；`continue` 留在内部，`blocked` 或失败终止。`error_max_turns` / `error_max_budget_usd` 有 session 与非空回复时可裁决，但必须在正常 `success` 后才可最终完成；400/429/500、连接/CLI/进程、无 Result、`terminal_reason` 为 `aborted_streaming`/`aborted_tools`，以及 `success` 下未知终止原因均在裁决前失败，且无外层自定义 HTTP 重试。旧 `action` 非 `blocked` 映射为 `continue`；若旧 `answer` 为空则使用固定安全兼容 continue 提示，绝不将旧控制 JSON 转发给 Agent。
 
-修迹真实第 7 步运行使用新的 `solution_design` session；Agent 读取实际产品定义、项目准备清单、前后端工程和组装 commit 事实，生成固定技术方案文档并通过专属 `completed` 裁决，状态推进到 `project:08_initialize_repositories`。第 7 步专属 11 项测试、第 0～7 步全量 86 项测试、`compileall` 和 `git diff --check` 已通过；成功历史保留初始指令、Agent 完整回复、结构化决定和固定完成声明，回复在落盘和转发决策模型前按敏感信息模式脱敏，根仓暂存区为空且适用工程无新增嵌套 Git。真实 run 重跑确认成功幂等复用，不再次调用 Agent 或决策模型。
+**重构后第 7 步隔离真实验证。** 新 run `agent-loop-step7-20260822T190149Z` 在外部复制工作区运行，未修改既有 `step01-mendmark`；session `e8000375-2698-4ccf-9927-ccb9ca627ca2` 的 init 确认 cwd、`solution-design` Skill、slash command 和 Fable 模型。首次 Agent 尝试内置 Explore 子代理时发生环境内部未识别模型并超时，未返回 ResultMessage；循环保存 session 与初始 conversation、未推进成功。仅在隔离验证历史中追加普通 assistant 的“不使用子代理、直接工具完成”提示后，从同一 session 恢复。该测试提示不进入生产 prompt，环境内部子代理错误也不是公共循环缺陷。
+
+恢复后 Agent 正常 `success`（44 turns，约 `$3.800742`），生成约 44 KB 技术方案。AI-compatible 服务对同一真实回复首返 YAML 风格结构，当时唯一格式重试提示要求花括号、双引号并禁止 YAML，第二次返回严格 JSON `completed`。测试包装器只在隔离副本首次 completed 后将技术方案置空，verifier 返回固定 `DESIGN_REPAIR_PROMPT`；公共循环保留真实 completed JSON、追加普通 assistant repair 提示、恢复同一已保存 session，Agent 补回非空文档，第二次真实裁决再次 `completed`。最终 `steps/07.json` 为 `success`，状态为 `project:08_initialize_repositories`，conversation 尾部为 `completed`，无旧 completion sentinel 或 `pending_agent_prompt`。公共循环 23 项、第 2/5/6/7 步 6/8/5/5 项、全量 83 项测试已通过。
+
+Probe C 的早期成功证据为 `probe-c-20260822T185623Z`：普通 `continue`（attempts=2）、外部支付 `blocked`（attempts=1）；后续最终验证连续两次失败：普通决定在唯一重试后仍返回带“验证：”前缀的非 JSON `ValidationError`，以及普通成功后 boundary 返回 Responses `status=incomplete`；代码均按合同 `failed`，未增加第三次重试或手写解析。随后 `common/decision.py` 使首次请求与唯一格式重试都附加相同的严格 JSON、首尾花括号、双引号、禁止 YAML 约束，步骤 system prompt 保持只负责领域条件。更新后真实复跑 `probe-c-20260822T200038Z` 通过：ordinary `continue`（attempts=1）、boundary `blocked`（attempts=1）。该前置约束后的单次成功确认能力可用，但不消除服务格式/完成状态波动，重复稳定性仍是验证缺口。
 
 ### 阶段一：第 12～19 步逐需求开发
 
@@ -426,7 +434,7 @@ phase_2:audit
 - 阶段二 `phase_two`，包括审计版本指纹、独立 session、审计结果、候选分流和入池证据；
 - 阶段二修复需求的 `return_node_after_completion`，确保第 19 步后返回 `phase_2:regress_and_reaudit`，而不是阶段一普通需求选择。
 
-状态只保存支持恢复所需的当前事实和引用，不复制完整历史事件。工作区文件和 Git 仓库仍是实际交付事实；Claude session 保存 Agent 对话；`conversations/` 保存 AI-compatible 完整、脱敏的编排历史。
+状态只保存支持恢复所需的当前事实和引用，不复制完整历史事件。工作区文件和 Git 仓库仍是实际交付事实；Claude session 保存 Agent 对话；`conversations/` 保存 AI-compatible 完整编排历史。第 2/5/6/7 步的恢复核心是 session、`{path}` 引用、最后 Agent 终止摘要和短暂 `pending_agent_text`，不再新写 `pending_agent_prompt`、决策轮次或 Python 完成声明。
 
 ### 3. 恢复原则
 
@@ -507,12 +515,11 @@ python run_all.py --run-id <run-id> --from-node phase_2:audit
 
 ## 十二、后续实现顺序
 
-1. 保持第 0～7 步已验证行为不变；
-2. 第 6 步已完成 14 项专属测试、75 项全量测试、真实 Claude Agent SDK 项目化、专属结构化裁决重试、同 session 连接中断恢复、前后端安装/构建/测试/启动、真实浏览器和基础联调，以及成功幂等复用；
-3. 第 7 步已完成 7 项专属测试、82 项全量测试、真实 `solution-design` Agent session、固定技术方案文档、专属结构化裁决、同 session 恢复和成功幂等复用；
-4. 下一次先讨论第 8 步初始化并提交适用仓库合同；
-5. 合同确认后先实现代码并通过测试和真实验证，再同步设计文档并提交；
-6. 不提前实现第 8～19 步或阶段二空壳；
+1. 保持第 0～7 步已确认的业务边界不变；
+2. 公共循环 23 项以及第 2/5/6/7 步 6/8/5/5 项、全量 83 项自动化测试已通过；隔离新 session 已真实验证第 7 步的错误保留、同 session 恢复、格式重试、completed 后 repair 和成功推进，后续仅在需要第 2/5/6 步独立新 session 证据时再补记；
+3. 下一次先讨论第 8 步初始化并提交适用仓库合同；
+4. 合同确认后先实现代码并通过测试和真实验证，再同步设计文档并提交；
+5. 不提前实现第 8～19 步或阶段二空壳；
 6. 每个阶段只根据真实运行发现补充最小公共能力；
 7. 阶段一先完整跑通一个正式需求，再验证至少第二个真实需求；
 8. 阶段二先在完整集成版本上跑通一次审计、分流、入池、修复回归和完整复审；

@@ -12,7 +12,7 @@ from typing import Any
 DEMO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(DEMO_ROOT))
 
-from common.decision import request_decision  # noqa: E402
+from common.decision import AgentDecision, SYSTEM_PROMPT, request_decision  # noqa: E402
 from config import LLMConfig  # noqa: E402
 
 
@@ -37,30 +37,36 @@ async def probe(run_dir: Path) -> dict[str, Any]:
     config = LLMConfig.load()
     ordinary, ordinary_attempts, _ = await request_decision(
         [
+            {"role": "system", "content": SYSTEM_PROMPT},
             {
                 "role": "user",
-                "content": "当前产物已存在，Agent 请求明确授权写入正式文档。请决定。",
-            }
+                "content": "当前产物已经存在，Agent 请求明确指令以完成正式文档写入或收尾。请决定。",
+            },
         ],
         config,
     )
     boundary, boundary_attempts, _ = await request_decision(
         [
+            {"role": "system", "content": SYSTEM_PROMPT},
             {
                 "role": "user",
                 "content": "Agent 完成任务必须取得真实支付商户账号和生产密钥，当前资源清单没有这些资源。请决定。",
-            }
+            },
         ],
         config,
     )
+    ordinary_decision = AgentDecision.model_validate(ordinary)
+    boundary_decision = AgentDecision.model_validate(boundary)
 
     checks = {
         "config_loaded": bool(config.base_url and config.api_key and config.model),
-        "ordinary_approved": ordinary["action"] == "approve",
-        "ordinary_has_no_required_inputs": not ordinary["required_inputs"],
-        "boundary_blocked": boundary["action"] == "blocked",
-        "boundary_has_required_inputs": bool(boundary["required_inputs"]),
-        "pydantic_output_parsed": ordinary_attempts == 1 and boundary_attempts == 1,
+        "ordinary_is_continue_or_completed": ordinary_decision.verdict
+        in {"continue", "completed"},
+        "ordinary_has_no_required_inputs": not ordinary_decision.required_inputs,
+        "boundary_blocked": boundary_decision.verdict == "blocked",
+        "boundary_has_required_inputs": bool(boundary_decision.required_inputs),
+        "pydantic_output_parsed": isinstance(ordinary_decision, AgentDecision)
+        and isinstance(boundary_decision, AgentDecision),
     }
     result = {
         "probe": "C",
@@ -72,13 +78,13 @@ async def probe(run_dir: Path) -> dict[str, Any]:
         "checks": checks,
         "decisions": {
             "ordinary": {
-                "action": ordinary["action"],
+                "verdict": ordinary_decision.verdict,
                 "attempts": ordinary_attempts,
             },
             "boundary": {
-                "action": boundary["action"],
+                "verdict": boundary_decision.verdict,
                 "attempts": boundary_attempts,
-                "required_input_count": len(boundary["required_inputs"]),
+                "required_input_count": len(boundary_decision.required_inputs),
             },
         },
     }

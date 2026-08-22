@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
-from pydantic import BaseModel, ValidationError
-
-from common.claude_agent import ClaudeRunResult, run_claude
+from common.agent_decision_loop import AgentDecisionLoopSpec, run_agent_decision_loop
+from common.claude_agent import run_claude
 from common.decision import request_decision
-from common.files import write_json
 from common.state import write_state, write_step_result
 from config import LLMConfig
 from steps.step_01_create_workspace.workspace import git
@@ -30,28 +28,33 @@ CURRENT_NODE = "project:06_bootstrap_foundation"
 NEXT_NODE = "project:07_solution_design"
 CONVERSATION_KEY = "project_bootstrap"
 SKILL_NAME = "project-bootstrap"
-CONVERSATION_PATH = Path("conversations/project_bootstrap.json")
 CHECKLIST = Path("docs/requirements/项目准备清单.md")
 MAX_DECISION_ROUNDS = 8
 PROJECT_BOOTSTRAP_MAX_TURNS = 48
 PROJECT_BOOTSTRAP_MAX_BUDGET_USD = 16.0
-COMPLETION_MESSAGE = "已完成 project-bootstrap：基础工程已完成项目化并通过完成条件与工程边界核验。"
+LEGACY_COMPLETION_MESSAGES = (
+    "已完成 project-bootstrap：基础工程已完成项目化并通过完成条件与工程边界核验。",
+)
 
-BOOTSTRAP_DECISION_SYSTEM_PROMPT = """判断最新一轮项目化 Agent 完整回复是否已经满足当前任务的完成条件，并填写 verdict、answer、reason 和 required_inputs。
+BOOTSTRAP_DECISION_SYSTEM_PROMPT = """根据最新 Agent 回复判断项目化工作是否完成。
 
-verdict 只允许：
-- completed：Agent 已明确报告完成产品根 README、各适用工程的项目身份、基础配置、文档和必要模板残留处理；所有适用工程的依赖安装、静态或类型检查、测试、构建、启动和基础联调均已真实通过或明确不适用；涉及 UI 时已使用真实浏览器读取代表性页面并检查阻断性控制台和网络错误；没有项目化范围内的失败、未验证项或未决事项；没有实施业务功能、总体技术方案、Git 初始化、暂存、提交、分支、合并或推送。
-- continue：Agent 尚在计划、请求确认、执行中、验证未完成，或回复缺少足够完成证据。answer 必须给出基于现有输入即可执行的明确下一步，要求其在原 session 中继续完成和验证。
-- blocked：只在缺少当前环境无法取得的真实外部账号、凭据、私有数据、授权、专用设备、付费服务或线下动作时使用，并在 required_inputs 中列出解除条件。
+- completed：产品根 README 和各适用工程的项目身份、基础配置、必要文档及安全确认的模板残留已经收口；每个适用工程的依赖安装、检查、测试、构建、启动和基础联调均已真实通过或明确不适用；涉及界面时已用真实浏览器检查代表性页面及阻断性控制台、网络错误；没有本次范围内的失败或未验证项，且未实施业务功能或 Git 写操作。
+- continue：项目化、验证或完成证据尚不完整，但可使用已有资料和工具继续完成。
+- blocked：只能用于缺少当前环境无法取得的真实外部账号、凭据、私有数据、授权、专用设备、付费服务或线下动作。
 
-存在多个合理的项目化方案、模板残留取舍或局部技术修正时，应选择最小且符合现有工程事实的方案并使用 continue，不要因此 blocked。不得用 Mock、假凭据、跳过检查或降低完成标准来判定 completed。completed 和 continue 的 required_inputs 必须为空数组；continue 的 answer 不得为空。输出必须是符合 Pydantic 模型的严格 JSON 对象，不得使用 YAML 键值行、Markdown 或代码围栏。"""
+填写 verdict、answer、reason 和 required_inputs。completed 的 answer 和 required_inputs 为空；continue 必须给出非空 answer 且 required_inputs 为空；blocked 的 answer 为空且 required_inputs 非空。reason 说明判断依据。直接输出结构化结果。"""
 
-
-class BootstrapDecision(BaseModel):
-    verdict: Literal["completed", "continue", "blocked"]
-    answer: str
-    reason: str
-    required_inputs: list[str]
+DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
+    key=CONVERSATION_KEY,
+    state_key="project_bootstrap",
+    skill_name=SKILL_NAME,
+    max_decision_rounds=MAX_DECISION_ROUNDS,
+    max_turns=PROJECT_BOOTSTRAP_MAX_TURNS,
+    max_budget_usd=PROJECT_BOOTSTRAP_MAX_BUDGET_USD,
+    decision_system_prompt=BOOTSTRAP_DECISION_SYSTEM_PROMPT,
+    legacy_completion_messages=LEGACY_COMPLETION_MESSAGES,
+)
+README_REPAIR_PROMPT = "产品根 README 缺失或为空。请仅补齐该文件的项目身份和必要基础运行说明，然后报告结果。"
 
 
 class ProjectBootstrapBlocked(RuntimeError):
@@ -103,7 +106,7 @@ def validate_inputs(
         raise RuntimeError("运行状态不位于基础工程项目化锚点")
     workspace = workspace_from_state(state)
     product_outputs = load_product_outputs(run_dir, workspace)
-    selection, _ = load_selection(run_dir)
+    selection = load_selection(run_dir)
     assembly = load_assembly(run_dir)
     verify_existing_success(
         workspace,
@@ -131,7 +134,7 @@ def verify_git_boundaries(workspace: Path, outputs: list[str]) -> None:
         if path.is_symlink() or not path.is_dir():
             raise RuntimeError(f"适用工程目录不存在或无效：{output}")
         if (path / ".git").exists() or (path / ".git").is_symlink():
-            raise RuntimeError(f"适用工程不得提前初始化 Git 仓库：{output}")
+            raise RuntimeError(f"适用工程目录存在嵌套 .git：{output}")
 
 
 def verify_existing_bootstrap_success(
@@ -151,232 +154,27 @@ def verify_existing_bootstrap_success(
     return existing
 
 
-def safe_result(run: ClaudeRunResult) -> dict[str, Any]:
-    return {
-        "subtype": run.result_subtype,
-        "is_error": run.is_error,
-        "stop_reason": run.stop_reason,
-        "session_id": run.session_id,
-        "num_turns": run.num_turns,
-        "total_cost_usd": run.total_cost_usd,
-        "exception": "Agent SDK 返回异常" if run.exception else None,
-    }
-
-
-def save_agent_update(run_dir: Path, state: dict[str, Any], run: ClaudeRunResult) -> None:
-    previous_session = state.get("claude_sessions", {}).get(CONVERSATION_KEY)
-    if previous_session and run.session_id and previous_session != run.session_id:
-        raise RuntimeError(
-            f"恢复 session ID 不一致：期望 {previous_session}，实际 {run.session_id}"
-        )
-    if run.session_id:
-        state.setdefault("claude_sessions", {})[CONVERSATION_KEY] = run.session_id
-    bootstrap = state.setdefault("project_bootstrap", {})
-    if run.init:
-        skills = {str(item) for item in run.init.get("skills") or []}
-        commands = {str(item) for item in run.init.get("slash_commands") or []}
-        bootstrap["skill_loaded"] = SKILL_NAME in skills
-        bootstrap["slash_command_loaded"] = SKILL_NAME in commands
-        bootstrap["init"] = {
-            key: run.init.get(key)
-            for key in ("cwd", "model", "permissionMode", "claude_code_version")
-        }
-    if run.result_subtype:
-        bootstrap["last_agent_result"] = safe_result(run)
-        bootstrap["pending_agent_text"] = run.text
-    write_state(run_dir, state)
-
-
-def load_conversation(run_dir: Path, state: dict[str, Any]) -> list[dict[str, str]]:
-    reference = state.get("decision_conversations", {}).get(CONVERSATION_KEY)
-    if reference is None:
-        return [{"role": "system", "content": BOOTSTRAP_DECISION_SYSTEM_PROMPT}]
-    if set(reference) != {"path", "turn"} or reference["path"] != str(CONVERSATION_PATH):
-        raise RuntimeError("项目化决策历史引用不符合约定")
+def root_readme_repair(workspace: Path) -> str | None:
+    path = workspace / "README.md"
+    if path.is_symlink():
+        raise RuntimeError("产品根 README 不能是符号链接")
+    if not path.exists():
+        return README_REPAIR_PROMPT
+    if not path.is_file():
+        raise RuntimeError("产品根 README 必须是普通文件")
     try:
-        data = json.loads((run_dir / CONVERSATION_PATH).read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
-        raise RuntimeError("项目化决策历史不可读取") from error
-    messages = data.get("messages")
-    if not isinstance(messages, list) or not messages:
-        raise RuntimeError("项目化决策历史内容不符合约定")
-    return messages
-
-
-def save_conversation(
-    run_dir: Path,
-    state: dict[str, Any],
-    messages: list[dict[str, str]],
-    *,
-    decision_turn: int | None = None,
-) -> None:
-    path = run_dir / CONVERSATION_PATH
-    path.parent.mkdir(exist_ok=True)
-    write_json(path, {"messages": messages})
-    if decision_turn is None:
-        decision_turn = (
-            state.get("decision_conversations", {})
-            .get(CONVERSATION_KEY, {})
-            .get("turn", 0)
-        )
-    state.setdefault("decision_conversations", {})[CONVERSATION_KEY] = {
-        "path": str(CONVERSATION_PATH),
-        "turn": decision_turn,
-    }
-    write_state(run_dir, state)
-
-
-def append_initial_agent_prompt(run_dir: Path, state: dict[str, Any], prompt: str) -> None:
-    messages = load_conversation(run_dir, state)
-    if len(messages) == 1:
-        messages.append({"role": "assistant", "content": prompt})
-        save_conversation(run_dir, state, messages)
-
-
-def parse_bootstrap_decision(content: str) -> dict[str, Any] | None:
-    try:
-        return BootstrapDecision.model_validate_json(content).model_dump()
-    except ValueError:
-        return None
-
-
-def validate_decision(decision: dict[str, Any], raw: str) -> dict[str, Any]:
-    try:
-        validated = BootstrapDecision.model_validate(decision).model_dump()
-        parsed_raw = BootstrapDecision.model_validate_json(raw).model_dump()
-    except ValueError as error:
-        raise RuntimeError("项目化决策结果不符合约定") from error
-    if validated != parsed_raw:
-        raise RuntimeError("项目化决策结果与原始结构化回复不一致")
-    if validated["verdict"] == "continue":
-        if not validated["answer"] or validated["required_inputs"]:
-            raise RuntimeError("继续项目化的决策缺少有效提示或包含外部输入")
-    elif validated["verdict"] == "blocked":
-        if not validated["required_inputs"]:
-            raise RuntimeError("项目化阻塞决定缺少解除条件")
-    elif validated["required_inputs"]:
-        raise RuntimeError("项目化完成决定不能包含外部输入")
-    return validated
-
-
-def last_decision(messages: list[dict[str, str]]) -> dict[str, Any] | None:
-    for message in reversed(messages):
-        if message.get("role") != "assistant":
-            continue
-        decision = parse_bootstrap_decision(message.get("content", ""))
-        if decision is not None:
-            return decision
-        if message.get("content") != COMPLETION_MESSAGE:
-            return None
+        if not path.read_text(encoding="utf-8").strip():
+            return README_REPAIR_PROMPT
+    except (OSError, UnicodeError) as error:
+        raise RuntimeError("产品根 README 不可读取") from error
     return None
-
-
-def decision_count(messages: list[dict[str, str]]) -> int:
-    return sum(
-        1
-        for message in messages
-        if message.get("role") == "assistant"
-        and parse_bootstrap_decision(message.get("content", "")) is not None
-    )
-
-
-def decision_turn(state: dict[str, Any]) -> int:
-    turn = (
-        state.get("decision_conversations", {})
-        .get(CONVERSATION_KEY, {})
-        .get("turn", 0)
-    )
-    if not isinstance(turn, int) or turn < 0:
-        raise RuntimeError("项目化决策历史轮次不符合约定")
-    return turn
-
-
-def synchronize_decision_turn(
-    run_dir: Path,
-    state: dict[str, Any],
-    messages: list[dict[str, str]],
-) -> int:
-    recorded = decision_turn(state)
-    actual = decision_count(messages)
-    if recorded > actual:
-        raise RuntimeError("项目化决策历史轮次与消息内容不一致")
-    if actual > recorded:
-        state.setdefault("decision_conversations", {})[CONVERSATION_KEY] = {
-            "path": str(CONVERSATION_PATH),
-            "turn": actual,
-        }
-        write_state(run_dir, state)
-    return actual
-
-
-def require_decision_round(
-    run_dir: Path,
-    state: dict[str, Any],
-    messages: list[dict[str, str]],
-) -> int:
-    turn = synchronize_decision_turn(run_dir, state, messages)
-    if turn >= MAX_DECISION_ROUNDS:
-        raise RuntimeError("project-bootstrap 决策循环达到上限仍未完成")
-    return turn
-
-
-def ensure_agent_round_available(state: dict[str, Any]) -> None:
-    if decision_turn(state) >= MAX_DECISION_ROUNDS:
-        raise RuntimeError("project-bootstrap 决策循环达到上限仍未完成")
-
-
-def append_agent_reply(
-    run_dir: Path,
-    state: dict[str, Any],
-    messages: list[dict[str, str]],
-    agent_text: str,
-) -> None:
-    if not agent_text:
-        raise RuntimeError("Agent 未返回可供完成判断的完整回复")
-    if not messages or messages[-1] != {"role": "user", "content": agent_text}:
-        messages.append({"role": "user", "content": agent_text})
-        save_conversation(run_dir, state, messages)
-
-
-def append_completion(
-    run_dir: Path,
-    state: dict[str, Any],
-    messages: list[dict[str, str]],
-) -> None:
-    if not messages or messages[-1].get("content") != COMPLETION_MESSAGE:
-        messages.append({"role": "assistant", "content": COMPLETION_MESSAGE})
-        save_conversation(run_dir, state, messages)
-
-
-def completion_recorded(messages: list[dict[str, str]]) -> bool:
-    return (
-        len(messages) >= 2
-        and messages[-1] == {"role": "assistant", "content": COMPLETION_MESSAGE}
-        and parse_bootstrap_decision(messages[-2].get("content", "")) is not None
-        and parse_bootstrap_decision(messages[-2]["content"])["verdict"] == "completed"  # type: ignore[index]
-    )
-
-
-def successful_agent(state: dict[str, Any]) -> bool:
-    previous = state.get("project_bootstrap", {}).get("last_agent_result", {})
-    return previous.get("subtype") == "success" and previous.get("is_error") is False
-
-
-def clear_pending(run_dir: Path, state: dict[str, Any]) -> None:
-    bootstrap = state.setdefault("project_bootstrap", {})
-    bootstrap.pop("pending_agent_prompt", None)
-    bootstrap.pop("pending_agent_text", None)
-    write_state(run_dir, state)
 
 
 def advance_success(
     run_dir: Path,
     state: dict[str, Any],
-    messages: list[dict[str, str]],
     outputs: list[str],
 ) -> dict[str, Any]:
-    append_completion(run_dir, state, messages)
-    clear_pending(run_dir, state)
     saved = result(
         "success",
         "project-bootstrap 已完成基础工程项目化和验证。",
@@ -399,9 +197,7 @@ def advance_success(
     return saved
 
 
-def advance_not_applicable(
-    run_dir: Path, state: dict[str, Any]
-) -> dict[str, Any]:
+def advance_not_applicable(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
     saved = result(
         "success",
         "当前没有适用的基础工程，项目化无副作用跳过。",
@@ -456,7 +252,7 @@ def initial_prompt(
     )
     assembly_json = json.dumps(prompt_assembly(assembly), ensure_ascii=False, indent=2)
     return f"""/project-bootstrap
-调用方已明确要求并授权你直接在当前项目中完成有限范围的工程项目化，并执行真实安装、构建、测试、启动和基础联调验证。
+调用方已授权你直接在当前项目完成有限范围的基础工程项目化，并执行真实安装、检查、测试、构建、启动、浏览器检查和基础联调。
 
 权威产品定义：
 {product_references}
@@ -467,54 +263,14 @@ def initial_prompt(
 实际适用工程：
 {project_references}
 
-实际组装来源：
+组装白名单事实：
 ```json
 {assembly_json}
 ```
 
-请先读取当前项目规则，以及各适用工程中的 README、manifest、锁文件、配置、代码、测试和 Git 事实，再完成以下工作：
+请依据这些输入和当前工程事实完成产品根 README、适用工程身份、基础配置、必要运行说明及可安全确认的模板残留收口。按锁文件和工程说明完成所有适用的依赖安装、静态或类型检查、测试、构建、启动；验证后端健康与就绪入口，存在前端时用真实浏览器读取代表性页面并检查阻断性控制台和失败网络请求，前后端同时适用时完成最小真实联调。失败先修复本次范围内的问题并重跑。
 
-1. 将产品根 README 和通用模板有限收口为当前具体项目，落实项目名称、应用名称、标题、描述、各适用工程 README、公开配置示例和必要的基础运行说明。
-2. 保留仍有效的工程能力；对模板首页、示例文案、模板测试和专属残留先检查引用，只处理会误导后续开发且能够安全确认归属的内容。
-3. 只落实产品定义中已经确认且属于共享基础的品牌、视觉和可访问性事实，不提前实现完整业务页面、导航、数据模型、业务接口、认证权限、迁移、状态机、初始化业务数据、总体技术方案或工程架构。
-4. 按当前工程的锁文件和真实说明安装依赖，执行所有适用的格式检查、静态检查、类型检查、测试和构建。
-5. 启动所有适用服务，验证后端健康与就绪入口；存在前端时使用真实浏览器读取代表性页面，检查阻断性控制台和失败网络请求；前后端同时适用时完成最小真实联调，不使用 Mock 或静态响应冒充通过。
-6. 验证失败时，先修复属于本次项目化范围的问题并重新执行；只有缺少当前环境无法取得的不可替代外部资源时才明确报告阻塞。
-7. 保护现有被忽略的开发配置、项目能力和 Plugin 快照，不在文档、回复、日志或可提交文件中展示秘密具体值。
-8. 不执行 Git 初始化、暂存、提交、建分支、合并或推送。
-
-只有项目身份和基础工程已经完成收口，所有适用安装、检查、测试、构建、启动及基础联调均通过，并且没有项目化范围内的未决失败或未验证项时，才明确报告完成。
-
-最终完整回复必须列出：实际处理的工程目录；创建、修改、删除和保留的主要内容；每个适用工程执行的安装、检查、测试、构建和启动结果；基础联调与浏览器验证结果；未验证范围、阻塞或仍待后续处理的事项。不得省略失败结果，也不得泄露秘密。"""
-
-
-def resume_prompt(product_outputs: list[str], checklist: str) -> str:
-    references = "、".join(f"@./{output}" for output in product_outputs)
-    return (
-        f"请重新读取 {references}、@./{checklist} 和当前适用工程事实，继续完成有限范围项目化。"
-        "请完成所有适用安装、检查、测试、构建、启动、真实浏览器检查和基础联调；修复本次范围内的问题后重跑验证。"
-        "不要实现业务功能、初始化独立 Git 仓库或执行暂存、提交、分支、合并和推送。"
-    )
-
-
-async def request_bootstrap_decision(
-    messages: list[dict[str, Any]], config: LLMConfig
-) -> tuple[dict[str, Any], int, str]:
-    for attempt in range(2):
-        prompt = BOOTSTRAP_DECISION_SYSTEM_PROMPT
-        if attempt:
-            prompt += "\n上一次响应不是有效 JSON；本次只返回严格 JSON 对象。"
-        try:
-            return await request_decision(
-                messages,
-                config,
-                system_prompt=prompt,
-                output_model=BootstrapDecision,
-            )
-        except ValidationError:
-            if attempt:
-                raise
-    raise RuntimeError("项目化决策未返回结构化结果")
+不得提前实现业务页面、导航、数据模型、业务接口、认证权限、迁移、业务数据、总体技术方案或工程架构；不得初始化、暂存、提交、建分支、合并或推送 Git；不得泄露秘密。最终完整回复须说明处理的工程、主要变更和保留项、每项真实验证结果、浏览器或联调结果，以及未验证范围、阻塞或后续事项。"""
 
 
 async def run(
@@ -522,7 +278,7 @@ async def run(
     state: dict[str, Any],
     *,
     agent_runner=run_claude,
-    decision_runner=request_bootstrap_decision,
+    decision_runner=request_decision,
     config_loader=LLMConfig.load,
 ) -> dict[str, Any]:
     workspace, product_outputs, assembly, checklist = validate_inputs(run_dir, state)
@@ -535,14 +291,15 @@ async def run(
             return verify_existing_bootstrap_success(run_dir, outputs)
         return advance_not_applicable(run_dir, state)
 
-    messages = load_conversation(run_dir, state)
-    synchronize_decision_turn(run_dir, state, messages)
+    def completion_verifier() -> str | None:
+        verified_workspace, _, verified_assembly, _ = validate_inputs(run_dir, state)
+        verify_git_boundaries(verified_workspace, verified_assembly["outputs"])
+        return root_readme_repair(verified_workspace)
 
     if position == (STEP + 1, STEP + 1, NEXT_NODE) and state.get("status") == "success":
-        if not successful_agent(state) or not completion_recorded(messages):
-            raise RuntimeError("第 6 步成功现场不完整")
         verify_existing_bootstrap_success(run_dir, outputs)
-        clear_pending(run_dir, state)
+        if completion_verifier() is not None:
+            raise RuntimeError("第 6 步既有成功缺少非空产品根 README")
         return result(
             "success",
             "project-bootstrap 已完成基础工程项目化和验证，确认既有成功。",
@@ -552,146 +309,29 @@ async def run(
     if position != (STEP, STEP, CURRENT_NODE):
         raise RuntimeError("运行状态不位于基础工程项目化锚点")
 
-    if successful_agent(state) and completion_recorded(messages):
-        if (run_dir / "steps" / "06.json").is_file():
-            verify_existing_bootstrap_success(run_dir, outputs)
-        return advance_success(run_dir, state, messages, outputs)
+    if (run_dir / "steps" / "06.json").is_file():
+        verify_existing_bootstrap_success(run_dir, outputs)
+        if completion_verifier() is not None:
+            raise RuntimeError("第 6 步既有成功缺少非空产品根 README")
+        return advance_success(run_dir, state, outputs)
 
-    state.update({"current_step": STEP, "status": "running", "blocked": None, "error": None})
-    write_state(run_dir, state)
-    existing_session = state.get("claude_sessions", {}).get(CONVERSATION_KEY)
-
-    pending_text = state.get("project_bootstrap", {}).get("pending_agent_text")
-    if pending_text is not None:
-        if not isinstance(pending_text, str) or not pending_text:
-            raise RuntimeError("待恢复 Agent 完整回复不符合约定")
-        previous = state.get("project_bootstrap", {}).get("last_agent_result", {})
-        recoverable = {"success", "error_max_turns", "error_max_budget_usd"}
-        if previous.get("subtype") not in recoverable:
-            raise RuntimeError("Agent SDK 上次执行结果不可恢复")
-        append_agent_reply(run_dir, state, messages, pending_text)
-        state.setdefault("project_bootstrap", {}).pop("pending_agent_text", None)
-        write_state(run_dir, state)
-        messages = load_conversation(run_dir, state)
-
-    pending = state.get("project_bootstrap", {}).pop("pending_agent_prompt", None)
-    if pending is not None and (not isinstance(pending, str) or not pending):
-        raise RuntimeError("待恢复项目化提示不符合约定")
-
-    if not pending and existing_session and messages[-1].get("role") == "user":
-        current_turn = require_decision_round(run_dir, state, messages)
-        try:
-            decision, _, raw = await decision_runner(messages, config_loader())
-        except Exception:
-            raise RuntimeError("AI-compatible 项目化完成判断失败") from None
-        decision = validate_decision(decision, raw)
-        messages.append({"role": "assistant", "content": raw})
-        save_conversation(run_dir, state, messages, decision_turn=current_turn + 1)
-        if decision["verdict"] == "blocked":
-            raise ProjectBootstrapBlocked(
-                decision["reason"], decision["required_inputs"], outputs
-            )
-        if decision["verdict"] == "completed":
-            if not successful_agent(state):
-                raise RuntimeError("决策模型判定完成，但 Agent 未正常结束")
-            validate_inputs(run_dir, state)
-            verify_git_boundaries(workspace, outputs)
-            return advance_success(run_dir, state, messages, outputs)
-        pending = decision["answer"]
-        state.setdefault("project_bootstrap", {})["pending_agent_prompt"] = pending
-        write_state(run_dir, state)
-
-    if not pending and existing_session:
-        recovered_decision = last_decision(messages)
-        if recovered_decision:
-            if recovered_decision["verdict"] == "blocked":
-                raise ProjectBootstrapBlocked(
-                    recovered_decision["reason"],
-                    recovered_decision["required_inputs"],
-                    outputs,
-                )
-            if recovered_decision["verdict"] == "completed":
-                if not successful_agent(state):
-                    raise RuntimeError("已保存完成决定缺少正常 Agent 结果")
-                verify_git_boundaries(workspace, outputs)
-                return advance_success(run_dir, state, messages, outputs)
-            pending = recovered_decision["answer"]
-            state.setdefault("project_bootstrap", {})["pending_agent_prompt"] = pending
-            write_state(run_dir, state)
-
-    if pending:
-        ensure_agent_round_available(state)
-        prompt = pending
-    elif existing_session:
-        prompt = resume_prompt(product_outputs, checklist)
-    else:
-        prompt = initial_prompt(product_outputs, assembly, checklist)
-        append_initial_agent_prompt(run_dir, state, prompt)
-
-    for _ in range(MAX_DECISION_ROUNDS):
-        run_result = await agent_runner(
-            prompt,
-            cwd=workspace,
-            resume_session_id=state.get("claude_sessions", {}).get(CONVERSATION_KEY),
-            max_turns=PROJECT_BOOTSTRAP_MAX_TURNS,
-            max_budget_usd=PROJECT_BOOTSTRAP_MAX_BUDGET_USD,
-            on_update=lambda update: save_agent_update(run_dir, state, update),
+    if state.get("status") != "blocked":
+        state.update(
+            {"current_step": STEP, "status": "running", "blocked": None, "error": None}
         )
-        save_agent_update(run_dir, state, run_result)
-        if not run_result.result_subtype:
-            raise RuntimeError("Agent SDK 未返回 ResultMessage")
-        recoverable_subtypes = {"error_max_turns", "error_max_budget_usd"}
-        if run_result.exception and run_result.result_subtype not in recoverable_subtypes:
-            clear_pending(run_dir, state)
-            raise RuntimeError("Agent SDK 执行异常")
-        if run_result.is_error and run_result.result_subtype not in recoverable_subtypes:
-            clear_pending(run_dir, state)
-            raise RuntimeError(f"Agent SDK 执行失败：{run_result.result_subtype}")
-        init = run_result.init or {}
-        init_cwd = init.get("cwd")
-        if not isinstance(init_cwd, str) or Path(init_cwd).resolve() != workspace:
-            clear_pending(run_dir, state)
-            raise RuntimeError("Agent SDK 实际工作目录与产品项目根不一致")
-        if SKILL_NAME not in {str(item) for item in init.get("skills") or []}:
-            clear_pending(run_dir, state)
-            raise RuntimeError("Agent SDK 未加载 project-bootstrap Skill")
-        if SKILL_NAME not in {str(item) for item in init.get("slash_commands") or []}:
-            clear_pending(run_dir, state)
-            raise RuntimeError("Agent SDK 未加载 project-bootstrap slash command")
-
-        messages = load_conversation(run_dir, state)
-        append_agent_reply(run_dir, state, messages, run_result.text)
-        bootstrap = state.setdefault("project_bootstrap", {})
-        bootstrap.pop("pending_agent_prompt", None)
-        bootstrap.pop("pending_agent_text", None)
-        write_state(run_dir, state)
-        messages = load_conversation(run_dir, state)
-        current_turn = require_decision_round(run_dir, state, messages)
-        try:
-            decision, _, raw = await decision_runner(messages, config_loader())
-        except Exception:
-            raise RuntimeError("AI-compatible 项目化完成判断失败") from None
-        decision = validate_decision(decision, raw)
-        messages.append({"role": "assistant", "content": raw})
-        save_conversation(run_dir, state, messages, decision_turn=current_turn + 1)
-
-        if decision["verdict"] == "blocked":
-            raise ProjectBootstrapBlocked(
-                decision["reason"], decision["required_inputs"], outputs
-            )
-        if decision["verdict"] == "completed":
-            if run_result.result_subtype != "success" or run_result.is_error:
-                raise RuntimeError("决策模型判定完成，但 Agent 未正常结束")
-            validate_inputs(run_dir, state)
-            verify_git_boundaries(workspace, outputs)
-            return advance_success(run_dir, state, messages, outputs)
-
-        ensure_agent_round_available(state)
-        session_id = state.get("claude_sessions", {}).get(CONVERSATION_KEY)
-        if not session_id:
-            raise RuntimeError("Agent 未完成且没有可恢复的 session ID")
-        prompt = decision["answer"]
-        bootstrap["pending_agent_prompt"] = prompt
         write_state(run_dir, state)
 
-    raise RuntimeError("project-bootstrap 决策循环达到上限仍未完成")
+    decision = await run_agent_decision_loop(
+        run_dir,
+        state,
+        workspace,
+        DECISION_LOOP_SPEC,
+        initial_prompt(product_outputs, assembly, checklist),
+        completion_verifier,
+        agent_runner=agent_runner,
+        decision_runner=decision_runner,
+        config_loader=config_loader,
+    )
+    if decision.verdict == "blocked":
+        raise ProjectBootstrapBlocked(decision.reason, decision.required_inputs, outputs)
+    return advance_success(run_dir, state, outputs)
