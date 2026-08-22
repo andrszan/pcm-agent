@@ -38,6 +38,10 @@ from steps.step_05_project_readiness import ProjectReadinessBlocked
 from steps.step_05_project_readiness import result as project_readiness_result
 from steps.step_05_project_readiness import run as run_project_readiness
 from steps.step_05_project_readiness.step import CURRENT_NODE as PROJECT_READINESS_NODE
+from steps.step_06_project_bootstrap import ProjectBootstrapBlocked
+from steps.step_06_project_bootstrap import result as project_bootstrap_result
+from steps.step_06_project_bootstrap import run as run_project_bootstrap
+from steps.step_06_project_bootstrap.step import CURRENT_NODE as PROJECT_BOOTSTRAP_NODE
 
 DEMO_ROOT = Path(__file__).resolve().parent
 
@@ -306,6 +310,15 @@ async def run_step_five(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]
     return run_dir, await run_project_readiness(run_dir, read_state(run_dir))
 
 
+async def run_step_six(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
+    if not args.run_id:
+        raise ValueError("第 6 步需要 --run-id")
+    run_dir = run_dir_for(args.run_id)
+    if not run_dir.is_dir():
+        raise ValueError(f"运行记录不存在：{args.run_id}")
+    return run_dir, await run_project_bootstrap(run_dir, read_state(run_dir))
+
+
 def sha256_bytes(data: bytes) -> str:
     import hashlib
 
@@ -342,7 +355,7 @@ def run_step_zero(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
 
 def main() -> int:
     args = parse_args()
-    if args.step not in {0, 1, 2, 3, 4, 5}:
+    if args.step not in {0, 1, 2, 3, 4, 5, 6}:
         print(f"步骤尚未实现：{args.step}", file=sys.stderr)
         return 2
 
@@ -367,12 +380,15 @@ def main() -> int:
                     run_dir, result = run_step_four(args)
                 else:
                     if not args.run_id:
-                        raise ValueError("第 5 步需要 --run-id")
+                        raise ValueError(f"第 {args.step} 步需要 --run-id")
                     candidate = run_dir_for(args.run_id)
                     if not candidate.is_dir():
                         raise ValueError(f"运行记录不存在：{args.run_id}")
                     run_dir = candidate
-                    run_dir, result = asyncio.run(run_step_five(args))
+                    if args.step == 5:
+                        run_dir, result = asyncio.run(run_step_five(args))
+                    else:
+                        run_dir, result = asyncio.run(run_step_six(args))
     except ProjectIntakeBlocked as error:
         result = project_intake_result(
             "blocked",
@@ -403,6 +419,20 @@ def main() -> int:
             },
         )
         error_message = str(error)
+    except ProjectBootstrapBlocked as error:
+        result = project_bootstrap_result(
+            "blocked",
+            str(error),
+            outputs=error.outputs,
+            blocked={
+                "reason": str(error),
+                "required_inputs": error.required_inputs,
+                "resume_phase": "project_initialization",
+                "resume_node": PROJECT_BOOTSTRAP_NODE,
+                "resume_step": 6,
+            },
+        )
+        error_message = str(error)
     except Exception as error:  # noqa: BLE001 - 顶层入口必须将所有步骤异常转换为结果。
         if args.step == 2:
             result_factory = project_intake_result
@@ -410,6 +440,8 @@ def main() -> int:
             result_factory = assembly_result
         elif args.step == 5:
             result_factory = project_readiness_result
+        elif args.step == 6:
+            result_factory = project_bootstrap_result
         else:
             result_factory = workspace_result
         result = result_factory(
@@ -423,7 +455,7 @@ def main() -> int:
         detail = result.get("blocked") or result.get("error") or {}
         error_message = str(detail.get("reason") or detail.get("message") or result["summary"])
 
-    if run_dir is not None and args.step in {1, 2, 5}:
+    if run_dir is not None and args.step in {1, 2, 5, 6}:
         if result["status"] != "success":
             try:
                 state = read_state(run_dir)
@@ -438,6 +470,8 @@ def main() -> int:
                 }
                 if args.step == 5:
                     update.update({"step": 5, "current_node": PROJECT_READINESS_NODE})
+                elif args.step == 6:
+                    update.update({"step": 6, "current_node": PROJECT_BOOTSTRAP_NODE})
                 state.update(update)
                 write_state(run_dir, state)
         write_step_result(run_dir, args.step, result)

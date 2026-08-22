@@ -2,7 +2,7 @@
 
 > 本文定义正式 PCM 开发前的轻量 Python 验证项目。Demo 的目的不是提前实现正式 PCM，而是用可独立运行、可串联的一组脚本，真实验证 [`PCM 程序化调度的 AI Agent 产品开发流程`](../../.claude/PCM版AI%20Agent自动化流程设计.md)。
 >
-> 截至 2026-08-22，阶段 0 技术探针以及业务第 0～5 步已经实现并真实验证。第 3 步使用 Pydantic `responses.parse` 完成基础工程选型，第 4 步以确定性 Git 和文件操作组装工程，第 5 步显式调用 `project-readiness`，由 Agent 使用可信开发资源完成配置、真实核验和准备清单，Python 只负责输入交接、session、决策循环、产物与状态。下一步先讨论第 6 步基础工程项目化合同。
+> 截至 2026-08-22，阶段 0 技术探针以及业务第 0～6 步已经实现并真实验证。第 3 步使用 Pydantic `responses.parse` 完成基础工程选型，第 4 步以确定性 Git 和文件操作组装工程，第 5 步显式调用 `project-readiness` 完成资源准备，第 6 步显式调用 `project-bootstrap`，通过专属结构化完成裁决、同 session 恢复、真实安装、构建、测试、启动、浏览器和最小联调完成工程项目化。下一步先讨论第 7 步总体技术方案合同。
 
 ## 一、验证目标
 
@@ -48,9 +48,10 @@ python run_all.py \
 - 第 3 步：将产品定义和 catalog 构造成 Pydantic 输入，使用代码内 system prompt 调用 `responses.parse`，将 `output_parsed` 直接保存为稳定选型结果；
 - 第 4 步：只读取第 3 步结果，以浅 clone、来源核验、临时 payload 和原子 rename 组装选中的模板目录，保存实际来源证据并推进到第 5 步；
 - 第 5 步：显式调用 `project-readiness`，把第 2 步产品定义、第 3 步选型、当前已组装工程和 `PCM_DEV_RESOURCE_LIST` 指向的可信开发资源交给 Agent；Agent 补齐被忽略配置、执行真实资源核验并生成准备清单，Python 保存 session、完整编排历史并推进到第 6 步；
-- `run_step.py` 对第 0～5 步提供单步运行入口。
+- 第 6 步：显式调用 `project-bootstrap`，把产品定义、第 4 步实际组装工程和第 5 步准备清单交给 Agent；Agent 完成项目身份、基础配置、模板残留、真实安装、构建、测试、启动、浏览器和最小联调，AI-compatible 模型以步骤专属 Pydantic 结果裁决 `completed/continue/blocked`，Python 核验目录与 Git 边界并推进到第 7 步；
+- `run_step.py` 对第 0～6 步提供单步运行入口。
 
-“已完成至第 5 步”不自动声明完整初始化阶段完成。当前代码接受第 0～5 步；第 6 步及以后仍明确返回“步骤尚未实现”。
+“已完成至第 6 步”不自动声明完整初始化阶段完成。当前代码接受第 0～6 步；第 7 步及以后仍明确返回“步骤尚未实现”。
 
 ### 2. 从第 3 步起的重大变化
 
@@ -65,7 +66,7 @@ python run_all.py \
 - 阶段一单需求循环改为第 12～19 步；
 - 所有当前正式需求完成后，不直接结束，而是进入新增的阶段二全项目级集成产品体验审计与修复闭环。
 
-旧第 3 步的自然语言选型汇报、二次 Responses API 抽取、总体技术方案产物和相关实现均不沿用；新版第 3 步已经按 Pydantic `responses.parse` 重写。第 4、5 步已按各自确认合同实现；第 6 步及以后继续按新编号和职责逐步讨论，不根据旧实现做兼容性补丁。
+旧第 3 步的自然语言选型汇报、二次 Responses API 抽取、总体技术方案产物和相关实现均不沿用；新版第 3 步已经按 Pydantic `responses.parse` 重写。第 4～6 步已按各自确认合同实现；第 7 步及以后继续按新编号和职责逐步讨论，不根据旧实现做兼容性补丁。
 
 ### 3. 开发协作边界
 
@@ -74,7 +75,7 @@ python run_all.py \
 - PCM 运行时不增加逐步人工审批；所有可由当前输入、事实、工具和资源完成的决策由 AI-compatible 模型处理；
 - Demo 开发时，先对照原手稿、当前流程设计和活动 TRD，与开发者确认该步的输入、输出、前置条件、操作、完成条件及失败、阻塞和恢复边界；
 - 合同确认后先实现代码并通过测试和真实验证，再将实际实现同步到设计文档并提交；
-- 当前已完成到第 5 步；第 6 步及以后仍须在实现前确认合同，不提前实现能力。
+- 当前已完成到第 6 步；第 7 步及以后仍须在实现前确认合同，不提前实现能力。
 
 ## 三、明确不做
 
@@ -150,7 +151,7 @@ pcm-demo/runs/<run-id>/
 
 ## 六、当前最小实现结构
 
-截至第 5 步，已跟踪结构为：
+截至第 6 步，已跟踪结构为：
 
 ```text
 pcm-demo/
@@ -176,7 +177,8 @@ pcm-demo/
 │   ├── step_02_project_intake/
 │   ├── step_03_foundation_selection/
 │   ├── step_04_assemble_foundation/
-│   └── step_05_project_readiness/
+│   ├── step_05_project_readiness/
+│   └── step_06_project_bootstrap/
 └── run_step.py
 ```
 
@@ -299,6 +301,12 @@ Python 负责确定性操作和最终状态裁决：
 第 5 步只确定性核验第 2、3、4 步交接、产品根 Git、组装现场和 `PCM_DEV_RESOURCE_LIST` 路径，再在产品项目根显式调用 `/project-readiness`。初始 prompt 只描述准备核验领域任务：两份产品定义是当前范围权威来源，模板选择和实际工程为技术事实，可信资源清单可由 Agent 原样读取；Agent 可以创建项目专用开发/测试数据库和对象存储桶、写入被忽略的实际 `.env` 并执行真实工具核验。依赖安装、构建、测试、启动、独立 Git 初始化、业务实现和完整验收属于后续工作，不作为当前准备阻塞。Python 不解析资源清单或准备清单状态；它保存 Claude session，以及由 Agent 完整真实回复和 AI-compatible 决策模型完整结构化回复交替组成的编排历史。Agent 正常 `success` 且清单存在时直接追加最后一次 Agent 回复和固定完成声明；预算或 turn 上限恢复同一 session；成功结果先落盘、下一节点状态随后写入，若中断可由成功结果恢复推进。
 
 修迹真实运行曾在旧 `$4`/12 turns 上限后恢复同一 session，完成 PostgreSQL、MinIO 和本地配置准备；本次修正对话历史后，由于这些资源已就绪，新 `project_readiness` session 一轮即正常完成。生成的历史严格为 `system → assistant 初始 Agent 指令 → user Agent 完整真实回复 → assistant 固定完成声明`，`decision_turn: 0`、完成声明唯一且没有占位内容。未完成分支的自动化测试同时验证 `user Agent 完整回复 → assistant request_decision 返回的完整结构化 JSON` 的多轮交替、完整 `answer` 转发和跨进程恢复。步骤最终推进到 `project:06_bootstrap_foundation`，随后幂等复用不再调用 Agent。
+
+第 6 步只从前序结果读取两份产品定义、第 4 步实际适用工程与脱敏后的组装来源、第 5 步准备清单；工程内部 README、manifest、锁文件、配置、代码和测试由 Agent 按现场读取。初始 prompt 显式调用 `/project-bootstrap`，不包含步骤编号、PCM 节点或其它编排背景，也不向 Agent 或决策模型传递可能带凭据的 `git_url`、`origin`。Agent 负责有限项目化和真实安装、检查、测试、构建、启动、浏览器及基础联调；Python 不重复执行这些领域工作，只核验前序交接、根仓仍是零提交 `main`、暂存区为空、适用目录存在且没有提前初始化 `.git`。
+
+每轮 Agent 完整回复都由步骤专属 Pydantic `BootstrapDecision` 裁决为 `completed`、`continue` 或 `blocked`；普通 `ResultMessage.success` 不直接代表步骤成功。单次 Agent 上限为 48 turns、`$16`，累计最多 8 轮裁决；预算、turn 或连接中断后恢复原 session。AI-compatible 服务首次返回 YAML 风格文本导致结构化解析失败，步骤为该专属裁决增加一次严格 JSON 限定重试；恢复后保存原始 `continue`，将“确认执行”发送给同一 session，第二次连接中断仍由决策模型要求继续，第三轮 Agent 回复完成前后端工程。完成后补查发现产品根 README 仍保留通用模板身份，遂在同一历史追加纠正性 `continue`，原 session 只补齐根 README 和链接复验，第 5 次裁决最终 `completed`。
+
+修迹真实项目化将产品根 README 收口为 MendMark 项目总说明，将前端收口为 `mendmark-web`、后端收口为 `mendmark-api`，同步公开配置、基础页面、健康检查与模板测试，保留有效基础设施并未实现业务功能。前端 `pnpm install --frozen-lockfile`、lint、type-check、10 项测试、build 和 1 项 Playwright E2E 通过；后端锁定、`uv sync --locked`、Ruff、15 项含 PostgreSQL `SELECT 1` 的测试和 `uv build` 通过；真实 Uvicorn/Vite、`/health`、`/ready`、OpenAPI、浏览器健康联调、375px 窄视口、控制台和网络检查通过。临时服务已停止，实际 `.env` 仍被忽略且权限为 `600`，根仓仍为零提交 `main`、无 staged，前后端无 `.git`。状态推进到 `project:07_solution_design`，成功复用耗时约 1 秒且不再调用 Agent。
 
 ### 阶段一：第 12～19 步逐需求开发
 
@@ -466,7 +474,7 @@ PCM_DEV_RESOURCE_LIST=
 当前已实现单步入口：
 
 ```bash
-uv run python run_step.py --step 5 --run-id <run-id>
+uv run python run_step.py --step 6 --run-id <run-id>
 ```
 
 目标运行入口在对应能力实现后逐步补齐：
@@ -491,11 +499,11 @@ python run_all.py --run-id <run-id> --from-node phase_2:audit
 
 ## 十二、后续实现顺序
 
-1. 保持第 0～5 步已验证行为不变；
-2. 第 5 步已完成 17 项专属测试、61 项全量测试、真实 Claude Agent SDK 准备核验、预算上限同 session 恢复、安全配置写入、PostgreSQL/MinIO 资源验证和成功幂等复用；
-3. 下一次先讨论第 6 步基础工程项目化合同；
+1. 保持第 0～6 步已验证行为不变；
+2. 第 6 步已完成 14 项专属测试、75 项全量测试、真实 Claude Agent SDK 项目化、专属结构化裁决重试、同 session 连接中断恢复、前后端安装/构建/测试/启动、真实浏览器和基础联调，以及成功幂等复用；
+3. 下一次先讨论第 7 步总体技术方案合同；
 4. 合同确认后先实现代码并通过测试和真实验证，再同步设计文档并提交；
-5. 不提前实现第 6～19 步或阶段二空壳；
+5. 不提前实现第 7～19 步或阶段二空壳；
 6. 每个阶段只根据真实运行发现补充最小公共能力；
 7. 阶段一先完整跑通一个正式需求，再验证至少第二个真实需求；
 8. 阶段二先在完整集成版本上跑通一次审计、分流、入池、修复回归和完整复审；

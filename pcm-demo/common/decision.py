@@ -31,13 +31,17 @@ class Decision(BaseModel):
 
 
 async def request_decision(
-    messages: list[dict[str, Any]], config: LLMConfig
+    messages: list[dict[str, Any]],
+    config: LLMConfig,
+    *,
+    system_prompt: str = SYSTEM_PROMPT,
+    output_model: type[BaseModel] = Decision,
 ) -> tuple[dict[str, Any], int, str]:
     decision = await parse_response(
         config,
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         input_model=DecisionInput.model_validate({"messages": messages}),
-        output_model=Decision,
+        output_model=output_model,
     )
     data = decision.model_dump()
     return data, 1, decision.model_dump_json()
