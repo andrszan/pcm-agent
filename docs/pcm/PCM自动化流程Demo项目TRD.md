@@ -54,7 +54,7 @@ Demo 继续采用增量实施，不一次创建完整流程空壳：
 - 新增第 5 步局部模块、README 和 `unittest`，不新增依赖、资源解析器、准备清单 schema 或通用步骤框架；
 - 将 `run_step.py` 扩展为第 0～5 步单步入口；
 - 新增 `PCM_DEV_RESOURCE_LIST`，只校验绝对路径、普通文件和可读性，不读取或持久化资源内容；
-- 运行第 5 步专属 12 项测试、全量 56 项测试、`compileall` 与 `git diff --check`；
+- 运行第 5 步专属 17 项测试、全量 61 项测试、`compileall` 与 `git diff --check`；
 - 使用修迹 run 恢复同一 Claude session，真实完成 PostgreSQL、MinIO、前后端本地配置和准备清单核验，并同步本文和上位设计。
 
 ### 4. 本阶段继续不做
@@ -427,12 +427,11 @@ Claude Agent SDK 与 AI-compatible 决策模型使用不同的历史机制：
 - 第一次收到 init 或最终 ResultMessage 时更新 session ID；阻塞、turn 上限或预算上限发生时仍保存已取得的 session ID；
 - 恢复时重新读取 `state.json`、原工作区和当前节点，再通过 `resume=<session-id>` 继续；恢复后的第一项任务是重新核验相关文件和 Git 事实；
 - session 文件缺失或无法恢复时，不静默新建会话冒充恢复成功，当前节点返回 `failed`；
-- AI-compatible 接口不依赖服务端 conversation 或 response ID；PCM 默认按领域键把完整、脱敏的编排消息历史原子写入 `runs/<run-id>/conversations/<key>.json`，每次调用携带该历史；
-- 普通语义决策历史至少保留初始 Agent 指令、每轮 Agent 结果、决策模型收到的当前事实、完整结构化决策、转发给 Agent 的指令和完成标记；
-- 当步骤直接向 Agent 提供可信真实凭据，且决策模型只需判断继续、批准或阻塞时，可以在该步合同中采用秘密最小化历史：原始 Agent 文本和决策自由文本只用于当轮调用，不持久化；历史只保存初始任务、终止语义、清单存在性、action 和固定恢复意图，具体领域上下文由原 Claude session 与当前工作区事实保留。第 5 步采用该例外；
+- AI-compatible 接口不依赖服务端 conversation 或 response ID；PCM 按领域键把完整编排消息历史原子写入 `runs/<run-id>/conversations/<key>.json`，每次调用携带该历史；
+- 历史至少保留初始 Agent 指令、每轮 Agent 完整回复、决策模型完整结构化回复、转发给 Agent 的指令和完成标记；
 - 不同步骤、不同正式需求和不同阶段二审计轮使用独立领域键，避免上下文污染；
 - `state.json` 只保存历史文件引用、当前轮次和恢复所需事实，不复制完整消息；
-- 完整编排历史只保存当前流程所需的脱敏内容，不保存密钥、完整环境变量或无关工具日志；首轮不建设数据库、向量记忆或摘要系统。
+- 编排历史位于被 Git 忽略的 run 目录，保存实际交互内容；Agent 仍须遵守项目规则，不主动在回复中展示无关秘密或完整环境变量。首轮不建设数据库、向量记忆或摘要系统。
 
 ## 六、程序化决策循环
 
@@ -484,7 +483,7 @@ AI-compatible 模型可以决定所有能够基于当前输入、项目事实、
 
 第 2 步的权威输入仅包括第 1 步发布的产品初稿、项目规则与配置、当前 `project-intake` 对话和该 Skill 已生成的产品定义产物；工作区中的技术方案、Backlog、TRD、代码和其它无关文档不作为本步骤决策输入，其存在也不构成阻塞。
 
-PCM 在请求前读取该领域已持久化的脱敏编排历史，追加当前 `user` 决策上下文；普通步骤保存完整结构化决定并把 `answer` 作为下一条用户指令发送给原 Claude session。采用秘密最小化历史的步骤只持久化已确认的安全字段和固定恢复意图，原始 Agent/决策自由文本不落盘，恢复依赖原 Claude session 和重新读取的当前工作区事实。
+PCM 在请求前读取该领域完整编排历史。首次保存 `system` 和已发送给 Claude Agent 的初始 `assistant` 指令；Agent 未完成时，将其完整真实回复作为 `user` 消息追加，把完整历史发送给 AI-compatible 决策模型，再将 `request_decision` 返回的完整结构化 JSON 作为 `assistant` 消息保存，并把其中的 `answer` 原样发送给原 Claude session。Agent 达到完成条件时，最后追加其完整回复和 Python 的固定完成声明。
 
 不发送密钥、完整 `.env`、无关仓库内容或可由程序直接判断的原始大段日志。
 
@@ -650,12 +649,12 @@ PCM 在请求前读取该领域已持久化的脱敏编排历史，追加当前 
 实现合同：
 
 - 状态必须位于 `project:05_verify_readiness`；重新核验根 Git，并读取成功的 `steps/02.json`、`steps/03.json` 和 `steps/04.json`。第 2 步的两个输出必须是工作区内非空普通文件；第 3 步使用 `FoundationSelectionResult` 校验；第 4 步复用既有来源、目标和临时目录核验；
-- `PCM_DEV_RESOURCE_LIST` 必须是可读、非符号链接普通文件的绝对路径。Python 不读取内容、不复制到 state、日志或步骤结果，只把路径作为可信开发资源引用交给 Agent；
+- `PCM_DEV_RESOURCE_LIST` 必须是可读、非符号链接普通文件的绝对路径。Python 不解析资源内容，只把路径作为可信开发资源引用交给 Agent；完整 Agent/决策交互保存在被 Git 忽略的 run 历史中；
 - 初始 prompt 显式调用 `/project-readiness`，引用第 2 步实际产品定义、适用组装工程、完整模板选择和资源清单路径；两份产品定义是当前产品范围权威来源；
 - 调用方已授权直接创建或更新 `docs/requirements/项目准备清单.md`。Agent 可以原样读取可信资源、创建项目专用开发/测试数据库和桶、写入被 Git 忽略的实际 `.env` 并使用工具验证；不得泄露秘密或执行 Git 暂存、提交、分支、合并、push；
 - 本步骤只判断进入基础工程项目化前的外部资源、访问条件和本地配置。依赖安装、构建、测试、启动、最小联调、独立 Git 初始化、业务实现和完整验收属于后续工作，不作为当前准备阻塞；
-- 每轮从 init 核验实际 cwd、`project-readiness` Skill 和 slash command；保存 session、Agent 终止语义、固定恢复提示和秘密最小化决策历史。Agent 原始文本与决策自由文本只临时提供给本轮调用，不持久化；
-- 单次 Agent 上限为 24 turns、`$8`，最多 6 轮决策。`error_max_turns` 和 `error_max_budget_usd` 必须有 session 并恢复原会话；只有 Agent 正常 `success`、决策 `approve` 且准备清单是工作区内非空普通文件时才成功；
+- 每轮从 init 核验实际 cwd、`project-readiness` Skill 和 slash command；保存 session 和 Agent 终止语义。Agent 未完成时，将其完整真实回复和 `request_decision` 返回的完整结构化 JSON 依次写入历史，并把 `answer` 原样发送给同一 Agent session 和保存为恢复提示；
+- 单次 Agent 上限为 24 turns、`$8`，同一历史累计最多 6 轮决策。`error_max_turns` 和 `error_max_budget_usd` 必须有 session 并恢复原会话；历史尾部为 Agent `user` 回复时恢复尚未完成的决策，尾部为完整决策 JSON 时恢复原 `answer` 或 `blocked`，达到累计上限则失败；Agent 正常 `success` 且准备清单是工作区内非空普通文件时直接完成，不再调用决策模型，最后保存 Agent 完整回复和固定完成声明；
 - `blocked` 只来自决策模型确认的不可替代外部资源缺失；其它输入、路径、状态、SDK、Skill、session、文件或决策错误为 `failed`；
 - 成功先写 `steps/05.json`，再推进到 `project:06_bootstrap_foundation`。若结果已成功而下一节点状态写入中断，重跑从成功结果恢复推进；成功现场完整时幂等复用而不再调用 Agent。
 
@@ -666,7 +665,7 @@ PCM 在请求前读取该领域已持久化的脱敏编排历史，追加当前 
 - `runs/<run-id>/conversations/project_readiness.json`；
 - `steps/05.json`。
 
-当前状态：第 5 步专属 12 项和第 0～5 步全量 56 项测试通过，`compileall` 与 `git diff --check` 通过。修迹真实运行首次达到旧 `$4`/12 turns 上限后停留原 session；调整到 `$8`/24 turns 并恢复后，Agent 创建并验证 PostgreSQL 项目角色、开发库和测试库，验证 JSONB 读写，创建并验证 MinIO 开发桶和测试桶，生成权限为 `600` 且被 Git 忽略的 `backend/.env` 与 `frontend/.env.local`，更新准备清单并确认当前开发无阻塞。最终 Agent `subtype: success`、session ID 保持一致，状态推进到第 6 步，重复执行幂等复用；决策历史未保存 Agent 原始文本，也未包含资源清单中的密码、secret 或 API Key 值。
+当前状态：第 5 步专属 17 项和第 0～5 步全量 61 项测试通过，`compileall` 与 `git diff --check` 通过。修迹真实资源准备已完成 PostgreSQL 项目角色、开发库和测试库、JSONB 读写、MinIO 开发桶和测试桶，以及被 Git 忽略的 `backend/.env` 与 `frontend/.env.local`。修正历史持久化后使用新 `project_readiness` session 重新真实核验，Agent 一轮正常 `success`；生成历史严格为 `system → assistant 初始指令 → user Agent 完整真实回复 → assistant 固定完成声明`，`decision_turn: 0`、完成声明唯一、无占位内容。未完成分支测试验证每轮 Agent 完整回复、决策模型完整原始 JSON、原样 `answer` 转发及预算/turn 上限同 session 恢复。状态推进到第 6 步，重复执行幂等复用。
 
 ### 第 6～11 步：项目初始化与项目级设计
 
@@ -769,7 +768,7 @@ PCM 在请求前读取该领域已持久化的脱敏编排历史，追加当前 
 
 ### 1. 当前状态事实
 
-当前第 0～5 步已经同时使用 `current_step` 和必要的 `phase/current_node`；第 1 步保存 `root_repository`、`checks` 和发布阶段，第 2 步保存 `claude_sessions` 与 `decision_conversations`，第 3、4 步分别保存选型交接与组装来源证据，第 5 步保存 `project_readiness` session、最小脱敏决策历史和准备清单引用，能够支持现有单步运行、预算/turn 上限恢复、成功写入中断恢复和幂等复用。
+当前第 0～5 步已经同时使用 `current_step` 和必要的 `phase/current_node`；第 1 步保存 `root_repository`、`checks` 和发布阶段，第 2 步保存 `claude_sessions` 与 `decision_conversations`，第 3、4 步分别保存选型交接与组装来源证据，第 5 步保存 `project_readiness` session、完整编排历史和准备清单引用，能够支持现有单步运行、预算/turn 上限恢复、成功写入中断恢复和幂等复用。
 
 新版流程增加：
 
@@ -902,7 +901,7 @@ PCM 在请求前读取该领域已持久化的脱敏编排历史，追加当前 
 - 第 4 步严格占位保护、run-owned marker、唯一仓库浅 clone、来源 SHA、路径与符号链接边界、payload 后发布、`null` 端、失败现场保留、安全重试、部分发布拒绝覆盖、成功幂等复用和普通 Git 错误脱敏；
 - 第 4 步专属 12 项与真实 GitLab SSH 组装、远端 `main` SHA 比对、无嵌套 `.git`、临时目录清理、零提交根仓库和黄金初稿哈希不变；
 - 第 5 步可信资源绝对路径、产品定义/选型/组装交接、Skill 与 cwd、session 一致性、预算/turn 上限恢复、清单路径与符号链接边界、决策历史不保存 Agent 原文、成功写入中断恢复、CLI 损坏状态、blocked/failed 和幂等复用；
-- 第 5 步专属 12 项与第 0～5 步全量 56 项测试、真实 PostgreSQL 项目角色和开发/测试库、JSONB 读写、MinIO 开发/测试桶、被忽略的前后端配置、同 session 恢复和准备清单无阻塞结论。
+- 第 5 步专属 17 项与第 0～5 步全量 61 项测试、真实 PostgreSQL 项目角色和开发/测试库、JSONB 读写、MinIO 开发/测试桶、被忽略的前后端配置、同 session 恢复和准备清单无阻塞结论。
 
 ### 2. 后续增量风险
 

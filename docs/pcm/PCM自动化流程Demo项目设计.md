@@ -47,7 +47,7 @@ python run_all.py \
 - 第 2 步：显式调用 `project-intake`，通过 AI-compatible 决策循环收敛产品定义，并保存 Claude session 与完整决策历史；
 - 第 3 步：将产品定义和 catalog 构造成 Pydantic 输入，使用代码内 system prompt 调用 `responses.parse`，将 `output_parsed` 直接保存为稳定选型结果；
 - 第 4 步：只读取第 3 步结果，以浅 clone、来源核验、临时 payload 和原子 rename 组装选中的模板目录，保存实际来源证据并推进到第 5 步；
-- 第 5 步：显式调用 `project-readiness`，把第 2 步产品定义、第 3 步选型、当前已组装工程和 `PCM_DEV_RESOURCE_LIST` 指向的可信开发资源交给 Agent；Agent 补齐被忽略配置、执行真实资源核验并生成准备清单，Python 保存 session、脱敏决策历史并推进到第 6 步；
+- 第 5 步：显式调用 `project-readiness`，把第 2 步产品定义、第 3 步选型、当前已组装工程和 `PCM_DEV_RESOURCE_LIST` 指向的可信开发资源交给 Agent；Agent 补齐被忽略配置、执行真实资源核验并生成准备清单，Python 保存 session、完整编排历史并推进到第 6 步；
 - `run_step.py` 对第 0～5 步提供单步运行入口。
 
 “已完成至第 5 步”不自动声明完整初始化阶段完成。当前代码接受第 0～5 步；第 6 步及以后仍明确返回“步骤尚未实现”。
@@ -296,9 +296,9 @@ Python 负责确定性操作和最终状态裁决：
 
 修迹真实验证使用 GitLab SSH 来源：前端 `vite-react-shadcn-spa` 的 `main` SHA 为 `a31db6deb85ab29f2d2253413dd362293a96325f`，后端 `fastapi-sqlalchemy-postgresql-async-api` 的 `main` SHA 为 `49ff842fcd330387f2fbdd1e9a43884e05894697`，均与 `ls-remote` 一致。两端完整、无嵌套 `.git` 和临时目录，根仓库仍零提交 `main`，源 PRD 和项目内初稿 SHA-256 均为 `d7d9b8054b226ef2abf730cfb29e59b30d5e39d68eb9121ded22a16750414fee`。首次 HTTPS 来源错误为 `failed`，目标未覆盖且临时现场保留；改为 SSH 后同 run 依据 marker 安全清理并成功，第二次执行 0.809 秒幂等复用。
 
-第 5 步只确定性核验第 2、3、4 步交接、产品根 Git、组装现场和 `PCM_DEV_RESOURCE_LIST` 路径，再在产品项目根显式调用 `/project-readiness`。初始 prompt 只描述准备核验领域任务：两份产品定义是当前范围权威来源，模板选择和实际工程为技术事实，可信资源清单可由 Agent 原样读取；Agent 可以创建项目专用开发/测试数据库和对象存储桶、写入被忽略的实际 `.env` 并执行真实工具核验。依赖安装、构建、测试、启动、独立 Git 初始化、业务实现和完整验收属于后续工作，不作为当前准备阻塞。Python 不解析资源清单或准备清单状态，只保存 Claude session、最小脱敏决策历史并核验非空普通清单；只有 Agent 正常 `success`、决策 `approve` 且清单存在时才能完成。预算或 turn 上限恢复同一 session；成功结果先落盘、下一节点状态随后写入，若中断可由成功结果恢复推进。
+第 5 步只确定性核验第 2、3、4 步交接、产品根 Git、组装现场和 `PCM_DEV_RESOURCE_LIST` 路径，再在产品项目根显式调用 `/project-readiness`。初始 prompt 只描述准备核验领域任务：两份产品定义是当前范围权威来源，模板选择和实际工程为技术事实，可信资源清单可由 Agent 原样读取；Agent 可以创建项目专用开发/测试数据库和对象存储桶、写入被忽略的实际 `.env` 并执行真实工具核验。依赖安装、构建、测试、启动、独立 Git 初始化、业务实现和完整验收属于后续工作，不作为当前准备阻塞。Python 不解析资源清单或准备清单状态；它保存 Claude session，以及由 Agent 完整真实回复和 AI-compatible 决策模型完整结构化回复交替组成的编排历史。Agent 正常 `success` 且清单存在时直接追加最后一次 Agent 回复和固定完成声明；预算或 turn 上限恢复同一 session；成功结果先落盘、下一节点状态随后写入，若中断可由成功结果恢复推进。
 
-修迹真实运行首次在 `$4`/12 turns 上限前已生成调查清单，但未被最终实现接受为完成；调高到 `$8`/24 turns 并恢复原 session 后，Agent 使用可信资源创建和验证 PostgreSQL 项目角色、开发库与测试库、MinIO 开发桶与测试桶，写入权限为 `600` 且被 Git 忽略的 `backend/.env` 与 `frontend/.env.local`，最终清单确认当前开发准备无阻塞。步骤推进到 `project:06_bootstrap_foundation`，随后幂等复用不再调用 Agent。第 5 步专属测试和全量测试覆盖预算/turn 恢复、结果写入中断恢复、路径边界、损坏 state、Agent/决策自由文本与 SDK 异常不持久化；决策历史未匹配资源清单中的密码、secret 或 API Key 值。
+修迹真实运行曾在旧 `$4`/12 turns 上限后恢复同一 session，完成 PostgreSQL、MinIO 和本地配置准备；本次修正对话历史后，由于这些资源已就绪，新 `project_readiness` session 一轮即正常完成。生成的历史严格为 `system → assistant 初始 Agent 指令 → user Agent 完整真实回复 → assistant 固定完成声明`，`decision_turn: 0`、完成声明唯一且没有占位内容。未完成分支的自动化测试同时验证 `user Agent 完整回复 → assistant request_decision 返回的完整结构化 JSON` 的多轮交替、完整 `answer` 转发和跨进程恢复。步骤最终推进到 `project:06_bootstrap_foundation`，随后幂等复用不再调用 Agent。
 
 ### 阶段一：第 12～19 步逐需求开发
 
@@ -443,7 +443,7 @@ PCM_DEV_RESOURCE_LIST=
 - `PCM_WORKSPACE_ROOT`：所有产品项目的独立父目录；
 - `PCM_TEMPLATE_REPOSITORY`：第 1 步发布开发管理模板；
 - `PCM_TEMPLATE_CATALOG`：第 3 步基础工程候选目录；
-- `PCM_DEV_RESOURCE_LIST`：第 5 步可信开发资源清单的绝对路径；Python 只核验路径并交给 Agent，不复制内容到状态、日志或提交；
+- `PCM_DEV_RESOURCE_LIST`：第 5 步可信开发资源清单的绝对路径；Python 只核验路径并交给 Agent，不解析资源内容；完整 Agent/决策交互保存在被 Git 忽略的 run 历史中；
 - Claude Agent SDK 的模型和认证继续使用 SDK/Claude Code 自身支持的环境或既有登录态，不与 `LLM_*` 混用。
 
 优先级：
@@ -492,7 +492,7 @@ python run_all.py --run-id <run-id> --from-node phase_2:audit
 ## 十二、后续实现顺序
 
 1. 保持第 0～5 步已验证行为不变；
-2. 第 5 步已完成 12 项专属测试、56 项全量测试、真实 Claude Agent SDK 准备核验、预算上限同 session 恢复、安全配置写入、PostgreSQL/MinIO 资源验证和成功幂等复用；
+2. 第 5 步已完成 17 项专属测试、61 项全量测试、真实 Claude Agent SDK 准备核验、预算上限同 session 恢复、安全配置写入、PostgreSQL/MinIO 资源验证和成功幂等复用；
 3. 下一次先讨论第 6 步基础工程项目化合同；
 4. 合同确认后先实现代码并通过测试和真实验证，再同步设计文档并提交；
 5. 不提前实现第 6～19 步或阶段二空壳；

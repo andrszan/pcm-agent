@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from common.claude_agent import ClaudeRunResult, run_claude
-from common.decision import SYSTEM_PROMPT, request_decision
+from common.decision import Decision, SYSTEM_PROMPT, request_decision
 from common.files import resolve_workspace_output, write_json
 from common.state import write_state, write_step_result
 from config import LLMConfig, load_dev_resource_list
@@ -27,9 +27,6 @@ CHECKLIST = Path("docs/requirements/项目准备清单.md")
 MAX_DECISION_ROUNDS = 6
 PROJECT_READINESS_MAX_TURNS = 24
 PROJECT_READINESS_MAX_BUDGET_USD = 8.0
-SAFE_CONTINUE_PROMPT = "请基于已提供的可信开发资源和当前项目事实继续完成项目准备核验。"
-BLOCKED_REASON = "缺少不可替代的外部开发资源"
-BLOCKED_REQUIRED_INPUTS = ["按项目准备清单补齐缺失的不可替代外部资源"]
 COMPLETION_MESSAGE = "已完成 project-readiness：项目准备清单已生成并通过文件事实核验。"
 
 
@@ -204,6 +201,7 @@ def save_agent_update(run_dir: Path, state: dict[str, Any], run: ClaudeRunResult
         }
     if run.result_subtype:
         readiness["last_agent_result"] = safe_result(run)
+        readiness["pending_agent_text"] = run.text
     write_state(run_dir, state)
 
 
@@ -257,15 +255,125 @@ def append_completion(
     run_dir: Path,
     state: dict[str, Any],
     messages: list[dict[str, str]],
+    agent_text: str,
 ) -> None:
-    messages.append(
-        {
-            "role": "user",
-            "content": "Agent 已正常结束，项目准备清单是工作区内的非空普通文件。",
-        }
-    )
+    messages.append({"role": "user", "content": agent_text})
     messages.append({"role": "assistant", "content": COMPLETION_MESSAGE})
     save_conversation(run_dir, state, messages)
+
+
+def clear_pending_agent_text(run_dir: Path, state: dict[str, Any]) -> None:
+    state.setdefault("project_readiness", {}).pop("pending_agent_text", None)
+    write_state(run_dir, state)
+
+
+def completion_recorded(messages: list[dict[str, str]], agent_text: str) -> bool:
+    return (
+        len(messages) >= 2
+        and messages[-2] == {"role": "user", "content": agent_text}
+        and messages[-1] == {"role": "assistant", "content": COMPLETION_MESSAGE}
+    )
+
+
+def last_decision(messages: list[dict[str, str]]) -> dict[str, Any] | None:
+    if not messages or messages[-1].get("role") != "assistant":
+        return None
+    try:
+        return Decision.model_validate_json(messages[-1]["content"]).model_dump()
+    except ValueError:
+        return None
+
+
+def decision_turn(state: dict[str, Any]) -> int:
+    turn = (
+        state.get("decision_conversations", {})
+        .get(CONVERSATION_KEY, {})
+        .get("turn", 0)
+    )
+    if not isinstance(turn, int) or turn < 0:
+        raise RuntimeError("决策历史轮次不符合约定")
+    return turn
+
+
+def conversation_decision_count(messages: list[dict[str, str]]) -> int:
+    count = 0
+    for message in messages:
+        if message.get("role") != "assistant":
+            continue
+        try:
+            Decision.model_validate_json(message["content"])
+        except ValueError:
+            continue
+        count += 1
+    return count
+
+
+def synchronize_decision_turn(
+    run_dir: Path,
+    state: dict[str, Any],
+    messages: list[dict[str, str]],
+) -> int:
+    recorded = decision_turn(state)
+    actual = conversation_decision_count(messages)
+    if recorded > actual:
+        raise RuntimeError("决策历史轮次与消息内容不一致")
+    if actual > recorded:
+        state.setdefault("decision_conversations", {})[CONVERSATION_KEY] = {
+            "path": str(CONVERSATION_PATH),
+            "turn": actual,
+        }
+        write_state(run_dir, state)
+    return actual
+
+
+def require_decision_round(
+    run_dir: Path,
+    state: dict[str, Any],
+    messages: list[dict[str, str]],
+) -> int:
+    turn = synchronize_decision_turn(run_dir, state, messages)
+    if turn >= MAX_DECISION_ROUNDS:
+        raise RuntimeError("project-readiness 决策循环达到上限仍未完成")
+    return turn
+
+
+def append_agent_reply(
+    run_dir: Path,
+    state: dict[str, Any],
+    messages: list[dict[str, str]],
+    agent_text: str,
+) -> None:
+    messages.append({"role": "user", "content": agent_text})
+    save_conversation(run_dir, state, messages)
+
+
+def advance_success(
+    run_dir: Path,
+    state: dict[str, Any],
+    messages: list[dict[str, str]],
+    agent_text: str,
+) -> dict[str, Any]:
+    if not completion_recorded(messages, agent_text):
+        append_completion(run_dir, state, messages, agent_text)
+    state.setdefault("project_readiness", {}).pop("pending_agent_prompt", None)
+    state.setdefault("project_readiness", {}).pop("pending_agent_text", None)
+    state.update(
+        {
+            "status": "success",
+            "phase": "project_initialization",
+            "step": STEP + 1,
+            "current_step": STEP + 1,
+            "current_node": NEXT_NODE,
+            "blocked": None,
+            "error": None,
+        }
+    )
+    saved = result(
+        "success", "project-readiness 已生成项目准备清单。", outputs=[CHECKLIST.as_posix()]
+    )
+    write_step_result(run_dir, STEP, saved)
+    write_state(run_dir, state)
+    return saved
 
 
 def initial_prompt(
@@ -312,35 +420,6 @@ def resume_prompt(product_outputs: list[str], resource_list: Path) -> str:
     )
 
 
-def decision_context(run_result: ClaudeRunResult, present: bool) -> str:
-    return json.dumps(
-        {
-            "agent_result": run_result.text,
-            "agent_result_subtype": run_result.result_subtype,
-            "agent_is_error": run_result.is_error,
-            "checklist_present": present,
-            "minimum_completion_gate": "只有 Agent 正常成功结束、决策为 approve 且清单是非空普通文件时才可完成；预算或 turn 上限必须恢复原 session 继续。",
-        },
-        ensure_ascii=False,
-    )
-
-
-def persisted_decision_context(run_result: ClaudeRunResult, present: bool) -> str:
-    return json.dumps(
-        {
-            "agent_result": "Agent 原始文本仅用于本轮决策，未持久化。",
-            "agent_result_subtype": run_result.result_subtype,
-            "agent_is_error": run_result.is_error,
-            "checklist_present": present,
-        },
-        ensure_ascii=False,
-    )
-
-
-def persisted_decision(decision: dict[str, Any]) -> str:
-    return json.dumps({"action": decision["action"]}, ensure_ascii=False)
-
-
 async def run(
     run_dir: Path,
     state: dict[str, Any],
@@ -365,6 +444,7 @@ async def run(
             raise RuntimeError("第 5 步成功现场不完整")
         verify_existing_readiness_success(run_dir)
         state.setdefault("project_readiness", {}).pop("pending_agent_prompt", None)
+        state.setdefault("project_readiness", {}).pop("pending_agent_text", None)
         write_state(run_dir, state)
         return result(
             "success",
@@ -379,6 +459,7 @@ async def run(
     ):
         existing = verify_existing_readiness_success(run_dir)
         state.setdefault("project_readiness", {}).pop("pending_agent_prompt", None)
+        state.setdefault("project_readiness", {}).pop("pending_agent_text", None)
         state.update(
             {
                 "status": "success",
@@ -393,6 +474,17 @@ async def run(
         write_state(run_dir, state)
         return existing
 
+    if position == (STEP, STEP, CURRENT_NODE) and successful_agent_and_checklist:
+        pending_agent_text = state.get("project_readiness", {}).get("pending_agent_text")
+        if not isinstance(pending_agent_text, str):
+            raise RuntimeError("Agent 成功结果缺少可恢复的完整回复")
+        return advance_success(
+            run_dir,
+            state,
+            load_conversation(run_dir, state),
+            pending_agent_text,
+        )
+
     if position != (
         STEP,
         STEP,
@@ -403,9 +495,43 @@ async def run(
     state.update({"current_step": STEP, "status": "running", "blocked": None, "error": None})
     write_state(run_dir, state)
     existing_session = state.get("claude_sessions", {}).get(CONVERSATION_KEY)
+    messages = load_conversation(run_dir, state)
+    synchronize_decision_turn(run_dir, state, messages)
     pending = state.get("project_readiness", {}).pop("pending_agent_prompt", None)
     if pending is not None and (not isinstance(pending, str) or not pending):
         raise RuntimeError("待恢复 Agent 提示不符合约定")
+    if not pending and existing_session and messages[-1].get("role") == "user":
+        current_turn = require_decision_round(run_dir, state, messages)
+        state.setdefault("project_readiness", {}).pop("pending_agent_text", None)
+        write_state(run_dir, state)
+        try:
+            decision, _, raw = await decision_runner(messages, config_loader())
+        except Exception:
+            raise RuntimeError("AI-compatible 决策失败") from None
+        messages.append({"role": "assistant", "content": raw})
+        save_conversation(run_dir, state, messages, decision_turn=current_turn + 1)
+        if decision["action"] == "blocked":
+            raise ProjectReadinessBlocked(
+                decision["reason"],
+                decision["required_inputs"],
+                [CHECKLIST.as_posix()] if checklist_present(workspace) else [],
+            )
+        pending = decision["answer"]
+        state.setdefault("project_readiness", {})["pending_agent_prompt"] = pending
+        state.setdefault("project_readiness", {}).pop("pending_agent_text", None)
+        write_state(run_dir, state)
+    if not pending and existing_session:
+        recovered_decision = last_decision(messages)
+        if recovered_decision:
+            if recovered_decision["action"] == "blocked":
+                raise ProjectReadinessBlocked(
+                    recovered_decision["reason"],
+                    recovered_decision["required_inputs"],
+                    [CHECKLIST.as_posix()] if checklist_present(workspace) else [],
+                )
+            pending = recovered_decision["answer"]
+            state.setdefault("project_readiness", {})["pending_agent_prompt"] = pending
+            write_state(run_dir, state)
     if pending:
         prompt = pending
         write_state(run_dir, state)
@@ -429,85 +555,61 @@ async def run(
             raise RuntimeError("Agent SDK 未返回 ResultMessage")
         recoverable_subtypes = {"error_max_turns", "error_max_budget_usd"}
         if run_result.exception and run_result.result_subtype not in recoverable_subtypes:
+            clear_pending_agent_text(run_dir, state)
             raise RuntimeError("Agent SDK 执行异常")
         if run_result.is_error and run_result.result_subtype not in recoverable_subtypes:
+            clear_pending_agent_text(run_dir, state)
             raise RuntimeError(f"Agent SDK 执行失败：{run_result.result_subtype}")
         init = run_result.init or {}
         init_cwd = init.get("cwd")
         if not isinstance(init_cwd, str) or Path(init_cwd).resolve() != workspace:
+            clear_pending_agent_text(run_dir, state)
             raise RuntimeError("Agent SDK 实际工作目录与产品项目根不一致")
         if SKILL_NAME not in {str(item) for item in init.get("skills") or []}:
+            clear_pending_agent_text(run_dir, state)
             raise RuntimeError("Agent SDK 未加载 project-readiness Skill")
         if SKILL_NAME not in {str(item) for item in init.get("slash_commands") or []}:
+            clear_pending_agent_text(run_dir, state)
             raise RuntimeError("Agent SDK 未加载 project-readiness slash command")
-        session_id = state.get("claude_sessions", {}).get(CONVERSATION_KEY)
-        if not session_id:
-            raise RuntimeError("Agent 未完成且没有可恢复的 session ID")
-
         messages = load_conversation(run_dir, state)
         present = checklist_present(workspace)
-        decision_messages = [
-            *messages,
-            {"role": "user", "content": decision_context(run_result, present)},
-        ]
+        if (
+            run_result.result_subtype == "success"
+            and not run_result.is_error
+            and present
+        ):
+            try:
+                validate_inputs(run_dir, state)
+            except Exception:
+                clear_pending_agent_text(run_dir, state)
+                raise
+            return advance_success(run_dir, state, messages, run_result.text)
+
+        session_id = state.get("claude_sessions", {}).get(CONVERSATION_KEY)
+        if not session_id:
+            clear_pending_agent_text(run_dir, state)
+            raise RuntimeError("Agent 未完成且没有可恢复的 session ID")
+        append_agent_reply(run_dir, state, messages, run_result.text)
+        state.setdefault("project_readiness", {}).pop("pending_agent_text", None)
+        write_state(run_dir, state)
+        current_turn = require_decision_round(run_dir, state, messages)
         try:
-            decision, _, _raw = await decision_runner(
-                decision_messages, config_loader()
-            )
+            decision, _, raw = await decision_runner(messages, config_loader())
         except Exception:
             raise RuntimeError("AI-compatible 决策失败") from None
-        messages.append(
-            {
-                "role": "user",
-                "content": persisted_decision_context(run_result, present),
-            }
-        )
-        messages.append({"role": "assistant", "content": persisted_decision(decision)})
-        current_turn = (
-            state.get("decision_conversations", {})
-            .get(CONVERSATION_KEY, {})
-            .get("turn", 0)
-        )
+        messages.append({"role": "assistant", "content": raw})
         save_conversation(run_dir, state, messages, decision_turn=current_turn + 1)
         if decision["action"] == "blocked":
             raise ProjectReadinessBlocked(
-                BLOCKED_REASON,
-                BLOCKED_REQUIRED_INPUTS,
+                decision["reason"],
+                decision["required_inputs"],
                 [CHECKLIST.as_posix()] if present else [],
             )
-        if (
-            decision["action"] == "approve"
-            and present
-            and run_result.result_subtype == "success"
-            and not run_result.is_error
-        ):
-            validate_inputs(run_dir, state)
-            append_completion(run_dir, state, messages)
-            state.setdefault("project_readiness", {}).pop("pending_agent_prompt", None)
-            state.update(
-                {
-                    "status": "success",
-                    "phase": "project_initialization",
-                    "step": STEP + 1,
-                    "current_step": STEP + 1,
-                    "current_node": NEXT_NODE,
-                    "blocked": None,
-                    "error": None,
-                }
-            )
-            saved = result(
-                "success", "project-readiness 已生成项目准备清单。", outputs=[CHECKLIST.as_posix()]
-            )
-            write_step_result(run_dir, STEP, saved)
-            write_state(run_dir, state)
-            return saved
-
         answer = decision.get("answer")
         if not isinstance(answer, str) or not answer:
             raise RuntimeError("决策模型未提供可恢复的 Agent 提示")
-        state.setdefault("project_readiness", {})[
-            "pending_agent_prompt"
-        ] = SAFE_CONTINUE_PROMPT
+        state.setdefault("project_readiness", {})["pending_agent_prompt"] = answer
+        state.setdefault("project_readiness", {}).pop("pending_agent_text", None)
         write_state(run_dir, state)
         prompt = answer
 
