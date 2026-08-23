@@ -16,7 +16,9 @@ NAME = "基础工程选型"
 NEXT_NODE = "project:04_assemble_foundation"
 SYSTEM_PROMPT = """根据产品定义和候选模板，为产品选择适用的前端与后端基础工程。
 
-每个选择必须来自对应候选列表，并原样返回候选中的 id、git_url、default_branch 和 path，同时给出简短选择理由。产品明确不需要某个交付面时，对应字段返回 null。不得发明候选、修改候选来源字段或输出候选列表之外的方案。"""
+每个选择必须来自对应候选列表，并原样返回候选中的 id、git_url、default_branch 和 path，同时给出简短选择理由。产品明确不需要某个交付面时，对应字段返回 null。不得发明候选、修改候选来源字段或输出候选列表之外的方案。
+
+只返回符合所提供结构化输出格式的严格 JSON 对象；不要使用 Markdown、代码围栏、YAML 或 JSON 之外的文本。"""
 
 
 class PreviousStepResult(BaseModel):

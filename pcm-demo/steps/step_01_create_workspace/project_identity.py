@@ -9,7 +9,16 @@ from config import LLMConfig
 
 SYSTEM_PROMPT = """从产品初稿中提取建立项目工作区所需的最小身份信息。
 
-优先使用初稿已经明确给出的仓库名或英文代号。只有初稿没有提供目录名时，才根据产品选题生成单段小写 kebab-case 名称。如果初稿无法确定明确的产品选题，在 blocked_reason 中说明原因。不要扩展无关产品属性。"""
+优先使用初稿已经明确给出的仓库名或英文代号。只有初稿没有提供目录名时，才根据产品选题生成单段小写 kebab-case 名称。如果初稿无法确定明确的产品选题，在 blocked_reason 中说明原因。不要扩展无关产品属性。
+
+输出只能包含以下字段，禁止增加其它字段：
+- topic_name：明确的产品选题；
+- project_directory_name：单段小写 kebab-case 目录名；
+- directory_name_source：只能是 source 或 generated；
+- reason：目录名来源或生成理由；
+- blocked_reason：没有阻塞时为 null，否则为非空字符串。
+
+只返回符合所提供结构化输出格式的严格 JSON 对象；不要使用 Markdown、代码围栏、YAML 或 JSON 之外的文本。"""
 
 
 class ProjectIdentityInput(BaseModel):

@@ -29,6 +29,9 @@ target-*/
 .playwright-cli/
 .playwright-mcp/
 
+# Python 测试覆盖率数据库
+**/.coverage
+
 # 根目录若产生 .env 不得入库；各子仓库另有各自规则
 .env*
 !.env.example

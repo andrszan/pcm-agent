@@ -8,7 +8,7 @@ from common.agent_decision_loop import AgentDecisionLoopSpec, run_agent_decision
 from common.claude_agent import run_claude
 from common.decision import request_decision
 from common.files import resolve_workspace_output
-from common.state import write_state, write_step_result
+from common.state import step_result_status, write_state, write_step_result
 from config import LLMConfig, load_dev_resource_list
 from steps.step_03_foundation_selection.step import FoundationSelectionResult
 from steps.step_04_assemble_foundation.step import (
@@ -302,7 +302,11 @@ async def run(
             outputs=[CHECKLIST.as_posix()],
         )
 
-    if position == (STEP, STEP, CURRENT_NODE) and checklist is not None and (run_dir / "steps" / "05.json").is_file():
+    if (
+        position == (STEP, STEP, CURRENT_NODE)
+        and checklist is not None
+        and step_result_status(run_dir, STEP) == "success"
+    ):
         existing = verify_existing_readiness_success(run_dir)
         state.update(
             {
@@ -346,6 +350,7 @@ async def run(
         config_loader=config_loader,
     )
     if decision.verdict == "blocked":
+        validate_inputs(run_dir, state)
         raise ProjectReadinessBlocked(
             decision.reason,
             decision.required_inputs,

@@ -19,6 +19,7 @@ PCM 自动化流程接收一份产品初稿；资料不足时先形成产品初�
 → 项目准备核验
 → 基础工程项目化
 → 总体技术方案
+→ 首次提交适用仓库
 → 工程架构和 UI/UX 框架
 → Backlog 拆分
 → 阶段一：逐需求形成 TRD、实现、验证、状态收尾、复盘和合并
@@ -318,7 +319,7 @@ PCM Demo 只保存支持继续运行所必需的状态：
   7. 核验最终目录的 Git 根就是自身、当前分支为 `main`、尚无 commit，并记录根仓库初始化证据。
 - 输出：产品项目根由 `state.workspace.final_path` 记录；步骤结果 `outputs` 记录相对于该根的 `docs/产品初稿.md`。
 - 完成条件：最终目录独立、可操作，位于配置的独立产品工作区根中；模板来源和 commit 可追溯且未误带上游 Git 历史；最终项目根已经初始化为 `main` 分支的独立 Git 仓库但尚无 commit；初始化后的 `docs/` 只含当前产品初稿，状态和文件事实一致。
-- 自动化说明：`PCM_WORKSPACE_ROOT` 必须是当前能力仓库之外、专门承载产品项目的独立父目录。AI-compatible 调用使用 Responses API 的严格 JSON Schema 只提取项目身份；服务不支持该协议时明确失败，不回退到 Chat Completions。Git、路径、清理、哈希、发布和根仓库初始化由 Python 程序确定性执行。最终路径必须原先不存在，不以复制少量能力文件代替完整模板 clone。
+- 自动化说明：AI-compatible 调用使用 Responses API 的严格 JSON Schema；第 1 步 prompt 明确只允许 `topic_name`、`project_directory_name`、`directory_name_source`、`reason`、`blocked_reason` 五个字段，并禁止 Markdown、代码围栏、YAML 或 JSON 之外的文本。服务不支持该协议或结构不符时明确失败，不回退到 Chat Completions、不增加宽松解析或额外模型重试。Git、路径、清理、哈希、发布和根仓库初始化由 Python 程序确定性执行。最终路径必须原先不存在，不以复制少量能力文件代替完整模板 clone。
 - 阻塞与失败：缺少不可替代的模板仓库读取权限时返回 `blocked`；初稿无法确定选题、工作区根位于当前能力仓库内部、目录归属不明、AI API、结构解析、Git 工具、网络、clone、清理、写入、核验、rename 或根仓库初始化错误返回 `failed`。失败时保留现场；若原子发布后 `git init` 中断，仅在最终目录与当前 run 发布证据一致时续接根仓库初始化，不自动删除或覆盖。
 
 ### 第 2 步：项目需求与产品定义
@@ -340,7 +341,7 @@ PCM Demo 只保存支持继续运行所必需的状态：
 ### 第 3 步：基础工程选型
 
 - 执行方式：Python 将产品定义和 catalog 候选构造成 Pydantic 输入模型，使用代码内的 system prompt 调用 OpenAI Python SDK `responses.parse(..., text_format=FoundationSelectionResult)`，取得 Pydantic 输出后直接保存；不调用 `foundation-selection` Skill 或 Claude Agent SDK。
-- 输入：第 2 步结果中记录的项目需求说明、产品功能说明，以及本次 `catalog.json` 中的前端和后端候选。system prompt 只描述选型功能、输入、输出和约束，不包含步骤编号、PCM、Skill 或其它外层编排背景。
+- 输入：第 2 步结果中记录的项目需求说明、产品功能说明，以及本次 `catalog.json` 中的前端和后端候选。system prompt 只描述选型功能、输入、输出和约束，不包含步骤编号、PCM、Skill 或其它外层编排背景，并要求严格 JSON、禁止 Markdown、代码围栏、YAML 或 JSON 之外的文本。
 - 输出：Pydantic `FoundationSelectionResult`，其中 `frontend`、`backend` 分别为完整模板选择或 `null`；每个选择直接包含 `id`、`git_url`、`default_branch`、`path` 和 `reason`。程序使用 `model_dump()` 将该结果写入 `steps/03.json.template_selection`。
 - 完成条件：SDK 成功返回 `output_parsed`，步骤结果已经写入，状态推进到 `project:04_assemble_foundation`。本步骤不获取、复制或组装模板，不初始化前后端仓库。
 - 失败与恢复：输入文件、catalog、Pydantic 解析或 Responses API 调用失败时保存简短脱敏错误并停留在当前步骤；已有成功结果且状态已推进到第 4 步时直接复用，不建立模型 session 或额外恢复状态机。
@@ -348,11 +349,11 @@ PCM Demo 只保存支持继续运行所必需的状态：
 ### 第 4 步：组装基础工程
 
 - 输入：只读取第 3 步成功结果 `steps/03.json`，以既有 `FoundationSelectionResult` / `TemplateSelection` 校验 `template_selection`；不读取 catalog、产品文档，不调用模型、Skill 或 Agent。状态必须位于 `project:04_assemble_foundation`，`workspace.final_path`、state 的根 Git 证据和现场必须一致，产品根仍为零提交 `main`。
-- 执行动作：目标固定为 `frontend/`、`backend/`。每个目标只能不存在，或是非符号链接且唯一内容为普通 `.gitkeep` 的目录；空目录、额外内容、符号链接和既有工程一律拒绝。对唯一 `(git_url, default_branch)` 执行一次 `git clone --depth 1 --branch <branch> --single-branch`，核验 origin、分支和 HEAD SHA；选中的相对模板路径不得为空、绝对、含 `..`、逃出 clone 或指向符号链接，子树不得包含 `.git` 或任何符号链接。全部 `shutil.copytree()` payload 准备完成后，才移除经核验的占位目录并以 `os.rename()` 发布。
-- 临时与恢复：临时根固定为产品目录同级 `<project>.pcm-assemble-<run-id>`，只以 run ID、产品路径和步骤号的 marker 证明归属。仅当路径、marker 完全匹配且两端仍是占位或不存在时，才删除失败残留并 fresh 重试；未知残留和部分发布现场均保留并 `failed`。`null` 端只删除严格占位目录，原本不存在则无副作用。成功后核验适用端无嵌套 `.git`、不适用端不存在，核验 marker 后清理临时根；已有成功结果且状态已到第 5 步时，最小现场核验来源记录、目标和临时根后幂等复用，不重新 clone。
+- 执行动作：目标固定为 `frontend/`、`backend/`。每个目标只能不存在，或是非符号链接且唯一内容为普通 `.gitkeep` 的目录；空目录、额外内容、符号链接和既有工程一律拒绝。对唯一 `(git_url, default_branch)` 执行一次 `git clone --depth 1 --branch <branch> --single-branch`，核验 origin、分支和 HEAD SHA；选中的相对模板路径不得为空、绝对、含 `..`、逃出 clone 或指向符号链接，子树不得包含上游 `.git` 或任何符号链接。每个适用 payload 复制到同级 run-owned 临时根后，在 payload 内执行 `git init -b main`，核验 Git top-level 就是 payload 自身、分支为 `main`、HEAD 为 unborn、index 为空，并且至少存在一个不被自身 ignore 的可提交文件；所有 payload 均合格后才移除经核验的占位目录并以 `os.rename()` 发布。第 4 步不执行 `git add`、`git commit` 或 push。
+- 临时与恢复：临时根固定为产品目录同级 `<project>.pcm-assemble-<run-id>`，只以 run ID、产品路径和步骤号的 marker 证明归属。仅当路径、marker 完全匹配且两端仍是占位或不存在时，才删除失败残留并 fresh 重试；未知残留和部分发布现场均保留并 `failed`。`null` 端只删除严格占位目录，原本不存在则无副作用。成功后核验每个适用端自身 top-level、`main`、unborn HEAD、空 index，不适用端不存在，核验 marker 后清理临时根；已有成功结果且状态已到第 5 步时，最小现场核验来源记录、上述仓库边界、目标和临时根后幂等复用，不重新 clone。
 - 输出：`steps/04.json` 记录 `applicable`、实际 `outputs` 和 `assembly.frontend/backend`；每个适用端保存 `target`、`id`、`git_url`、`default_branch`、`path`、实际 `origin`、`branch`、`commit_sha`，不适用端为 `null`。成功推进 `phase: project_initialization`、`current_node: project:05_verify_readiness`、`step/current_step: 5`。
 - 阻塞与失败：明确的模板仓库认证或读取权限缺失为 `blocked`；状态、目录、Git、来源、路径、复制、发布、清理和核验错误为 `failed`。步骤自行保存 result/state；入口只输出结果路径与退出码，不重复写第 4 步结果。
-- 已验证：修迹 run 使用 GitLab SSH 模板成功组装前端 `vite-react-shadcn-spa`（`main` SHA `a31db6deb85ab29f2d2253413dd362293a96325f`）和后端 `fastapi-sqlalchemy-postgresql-async-api`（`main` SHA `49ff842fcd330387f2fbdd1e9a43884e05894697`）；两端无嵌套 `.git`、无临时目录，产品根仍为零提交 `main`。首次 HTTPS 来源错误按 `failed` 保存且未覆盖 `.gitkeep`、保留临时现场；修正为 SSH 后同 run 核验 marker、安全清理并 fresh clone 成功。重复执行在 0.809 秒内幂等复用。
+- 已验证：修迹 run 使用 GitLab SSH 模板成功组装前端 `vite-react-shadcn-spa`（`main` SHA `a31db6deb85ab29f2d2253413dd362293a96325f`）和后端 `fastapi-sqlalchemy-postgresql-async-api`（`main` SHA `49ff842fcd330387f2fbdd1e9a43884e05894697`）；两端均为自身 top-level 的 `main`、unborn HEAD、空 index 独立仓，产品根仍为零提交 `main`。首次 HTTPS 来源错误按 `failed` 保存且未覆盖 `.gitkeep`、保留临时现场；修正为 SSH 后同 run 核验 marker、安全清理并 fresh clone 成功。重复执行在 0.809 秒内幂等复用。
 
 ### 第 5 步：核验项目准备状态
 
@@ -378,14 +379,15 @@ PCM Demo 只保存支持继续运行所必需的状态：
 - 完成条件：方案 Markdown 存在且可读，系统边界、主要技术选择、交付单元、跨单元协作、关键风险和未决事项已经确认，并与当前工程事实一致。
 - 自动化说明：本步骤基于已组装和项目化后的工程事实进行总体设计，不重新进行模板选型或组装；文档、模型、文件或状态问题在本步骤失败，外部不可替代资源缺失时返回 `blocked`。
 
-### 第 8 步：初始化并提交适用仓库
+### 第 8 步：首次提交适用仓库
 
-- 能力：显式 Git 脚本和 `commit-changes`。
-- 输入：第 1 步已初始化但尚无提交的根仓库，以及完成项目化的适用工程。
-- 执行动作：核验根目录 Git 边界和 `main`，为适用的独立交付单元初始化 Git，分别检查忽略规则和秘密，并按仓库创建首次本地提交。
-- 输出：每个适用仓库的初始本地提交，以及作为后续仓库遍历单一事实源的 `applicable_repositories`。
-- 完成条件：根仓库和适用交付单元仓库均位于 `main`、初始提交存在、工作树符合预期且没有跨仓误纳入内容。
-- 自动化说明：不执行 push。
+- 能力：在产品根创建一个 Claude Agent SDK session，显式调用 `commit-changes`；Python 只执行确定性输入、状态与真实 Git 核验。
+- 输入：第 3～7 步均为成功结果；第 1 步根仓和第 4 步每个适用 `frontend` / `backend` 都是自身 top-level、`main`、unborn HEAD、空 index 的独立 Git 仓库；不适用端不存在。权威有序仓库清单是 `['root', *steps/04.json.outputs]`，根 `.gitignore` 必须实际忽略所有适用子仓，所有适用仓无未处理 `.coverage`。
+- 执行动作：初始 prompt 的首行是 `/commit-changes`。同一 Agent 任务按仓库分别执行单仓合同，以 `expected_head=unborn` 将每仓当前全部合法变更创建为唯一初始基线提交。Python 不逐仓派发、不 stage、不 commit。Agent 不得改写历史、切换分支、merge、push 或让根提交纳入子仓/gitlink；最终回复最后一个非空行必须为严格 `INITIAL_COMMITS_JSON`，按权威顺序报告完整 SHA。
+- 输出：`steps/08.json` 的 `outputs` 固定为空，并保存 `applicable_repositories`、`initial_commits`（名称到 SHA）及 `repositories` 列表；状态保存同名仓库证据，成功推进到 `project:09_engineering_architecture`。
+- 完成条件：每仓 top-level、`main`、HEAD 和干净工作树均通过核验，恰好一个无父且非 shallow/replace 的初始提交与 marker SHA 一致；根 tree 不含 `frontend`、`backend` 或 gitlink，根 `.gitignore` 实际忽略所有适用子仓。
+- 恢复：只接纳最近一次 Agent 回合记录的 `observed_heads`；部分已提交仓保持原提交，继续同一 session，不 reset、amend 或 rebase。`failed` / `blocked` 的步骤结果不能当作成功或阻止恢复；只有 `status=success` 可幂等复用。成功结果写入后 state 中断时，重跑只重验并推进，不覆盖成功锚点或再次调用 Agent。
+- 自动化说明：决策只有 `completed`、`continue`、`blocked`；`completed` 可在 marker 或未提交仓缺失时向同一 session 发送固定修复提示，事实冲突即 `failed`。不执行 push。
 
 ### 第 9 步：工程架构设计（按需）
 

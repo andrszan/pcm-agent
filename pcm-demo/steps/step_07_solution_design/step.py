@@ -8,7 +8,7 @@ from common.agent_decision_loop import AgentDecisionLoopSpec, run_agent_decision
 from common.claude_agent import run_claude
 from common.decision import request_decision
 from common.files import resolve_workspace_output
-from common.state import write_state, write_step_result
+from common.state import step_result_status, write_state, write_step_result
 from config import LLMConfig
 from steps.step_04_assemble_foundation.step import (
     temporary_root,
@@ -267,7 +267,7 @@ async def run(
     if position != (STEP, STEP, CURRENT_NODE):
         raise RuntimeError("运行状态不位于总体技术方案锚点")
 
-    if (run_dir / "steps" / "07.json").is_file():
+    if step_result_status(run_dir, STEP) == "success":
         verify_existing_solution_success(run_dir)
         if completion_verifier() is not None:
             raise RuntimeError("第 7 步既有成功缺少非空技术方案文档")
@@ -291,6 +291,7 @@ async def run(
         config_loader=config_loader,
     )
     if decision.verdict == "blocked":
+        validate_inputs(run_dir, state)
         raise SolutionDesignBlocked(
             decision.reason,
             decision.required_inputs,

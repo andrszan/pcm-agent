@@ -18,6 +18,7 @@ from common.state import read_state, write_state
 from steps.step_01_create_workspace import initialize_root_repository
 from steps.step_03_foundation_selection.step import TemplateSelection
 from steps.step_06_project_bootstrap.step import (
+    COVERAGE_ARTIFACT_REPAIR_PROMPT,
     CURRENT_NODE,
     DECISION_LOOP_SPEC,
     LEGACY_COMPLETION_MESSAGES,
@@ -88,6 +89,7 @@ class ProjectBootstrapTests(unittest.TestCase):
         if applicable:
             (workspace / "frontend").mkdir()
             (workspace / "frontend/package.json").write_text("{}\n", encoding="utf-8")
+            initialize_root_repository(workspace / "frontend")
             frontend = TemplateSelection(
                 id="frontend-template",
                 git_url="file:///templates.git",
@@ -227,6 +229,37 @@ class ProjectBootstrapTests(unittest.TestCase):
             self.assertEqual(reused["status"], "success")
             self.assertIn("确认既有成功", reused["summary"])
 
+    def test_unignored_coverage_artifact_uses_same_session_repair(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory))
+            (workspace / "README.md").write_text("# 项目\n", encoding="utf-8")
+            coverage = workspace / ".coverage"
+            coverage.write_bytes(b"coverage")
+            calls: list[dict] = []
+
+            async def fake_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
+                calls.append({"prompt": prompt, **kwargs})
+                if len(calls) == 2:
+                    coverage.unlink()
+                current = agent_result(cwd=kwargs["cwd"])  # type: ignore[arg-type, index]
+                kwargs["on_update"](current)  # type: ignore[index, operator]
+                return current
+
+            async def completed(messages, config, *, system_prompt):
+                return decision("completed")
+
+            saved = self.run_step(
+                run_dir,
+                state,
+                agent_runner=fake_agent,
+                decision_runner=completed,
+                config_loader=lambda: object(),
+            )
+            self.assertEqual(saved["status"], "success")
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(calls[1]["resume_session_id"], "session-1")
+            self.assertEqual(calls[1]["prompt"], COVERAGE_ARTIFACT_REPAIR_PROMPT)
+
     def test_blocked_decision_preserves_domain_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))
@@ -255,7 +288,65 @@ class ProjectBootstrapTests(unittest.TestCase):
             self.assertEqual(raised.exception.outputs, ["frontend"])
             self.assertTrue(workspace.is_dir())
 
-    def test_staged_and_nested_git_changes_are_rejected(self) -> None:
+    def test_blocked_decision_rechecks_git_boundaries(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory))
+
+            async def staging_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
+                (workspace / "README.md").write_text("# 项目\n", encoding="utf-8")
+                subprocess.run(
+                    ["git", "add", "README.md"],
+                    cwd=workspace,
+                    check=True,
+                    capture_output=True,
+                )
+                current = agent_result(cwd=kwargs["cwd"])  # type: ignore[arg-type, index]
+                kwargs["on_update"](current)  # type: ignore[index, operator]
+                return current
+
+            async def blocked(messages, config, *, system_prompt):
+                return decision(
+                    "blocked",
+                    reason="缺少不可替代授权",
+                    required_inputs=["外部授权"],
+                )
+
+            with self.assertRaisesRegex(RuntimeError, "不得暂存文件"):
+                self.run_step(
+                    run_dir,
+                    state,
+                    agent_runner=staging_agent,
+                    decision_runner=blocked,
+                    config_loader=lambda: object(),
+                )
+
+    def test_blocked_decision_rechecks_coverage_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory))
+            (workspace / ".coverage").write_bytes(b"coverage")
+
+            async def fake_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
+                current = agent_result(cwd=kwargs["cwd"])  # type: ignore[arg-type, index]
+                kwargs["on_update"](current)  # type: ignore[index, operator]
+                return current
+
+            async def blocked(messages, config, *, system_prompt):
+                return decision(
+                    "blocked",
+                    reason="缺少不可替代授权",
+                    required_inputs=["外部授权"],
+                )
+
+            with self.assertRaisesRegex(RuntimeError, "覆盖率数据库"):
+                self.run_step(
+                    run_dir,
+                    state,
+                    agent_runner=fake_agent,
+                    decision_runner=blocked,
+                    config_loader=lambda: object(),
+                )
+
+    def test_root_and_child_repository_changes_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))
 
@@ -280,12 +371,59 @@ class ProjectBootstrapTests(unittest.TestCase):
                     config_loader=lambda: object(),
                 )
 
+        for mutation in ("staged", "committed", "non-main"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
+                run_dir, workspace, state = self.make_run(Path(directory))
+                frontend = workspace / "frontend"
+                if mutation == "staged":
+                    subprocess.run(
+                        ["git", "add", "package.json"], cwd=frontend, check=True, capture_output=True
+                    )
+                elif mutation == "committed":
+                    subprocess.run(
+                        ["git", "add", "package.json"], cwd=frontend, check=True, capture_output=True
+                    )
+                    subprocess.run(
+                        [
+                            "git",
+                            "-c",
+                            "user.name=PCM Test",
+                            "-c",
+                            "user.email=pcm@example.invalid",
+                            "commit",
+                            "-m",
+                            "test",
+                        ],
+                        cwd=frontend,
+                        check=True,
+                        capture_output=True,
+                    )
+                else:
+                    subprocess.run(
+                        ["git", "switch", "-c", "feature"],
+                        cwd=frontend,
+                        check=True,
+                        capture_output=True,
+                    )
+
+                async def unexpected_agent(*args: object, **kwargs: object) -> ClaudeRunResult:
+                    raise AssertionError("子仓边界异常不应调用 Agent")
+
+                with self.assertRaisesRegex(RuntimeError, "Git 仓库"):
+                    self.run_step(
+                        run_dir,
+                        state,
+                        agent_runner=unexpected_agent,
+                        config_loader=lambda: object(),
+                    )
+
+    def test_failed_result_file_does_not_block_recovery(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))
+            write_json(run_dir / "steps/06.json", {"step": 6, "status": "failed"})
 
-            async def nested_git_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
+            async def fake_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
                 (workspace / "README.md").write_text("# 项目\n", encoding="utf-8")
-                (workspace / "frontend/.git").mkdir()
                 current = agent_result(cwd=kwargs["cwd"])  # type: ignore[arg-type, index]
                 kwargs["on_update"](current)  # type: ignore[index, operator]
                 return current
@@ -293,14 +431,14 @@ class ProjectBootstrapTests(unittest.TestCase):
             async def completed(messages, config, *, system_prompt):
                 return decision("completed")
 
-            with self.assertRaisesRegex(RuntimeError, "完成核验失败"):
-                self.run_step(
-                    run_dir,
-                    state,
-                    agent_runner=nested_git_agent,
-                    decision_runner=completed,
-                    config_loader=lambda: object(),
-                )
+            saved = self.run_step(
+                run_dir,
+                state,
+                agent_runner=fake_agent,
+                decision_runner=completed,
+                config_loader=lambda: object(),
+            )
+            self.assertEqual(saved["status"], "success")
 
     def test_no_applicable_foundation_skips_without_agent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -16,7 +16,12 @@ sys.path.insert(0, str(DEMO_ROOT))
 
 from common.files import write_json
 from common.state import read_state, write_state
-from steps.step_01_create_workspace.workspace import WorkspaceBlocked, git
+from steps.step_01_create_workspace.workspace import (
+    WorkspaceBlocked,
+    git,
+    initialize_repository,
+    inspect_root_repository,
+)
 from steps.step_03_foundation_selection.step import TemplateSelection
 from steps.step_04_assemble_foundation.step import (
     CURRENT_NODE,
@@ -44,6 +49,7 @@ class AssembleFoundationTests(unittest.TestCase):
         source_symlink: bool = False,
         escape_link: bool = False,
         git_link: bool = False,
+        ignore_all_frontend: bool = False,
     ) -> tuple[Path, str]:
         source = root / "template-source"
         command("init", "-b", branch, str(source))
@@ -62,7 +68,17 @@ class AssembleFoundationTests(unittest.TestCase):
             (frontend / "escape").symlink_to("../../../../outside")
         if git_link:
             (frontend / "git-metadata").symlink_to("../../.git", target_is_directory=True)
+        if ignore_all_frontend:
+            (frontend / ".gitignore").write_text("*\n", encoding="utf-8")
         command("add", ".", cwd=source)
+        if ignore_all_frontend:
+            command(
+                "add",
+                "-f",
+                "templates/frontend/.gitignore",
+                "templates/frontend/frontend.txt",
+                cwd=source,
+            )
         command("commit", "-m", "templates", cwd=source)
         bare = root / "templates.git"
         command("clone", "--bare", str(source), str(bare))
@@ -141,6 +157,11 @@ class AssembleFoundationTests(unittest.TestCase):
             self.assertEqual(saved["outputs"], ["frontend", "backend"])
             self.assertEqual((workspace / "frontend" / "frontend.txt").read_text(), "frontend")
             self.assertEqual((workspace / "backend" / "backend.txt").read_text(), "backend")
+            for target in ("frontend", "backend"):
+                self.assertEqual(
+                    inspect_root_repository(workspace / target),
+                    {"path": str((workspace / target).resolve()), "branch": "main", "head": None},
+                )
             self.assertEqual(saved["assembly"]["frontend"]["origin"], url)
             self.assertEqual(saved["assembly"]["frontend"]["branch"], "release")
             self.assertEqual(
@@ -188,6 +209,8 @@ class AssembleFoundationTests(unittest.TestCase):
                 )
                 saved = run(run_dir, state)
                 self.assertEqual(saved["outputs"], outputs)
+                for target in outputs:
+                    self.assertEqual(inspect_root_repository(workspace / target)["head"], None)
                 self.assertEqual((workspace / "frontend").exists(), frontend is not None)
                 self.assertEqual((workspace / "backend").exists(), backend is not None)
 
@@ -232,7 +255,7 @@ class AssembleFoundationTests(unittest.TestCase):
             ("source-link", "templates/frontend", True, False, False, False),
             ("escape-link", "templates/frontend", False, True, False, False),
             ("git-link", "templates/frontend", False, False, True, False),
-            ("nested-git", "templates/frontend", False, False, False, True),
+            ("source-git", "templates/frontend", False, False, False, True),
         ]
         for name, path, source_symlink, escape_link, git_link, nested_git in cases:
             with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
@@ -256,6 +279,46 @@ class AssembleFoundationTests(unittest.TestCase):
                 self.assertEqual(saved["status"], "failed")
                 self.assertTrue((workspace / "frontend" / ".gitkeep").is_file())
                 self.assertTrue((workspace / "backend" / ".gitkeep").is_file())
+
+    def test_payload_initialization_failure_does_not_publish(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, url = self.create_remote(root)
+            run_dir, workspace, state = self.make_run(root, self.selection(url))
+            original_initialize = initialize_repository
+
+            def fail_backend(payload: Path) -> dict[str, str | None]:
+                if payload.name == "backend":
+                    raise RuntimeError("backend Git 初始化失败")
+                return original_initialize(payload)
+
+            with patch(
+                "steps.step_04_assemble_foundation.step.initialize_repository",
+                side_effect=fail_backend,
+            ):
+                saved = run(run_dir, state)
+
+            self.assertEqual(saved["status"], "failed")
+            for target in ("frontend", "backend"):
+                self.assertTrue((workspace / target / ".gitkeep").is_file())
+            temporary = temporary_root(workspace, state["run_id"])
+            self.assertTrue((temporary / "payloads/frontend/.git").is_dir())
+            self.assertTrue((temporary / "payloads/backend").is_dir())
+
+    def test_payload_without_committable_files_does_not_publish(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, url = self.create_remote(root, ignore_all_frontend=True)
+            run_dir, workspace, state = self.make_run(
+                root,
+                self.selection(url, backend=None),
+            )
+
+            saved = run(run_dir, state)
+
+            self.assertEqual(saved["status"], "failed")
+            self.assertIn("没有可提交文件", saved["error"]["message"])
+            self.assertTrue((workspace / "frontend/.gitkeep").is_file())
 
     def test_blocked_authentication_and_normal_git_failure_are_distinct(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -335,8 +398,11 @@ class AssembleFoundationTests(unittest.TestCase):
             ):
                 self.assertEqual(run(run_dir, state)["status"], "failed")
             self.assertTrue((workspace / "frontend" / "frontend.txt").is_file())
+            self.assertEqual(inspect_root_repository(workspace / "frontend")["head"], None)
             self.assertFalse((workspace / "backend").exists())
-            self.assertTrue(temporary_root(workspace, state["run_id"]).exists())
+            temporary = temporary_root(workspace, state["run_id"])
+            self.assertTrue(temporary.exists())
+            self.assertTrue((temporary / "payloads/backend/.git").is_dir())
             self.assertEqual(run(run_dir, read_state(run_dir))["status"], "failed")
             self.assertTrue((workspace / "frontend" / "frontend.txt").is_file())
 

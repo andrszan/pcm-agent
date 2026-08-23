@@ -7,9 +7,9 @@ from typing import Any
 from common.agent_decision_loop import AgentDecisionLoopSpec, run_agent_decision_loop
 from common.claude_agent import run_claude
 from common.decision import request_decision
-from common.state import write_state, write_step_result
+from common.state import step_result_status, write_state, write_step_result
 from config import LLMConfig
-from steps.step_01_create_workspace.workspace import git
+from steps.step_01_create_workspace.workspace import git, inspect_root_repository
 from steps.step_04_assemble_foundation.step import (
     temporary_root,
     verify_existing_success,
@@ -55,6 +55,10 @@ DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     legacy_completion_messages=LEGACY_COMPLETION_MESSAGES,
 )
 README_REPAIR_PROMPT = "产品根 README 缺失或为空。请仅补齐该文件的项目身份和必要基础运行说明，然后报告结果。"
+COVERAGE_ARTIFACT_REPAIR_PROMPT = (
+    "检测到未忽略的 .coverage 测试覆盖率数据库。请删除可确认的覆盖率临时产物，"
+    "或将它加入所属仓库的 .gitignore；不得把覆盖率数据库作为项目文件保留，然后重新核验并报告。"
+)
 
 
 class ProjectBootstrapBlocked(RuntimeError):
@@ -126,15 +130,20 @@ def validate_inputs(
 
 
 def verify_git_boundaries(workspace: Path, outputs: list[str]) -> None:
-    staged = git("diff", "--cached", "--name-only", cwd=workspace)
-    if staged:
-        raise RuntimeError("项目化过程不得暂存文件")
+    inspect_root_repository(workspace)
     for output in outputs:
-        path = workspace / output
-        if path.is_symlink() or not path.is_dir():
-            raise RuntimeError(f"适用工程目录不存在或无效：{output}")
-        if (path / ".git").exists() or (path / ".git").is_symlink():
-            raise RuntimeError(f"适用工程目录存在嵌套 .git：{output}")
+        inspect_root_repository(workspace / output)
+
+
+def coverage_artifact_repair(workspace: Path, outputs: list[str]) -> str | None:
+    for relative in [".", *outputs]:
+        repository = workspace if relative == "." else workspace / relative
+        status = git("status", "--porcelain", "--untracked-files=all", cwd=repository)
+        for line in status.splitlines():
+            path = line[3:].strip()
+            if path == ".coverage" or path.endswith("/.coverage"):
+                return COVERAGE_ARTIFACT_REPAIR_PROMPT
+    return None
 
 
 def verify_existing_bootstrap_success(
@@ -268,7 +277,7 @@ def initial_prompt(
 {assembly_json}
 ```
 
-请依据这些输入和当前工程事实完成产品根 README、适用工程身份、基础配置、必要运行说明及可安全确认的模板残留收口。按锁文件和工程说明完成所有适用的依赖安装、静态或类型检查、测试、构建、启动；验证后端健康与就绪入口，存在前端时用真实浏览器读取代表性页面并检查阻断性控制台和失败网络请求，前后端同时适用时完成最小真实联调。失败先修复本次范围内的问题并重跑。
+请依据这些输入和当前工程事实完成产品根 README、适用工程身份、基础配置、必要运行说明及可安全确认的模板残留收口。按锁文件和工程说明完成所有适用的依赖安装、静态或类型检查、测试、构建、启动；验证后端健康与就绪入口，存在前端时用真实浏览器读取代表性页面并检查阻断性控制台和失败网络请求，前后端同时适用时完成最小真实联调。失败先修复本次范围内的问题并重跑。完成前删除本轮测试或模板遗留的未忽略 `.coverage` 覆盖率数据库，或将这类可再生产物加入所属仓库的 `.gitignore`；不得把覆盖率数据库作为项目文件保留。
 
 不得提前实现业务页面、导航、数据模型、业务接口、认证权限、迁移、业务数据、总体技术方案或工程架构；不得初始化、暂存、提交、建分支、合并或推送 Git；不得泄露秘密。最终完整回复须说明处理的工程、主要变更和保留项、每项真实验证结果、浏览器或联调结果，以及未验证范围、阻塞或后续事项。"""
 
@@ -293,8 +302,12 @@ async def run(
 
     def completion_verifier() -> str | None:
         verified_workspace, _, verified_assembly, _ = validate_inputs(run_dir, state)
-        verify_git_boundaries(verified_workspace, verified_assembly["outputs"])
-        return root_readme_repair(verified_workspace)
+        verified_outputs = verified_assembly["outputs"]
+        verify_git_boundaries(verified_workspace, verified_outputs)
+        readme_repair = root_readme_repair(verified_workspace)
+        if readme_repair is not None:
+            return readme_repair
+        return coverage_artifact_repair(verified_workspace, verified_outputs)
 
     if position == (STEP + 1, STEP + 1, NEXT_NODE) and state.get("status") == "success":
         verify_existing_bootstrap_success(run_dir, outputs)
@@ -309,7 +322,7 @@ async def run(
     if position != (STEP, STEP, CURRENT_NODE):
         raise RuntimeError("运行状态不位于基础工程项目化锚点")
 
-    if (run_dir / "steps" / "06.json").is_file():
+    if step_result_status(run_dir, STEP) == "success":
         verify_existing_bootstrap_success(run_dir, outputs)
         if completion_verifier() is not None:
             raise RuntimeError("第 6 步既有成功缺少非空产品根 README")
@@ -333,5 +346,10 @@ async def run(
         config_loader=config_loader,
     )
     if decision.verdict == "blocked":
+        verified_workspace, _, verified_assembly, _ = validate_inputs(run_dir, state)
+        verified_outputs = verified_assembly["outputs"]
+        verify_git_boundaries(verified_workspace, verified_outputs)
+        if coverage_artifact_repair(verified_workspace, verified_outputs) is not None:
+            raise RuntimeError("项目化过程仍包含未删除或未忽略的 .coverage 覆盖率数据库")
         raise ProjectBootstrapBlocked(decision.reason, decision.required_inputs, outputs)
     return advance_success(run_dir, state, outputs)

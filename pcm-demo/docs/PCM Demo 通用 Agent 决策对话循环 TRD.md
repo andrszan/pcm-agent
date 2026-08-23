@@ -1,12 +1,12 @@
 # PCM Demo 通用 Agent 决策对话循环 TRD
 
-> 本文记录 PCM Demo 第 2、5、6、7 步已经实现的公共 Agent 决策对话循环技术合同。
+> 本文记录 PCM Demo 第 2、5、6、7、8 步已经实现的公共 Agent 决策对话循环技术合同。
 >
-> 本文只定义通用执行与恢复机制；各业务步骤的输入、产物、完成条件和状态推进仍以步骤 README、Demo 项目设计和活动 TRD 为准。
+> 本文只定义通用执行与恢复机制；各业务步骤的输入、产物、完成条件、Git 核验和状态推进仍以步骤 README、Demo 项目设计和活动 TRD 为准。
 
 ## 1. 背景与目标
 
-第 2、5、6、7 步都需要完成同一种长任务交互：
+第 2、5、6、7、8 步都需要完成同一种长任务交互：
 
 ```text
 Claude Agent 执行领域任务
@@ -107,7 +107,7 @@ flowchart LR
 - blocked 显式重跑；
 - SDK 结果分类和安全错误。
 
-公共循环不导入 `steps.*`，不执行领域 Git、测试、浏览器或产物判断。
+公共循环不导入 `steps.*`，不执行领域 Git、测试、浏览器或产物判断。第 8 步的多仓提交合同、`observed_heads` 和真实 Git verifier 均仍由该步骤实现，不形成公共 Git DSL。
 
 ### 3.4 各步骤 `step.py`
 
@@ -389,9 +389,8 @@ Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重�
 
 统一要求：
 
-- 首行 slash command 仅作为显式 Skill 调用协议；
-- 正文不写步骤编号、PCM 节点、阶段、session、轮次或预算；
-- 只写领域任务、权威输入、固定产物、真实验证与边界；
+- 首行 slash command 可显式选择当前能力；正文不写步骤编号、PCM 节点、阶段、session、轮次或 Skill 编排；
+- 正文只写领域任务、权威输入、固定产物、真实验证与边界；
 - 不复制 Skill 的完整执行流程；
 - decision system prompt 只定义领域完成、继续和阻塞标准；
 - repair prompt 只说明程序发现的固定缺口；
@@ -401,6 +400,7 @@ Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重�
 
 - 第 5 步只传递 readiness 所需的选型投影；
 - 第 6、7 步只传递白名单组装事实；
+- 第 8 步只传递有序权威仓库清单与白名单组装事实，由该步骤而非公共循环核验每个 Git 事实；
 - 不向 Prompt 传递 `git_url`、`origin` 或无关工程内容；
 - 第 7 步只读取足以支撑方案主张的工程事实，不要求机械扫描整个代码库。
 
@@ -428,6 +428,7 @@ Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重�
 | 5 `project-readiness` | 核验进入项目化前的资源与配置 | 固定准备清单为非空普通文件 |
 | 6 `project-bootstrap` | 有限项目化和真实工程验证 | 前序交接、根 README、工程和 Git 边界 |
 | 7 `solution-design` | 基于真实工程形成总体技术方案 | 固定方案文档、前序交接和 Git 边界 |
+| 8 `commit-changes` | 在同一产品根 session 中分别创建权威清单中各仓的唯一初始基线提交 | 步骤专属多仓 Git verifier、严格 marker、根 tree 与 `.gitignore` 边界 |
 
 第 6 步没有适用基础工程时，继续 `applicable: false` 无副作用跳过，不调用 Agent 或决策模型。
 
@@ -454,8 +455,8 @@ Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重�
 自动化验证：
 
 - 公共循环 23 项测试；
-- 第 2、5、6、7 步分别 6、8、5、5 项测试；
-- 全量 83 项 `unittest`；
+- 步骤测试共 85 项，其中第 8 步专属 14 项覆盖 root-only/三仓、单 Agent、repair、blocked 后部分提交恢复、最近观察 SHA、防 shallow、根 `.gitignore`、结果/state 中断和 CLI；
+- 全量 108 项 `unittest`；
 - `compileall`、`git diff --check` 和 IDE 诊断；
 - 独立只读审查及两项问题修复复核。
 
@@ -475,6 +476,11 @@ Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重�
 - 原 session 补回文档并再次 `completed`；
 - conversation 尾部为 `completed`，无旧 sentinel 或 `pending_agent_prompt`；
 - 最终状态推进到 `project:08_initialize_repositories`。
+
+第 8 步真实集成验证：
+
+- `step08-real-20260823-a` 保留失败链路：第 1 步先后出现代码围栏、Responses `incomplete`、自创字段，收紧严格 JSON prompt 后同 run 成功；第 3 步一次 `ValidationError` 后同 run 重试成功；第 7 步 API 500 暴露 failed `07.json` 会错误阻断恢复，修复为仅 `status=success` 可复用后同 session 成功；第 8 步因未处理的模板 `.coverage`，Agent 未提交，决策模型重复索取调用方授权并耗尽 8 轮，未产生三仓提交。
+- `step08-real-20260823-b` 第 6 步真实清除 `.coverage` 后完成第 8 步：唯一 session `64aa707c-268c-48c8-bb3f-f67f62abe75e` 的 conversation 为 `system → assistant → user → assistant`，一次 Agent 回复和一次 `completed` 裁决完成。root、frontend、backend 的唯一无父 `main` 提交依次为 `c1eb33dfa5bda91a0d7f9aeeb41d8fefe10a6fca`、`5997213c34c09ea6ba4e740e35f9df77d2d45d82`、`5d8dd95d8c42370697d25e6ecaf400bab42785b3`；三仓干净，根 tree 不含子仓，状态推进至 `project:09_engineering_architecture`。同 run 重跑不调用 Agent，SHA 不变。
 
 Probe C：
 

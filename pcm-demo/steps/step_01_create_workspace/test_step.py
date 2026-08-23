@@ -23,10 +23,11 @@ from config import (
     load_template_repository,
     load_workspace_root,
 )
-from steps.step_01_create_workspace.project_identity import validate_identity
+from steps.step_01_create_workspace.project_identity import SYSTEM_PROMPT, validate_identity
 from steps.step_01_create_workspace.workspace import (
     initialize_root_repository,
     inspect_clone,
+    inspect_repository,
     inspect_root_repository,
     parse_default_branch,
     prepare_staging,
@@ -69,6 +70,17 @@ class WorkspaceStepTests(unittest.TestCase):
             }
         )
         self.assertEqual(identity["project_directory_name"], "mendmark")
+        self.assertIn("严格 JSON", SYSTEM_PROMPT)
+        self.assertIn("代码围栏", SYSTEM_PROMPT)
+        for field in (
+            "topic_name",
+            "project_directory_name",
+            "directory_name_source",
+            "reason",
+            "blocked_reason",
+        ):
+            self.assertIn(field, SYSTEM_PROMPT)
+        self.assertIn("禁止增加其它字段", SYSTEM_PROMPT)
         with self.assertRaises(ValueError):
             validate_identity({**identity, "project_directory_name": "Mend Mark"})
 
@@ -118,6 +130,8 @@ class WorkspaceStepTests(unittest.TestCase):
 
             (root / "tracked.txt").write_text("tracked\n", encoding="utf-8")
             subprocess.run(["git", "add", "tracked.txt"], cwd=root, check=True)
+            with self.assertRaisesRegex(RuntimeError, "不得暂存文件"):
+                inspect_root_repository(root)
             subprocess.run(
                 [
                     "git",
@@ -132,6 +146,20 @@ class WorkspaceStepTests(unittest.TestCase):
                 cwd=root,
                 check=True,
                 capture_output=True,
+            )
+            self.assertEqual(
+                inspect_repository(root, expected_head="present"),
+                {
+                    "path": str(root.resolve()),
+                    "branch": "main",
+                    "head": subprocess.run(
+                        ["git", "rev-parse", "HEAD"],
+                        cwd=root,
+                        text=True,
+                        capture_output=True,
+                        check=True,
+                    ).stdout.strip(),
+                },
             )
             with self.assertRaisesRegex(RuntimeError, "尚无 commit"):
                 inspect_root_repository(root)

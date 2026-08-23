@@ -86,32 +86,60 @@ def verify_prepared(root: Path, source_hash: str) -> bool:
     return verify_published_content(root, source_hash) and not (root / ".git").exists()
 
 
-def inspect_root_repository(root: Path) -> dict[str, str | None]:
-    require_real_directory(root, "最终项目根")
-    if not (root / ".git").is_dir():
-        raise RuntimeError("最终项目根尚未初始化 Git 仓库")
+def inspect_repository(
+    root: Path, *, expected_head: str, require_clean_index: bool = True
+) -> dict[str, str | None]:
+    if expected_head not in {"unborn", "present"}:
+        raise ValueError("Git HEAD 状态必须是 unborn 或 present")
+    require_real_directory(root, "Git 仓库目录")
+    git_dir = root / ".git"
+    if git_dir.is_symlink() or not git_dir.is_dir():
+        raise RuntimeError("Git 仓库目录尚未初始化 Git 仓库")
     top_level = Path(git("rev-parse", "--show-toplevel", cwd=root)).resolve()
     branch = git("branch", "--show-current", cwd=root)
-    head = subprocess.run(
-        ["git", "rev-parse", "--verify", "HEAD"],
-        cwd=root,
-        text=True,
-        capture_output=True,
-        timeout=120,
-    )
-    if top_level != root.resolve() or branch != "main" or head.returncode == 0:
-        raise RuntimeError("根 Git 仓库必须位于最终项目根、分支为 main 且尚无 commit")
-    return {"path": str(top_level), "branch": branch, "head": None}
+    try:
+        head = subprocess.run(
+            ["git", "rev-parse", "--verify", "HEAD"],
+            cwd=root,
+            text=True,
+            capture_output=True,
+            timeout=120,
+        )
+    except FileNotFoundError as error:
+        raise RuntimeError("未安装 Git") from error
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError("Git 命令超时") from error
+    has_head = head.returncode == 0
+    if top_level != root.resolve() or branch != "main" or has_head != (expected_head == "present"):
+        expected = "尚无 commit" if expected_head == "unborn" else "已有 commit"
+        raise RuntimeError(f"Git 仓库必须位于目标目录、分支为 main 且{expected}")
+    if require_clean_index:
+        index = (
+            git("ls-files", "--stage", cwd=root)
+            if expected_head == "unborn"
+            else git("diff", "--cached", "--name-only", cwd=root)
+        )
+        if index:
+            raise RuntimeError("Git 仓库不得暂存文件")
+    return {"path": str(top_level), "branch": branch, "head": head.stdout.strip() or None}
 
 
-def initialize_root_repository(root: Path) -> dict[str, str | None]:
-    require_real_directory(root, "最终项目根")
+def inspect_root_repository(root: Path) -> dict[str, str | None]:
+    return inspect_repository(root, expected_head="unborn")
+
+
+def initialize_repository(root: Path) -> dict[str, str | None]:
+    require_real_directory(root, "Git 仓库目录")
     git_dir = root / ".git"
     if not git_dir.exists():
         git("init", "-b", "main", cwd=root)
-    elif not git_dir.is_dir():
-        raise RuntimeError("最终项目根的 .git 不是目录")
-    return inspect_root_repository(root)
+    elif git_dir.is_symlink() or not git_dir.is_dir():
+        raise RuntimeError("Git 仓库目录的 .git 不是目录")
+    return inspect_repository(root, expected_head="unborn")
+
+
+def initialize_root_repository(root: Path) -> dict[str, str | None]:
+    return initialize_repository(root)
 
 
 def result(status: str, summary: str, *, blocked: dict[str, Any] | None = None, error: dict[str, Any] | None = None, outputs: list[str] | None = None) -> dict[str, Any]:

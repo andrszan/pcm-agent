@@ -74,6 +74,7 @@ class ProjectReadinessTests(unittest.TestCase):
         (workspace / "docs/requirements").mkdir(parents=True)
         (workspace / "frontend").mkdir(parents=True)
         (workspace / "frontend/app.py").write_text("pass\n", encoding="utf-8")
+        initialize_root_repository(workspace / "frontend")
         requirements = "docs/requirements/项目需求说明.md"
         features = "docs/requirements/产品功能说明.md"
         for output in (requirements, features):
@@ -295,6 +296,62 @@ class ProjectReadinessTests(unittest.TestCase):
             self.assertEqual(str(raised.exception), "无法取得客户账号")
             self.assertEqual(raised.exception.required_inputs, ["客户提供真实账号"])
             self.assertEqual(raised.exception.outputs, [])
+
+    def test_blocked_decision_rechecks_git_boundaries(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory))
+
+            async def staging_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
+                subprocess.run(
+                    ["git", "add", "docs/requirements/项目需求说明.md"],
+                    cwd=workspace,
+                    check=True,
+                    capture_output=True,
+                )
+                current = agent_result(cwd=workspace, text="缺少真实外部账号")
+                kwargs["on_update"](current)  # type: ignore[index, operator]
+                return current
+
+            async def blocked(messages, config, *, system_prompt):
+                current = decision(
+                    "blocked",
+                    reason="无法取得客户账号",
+                    required_inputs=["客户提供真实账号"],
+                )
+                return current.model_dump(), 1, current.model_dump_json()
+
+            with self.assertRaisesRegex(RuntimeError, "不得暂存文件"):
+                self.run_step(
+                    run_dir,
+                    state,
+                    agent_runner=staging_agent,
+                    decision_runner=blocked,
+                    config_loader=lambda: object(),
+                )
+
+    def test_failed_result_file_does_not_block_recovery(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory))
+            write_json(run_dir / "steps/05.json", {"step": 5, "status": "failed"})
+
+            async def fake_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
+                (workspace / CHECKLIST).write_text("# 准备\n", encoding="utf-8")
+                current = agent_result(cwd=workspace, text="已补全准备清单")
+                kwargs["on_update"](current)  # type: ignore[index, operator]
+                return current
+
+            async def completed(messages, config, *, system_prompt):
+                current = decision("completed", reason="准备清单已完成")
+                return current.model_dump(), 1, current.model_dump_json()
+
+            saved = self.run_step(
+                run_dir,
+                state,
+                agent_runner=fake_agent,
+                decision_runner=completed,
+                config_loader=lambda: object(),
+            )
+            self.assertEqual(saved["status"], "success")
 
     def test_existing_success_result_and_domain_facts_are_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -142,6 +142,8 @@ class FoundationSelectionTests(unittest.TestCase):
         self.assertIs(calls[0]["input_model"], selection_input)
         self.assertIs(calls[0]["output_model"], FoundationSelectionResult)
         self.assertEqual(calls[0]["system_prompt"], SYSTEM_PROMPT)
+        self.assertIn("严格 JSON", SYSTEM_PROMPT)
+        self.assertIn("代码围栏", SYSTEM_PROMPT)
         for forbidden in ("PCM", "Skill", "第 3 步", "编排"):
             self.assertNotIn(forbidden, SYSTEM_PROMPT)
 

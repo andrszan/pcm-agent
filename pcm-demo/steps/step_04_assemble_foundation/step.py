@@ -11,6 +11,7 @@ from common.state import write_state, write_step_result
 from steps.step_01_create_workspace.workspace import (
     WorkspaceBlocked,
     git,
+    initialize_repository,
     inspect_root_repository,
     require_real_directory,
 )
@@ -177,13 +178,6 @@ def verify_tree(root: Path) -> None:
                 raise RuntimeError("选中模板子树不能包含符号链接")
 
 
-def verify_no_nested_git(root: Path) -> None:
-    require_real_directory(root, "基础工程目标")
-    for directory, directories, files in os.walk(root, followlinks=False):
-        if ".git" in directories or ".git" in files:
-            raise RuntimeError(f"基础工程目标包含嵌套 .git：{root}")
-
-
 def clone_repository(
     temporary: Path,
     index: int,
@@ -249,7 +243,10 @@ def prepare_payloads(
         verify_tree(source)
         payload = temporary / "payloads" / target
         shutil.copytree(source, payload)
-        verify_no_nested_git(payload)
+        verify_tree(payload)
+        initialize_repository(payload)
+        if not git_runner("ls-files", "--others", "--exclude-standard", cwd=payload):
+            raise RuntimeError(f"适用基础工程没有可提交文件：{target}")
         assembly[target] = {
             "target": target,
             "id": chosen.id,
@@ -284,15 +281,16 @@ def publish_payloads(
             if destination.exists() or destination.is_symlink():
                 raise RuntimeError(f"不适用端发布后仍存在：{destination}")
         else:
-            verify_no_nested_git(destination)
+            inspect_root_repository(destination)
 
 
-def verify_existing_success(
+def verify_existing_assembly(
     workspace: Path,
     selection: FoundationSelectionResult,
     existing: dict[str, Any],
     temporary: Path,
 ) -> None:
+    """核验组装产物身份和来源，不约束后续步骤产生的提交。"""
     if existing.get("step") != STEP or existing.get("status") != "success":
         raise RuntimeError("第 4 步成功结果不可复用")
     assembly = existing.get("assembly")
@@ -333,7 +331,22 @@ def verify_existing_success(
             or entry["branch"] != chosen.default_branch
         ):
             raise RuntimeError(f"基础工程来源证据不完整：{target}")
-        verify_no_nested_git(destination)
+        require_real_directory(destination, "基础工程目录")
+        git_dir = destination / ".git"
+        if git_dir.is_symlink() or not git_dir.is_dir():
+            raise RuntimeError(f"基础工程 Git 元数据不完整：{target}")
+
+
+def verify_existing_success(
+    workspace: Path,
+    selection: FoundationSelectionResult,
+    existing: dict[str, Any],
+    temporary: Path,
+) -> None:
+    verify_existing_assembly(workspace, selection, existing, temporary)
+    for target, chosen in (("frontend", selection.frontend), ("backend", selection.backend)):
+        if chosen is not None:
+            inspect_root_repository(workspace / target)
 
 
 def save_failure(

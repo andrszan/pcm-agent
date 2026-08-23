@@ -88,6 +88,7 @@ class SolutionDesignTests(unittest.TestCase):
         if applicable:
             (workspace / "frontend").mkdir()
             (workspace / "frontend/package.json").write_text("{}\n", encoding="utf-8")
+            initialize_root_repository(workspace / "frontend")
             frontend = TemplateSelection(
                 id="frontend-template",
                 git_url="file:///templates.git",
@@ -322,6 +323,39 @@ class SolutionDesignTests(unittest.TestCase):
             self.assertEqual(raised.exception.required_inputs, ["外部授权"])
             self.assertEqual(raised.exception.outputs, [DESIGN_PATH.as_posix()])
 
+    def test_blocked_decision_rechecks_git_boundaries(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory))
+            self.write_design(workspace)
+
+            async def staging_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
+                (workspace / "README.md").write_text("# 项目\n", encoding="utf-8")
+                subprocess.run(
+                    ["git", "add", "README.md"],
+                    cwd=workspace,
+                    check=True,
+                    capture_output=True,
+                )
+                current = agent_result(cwd=kwargs["cwd"])  # type: ignore[arg-type, index]
+                kwargs["on_update"](current)  # type: ignore[index, operator]
+                return current
+
+            async def blocked(messages, config, *, system_prompt):
+                return decision(
+                    "blocked",
+                    reason="缺少不可替代授权",
+                    required_inputs=["外部授权"],
+                )
+
+            with self.assertRaisesRegex(RuntimeError, "不得暂存文件"):
+                self.run_step(
+                    run_dir,
+                    state,
+                    agent_runner=staging_agent,
+                    decision_runner=blocked,
+                    config_loader=lambda: object(),
+                )
+
     def test_staged_changes_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))
@@ -347,6 +381,76 @@ class SolutionDesignTests(unittest.TestCase):
                     decision_runner=completed,
                     config_loader=lambda: object(),
                 )
+
+    def test_child_repository_changes_are_rejected(self) -> None:
+        for mutation in ("staged", "committed", "non-main"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
+                run_dir, workspace, state = self.make_run(Path(directory))
+                frontend = workspace / "frontend"
+                if mutation == "staged":
+                    subprocess.run(
+                        ["git", "add", "package.json"], cwd=frontend, check=True, capture_output=True
+                    )
+                elif mutation == "committed":
+                    subprocess.run(
+                        ["git", "add", "package.json"], cwd=frontend, check=True, capture_output=True
+                    )
+                    subprocess.run(
+                        [
+                            "git",
+                            "-c",
+                            "user.name=PCM Test",
+                            "-c",
+                            "user.email=pcm@example.invalid",
+                            "commit",
+                            "-m",
+                            "test",
+                        ],
+                        cwd=frontend,
+                        check=True,
+                        capture_output=True,
+                    )
+                else:
+                    subprocess.run(
+                        ["git", "switch", "-c", "feature"],
+                        cwd=frontend,
+                        check=True,
+                        capture_output=True,
+                    )
+
+                async def unexpected_agent(*args: object, **kwargs: object) -> ClaudeRunResult:
+                    raise AssertionError("子仓边界异常不应调用 Agent")
+
+                with self.assertRaisesRegex(RuntimeError, "Git 仓库"):
+                    self.run_step(
+                        run_dir,
+                        state,
+                        agent_runner=unexpected_agent,
+                        config_loader=lambda: object(),
+                    )
+
+    def test_failed_result_file_does_not_block_recovery(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory))
+            write_json(run_dir / "steps/07.json", {"step": 7, "status": "failed"})
+
+            async def fake_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
+                self.write_design(workspace)
+                current = agent_result(cwd=kwargs["cwd"])  # type: ignore[arg-type, index]
+                kwargs["on_update"](current)  # type: ignore[index, operator]
+                return current
+
+            async def completed(messages, config, *, system_prompt):
+                return decision("completed")
+
+            saved = self.run_step(
+                run_dir,
+                state,
+                agent_runner=fake_agent,
+                decision_runner=completed,
+                config_loader=lambda: object(),
+            )
+            self.assertEqual(saved["status"], "success")
 
     def test_no_applicable_engine_still_generates_fixed_document(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

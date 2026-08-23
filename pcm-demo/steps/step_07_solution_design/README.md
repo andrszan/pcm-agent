@@ -2,7 +2,7 @@
 
 ## 输入
 
-- 运行状态位于 `project:07_solution_design`，产品根仍是第 1 步初始化的独立 Git `main` 仓库。
+- 运行状态位于 `project:07_solution_design`，产品根仍是第 1 步初始化的零提交、空 index 独立 Git `main` 仓库；每个适用基础工程已在第 4 步建立自身 top-level 为目录本身、unborn HEAD、空 index 的 `main` Git 边界，不适用端不存在。
 - `steps/02.json` 引用两份工作区内非空、非符号链接的产品定义文档。
 - `steps/04.json` 提供实际适用工程、模板 ID、路径、分支、commit SHA 和组装证据；用于提示的白名单投影不含 `git_url` 或 `origin`。
 - `steps/05.json` 成功，且 `docs/requirements/项目准备清单.md` 存在并可读取。
@@ -14,7 +14,7 @@
 
 在产品项目根新建或恢复 Claude session，首条提示第一行固定为 `/solution-design`。正文只描述授权范围、权威产品定义、准备清单、实际工程、白名单组装事实、产物和约束，不包含步骤号、PCM 节点或外层编排语义。
 
-Agent 创建或更新唯一固定产物 `docs/design/技术方案.md`，并区分当前工程事实、已确认决定、目标状态、假设和待确认事项；说明系统边界、交付单元、数据所有权、依赖方向、跨单元协作、主要技术取舍、风险和恢复语义。不得重新选择或组装模板，不得实施业务功能、修改业务代码、工程配置、迁移或基础设施，也不得执行 Git 写操作。风险、假设和正常的未来待决事项可以保留，不因此阻塞完成。
+Agent 创建或更新唯一固定产物 `docs/design/技术方案.md`，并区分当前工程事实、已确认决定、目标状态、假设和待确认事项；说明系统边界、交付单元、数据所有权、依赖方向、跨单元协作、主要技术取舍、风险和恢复语义。不得重新选择或组装模板，不得实施业务功能、修改业务代码、工程配置、迁移或基础设施，也不得执行 Git 写操作或改变现有 Git 边界。风险、假设和正常的未来待决事项可以保留，不因此阻塞完成。
 
 完整 Agent 回复、待裁决文本和新 run 的决策输入均按原文保存在 Git 忽略的 run 目录；不再对第 7 步回复做脱敏替换。Agent 仍必须遵守项目规则，不得主动披露秘密、完整 `.env` 或无关认证信息。
 
@@ -23,8 +23,8 @@ Agent 创建或更新唯一固定产物 `docs/design/技术方案.md`，并区�
 完整真实 Agent 回复先保存为对话 `user` 消息，再由步骤专属精简 decision system prompt 生成统一 `AgentDecision`：
 
 - `continue` 的 `answer` 原样恢复同一 session；`blocked` 只用于当前环境无法取得的不可替代外部资源。
-- `completed` 后程序重验前序交接、session/cwd/Skill 边界、根仓暂存区和适用工程嵌套 Git，并确认固定方案文件为非空普通文件。文档缺失或为空时，会追加固定文档修复提示并继续同一 session；交接或 Git 边界冲突为 `failed`。
-- `error_max_turns` 与 `error_max_budget_usd` 在拥有 session 和非空回复时可裁决，但必须恢复一次正常 `success` 才能最终完成。400/429/500、连接、CLI/进程、无 `ResultMessage`、`terminal_reason` 为 `aborted_streaming` 或 `aborted_tools`，以及 `success` 下未知终止原因均在裁决前为 `failed`；其它 SDK/API 错误同样失败，不使用外层自定义 HTTP 重试。
+- `completed` 后程序重验前序交接、session/cwd/Skill 边界、产品根和适用子仓的 Git 边界（各自 top-level、`main`、unborn HEAD、空 index），并确认固定方案文件为非空普通文件。文档缺失或为空时，会追加固定文档修复提示并继续同一 session；交接或 Git 边界冲突为 `failed`。
+- `blocked` 终止前也复核上述 Git 边界；`error_max_turns` 与 `error_max_budget_usd` 在拥有 session 和非空回复时可裁决，但必须恢复一次正常 `success` 才能最终完成。400/429/500、连接、CLI/进程、无 `ResultMessage`、`terminal_reason` 为 `aborted_streaming` 或 `aborted_tools`，以及 `success` 下未知终止原因均在裁决前为 `failed`；其它 SDK/API 错误同样失败，不使用外层自定义 HTTP 重试。
 
 `conversations/solution_design.json` 的尾部是调度真相：`user` 尾部先裁决，`continue` 尾部执行 answer，`completed` 尾部先核验，`blocked` 尾部停止；显式从 `blocked` 重跑才重新核验。状态只保留 session、对话路径、最后一次 Agent 终止摘要和短暂待写入原文；不再写 `pending_agent_prompt`、决策轮次或 Python 完成声明。旧 `action` 与旧完成 sentinel 只读兼容，旧记录不会转换回写；旧 `action` 非 `blocked` 时映射为 `continue`，若其 `answer` 为空则使用固定安全兼容 continue 提示，绝不将旧控制 JSON 发给 Agent。
 
@@ -37,7 +37,7 @@ Agent 创建或更新唯一固定产物 `docs/design/技术方案.md`，并区�
 - 保存完整的 `conversations/solution_design.json`；
 - 先写步骤结果，再将状态推进到 `project:08_initialize_repositories`。
 
-即使没有适用基础工程，仍需生成总体技术方案，不无副作用跳过。已有成功结果、完成决定或状态推进中断时，重新核验文档和交接后补写或复用成功；完整成功状态不再次调用 Agent 或决策模型。步骤结果和 `run_step.py` 三态保持不变。
+即使没有适用基础工程，仍需生成总体技术方案，不无副作用跳过。只有 `status=success` 的既有结果、完成决定或状态推进中断可在重新核验文档、交接和 Git 边界后补写或复用成功；`failed` / `blocked` 结果不视为成功，也不阻止原 session 恢复。完整成功状态不再次调用 Agent 或决策模型。步骤结果和 `run_step.py` 三态保持不变。
 
 ## 隔离真实验证
 
