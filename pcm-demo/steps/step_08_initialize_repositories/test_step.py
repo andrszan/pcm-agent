@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -15,19 +14,17 @@ from unittest.mock import patch
 DEMO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(DEMO_ROOT))
 
+from common.agent_decision_loop import BLOCKED_RESUME_PROMPT
 from common.claude_agent import ClaudeRunResult
 from common.files import write_json
 from common.state import read_state, write_state
 from steps.step_01_create_workspace import initialize_root_repository
-from steps.step_03_foundation_selection.step import TemplateSelection
 from steps.step_08_initialize_repositories.step import (
     CURRENT_NODE,
-    DECISION_LOOP_SPEC,
-    INITIAL_COMMITS_PREFIX,
-    INITIAL_COMMITS_REPAIR_PROMPT,
     INITIALIZE_REPOSITORIES_MAX_BUDGET_USD,
     INITIALIZE_REPOSITORIES_MAX_TURNS,
     NEXT_NODE,
+    REPOSITORY_REPAIR_PROMPT,
     InitializeRepositoriesBlocked,
     run,
 )
@@ -40,8 +37,8 @@ def command(*args: str, cwd: Path) -> str:
     ).stdout.strip()
 
 
-def commit_all(repository: Path, message: str = "initial baseline") -> str:
-    command("add", ".", cwd=repository)
+def commit_all(repository: Path, message: str = "test commit") -> None:
+    command("add", "-A", cwd=repository)
     command(
         "-c",
         "user.name=PCM Test",
@@ -52,18 +49,9 @@ def commit_all(repository: Path, message: str = "initial baseline") -> str:
         message,
         cwd=repository,
     )
-    return command("rev-parse", "HEAD", cwd=repository)
 
 
-def marker(names: list[str], workspace: Path) -> str:
-    commits = [
-        {"name": name, "sha": command("rev-parse", "HEAD", cwd=workspace if name == "root" else workspace / name)}
-        for name in names
-    ]
-    return INITIAL_COMMITS_PREFIX + json.dumps({"repositories": commits}, ensure_ascii=False)
-
-
-def agent_result(*, cwd: Path, text: str, session: str = "session-1") -> ClaudeRunResult:
+def agent_result(*, cwd: Path, text: str = "已处理", session: str = "session-1") -> ClaudeRunResult:
     return ClaudeRunResult(
         init={"cwd": str(cwd), "skills": ["commit-changes"], "slash_commands": ["commit-changes"]},
         text=text,
@@ -81,7 +69,7 @@ def decision(
     verdict: str,
     *,
     answer: str = "",
-    reason: str = "完成条件已经满足",
+    reason: str = "已核验",
     required_inputs: list[str] | None = None,
 ) -> tuple[dict, int, str]:
     data = {
@@ -99,79 +87,18 @@ class InitializeRepositoriesTests(unittest.TestCase):
         (run_dir / "steps").mkdir(parents=True)
         workspace_root = root / "workspace-root"
         workspace = workspace_root / "project"
-        (workspace / "docs/requirements").mkdir(parents=True)
-        for path in (
-            "docs/requirements/项目需求说明.md",
-            "docs/requirements/产品功能说明.md",
-            "docs/requirements/项目准备清单.md",
-        ):
-            (workspace / path).write_text(f"# {Path(path).stem}\n", encoding="utf-8")
-        design = workspace / "docs/design/技术方案.md"
-        design.parent.mkdir(parents=True)
-        design.write_text("# 总体技术方案\n", encoding="utf-8")
-
-        selections: dict[str, dict | None] = {"frontend": None, "backend": None}
-        assembly: dict[str, dict | None] = {"frontend": None, "backend": None}
-        if outputs:
-            (workspace / ".gitignore").write_text(
-                "".join(f"{name}/\n" for name in outputs), encoding="utf-8"
-            )
-        for target in outputs:
-            project = workspace / target
-            project.mkdir()
-            (project / f"{target}.txt").write_text(target, encoding="utf-8")
-            initialize_root_repository(project)
-            selected = TemplateSelection(
-                id=f"{target}-template",
-                git_url="file:///templates.git",
-                default_branch="main",
-                path=f"templates/{target}",
-                reason="test",
-            )
-            selections[target] = selected.model_dump(mode="json")
-            assembly[target] = {
-                "target": target,
-                "id": selected.id,
-                "git_url": selected.git_url,
-                "default_branch": selected.default_branch,
-                "path": selected.path,
-                "origin": selected.git_url,
-                "branch": "main",
-                "commit_sha": "a" * 40,
-            }
-
-        write_json(
-            run_dir / "steps/03.json",
-            {"step": 3, "status": "success", "template_selection": selections},
-        )
+        workspace.mkdir(parents=True)
+        initialize_root_repository(workspace)
+        for name in outputs:
+            child = workspace / name
+            child.mkdir()
+            initialize_root_repository(child)
+            with (workspace / ".git/info/exclude").open("a", encoding="utf-8") as exclude:
+                exclude.write(f"{name}/\n")
         write_json(
             run_dir / "steps/04.json",
-            {
-                "step": 4,
-                "status": "success",
-                "applicable": bool(outputs),
-                "outputs": outputs,
-                "assembly": assembly,
-            },
+            {"step": 4, "status": "success", "applicable": bool(outputs), "outputs": outputs},
         )
-        write_json(
-            run_dir / "steps/05.json",
-            {"step": 5, "status": "success", "outputs": ["docs/requirements/项目准备清单.md"]},
-        )
-        write_json(
-            run_dir / "steps/06.json",
-            {"step": 6, "status": "success", "applicable": bool(outputs), "outputs": outputs},
-        )
-        write_json(
-            run_dir / "steps/07.json",
-            {
-                "step": 7,
-                "status": "success",
-                "applicable": True,
-                "outputs": ["docs/design/技术方案.md"],
-            },
-        )
-        root_repository = initialize_root_repository(workspace)
         state = {
             "run_id": "test-run",
             "status": "success",
@@ -180,7 +107,6 @@ class InitializeRepositoriesTests(unittest.TestCase):
             "current_step": 8,
             "current_node": CURRENT_NODE,
             "workspace": {"root": str(workspace_root), "final_path": str(workspace)},
-            "root_repository": root_repository,
             "blocked": None,
             "error": None,
         }
@@ -191,138 +117,168 @@ class InitializeRepositoriesTests(unittest.TestCase):
         return asyncio.run(run(run_dir, state, **kwargs))
 
     @staticmethod
+    def dirty(workspace: Path, names: list[str]) -> None:
+        for name in names:
+            repository = workspace if name == "root" else workspace / name
+            (repository / f"{name}-change.txt").write_text("changed\n", encoding="utf-8")
+
+    @staticmethod
     def commit_repositories(workspace: Path, names: list[str]) -> None:
         for name in names:
             commit_all(workspace if name == "root" else workspace / name)
 
-    def test_root_only_and_all_repositories_complete_in_one_agent_call(self) -> None:
+    def test_root_only_and_multiple_clean_repositories_succeed_without_agent(self) -> None:
         for outputs in ([], ["frontend", "backend"]):
             with self.subTest(outputs=outputs), tempfile.TemporaryDirectory() as directory:
                 run_dir, workspace, state = self.make_run(Path(directory), outputs)
-                names = ["root", *outputs]
-                calls: list[dict] = []
-                decisions: list[str] = []
+                calls: list[object] = []
 
-                async def fake_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
-                    calls.append({"prompt": prompt, **kwargs})
-                    self.commit_repositories(workspace, names)
-                    current = agent_result(cwd=kwargs["cwd"], text=f"完成\n{marker(names, workspace)}")  # type: ignore[arg-type, index]
-                    kwargs["on_update"](current)  # type: ignore[index, operator]
-                    return current
-
-                async def completed(messages, config, *, system_prompt):
-                    decisions.append(system_prompt)
-                    return decision("completed")
+                async def unexpected(*args: object, **kwargs: object) -> ClaudeRunResult:
+                    calls.append((args, kwargs))
+                    raise AssertionError("干净仓库不应调用 Agent")
 
                 saved = self.run_step(
                     run_dir,
                     state,
-                    agent_runner=fake_agent,
-                    decision_runner=completed,
-                    config_loader=lambda: object(),
+                    agent_runner=unexpected,
+                    decision_runner=unexpected,
                 )
-                self.assertEqual(len(calls), 1)
-                self.assertEqual(calls[0]["cwd"].resolve(), workspace.resolve())
-                self.assertIsNone(calls[0]["resume_session_id"])
-                self.assertEqual(calls[0]["max_turns"], INITIALIZE_REPOSITORIES_MAX_TURNS)
-                self.assertEqual(calls[0]["max_budget_usd"], INITIALIZE_REPOSITORIES_MAX_BUDGET_USD)
-                self.assertEqual(len(decisions), 1)
-                system_prompt = decisions[0]
-                for tag in ("role", "project_context", "responsibility", "require"):
-                    self.assertIn(f"<{tag}>", system_prompt)
-                    self.assertIn(f"</{tag}>", system_prompt)
-                for required in (
-                    "最高项目负责人、工程负责人、专业开发者和 Agent 专家",
-                    "assistant 是你此前发给 Agent 的指令或结构化回复",
-                    "user 是 Agent 返回给你的完整执行结果",
-                    "权威仓库清单中的每个独立仓库",
-                    "有序仓库",
-                    "初始仓库基线",
-                    '"name": "root"',
-                    '"path": "."',
-                ):
-                    self.assertIn(required, system_prompt)
-                if outputs:
-                    self.assertIn('"commit_sha"', system_prompt)
-                else:
-                    self.assertIn('"frontend": null', system_prompt)
-                self.assertNotEqual(system_prompt, DECISION_LOOP_SPEC.decision_system_prompt)
-                for forbidden in ("file:///templates.git", "git_url", "origin", "remote", "# 总体技术方案"):
-                    self.assertNotIn(forbidden, system_prompt)
-                prompt = calls[0]["prompt"]
-                self.assertTrue(prompt.startswith("/commit-changes\n"))
-                self.assertIn("权威仓库清单", prompt)
-                self.assertIn("组装事实", prompt)
-                self.assertIn("INITIAL_COMMITS_JSON", prompt)
-                for forbidden in ("第 8 步", "PCM", "节点", "session", "决策模型", "轮次", "预算"):
-                    self.assertNotIn(forbidden, prompt)
+
+                names = ["root", *outputs]
+                self.assertEqual(calls, [])
                 self.assertEqual(saved["applicable_repositories"], names)
-                self.assertEqual(list(saved["initial_commits"]), names)
-                self.assertEqual(saved["outputs"], [])
-                self.assertEqual((read_state(run_dir)["step"], read_state(run_dir)["current_node"]), (9, NEXT_NODE))
-                self.assertEqual(command("rev-list", "--count", "HEAD", cwd=workspace), "1")
-                self.assertFalse(command("ls-tree", "HEAD", "--", "frontend", "backend", cwd=workspace))
-
-    def test_missing_marker_or_unborn_repository_uses_same_session_repair(self) -> None:
-        for case in ("marker", "unborn"):
-            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
-                run_dir, workspace, state = self.make_run(Path(directory), ["frontend"])
-                names = ["root", "frontend"]
-                calls: list[dict] = []
-
-                async def fake_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
-                    calls.append({"prompt": prompt, **kwargs})
-                    if len(calls) == 1 and case == "marker":
-                        self.commit_repositories(workspace, names)
-                        text = "提交已完成"
-                    elif len(calls) == 1:
-                        text = "尚未提交"
-                    else:
-                        if case == "unborn":
-                            self.commit_repositories(workspace, names)
-                        text = marker(names, workspace)
-                    current = agent_result(cwd=kwargs["cwd"], text=text)  # type: ignore[arg-type, index]
-                    kwargs["on_update"](current)  # type: ignore[index, operator]
-                    return current
-
-                async def completed(messages, config, *, system_prompt):
-                    return decision("completed")
-
-                self.run_step(
-                    run_dir,
-                    state,
-                    agent_runner=fake_agent,
-                    decision_runner=completed,
-                    config_loader=lambda: object(),
+                self.assertNotIn("initial_commits", saved)
+                self.assertEqual([item["name"] for item in saved["repositories"]], names)
+                self.assertTrue(all(item["worktree_clean"] for item in saved["repositories"]))
+                self.assertEqual([item["path"] for item in saved["repositories"]], [".", *outputs])
+                completed_state = read_state(run_dir)
+                self.assertEqual((completed_state["step"], completed_state["current_node"]), (9, NEXT_NODE))
+                self.assertEqual(
+                    [item["name"] for item in completed_state["repositories"]], names
                 )
-                self.assertEqual(len(calls), 2)
-                self.assertIsNone(calls[0]["resume_session_id"])
-                self.assertEqual(calls[1]["resume_session_id"], "session-1")
-                self.assertEqual(calls[1]["prompt"], INITIAL_COMMITS_REPAIR_PROMPT)
+                self.assertTrue(
+                    all(Path(item["path"]).is_absolute() for item in completed_state["repositories"])
+                )
+                self.assertNotIn("claude_sessions", completed_state)
+                self.assertNotIn("decision_conversations", completed_state)
+                self.assertEqual(
+                    workspace.resolve(), Path(completed_state["repositories"][0]["path"])
+                )
 
-    def test_blocked_partial_submission_resumes_without_rewriting_existing_commit(self) -> None:
+    def test_dirty_repositories_use_one_product_root_session(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory), ["frontend", "backend"])
+            names = ["root", "frontend", "backend"]
+            self.dirty(workspace, names)
+            calls: list[dict] = []
+
+            async def fake_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
+                calls.append({"prompt": prompt, **kwargs})
+                self.commit_repositories(workspace, names)
+                value = agent_result(cwd=kwargs["cwd"])  # type: ignore[index]
+                kwargs["on_update"](value)  # type: ignore[index, operator]
+                return value
+
+            async def completed(messages, config, *, system_prompt):
+                return decision("completed")
+
+            saved = self.run_step(
+                run_dir,
+                state,
+                agent_runner=fake_agent,
+                decision_runner=completed,
+                config_loader=lambda: object(),
+            )
+
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(calls[0]["cwd"].resolve(), workspace.resolve())
+            self.assertIsNone(calls[0]["resume_session_id"])
+            self.assertEqual(calls[0]["max_turns"], INITIALIZE_REPOSITORIES_MAX_TURNS)
+            self.assertEqual(calls[0]["max_budget_usd"], INITIALIZE_REPOSITORIES_MAX_BUDGET_USD)
+            self.assertTrue(calls[0]["prompt"].startswith("/commit-changes\n"))
+            for forbidden in ("expected_head", "INITIAL_COMMITS", "SHA", "组装", "唯一", "无父"):
+                self.assertNotIn(forbidden, calls[0]["prompt"])
+            self.assertEqual(saved["applicable_repositories"], names)
+            self.assertNotIn("initial_commits", read_state(run_dir))
+
+    def test_completed_with_dirty_repair_continues_same_session(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory), ["frontend"])
             names = ["root", "frontend"]
+            self.dirty(workspace, names)
+            calls: list[dict] = []
+
+            async def fake_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
+                calls.append({"prompt": prompt, **kwargs})
+                if len(calls) == 2:
+                    self.commit_repositories(workspace, names)
+                value = agent_result(cwd=kwargs["cwd"])  # type: ignore[index]
+                kwargs["on_update"](value)  # type: ignore[index, operator]
+                return value
+
+            async def completed(messages, config, *, system_prompt):
+                return decision("completed")
+
+            self.run_step(
+                run_dir,
+                state,
+                agent_runner=fake_agent,
+                decision_runner=completed,
+                config_loader=lambda: object(),
+            )
+
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(calls[1]["prompt"], REPOSITORY_REPAIR_PROMPT)
+            self.assertEqual(calls[1]["resume_session_id"], "session-1")
+
+    def test_blocked_after_agent_clean_state_succeeds(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory), [])
+            self.dirty(workspace, ["root"])
+            calls = 0
+
+            async def fake_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
+                nonlocal calls
+                calls += 1
+                commit_all(workspace)
+                value = agent_result(cwd=kwargs["cwd"])  # type: ignore[index]
+                kwargs["on_update"](value)  # type: ignore[index, operator]
+                return value
+
+            async def blocked(messages, config, *, system_prompt):
+                return decision("blocked", reason="等待外部输入", required_inputs=["外部输入"])
+
+            saved = self.run_step(
+                run_dir,
+                state,
+                agent_runner=fake_agent,
+                decision_runner=blocked,
+                config_loader=lambda: object(),
+            )
+
+            self.assertEqual(calls, 1)
+            self.assertEqual(saved["status"], "success")
+            self.assertEqual(read_state(run_dir)["status"], "success")
+
+    def test_blocked_dirty_state_is_saved_and_resumes_existing_session(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory), [])
+            self.dirty(workspace, ["root"])
             calls: list[dict] = []
             decisions = ["blocked", "completed"]
 
             async def fake_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
                 calls.append({"prompt": prompt, **kwargs})
-                if len(calls) == 1:
+                if len(calls) == 2:
                     commit_all(workspace)
-                    text = "根仓已提交，等待外部授权"
-                else:
-                    commit_all(workspace / "frontend")
-                    text = marker(names, workspace)
-                current = agent_result(cwd=kwargs["cwd"], text=text)  # type: ignore[arg-type, index]
-                kwargs["on_update"](current)  # type: ignore[index, operator]
-                return current
+                value = agent_result(cwd=kwargs["cwd"])  # type: ignore[index]
+                kwargs["on_update"](value)  # type: ignore[index, operator]
+                return value
 
             async def decide(messages, config, *, system_prompt):
                 verdict = decisions.pop(0)
                 if verdict == "blocked":
-                    return decision("blocked", reason="缺少授权", required_inputs=["授权"])
+                    return decision("blocked", reason="等待授权", required_inputs=["授权"])
                 return decision("completed")
 
             with self.assertRaises(InitializeRepositoriesBlocked):
@@ -333,25 +289,11 @@ class InitializeRepositoriesTests(unittest.TestCase):
                     decision_runner=decide,
                     config_loader=lambda: object(),
                 )
-            root_sha = command("rev-parse", "HEAD", cwd=workspace)
             blocked_state = read_state(run_dir)
             self.assertEqual(blocked_state["status"], "blocked")
-            self.assertEqual(
-                blocked_state["initialize_repositories"]["observed_heads"],
-                {"root": root_sha, "frontend": None},
-            )
-            write_json(
-                run_dir / "steps/08.json",
-                initialize_step.result(
-                    "blocked",
-                    "缺少授权",
-                    blocked={
-                        "reason": "缺少授权",
-                        "required_inputs": ["授权"],
-                        "applicable_repositories": names,
-                    },
-                ),
-            )
+            self.assertEqual(blocked_state["claude_sessions"]["initialize_repositories"], "session-1")
+            self.assertEqual(json.loads((run_dir / "steps/08.json").read_text(encoding="utf-8"))["status"], "blocked")
+
             saved = self.run_step(
                 run_dir,
                 blocked_state,
@@ -359,244 +301,245 @@ class InitializeRepositoriesTests(unittest.TestCase):
                 decision_runner=decide,
                 config_loader=lambda: object(),
             )
-            self.assertEqual(saved["initial_commits"]["root"], root_sha)
-            self.assertEqual(command("rev-parse", "HEAD", cwd=workspace), root_sha)
+            self.assertEqual(saved["status"], "success")
+            self.assertEqual(calls[1]["prompt"], BLOCKED_RESUME_PROMPT)
             self.assertEqual(calls[1]["resume_session_id"], "session-1")
 
-    def test_blocked_decision_rechecks_observed_git_state(self) -> None:
+    def test_failed_state_with_dirty_workspace_resumes_existing_session(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory), [])
-
-            async def fake_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
-                commit_all(workspace)
-                current = agent_result(cwd=kwargs["cwd"], text="等待外部授权")  # type: ignore[arg-type, index]
-                kwargs["on_update"](current)  # type: ignore[index, operator]
-                return current
-
-            async def blocked(messages, config, *, system_prompt):
-                command("switch", "-c", "feature", cwd=workspace)
-                return decision(
-                    "blocked",
-                    reason="缺少授权",
-                    required_inputs=["授权"],
-                )
-
-            with self.assertRaisesRegex(RuntimeError, "最近 Agent 回合记录不一致|分支为 main"):
-                self.run_step(
-                    run_dir,
-                    state,
-                    agent_runner=fake_agent,
-                    decision_runner=blocked,
-                    config_loader=lambda: object(),
-                )
-
-    def test_no_session_commit_and_unsafe_repository_states_fail_before_agent(self) -> None:
-        for mutation in ("existing", "wrong-branch", "multiple", "root-path", "root-gitlink", "dirty"):
-            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
-                outputs = ["frontend"] if mutation in {"root-path", "root-gitlink"} else []
-                run_dir, workspace, state = self.make_run(Path(directory), outputs)
-                if mutation == "existing":
-                    commit_all(workspace)
-                elif mutation == "wrong-branch":
-                    command("switch", "-c", "feature", cwd=workspace)
-                else:
-                    state["claude_sessions"] = {"initialize_repositories": "session-1"}
-                    if mutation == "root-path":
-                        child_git = workspace / "frontend/.git"
-                        parked_git = workspace.parent / "parked-frontend-git"
-                        os.rename(child_git, parked_git)
-                        try:
-                            command("add", "-f", "frontend/frontend.txt", cwd=workspace)
-                            commit_all(workspace)
-                        finally:
-                            os.rename(parked_git, child_git)
-                    else:
-                        commit_all(workspace)
-                    if mutation == "multiple":
-                        (workspace / "extra.txt").write_text("extra", encoding="utf-8")
-                        commit_all(workspace, "second")
-                    elif mutation == "root-gitlink":
-                        commit_all(workspace / "frontend")
-                        command("add", "-f", "frontend", cwd=workspace)
-                        command(
-                            "-c",
-                            "user.name=PCM Test",
-                            "-c",
-                            "user.email=pcm@example.invalid",
-                            "commit",
-                            "--amend",
-                            "--no-edit",
-                            cwd=workspace,
-                        )
-                    elif mutation == "dirty":
-                        (workspace / "docs/design/技术方案.md").write_text("changed", encoding="utf-8")
-                    write_state(run_dir, state)
-
-                async def unexpected_agent(*args, **kwargs):
-                    raise AssertionError("非法 Git 现场不应调用 Agent")
-
-                with self.assertRaises(RuntimeError):
-                    self.run_step(run_dir, state, agent_runner=unexpected_agent)
-
-    def test_existing_session_does_not_adopt_external_commit(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            run_dir, workspace, state = self.make_run(Path(directory), [])
-            state["claude_sessions"] = {"initialize_repositories": "session-1"}
-            state["initialize_repositories"] = {"observed_heads": {"root": None}}
-            write_state(run_dir, state)
-            commit_all(workspace)
-
-            async def unexpected_agent(*args: object, **kwargs: object) -> ClaudeRunResult:
-                raise AssertionError("外部提交冲突不应调用 Agent")
-
-            with self.assertRaisesRegex(RuntimeError, "最近 Agent 回合记录不一致"):
-                self.run_step(run_dir, state, agent_runner=unexpected_agent)
-
-    def test_shallow_history_cannot_be_initial_baseline(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = root / "source"
-            source.mkdir()
-            initialize_root_repository(source)
-            (source / "one.txt").write_text("one", encoding="utf-8")
-            commit_all(source, "first")
-            (source / "two.txt").write_text("two", encoding="utf-8")
-            commit_all(source, "second")
-            shallow = root / "shallow"
-            subprocess.run(
-                ["git", "clone", "--depth", "1", source.as_uri(), str(shallow)],
-                check=True,
-                capture_output=True,
+            self.dirty(workspace, ["root"])
+            state.update(
+                {
+                    "status": "failed",
+                    "claude_sessions": {"initialize_repositories": "session-1"},
+                    "decision_conversations": {
+                        "initialize_repositories": {
+                            "path": "conversations/initialize_repositories.json"
+                        }
+                    },
+                }
             )
-
-            with self.assertRaisesRegex(RuntimeError, "浅历史"):
-                initialize_step._require_single_initial_commit(shallow)
-
-    def test_completion_requires_root_gitignore_not_local_exclude(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            run_dir, workspace, state = self.make_run(Path(directory), ["frontend"])
-            names = ["root", "frontend"]
+            (run_dir / "conversations").mkdir()
+            write_json(
+                run_dir / "conversations/initialize_repositories.json",
+                {"messages": [{"role": "system", "content": "测试 system"}]},
+            )
+            write_state(run_dir, state)
+            calls: list[dict] = []
 
             async def fake_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
-                (workspace / ".gitignore").write_text("# 子仓规则已删除\n", encoding="utf-8")
-                (workspace / ".git/info/exclude").write_text("frontend/\n", encoding="utf-8")
-                commit_all(workspace / "frontend")
+                calls.append({"prompt": prompt, **kwargs})
                 commit_all(workspace)
-                current = agent_result(
-                    cwd=kwargs["cwd"],  # type: ignore[arg-type, index]
-                    text=marker(names, workspace),
-                )
-                kwargs["on_update"](current)  # type: ignore[index, operator]
-                return current
+                value = agent_result(cwd=kwargs["cwd"])  # type: ignore[index]
+                kwargs["on_update"](value)  # type: ignore[index, operator]
+                return value
 
             async def completed(messages, config, *, system_prompt):
                 return decision("completed")
 
-            with self.assertRaisesRegex(RuntimeError, "完成核验失败"):
-                self.run_step(
-                    run_dir,
-                    state,
-                    agent_runner=fake_agent,
-                    decision_runner=completed,
-                    config_loader=lambda: object(),
-                )
-
-    def test_replace_reference_cannot_rewrite_initial_baseline(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            repository = Path(directory) / "repository"
-            repository.mkdir()
-            initialize_root_repository(repository)
-            (repository / "file.txt").write_text("content", encoding="utf-8")
-            head = commit_all(repository)
-            tree = command("rev-parse", "HEAD^{tree}", cwd=repository)
-            replacement = command(
-                "-c",
-                "user.name=PCM Test",
-                "-c",
-                "user.email=pcm@example.invalid",
-                "commit-tree",
-                tree,
-                "-m",
-                "replacement",
-                cwd=repository,
+            self.run_step(
+                run_dir,
+                state,
+                agent_runner=fake_agent,
+                decision_runner=completed,
+                config_loader=lambda: object(),
             )
-            command("replace", head, replacement, cwd=repository)
+            self.assertEqual(calls[0]["resume_session_id"], "session-1")
 
-            with self.assertRaisesRegex(RuntimeError, "replace"):
-                initialize_step._require_single_initial_commit(repository)
-
-    def test_unignored_coverage_artifact_fails_before_agent(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            run_dir, workspace, state = self.make_run(Path(directory), [])
-            (workspace / ".coverage").write_bytes(b"coverage")
-
-            async def unexpected_agent(*args: object, **kwargs: object) -> ClaudeRunResult:
-                raise AssertionError("未处理覆盖率产物不应调用 Agent")
-
-            with self.assertRaisesRegex(RuntimeError, "覆盖率数据库"):
-                self.run_step(run_dir, state, agent_runner=unexpected_agent)
-
-    def test_root_ignore_is_required_before_agent(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            run_dir, workspace, state = self.make_run(Path(directory), ["frontend"])
-            (workspace / ".gitignore").unlink()
-
-            async def unexpected_agent(*args, **kwargs):
-                raise AssertionError("缺少根忽略规则不应调用 Agent")
-
-            with self.assertRaisesRegex(RuntimeError, ".gitignore"):
-                self.run_step(run_dir, state, agent_runner=unexpected_agent)
-
-    def test_invalid_marker_set_order_or_sha_repairs_in_same_session(self) -> None:
-        for kind in ("set", "order", "sha"):
-            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:
-                run_dir, workspace, state = self.make_run(Path(directory), ["frontend"])
-                names = ["root", "frontend"]
-                calls: list[dict] = []
-
-                async def fake_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
-                    calls.append({"prompt": prompt, **kwargs})
-                    if len(calls) == 1:
-                        self.commit_repositories(workspace, names)
-                        entries = json.loads(marker(names, workspace).removeprefix(INITIAL_COMMITS_PREFIX))["repositories"]
-                        if kind == "set":
-                            entries = entries[:1]
-                        elif kind == "order":
-                            entries = list(reversed(entries))
-                        else:
-                            entries[0]["sha"] = "0" * 40
-                        text = INITIAL_COMMITS_PREFIX + json.dumps({"repositories": entries})
-                    else:
-                        text = marker(names, workspace)
-                    current = agent_result(cwd=kwargs["cwd"], text=text)  # type: ignore[arg-type, index]
-                    kwargs["on_update"](current)  # type: ignore[index, operator]
-                    return current
-
-                async def completed(messages, config, *, system_prompt):
-                    return decision("completed")
-
-                self.run_step(
-                    run_dir,
-                    state,
-                    agent_runner=fake_agent,
-                    decision_runner=completed,
-                    config_loader=lambda: object(),
+    def test_dirty_blocked_recovery_requires_original_session_and_conversation(self) -> None:
+        for missing in ("session", "conversation"):
+            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as directory:
+                run_dir, workspace, state = self.make_run(Path(directory), [])
+                self.dirty(workspace, ["root"])
+                state.update(
+                    {
+                        "status": "blocked",
+                        "blocked": {
+                            "reason": "等待授权",
+                            "required_inputs": ["授权"],
+                            "applicable_repositories": ["root"],
+                        },
+                    }
                 )
-                self.assertEqual(len(calls), 2)
-                self.assertEqual(calls[1]["prompt"], INITIAL_COMMITS_REPAIR_PROMPT)
+                if missing != "session":
+                    state["claude_sessions"] = {
+                        "initialize_repositories": "session-1"
+                    }
+                if missing != "conversation":
+                    state["decision_conversations"] = {
+                        "initialize_repositories": {
+                            "path": "conversations/initialize_repositories.json"
+                        }
+                    }
+                    (run_dir / "conversations").mkdir()
+                    write_json(
+                        run_dir / "conversations/initialize_repositories.json",
+                        {"messages": [{"role": "system", "content": "测试 system"}]},
+                    )
+                write_state(run_dir, state)
 
-    def test_result_write_interruption_advances_on_retry_and_success_reuses_without_agent(self) -> None:
+                async def unexpected(*args: object, **kwargs: object) -> ClaudeRunResult:
+                    raise AssertionError("恢复锚点缺失时不得启动新 Agent session")
+
+                with self.assertRaisesRegex(RuntimeError, "缺少原"):
+                    self.run_step(
+                        run_dir,
+                        state,
+                        agent_runner=unexpected,
+                        decision_runner=unexpected,
+                    )
+
+    def test_dirty_blocked_recovery_requires_blocked_decision_tail(self) -> None:
+        for history in ("system-only", "completed", "invalid-json"):
+            with self.subTest(history=history), tempfile.TemporaryDirectory() as directory:
+                run_dir, workspace, state = self.make_run(Path(directory), [])
+                self.dirty(workspace, ["root"])
+                state.update(
+                    {
+                        "status": "blocked",
+                        "claude_sessions": {
+                            "initialize_repositories": "session-1"
+                        },
+                        "decision_conversations": {
+                            "initialize_repositories": {
+                                "path": "conversations/initialize_repositories.json"
+                            }
+                        },
+                        "blocked": {
+                            "reason": "等待授权",
+                            "required_inputs": ["授权"],
+                            "applicable_repositories": ["root"],
+                        },
+                    }
+                )
+                conversations = run_dir / "conversations"
+                conversations.mkdir()
+                history_path = conversations / "initialize_repositories.json"
+                if history == "invalid-json":
+                    history_path.write_text("{invalid", encoding="utf-8")
+                else:
+                    messages = [{"role": "system", "content": "测试 system"}]
+                    if history == "completed":
+                        messages.append(
+                            {
+                                "role": "assistant",
+                                "content": json.dumps(
+                                    decision("completed")[0], ensure_ascii=False
+                                ),
+                            }
+                        )
+                    write_json(history_path, {"messages": messages})
+                write_state(run_dir, state)
+
+                async def unexpected(*args: object, **kwargs: object) -> ClaudeRunResult:
+                    raise AssertionError("无效 blocked 历史不得恢复 Agent")
+
+                with self.assertRaisesRegex(RuntimeError, "blocked 决策"):
+                    self.run_step(
+                        run_dir,
+                        state,
+                        agent_runner=unexpected,
+                        decision_runner=unexpected,
+                    )
+
+    def test_blocked_recovery_reads_clean_workspace_before_resuming(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory), [])
+            self.dirty(workspace, ["root"])
+            blocked = {
+                "reason": "等待授权",
+                "required_inputs": ["授权"],
+                "applicable_repositories": ["root"],
+            }
+            state.update(
+                {
+                    "status": "blocked",
+                    "claude_sessions": {"initialize_repositories": "session-1"},
+                    "blocked": blocked,
+                }
+            )
+            write_state(run_dir, state)
+            commit_all(workspace)
+
+            async def unexpected(*args: object, **kwargs: object) -> ClaudeRunResult:
+                raise AssertionError("已清理的 blocked 恢复不应调用 Agent")
+
+            saved = self.run_step(run_dir, state, agent_runner=unexpected, decision_runner=unexpected)
+            self.assertEqual(saved["status"], "success")
+            self.assertEqual(read_state(run_dir)["status"], "success")
+
+    def test_step_nine_success_refuses_later_dirty_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory), [])
+
+            async def unexpected(*args: object, **kwargs: object) -> ClaudeRunResult:
+                raise AssertionError("干净仓库不应调用 Agent")
+
+            self.run_step(run_dir, state, agent_runner=unexpected, decision_runner=unexpected)
+            self.dirty(workspace, ["root"])
+            with self.assertRaisesRegex(RuntimeError, "成功后权威仓库出现未提交修改"):
+                self.run_step(run_dir, read_state(run_dir), agent_runner=unexpected, decision_runner=unexpected)
+
+    def test_top_level_and_branch_fail_before_agent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory), [])
+            self.dirty(workspace, ["root"])
+
+            async def unexpected(*args: object, **kwargs: object) -> ClaudeRunResult:
+                raise AssertionError("无效仓库不应调用 Agent")
+
+            original_git_read = initialize_step._git_read
+
+            def wrong_top_level(path: Path, *args: str) -> str:
+                if args == ("rev-parse", "--show-toplevel"):
+                    return str(path.parent)
+                return original_git_read(path, *args)
+
+            with patch.object(initialize_step, "_git_read", side_effect=wrong_top_level):
+                with self.assertRaisesRegex(RuntimeError, "顶层目录"):
+                    self.run_step(run_dir, state, agent_runner=unexpected)
+
+            command("switch", "-c", "feature", cwd=workspace)
+            with self.assertRaisesRegex(RuntimeError, "分支不是 main"):
+                self.run_step(run_dir, state, agent_runner=unexpected)
+
+    def test_unborn_and_multiple_commit_clean_repositories_are_legal(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory), [])
+
+            async def unexpected(*args: object, **kwargs: object) -> ClaudeRunResult:
+                raise AssertionError("干净仓库不应调用 Agent")
+
+            self.assertEqual(
+                self.run_step(run_dir, state, agent_runner=unexpected, decision_runner=unexpected)["status"],
+                "success",
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory), [])
+            (workspace / "one.txt").write_text("one\n", encoding="utf-8")
+            commit_all(workspace, "first")
+            (workspace / "two.txt").write_text("two\n", encoding="utf-8")
+            commit_all(workspace, "second")
+            self.assertEqual(
+                self.run_step(run_dir, state, agent_runner=unexpected, decision_runner=unexpected)["status"],
+                "success",
+            )
+
+    def test_result_write_interruption_recovers_from_clean_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory), [])
+            self.dirty(workspace, ["root"])
             calls = 0
 
             async def fake_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
                 nonlocal calls
                 calls += 1
                 commit_all(workspace)
-                current = agent_result(cwd=kwargs["cwd"], text=marker(["root"], workspace))  # type: ignore[arg-type, index]
-                kwargs["on_update"](current)  # type: ignore[index, operator]
-                return current
+                value = agent_result(cwd=kwargs["cwd"])  # type: ignore[index]
+                kwargs["on_update"](value)  # type: ignore[index, operator]
+                return value
 
             async def completed(messages, config, *, system_prompt):
                 return decision("completed")
@@ -620,127 +563,121 @@ class InitializeRepositoriesTests(unittest.TestCase):
             self.assertTrue((run_dir / "steps/08.json").is_file())
             interrupted = read_state(run_dir)
 
-            async def unexpected(*args, **kwargs):
-                raise AssertionError("已有成功结果不应调用 Agent 或决策模型")
+            async def unexpected(*args: object, **kwargs: object) -> ClaudeRunResult:
+                raise AssertionError("清理后的重试不应调用 Agent")
 
-            advanced = self.run_step(
-                run_dir,
-                interrupted,
-                agent_runner=unexpected,
-                decision_runner=unexpected,
+            self.assertEqual(
+                self.run_step(run_dir, interrupted, agent_runner=unexpected, decision_runner=unexpected)["status"],
+                "success",
             )
-            self.assertEqual(advanced["status"], "success")
-            saved_state = read_state(run_dir)
-            self.assertEqual((saved_state["step"], saved_state["current_node"]), (9, NEXT_NODE))
-            reused = self.run_step(
-                run_dir,
-                saved_state,
-                agent_runner=unexpected,
-                decision_runner=unexpected,
-            )
-            self.assertEqual(reused, advanced)
             self.assertEqual(calls, 1)
 
-    def test_cli_step_eight_missing_id_corrupt_state_and_blocked_mapping(self) -> None:
-        missing = subprocess.run(
-            [sys.executable, str(DEMO_ROOT / "run_step.py"), "--step", "8"],
-            cwd=DEMO_ROOT,
-            text=True,
-            capture_output=True,
-        )
-        self.assertEqual(missing.returncode, 1)
-        self.assertIn("第 8 步执行失败", missing.stderr)
-        self.assertNotIn("Traceback", missing.stderr)
+    def test_legacy_success_is_normalized_when_workspace_is_clean(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory), [])
+            write_json(
+                run_dir / "steps/08.json",
+                {
+                    "step": 8,
+                    "status": "success",
+                    "initial_commits": {"root": "a" * 40},
+                    "repositories": [{"name": "root", "head": "a" * 40}],
+                },
+            )
 
-        run_dir = DEMO_ROOT / "runs" / "corrupt-step-eight-test"
+            async def unexpected(*args: object, **kwargs: object) -> ClaudeRunResult:
+                raise AssertionError("干净旧成功记录不应调用 Agent")
+
+            state["initial_commits"] = {"root": "a" * 40}
+            write_state(run_dir, state)
+            saved = self.run_step(run_dir, state, agent_runner=unexpected, decision_runner=unexpected)
+            self.assertNotIn("initial_commits", saved)
+            self.assertEqual(set(saved["repositories"][0]), {"name", "path", "branch", "worktree_clean"})
+            stored = json.loads((run_dir / "steps/08.json").read_text(encoding="utf-8"))
+            self.assertNotIn("initial_commits", stored)
+            self.assertEqual(stored, saved)
+            normalized_state = read_state(run_dir)
+            self.assertNotIn("initial_commits", normalized_state)
+            self.assertEqual(Path(normalized_state["repositories"][0]["path"]), workspace.resolve())
+
+    def test_step_four_outputs_are_the_ordered_authoritative_list(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, _workspace, state = self.make_run(Path(directory), ["backend", "frontend"])
+
+            async def unexpected(*args: object, **kwargs: object) -> ClaudeRunResult:
+                raise AssertionError("干净仓库不应调用 Agent")
+
+            saved = self.run_step(run_dir, state, agent_runner=unexpected, decision_runner=unexpected)
+            self.assertEqual(saved["applicable_repositories"], ["root", "backend", "frontend"])
+
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, _workspace, state = self.make_run(Path(directory), [])
+            write_json(run_dir / "steps/04.json", {"step": 4, "status": "success", "outputs": ["mobile"]})
+            with self.assertRaisesRegex(RuntimeError, "第 4 步"):
+                self.run_step(run_dir, state)
+
+    def test_production_git_reads_use_only_the_allowlisted_commands(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            _run_dir, workspace, _state = self.make_run(Path(directory), ["frontend"])
+            with patch.object(initialize_step.subprocess, "run", wraps=subprocess.run) as mocked:
+                repositories = initialize_step._repository_facts(workspace, ["root", "frontend"])
+
+            self.assertTrue(all(item["worktree_clean"] for item in repositories))
+            commands = [tuple(call.args[0][1:]) for call in mocked.call_args_list]
+            self.assertEqual(
+                commands,
+                [
+                    ("rev-parse", "--show-toplevel"),
+                    ("branch", "--show-current"),
+                    ("status", "--porcelain"),
+                ]
+                * 2,
+            )
+
+    def test_cli_success_fixture_uses_the_new_schema(self) -> None:
+        import run_step as cli
+
+        run_dir = DEMO_ROOT / "runs" / "step-eight-new-schema-test"
         if run_dir.exists():
-            self.skipTest("本地 demo runs 已存在 corrupt-step-eight-test")
+            self.skipTest("本地 demo runs 已存在 step-eight-new-schema-test")
         try:
             (run_dir / "steps").mkdir(parents=True)
-            (run_dir / "state.json").write_text("{invalid", encoding="utf-8")
-            corrupt = subprocess.run(
-                [sys.executable, str(DEMO_ROOT / "run_step.py"), "--step", "8", "--run-id", run_dir.name],
-                cwd=DEMO_ROOT,
-                text=True,
-                capture_output=True,
+            write_state(
+                run_dir,
+                {"status": "running", "step": 8, "current_step": 8, "current_node": CURRENT_NODE},
             )
-            self.assertEqual(corrupt.returncode, 1)
-            saved = json.loads((run_dir / "steps/08.json").read_text(encoding="utf-8"))
-            self.assertEqual(saved["status"], "failed")
+            fixture = initialize_step.result(
+                "success",
+                "已完成",
+                applicable_repositories=["root"],
+                repositories=[
+                    {
+                        "name": "root",
+                        "path": "/tmp/product",
+                        "branch": "main",
+                        "worktree_clean": True,
+                    }
+                ],
+            )
+            write_json(run_dir / "steps/08.json", fixture)
+            args = Namespace(
+                step=8,
+                product_draft=None,
+                workspace_root=None,
+                catalog_path=None,
+                run_id=run_dir.name,
+            )
+            with (
+                patch.object(cli, "parse_args", return_value=args),
+                patch.object(cli, "run_step_eight", side_effect=OSError("模拟中断")),
+            ):
+                self.assertEqual(cli.main(), 1)
+            preserved = json.loads((run_dir / "steps/08.json").read_text(encoding="utf-8"))
+            self.assertEqual(preserved, fixture)
+            self.assertNotIn("initial_commits", preserved)
         finally:
             if run_dir.exists():
                 shutil.rmtree(run_dir)
-
-        import run_step as cli
-
-        preserved_dir = DEMO_ROOT / "runs" / "preserve-step-eight-success-test"
-        if preserved_dir.exists():
-            self.skipTest("本地 demo runs 已存在 preserve-step-eight-success-test")
-        try:
-            (preserved_dir / "steps").mkdir(parents=True)
-            write_state(
-                preserved_dir,
-                {"status": "running", "step": 8, "current_step": 8, "current_node": CURRENT_NODE},
-            )
-            write_json(
-                preserved_dir / "steps/08.json",
-                initialize_step.result(
-                    "success",
-                    "已完成",
-                    applicable_repositories=["root"],
-                    initial_commits={"root": "a" * 40},
-                    repositories=[],
-                ),
-            )
-            args = Namespace(
-                step=8,
-                product_draft=None,
-                workspace_root=None,
-                catalog_path=None,
-                run_id=preserved_dir.name,
-            )
-            with (
-                patch.object(cli, "parse_args", return_value=args),
-                patch.object(cli, "run_step_eight", side_effect=OSError("模拟最终状态写入失败")),
-            ):
-                self.assertEqual(cli.main(), 1)
-            preserved = json.loads((preserved_dir / "steps/08.json").read_text(encoding="utf-8"))
-            self.assertEqual(preserved["status"], "success")
-        finally:
-            if preserved_dir.exists():
-                shutil.rmtree(preserved_dir)
-
-        blocked_dir = DEMO_ROOT / "runs" / "blocked-step-eight-test"
-        if blocked_dir.exists():
-            self.skipTest("本地 demo runs 已存在 blocked-step-eight-test")
-        try:
-            (blocked_dir / "steps").mkdir(parents=True)
-            write_state(blocked_dir, {"status": "running"})
-
-            async def blocked_run(*args, **kwargs):
-                raise InitializeRepositoriesBlocked("缺少授权", ["授权"], ["root"])
-
-            args = Namespace(
-                step=8,
-                product_draft=None,
-                workspace_root=None,
-                catalog_path=None,
-                run_id=blocked_dir.name,
-            )
-            with (
-                patch.object(cli, "parse_args", return_value=args),
-                patch.object(cli, "run_step_eight", side_effect=blocked_run),
-            ):
-                self.assertEqual(cli.main(), 1)
-            blocked = json.loads((blocked_dir / "steps/08.json").read_text(encoding="utf-8"))
-            self.assertEqual(blocked["status"], "blocked")
-            self.assertEqual(
-                blocked["blocked"],
-                {"reason": "缺少授权", "required_inputs": ["授权"], "applicable_repositories": ["root"]},
-            )
-        finally:
-            if blocked_dir.exists():
-                shutil.rmtree(blocked_dir)
 
 
 if __name__ == "__main__":

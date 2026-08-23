@@ -108,7 +108,7 @@ flowchart LR
 - blocked 显式重跑；
 - SDK 结果分类和安全错误。
 
-公共循环不导入 `steps.*`，不执行领域 Git、测试、浏览器或产物判断。第 8 步的多仓提交合同、`observed_heads` 和真实 Git verifier 均仍由该步骤实现，不形成公共 Git DSL。
+公共循环不导入 `steps.*`，不执行领域 Git、测试、浏览器或产物判断。第 8 步的权威多仓只读核验、干净基线逻辑和结果映射均仍由该步骤实现，不形成公共 Git DSL。
 
 ### 3.4 各步骤 `step.py`
 
@@ -396,7 +396,7 @@ Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重�
 - `completed` 只表示负责人根据 Agent 执行结果相信当前任务完成，步骤程序仍以现有文件、Git、命令和交接 verifier 二次核验；
 - 首行 slash command 只属于 Agent initial prompt；该 prompt 正文不写步骤编号、PCM 节点、阶段、session 或 Skill 编排；
 - `request_decision` 的 system prompt 为必传参数，并原样传给一次 `responses.parse`；Pydantic `AgentDecision` 是唯一结构化输出合同，没有公共默认 system prompt、公共 JSON 追加 prompt 或格式重试；
-- 项目上下文范围固定为：第 2 步初稿原文和目标路径；第 5 步产品定义原文、适用工程、选型白名单投影及资源清单仅路径/可读性；第 6、7 步产品定义原文、准备清单原文、适用工程和组装白名单投影；第 8 步有序仓库相对路径、组装白名单投影和最小基线说明；第 8 步其余 Git、marker、`observed_heads` 与 verifier 不变；
+- 项目上下文范围固定为：第 2 步初稿原文和目标路径；第 5 步产品定义原文、适用工程、选型白名单投影及资源清单仅路径/可读性；第 6、7 步产品定义原文、准备清单原文、适用工程和组装白名单投影；第 8 步有序权威仓库相对路径和干净基线说明；第 8 步其余只读 Git 核验与 verifier 仍由步骤私有实现；
 - 选型和组装投影不包含 `git_url`、`origin`、`remote`。资源清单正文和 `.env` 不进入项目上下文；资源清单仍按步骤 Agent initial prompt 的既有授权处理；
 - 项目上下文只做标准 XML 转义；
 - repair prompt 只说明程序发现的固定缺口。
@@ -421,7 +421,7 @@ Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重�
 | 5 `project-readiness` | 核验进入项目化前的资源与配置 | 固定准备清单为非空普通文件 |
 | 6 `project-bootstrap` | 有限项目化和真实工程验证 | 前序交接、根 README、工程和 Git 边界 |
 | 7 `solution-design` | 基于真实工程形成总体技术方案 | 固定方案文档、前序交接和 Git 边界 |
-| 8 `commit-changes` | 在同一产品根 session 中分别创建权威清单中各仓的唯一初始基线提交 | 步骤专属多仓 Git verifier、严格 marker、根 tree 与 `.gitignore` 边界 |
+| 8 `commit-changes` | 对权威仓库清单形成首次全仓干净基线；已全干净时零调用，dirty 时同一产品根 session 处理必要提交 | 步骤专属多仓 top-level、`main` 与工作树只读核验 |
 
 第 6 步没有适用基础工程时，继续 `applicable: false` 无副作用跳过，不调用 Agent 或决策模型。
 
@@ -448,16 +448,16 @@ Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重�
 自动化验证：
 
 - 公共循环 24 项测试；
-- 步骤测试共 85 项，其中第 8 步专属 14 项覆盖 root-only/三仓、单 Agent、repair、blocked 后部分提交恢复、最近观察 SHA、防 shallow、根 `.gitignore`、结果/state 中断和 CLI；
-- 五步与公共循环定向测试 71 项；
-- 全量 109 项 `unittest`；
-- `compileall`、`git diff --check` 通过；IDE 唯一剩余 warning 是编辑器未解析 Pydantic 环境，不是代码错误。
+- 第 8 步专属 17 项测试；第 4、6、7 步相关回归 31 项；
+- 第 2/5/6/7/8 步与公共循环定向测试 74 项（6+10+9+8+17+24）；
+- 全量 112 项 `unittest`；
+- `compileall`、`git diff --check` 均已通过；IDE 无诊断，独立审查无高、中问题。
 
 兼容验证：
 
-- `step01-mendmark` 只读核验通过；
 - 旧 action、完成 sentinel 和 `{path, turn}` 均可读取；
-- 黄金 run 未被修改，仍位于第 8 步入口。
+- 旧 `step08-real-20260823-a/b` 继续按旧“唯一初始提交证明”合同解释，不改写为当前合同证据；
+- 真实 run `step01-mendmark` 的目录名与 state 内历史 `run_id` 不一致是既有已知事实；当前第 8 步依据 state、产品路径和现场继续核验并已推进到第 9 步入口。
 
 真实集成验证：
 
@@ -472,10 +472,21 @@ Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重�
 - conversation 尾部为 `completed`，无旧 sentinel 或 `pending_agent_prompt`；
 - 最终状态推进到 `project:08_initialize_repositories`。
 
-第 8 步真实集成验证：
+第 8 步旧合同真实运行：
 
-- `step08-real-20260823-a` 保留失败链路：第 1 步先后出现代码围栏、Responses `incomplete`、自创字段，收紧严格 JSON prompt 后同 run 成功；第 3 步一次 `ValidationError` 后同 run 重试成功；第 7 步 API 500 暴露 failed `07.json` 会错误阻断恢复，修复为仅 `status=success` 可复用后同 session 成功；第 8 步因未处理的模板 `.coverage`，Agent 未提交，决策模型重复索取调用方授权并耗尽 8 轮，未产生三仓提交。
-- `step08-real-20260823-b` 第 6 步真实清除 `.coverage` 后完成第 8 步：唯一 session `64aa707c-268c-48c8-bb3f-f67f62abe75e` 的 conversation 为 `system → assistant → user → assistant`，一次 Agent 回复和一次 `completed` 裁决完成。root、frontend、backend 的唯一无父 `main` 提交依次为 `c1eb33dfa5bda91a0d7f9aeeb41d8fefe10a6fca`、`5997213c34c09ea6ba4e740e35f9df77d2d45d82`、`5d8dd95d8c42370697d25e6ecaf400bab42785b3`；三仓干净，根 tree 不含子仓，状态推进至 `project:09_engineering_architecture`。同 run 重跑不调用 Agent，SHA 不变。
+- `step08-real-20260823-a` 保留旧“唯一初始提交证明”合同下的失败链路：第 1 步先后出现代码围栏、Responses `incomplete`、自创字段，收紧严格 JSON prompt 后同 run 成功；第 3 步一次 `ValidationError` 后同 run 重试成功；第 7 步 API 500 暴露 failed `07.json` 会错误阻断恢复，修复为仅 `status=success` 可复用后同 session 成功；第 8 步因未处理的模板 `.coverage`，Agent 未提交，决策模型重复索取调用方授权并耗尽 8 轮，未产生三仓提交。
+- `step08-real-20260823-b` 是旧合同下的历史成功：第 6 步真实清除 `.coverage` 后，session `64aa707c-268c-48c8-bb3f-f67f62abe75e` 的 conversation 为 `system → assistant → user → assistant`，一次 Agent 回复和一次 `completed` 裁决完成。root、frontend、backend 的唯一无父 `main` 提交依次为 `c1eb33dfa5bda91a0d7f9aeeb41d8fefe10a6fca`、`5997213c34c09ea6ba4e740e35f9df77d2d45d82`、`5d8dd95d8c42370697d25e6ecaf400bab42785b3`；状态推进至 `project:09_engineering_architecture`。这些 SHA、提交形态和重跑事实不再是当前合同完成条件。
+
+第 8 步当前合同真实运行：
+
+- 真实 run 目录为 `pcm-demo/runs/step01-mendmark`，state 内历史 `run_id` 不一致是既有已知事实；产品工作区为 `/Users/zhou/resource/fireworks/ANDRSZAN/pcm-products/mendmark`。权威仓库为 `root/frontend/backend`，第 4 步 `outputs` 为 `frontend/backend`；首次执行前三仓均为自身 top-level、`main`、dirty 且 HEAD 不存在。
+- 首次执行只创建 `initialize_repositories` session `f6d42df8-13e5-437b-ada3-eef1015ecc87`。Agent 尝试内置 Explore 时遇到环境未识别模型 `gpt-5.6-sol[1m]`，无 Result、无 Git 变化，进程挂起后停止；session、conversation 和 init 证据已保存。这是环境内部子代理问题，不是第 8 步业务或 Git 逻辑失败。
+- 仅在该 Git 忽略 run 历史中追加普通恢复指令“不要使用子代理/Explore，直接工具完成”，生产 prompt 和代码未改变；重跑恢复同一 session。Agent 先创建 frontend `dbab574dbe4d83a02323a750afd04de007565ac5` 和 backend `9682be837759c20f1a9ebbdf8fa2cfc09c2768d4` 两个本地提交，未 push，随后针对根仓运行时产物和 `.agents/plugins/superpowers/.git` 请求决策。
+- AI-compatible 负责人返回 `continue`：删除 61 个 `.in_use/*`、`.orphaned_at`、`.coverage` 运行时产物、补 `.gitignore`、移除 superpowers 嵌套 `.git` 并按普通受控插件快照提交，不采用 submodule。同一 session 继续后，root 创建 `02ba4c1`（产品与技术基线）、`ae72c31`（Agent 规范与 Skills）、`5eeeacd217bbd27e03483b1b6d32915c721aadd9`（插件快照）三个本地提交，未 push。
+- 最终 conversation 共 7 条，角色顺序为 `system → assistant 初始 → assistant 恢复 → user → assistant continue → user → assistant completed`。Agent 最终正常 `success`，26 turns，约 `$1.859406`，session 不变。
+- Python 只读 verifier 写入 `steps/08.json` success：`applicable_repositories` 为 `root/frontend/backend`，result 保存相对路径，state 保存绝对路径，并推进到 `project:09_engineering_architecture`。独立 Git 核验确认 root HEAD `5eeeacd217bbd27e03483b1b6d32915c721aadd9`、3 commits，frontend HEAD `dbab574dbe4d83a02323a750afd04de007565ac5`、1 commit，backend HEAD `9682be837759c20f1a9ebbdf8fa2cfc09c2768d4`、1 commit；三仓均在 `main` 且 `status --porcelain` 为空。这证明当前合同允许每仓 0、1 或多个提交，不要求唯一无父提交。
+- 同 run 重跑第 8 步直接 clean 幂等成功，conversation 仍为 7 条，未再次调用 Agent 或决策模型，SHA 不变。backend 提交阶段 Agent 摘要报告 Ruff、格式、build 通过，`pytest` 14 passed、1 skipped，跳过项需要显式 `DB_*`；该摘要不是 Python verifier 条件，也不改变第 6 步历史项目化验证。
+- 当前合同已完成真实 Agent 集成验证，但首次成功包含 run-local 恢复指令，不能宣称环境内部子代理问题已经解决或无需恢复。
 
 Probe C：
 

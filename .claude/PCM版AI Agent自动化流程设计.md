@@ -204,17 +204,17 @@ PCM Demo 只保存支持继续运行所必需的状态：
     "root": {
       "path": "/products/family-meal-planner",
       "branch": "feat/req-002",
-      "head": "<step-17-root-commit-sha>"
+      "worktree_clean": true
     },
     "frontend": {
       "path": "/products/family-meal-planner/frontend",
       "branch": "main",
-      "head": "<frontend-main-sha>"
+      "worktree_clean": true
     },
     "backend": {
       "path": "/products/family-meal-planner/backend",
       "branch": "main",
-      "head": "<backend-main-sha>"
+      "worktree_clean": true
     }
   },
   "phase": "phase_1_requirement_development",
@@ -381,13 +381,18 @@ PCM Demo 只保存支持继续运行所必需的状态：
 
 ### 第 8 步：首次提交适用仓库
 
-- 能力：在产品根创建一个 Claude Agent SDK session，显式调用 `commit-changes`；Python 只执行确定性输入、状态与真实 Git 核验。
-- 输入：第 3～7 步均为成功结果；第 1 步根仓和第 4 步每个适用 `frontend` / `backend` 都是自身 top-level、`main`、unborn HEAD、空 index 的独立 Git 仓库；不适用端不存在。权威有序仓库清单是 `['root', *steps/04.json.outputs]`，根 `.gitignore` 必须实际忽略所有适用子仓，所有适用仓无未处理 `.coverage`。
-- 执行动作：初始 prompt 的首行是 `/commit-changes`。同一 Agent 任务按仓库分别执行单仓合同，以 `expected_head=unborn` 将每仓当前全部合法变更创建为唯一初始基线提交。Python 不逐仓派发、不 stage、不 commit。Agent 不得改写历史、切换分支、merge、push 或让根提交纳入子仓/gitlink；最终回复最后一个非空行必须为严格 `INITIAL_COMMITS_JSON`，按权威顺序报告完整 SHA。
-- 输出：`steps/08.json` 的 `outputs` 固定为空，并保存 `applicable_repositories`、`initial_commits`（名称到 SHA）及 `repositories` 列表；状态保存同名仓库证据，成功推进到 `project:09_engineering_architecture`。
-- 完成条件：每仓 top-level、`main`、HEAD 和干净工作树均通过核验，恰好一个无父且非 shallow/replace 的初始提交与 marker SHA 一致；根 tree 不含 `frontend`、`backend` 或 gitlink，根 `.gitignore` 实际忽略所有适用子仓。
-- 恢复：只接纳最近一次 Agent 回合记录的 `observed_heads`；部分已提交仓保持原提交，继续同一 session，不 reset、amend 或 rebase。`failed` / `blocked` 的步骤结果不能当作成功或阻止恢复；只有 `status=success` 可幂等复用。成功结果写入后 state 中断时，重跑只重验并推进，不覆盖成功锚点或再次调用 Agent。
-- 自动化说明：决策只有 `completed`、`continue`、`blocked`；`completed` 可在 marker 或未提交仓缺失时向同一 session 发送固定修复提示，事实冲突即 `failed`。不执行 push。
+- 能力：这是第一次全仓提交检查和干净基线节点。Python 只执行确定性输入、状态及 Git 只读核验；存在未提交变更时，才在产品根创建一个 Claude Agent SDK session，显式调用 `commit-changes`。
+- 输入：权威有序仓库严格为 `['root', *steps/04.json.outputs]`；每个权威路径必须是自身 top-level、`main` 的独立 Git 仓库。不从固定前后端目录、历史状态或 Agent 回复扩充该清单。
+- 执行动作：Python 对每仓只执行 `git rev-parse --show-toplevel`、`git branch --show-current`、`git status --porcelain`。若全部干净，在创建 conversation/session 或写入 `running` 前零 Agent、零决策模型调用，直接成功并记录全仓干净基线。任一仓 dirty 时，初始 prompt 首行是 `/commit-changes`，只给仓库清单及边界；Agent 负责必要 Git 写操作，Python 不逐仓派发、不 `add`、不 `commit`、不 `reset`、`amend` 或 `rebase`。Agent 不得切换分支、改写历史或 push。
+- 输出：`steps/08.json` 的 `outputs` 固定为空，并保存 `applicable_repositories` 和 `repositories` 列表；每项为相对 `path`、`branch`、`worktree_clean`。状态保存同样事实但路径为绝对路径，成功推进到 `project:09_engineering_architecture`。
+- 完成条件：每仓自身 top-level、`main` 且 `status --porcelain` 为空。无需检查 HEAD、提交是否产生、提交数、父提交、SHA、marker、历史替换或根 tree。
+- 恢复：`completed` 后 Python 只读复验；仍 dirty 则以固定 repair prompt 继续同一 session。`blocked` 后重读，已全干净直接成功，仍 dirty 才保存 blocked。恢复也先读现场，已全干净直接成功，仍 dirty 才恢复原 session。`failed` / `blocked` 的步骤结果不能当作成功；只有 `status=success` 可幂等复用。成功后的第 9 步状态若权威仓库变 dirty，拒绝复用，避免第 8 步替后续修改提交。
+- 自动化说明：决策只有 `completed`、`continue`、`blocked`；不执行 push。第 8 步专属 17 项、公共循环 24 项、第 4/6/7 步回归 31 项、定向 74 项、全量 112 项测试通过；`compileall`、`git diff --check` 通过，IDE 无诊断，独立审查无高、中问题。
+- 真实验证：当前合同已在真实 run `pcm-demo/runs/step01-mendmark` 和产品工作区 `/Users/zhou/resource/fireworks/ANDRSZAN/pcm-products/mendmark` 完成验证；run 目录名与 state 内历史 `run_id` 不一致是既有已知事实。权威仓库为 `root/frontend/backend`，第 4 步 `outputs` 为 `frontend/backend`；首次执行前三仓均为自身 top-level、`main`、dirty 且 HEAD 不存在。
+- 环境恢复：首次执行只启动 `initialize_repositories` session `f6d42df8-13e5-437b-ada3-eef1015ecc87`。Agent 尝试内置 Explore 时遇到环境未识别模型 `gpt-5.6-sol[1m]`，无 Result、无 Git 变化，挂起进程停止后保存 session、conversation 和 init 证据；这是环境内部子代理问题，不是第 8 步业务或 Git 逻辑失败。仅在 Git 忽略的真实 run 历史中追加普通恢复指令“不要使用子代理/Explore，直接工具完成”，生产 prompt 和代码未改变，并恢复同一 session。
+- 提交与决策：Agent 先创建 frontend `dbab574dbe4d83a02323a750afd04de007565ac5`、backend `9682be837759c20f1a9ebbdf8fa2cfc09c2768d4` 两个本地提交；随后针对根仓运行时产物和 `.agents/plugins/superpowers/.git` 请求决策。AI-compatible 负责人返回 `continue`，授权删除 61 个 `.in_use/*`、`.orphaned_at`、`.coverage` 运行时产物、补 `.gitignore`、移除嵌套 `.git`，并将 superpowers 作为普通受控插件快照而非 submodule 提交。root 创建 `02ba4c1`、`ae72c31`、`5eeeacd217bbd27e03483b1b6d32915c721aadd9` 三个本地提交；全程未 push。
+- 完成证据：最终 conversation 共 7 条，角色顺序为 `system → assistant 初始 → assistant 恢复 → user → assistant continue → user → assistant completed`；Agent 正常 `success`，26 turns，约 `$1.859406`，session 不变。Python 只读 verifier 写入 `steps/08.json` success，result 保存相对路径、state 保存绝对路径，状态推进至 `project:09_engineering_architecture`。独立 Git 核验确认 root 3 commits、frontend/backend 各 1 commit，三仓均在 `main` 且 clean；当前合同允许每仓 0、1 或多个提交，不要求唯一无父提交。同 run 重跑直接 clean 幂等成功，conversation 仍为 7 条，未再次调用 Agent 或决策模型，SHA 不变。
+- 证据边界：backend 提交摘要中的 Ruff、格式、build 通过和 `pytest` 14 passed、1 skipped（数据库集成测试需显式 `DB_*`）是 Agent 报告，不是 Python verifier 条件，也不改变第 6 步历史项目化验证。`step08-real-20260823-a/b` 继续仅是旧“唯一初始提交证明”合同历史；当前首次成功包含 run-local 恢复指令，不能宣称环境内部子代理问题已解决或无需恢复。
 
 ### 第 9 步：工程架构设计（按需）
 
