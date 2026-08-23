@@ -223,7 +223,7 @@ class SolutionDesignTests(unittest.TestCase):
             self.assertEqual(calls[0]["max_budget_usd"], SOLUTION_DESIGN_MAX_BUDGET_USD)
             self.assertEqual(len(system_prompts), 2)
             for system_prompt in system_prompts:
-                for tag in ("role", "project_context", "responsibility", "require"):
+                for tag in ("role", "project_context", "responsibility", "completion", "output"):
                     self.assertIn(f"<{tag}>", system_prompt)
                     self.assertIn(f"</{tag}>", system_prompt)
                 for required in (

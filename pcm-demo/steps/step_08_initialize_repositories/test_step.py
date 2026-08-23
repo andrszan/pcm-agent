@@ -642,10 +642,16 @@ class InitializeRepositoriesTests(unittest.TestCase):
             self.skipTest("本地 demo runs 已存在 step-eight-new-schema-test")
         try:
             (run_dir / "steps").mkdir(parents=True)
-            write_state(
-                run_dir,
-                {"status": "running", "step": 8, "current_step": 8, "current_node": CURRENT_NODE},
-            )
+            successful_state = {
+                "status": "success",
+                "phase": "project_initialization",
+                "step": 9,
+                "current_step": 9,
+                "current_node": NEXT_NODE,
+                "blocked": None,
+                "error": None,
+            }
+            write_state(run_dir, successful_state)
             fixture = initialize_step.result(
                 "success",
                 "已完成",
@@ -653,7 +659,7 @@ class InitializeRepositoriesTests(unittest.TestCase):
                 repositories=[
                     {
                         "name": "root",
-                        "path": "/tmp/product",
+                        "path": ".",
                         "branch": "main",
                         "worktree_clean": True,
                     }
@@ -667,14 +673,21 @@ class InitializeRepositoriesTests(unittest.TestCase):
                 catalog_path=None,
                 run_id=run_dir.name,
             )
-            with (
-                patch.object(cli, "parse_args", return_value=args),
-                patch.object(cli, "run_step_eight", side_effect=OSError("模拟中断")),
-            ):
-                self.assertEqual(cli.main(), 1)
-            preserved = json.loads((run_dir / "steps/08.json").read_text(encoding="utf-8"))
-            self.assertEqual(preserved, fixture)
-            self.assertNotIn("initial_commits", preserved)
+            for attempt in range(2):
+                with self.subTest(attempt=attempt):
+                    with (
+                        patch.object(cli, "parse_args", return_value=args),
+                        patch.object(
+                            cli, "run_step_eight", side_effect=OSError("模拟中断")
+                        ),
+                    ):
+                        self.assertEqual(cli.main(), 1)
+                preserved = json.loads(
+                    (run_dir / "steps/08.json").read_text(encoding="utf-8")
+                )
+                self.assertEqual(preserved, fixture)
+                self.assertEqual(read_state(run_dir), successful_state)
+                self.assertNotIn("initial_commits", preserved)
         finally:
             if run_dir.exists():
                 shutil.rmtree(run_dir)

@@ -51,6 +51,10 @@ from steps.step_08_initialize_repositories import InitializeRepositoriesBlocked
 from steps.step_08_initialize_repositories import result as initialize_repositories_result
 from steps.step_08_initialize_repositories import run as run_initialize_repositories
 from steps.step_08_initialize_repositories.step import CURRENT_NODE as INITIALIZE_REPOSITORIES_NODE
+from steps.step_09_engineering_architecture import EngineeringArchitectureBlocked
+from steps.step_09_engineering_architecture import result as engineering_architecture_result
+from steps.step_09_engineering_architecture import run as run_engineering_architecture
+from steps.step_09_engineering_architecture.step import CURRENT_NODE as ENGINEERING_ARCHITECTURE_NODE
 
 DEMO_ROOT = Path(__file__).resolve().parent
 
@@ -86,12 +90,57 @@ def run_dir_for(run_id: str) -> Path:
     return run_dir
 
 
-def has_step_eight_success(run_dir: Path) -> bool:
+def has_step_success(run_dir: Path, step: int) -> bool:
+    if step not in {8, 9}:
+        return False
     try:
-        existing = json.loads((run_dir / "steps" / "08.json").read_text(encoding="utf-8"))
+        existing = json.loads(
+            (run_dir / "steps" / f"{step:02d}.json").read_text(encoding="utf-8")
+        )
     except (OSError, UnicodeError, json.JSONDecodeError):
         return False
-    return isinstance(existing, dict) and existing.get("status") == "success"
+    if (
+        not isinstance(existing, dict)
+        or type(existing.get("step")) is not int
+        or existing.get("step") != step
+        or existing.get("status") != "success"
+        or not isinstance(existing.get("summary"), str)
+        or not existing["summary"]
+        or existing.get("applicable") is not True
+        or existing.get("blocked") is not None
+        or existing.get("error") is not None
+    ):
+        return False
+    if step == 9:
+        return (
+            existing.get("name") == "工程架构设计"
+            and existing.get("outputs") == ["docs/design/工程架构设计.md"]
+        )
+
+    names = existing.get("applicable_repositories")
+    repositories = existing.get("repositories")
+    if (
+        existing.get("name") != "首次提交适用仓库"
+        or existing.get("outputs") != []
+        or not isinstance(names, list)
+        or not names
+        or names[0] != "root"
+        or any(name not in {"root", "frontend", "backend"} for name in names)
+        or len(set(names)) != len(names)
+        or not isinstance(repositories, list)
+        or len(repositories) != len(names)
+    ):
+        return False
+    return all(
+        repository
+        == {
+            "name": name,
+            "path": "." if name == "root" else name,
+            "branch": "main",
+            "worktree_clean": True,
+        }
+        for name, repository in zip(names, repositories, strict=True)
+    )
 
 
 def load_or_create_step_one_run(args: argparse.Namespace) -> tuple[Path, dict[str, Any], Path]:
@@ -354,6 +403,15 @@ async def run_step_eight(args: argparse.Namespace) -> tuple[Path, dict[str, Any]
     return run_dir, await run_initialize_repositories(run_dir, read_state(run_dir))
 
 
+async def run_step_nine(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
+    if not args.run_id:
+        raise ValueError("第 9 步需要 --run-id")
+    run_dir = run_dir_for(args.run_id)
+    if not run_dir.is_dir():
+        raise ValueError(f"运行记录不存在：{args.run_id}")
+    return run_dir, await run_engineering_architecture(run_dir, read_state(run_dir))
+
+
 def sha256_bytes(data: bytes) -> str:
     import hashlib
 
@@ -390,7 +448,7 @@ def run_step_zero(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
 
 def main() -> int:
     args = parse_args()
-    if args.step not in {0, 1, 2, 3, 4, 5, 6, 7, 8}:
+    if args.step not in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}:
         print(f"步骤尚未实现：{args.step}", file=sys.stderr)
         return 2
 
@@ -426,8 +484,10 @@ def main() -> int:
                         run_dir, result = asyncio.run(run_step_six(args))
                     elif args.step == 7:
                         run_dir, result = asyncio.run(run_step_seven(args))
-                    else:
+                    elif args.step == 8:
                         run_dir, result = asyncio.run(run_step_eight(args))
+                    else:
+                        run_dir, result = asyncio.run(run_step_nine(args))
     except ProjectIntakeBlocked as error:
         result = project_intake_result(
             "blocked",
@@ -497,6 +557,20 @@ def main() -> int:
             },
         )
         error_message = str(error)
+    except EngineeringArchitectureBlocked as error:
+        result = engineering_architecture_result(
+            "blocked",
+            str(error),
+            outputs=error.outputs,
+            blocked={
+                "reason": str(error),
+                "required_inputs": error.required_inputs,
+                "resume_phase": "project_initialization",
+                "resume_node": ENGINEERING_ARCHITECTURE_NODE,
+                "resume_step": 9,
+            },
+        )
+        error_message = str(error)
     except Exception as error:  # noqa: BLE001 - 顶层入口必须将所有步骤异常转换为结果。
         if args.step == 2:
             result_factory = project_intake_result
@@ -510,6 +584,8 @@ def main() -> int:
             result_factory = solution_design_result
         elif args.step == 8:
             result_factory = initialize_repositories_result
+        elif args.step == 9:
+            result_factory = engineering_architecture_result
         else:
             result_factory = workspace_result
         result = result_factory(
@@ -523,8 +599,13 @@ def main() -> int:
         detail = result.get("blocked") or result.get("error") or {}
         error_message = str(detail.get("reason") or detail.get("message") or result["summary"])
 
-    if run_dir is not None and args.step in {1, 2, 5, 6, 7, 8}:
-        if result["status"] != "success":
+    protected_success = (
+        run_dir is not None
+        and args.step in {8, 9}
+        and has_step_success(run_dir, args.step)
+    )
+    if run_dir is not None and args.step in {1, 2, 5, 6, 7, 8, 9}:
+        if result["status"] != "success" and not protected_success:
             try:
                 state = read_state(run_dir)
             except Exception:  # noqa: BLE001 - 状态损坏时仍需保存步骤失败结果。
@@ -544,9 +625,11 @@ def main() -> int:
                     update.update({"step": 7, "current_node": SOLUTION_DESIGN_NODE})
                 elif args.step == 8:
                     update.update({"step": 8, "current_node": INITIALIZE_REPOSITORIES_NODE})
+                elif args.step == 9:
+                    update.update({"step": 9, "current_node": ENGINEERING_ARCHITECTURE_NODE})
                 state.update(update)
                 write_state(run_dir, state)
-        if args.step != 8 or not has_step_eight_success(run_dir):
+        if not protected_success:
             write_step_result(run_dir, args.step, result)
 
     if run_dir is not None:

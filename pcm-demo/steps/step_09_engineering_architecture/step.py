@@ -1,0 +1,779 @@
+from __future__ import annotations
+
+import json
+import subprocess
+from dataclasses import replace
+from pathlib import Path
+from typing import Any
+
+from common.agent_decision_loop import AgentDecisionLoopSpec, run_agent_decision_loop
+from common.claude_agent import run_claude
+from common.decision import parse_agent_decision, render_decision_system_prompt, request_decision
+from common.files import resolve_workspace_output
+from common.state import step_result_status, write_state, write_step_result
+from config import LLMConfig
+from steps.step_05_project_readiness.step import (
+    CHECKLIST,
+    checklist_contents,
+    load_product_outputs,
+    product_output_contents,
+    verify_existing_readiness_success,
+)
+from steps.step_07_solution_design.step import (
+    DESIGN_PATH,
+    design_repair,
+    verify_existing_solution_success,
+)
+
+STEP = 9
+NAME = "工程架构设计"
+CURRENT_NODE = "project:09_engineering_architecture"
+NEXT_NODE = "project:10_ui_ux_framework"
+CONVERSATION_KEY = "engineering_architecture"
+SKILL_NAME = "engineering-architecture"
+ARCHITECTURE_PATH = Path("docs/design/工程架构设计.md")
+MAX_DECISION_ROUNDS = 8
+ENGINEERING_ARCHITECTURE_MAX_TURNS = 48
+ENGINEERING_ARCHITECTURE_MAX_BUDGET_USD = 16.0
+
+ARCHITECTURE_REPAIR_PROMPT = (
+    "固定工程架构设计文档缺失或为空。请仅创建或补全 "
+    "docs/design/工程架构设计.md；不得修改任何其他文件，不得执行 Git 写操作，然后报告结果。"
+)
+COMMIT_REPAIR_PROMPT = """/commit-changes
+只授权处理产品根 Git 仓库中的固定文档 `docs/design/工程架构设计.md`。请核验该文档；仅当它存在未提交变更时，暂存并提交这一个文件，然后确认产品根仓库工作区干净。不得暂存、提交或修改任何其他路径，不得处理子仓库，不得建分支、改写历史或 push。若固定文档相对当前提交没有变化，直接报告无变更，不得制造变更。"""
+
+ENGINEERING_ARCHITECTURE_DECISION_RULES = """- completed：固定工程架构设计文档已生成，基于权威产品定义、项目准备清单、总体技术方案和实际工程明确了代码与模块组织、依赖边界、关键接口、数据与配置组织、质量保障、部署运行约束和演进规则；没有越界实现业务功能。
+- continue：工程架构文档、工程事实核验或关键设计内容仍可在当前项目中补全。
+- blocked：只能用于缺少当前环境无法取得的真实外部账号、凭据、私有数据、授权、专用设备、付费服务或线下动作。"""
+
+DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
+    key=CONVERSATION_KEY,
+    state_key=CONVERSATION_KEY,
+    skill_name=SKILL_NAME,
+    max_decision_rounds=MAX_DECISION_ROUNDS,
+    max_turns=ENGINEERING_ARCHITECTURE_MAX_TURNS,
+    max_budget_usd=ENGINEERING_ARCHITECTURE_MAX_BUDGET_USD,
+    decision_system_prompt=render_decision_system_prompt(
+        ENGINEERING_ARCHITECTURE_DECISION_RULES, {}
+    ),
+)
+
+
+class EngineeringArchitectureBlocked(RuntimeError):
+    def __init__(
+        self,
+        reason: str,
+        required_inputs: list[str],
+        outputs: list[str] | None = None,
+    ) -> None:
+        super().__init__(reason)
+        self.required_inputs = required_inputs
+        self.outputs = outputs or []
+
+
+def result(
+    status: str,
+    summary: str,
+    *,
+    blocked: dict[str, Any] | None = None,
+    error: dict[str, Any] | None = None,
+    outputs: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "step": STEP,
+        "name": NAME,
+        "status": status,
+        "summary": summary,
+        "applicable": True,
+        "outputs": outputs or [],
+        "blocked": blocked,
+        "error": error,
+    }
+
+
+def _workspace_from_state(state: dict[str, Any]) -> Path:
+    try:
+        root_value = state["workspace"]["root"]
+        workspace_value = state["workspace"]["final_path"]
+    except (KeyError, TypeError) as error:
+        raise RuntimeError("工作区状态记录不完整") from error
+    if not isinstance(root_value, str) or not isinstance(workspace_value, str):
+        raise RuntimeError("工作区状态记录不完整")
+    root = Path(root_value)
+    workspace = Path(workspace_value)
+    if not root.is_absolute() or not workspace.is_absolute():
+        raise RuntimeError("工作区状态路径必须为绝对路径")
+    if workspace.is_symlink():
+        raise RuntimeError("产品工作区不得是符号链接")
+    root = root.resolve()
+    workspace = workspace.resolve()
+    if workspace.parent != root or not workspace.is_dir():
+        raise RuntimeError("产品工作区路径与状态根目录不一致")
+    return workspace
+
+
+def _read_json(path: Path, message: str) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise RuntimeError(message) from error
+    if not isinstance(value, dict):
+        raise RuntimeError(message)
+    return value
+
+
+def _repository_path(workspace: Path, name: str) -> Path:
+    return workspace if name == "root" else workspace / name
+
+
+def _validate_repository_entry(
+    entry: Any,
+    *,
+    name: str,
+    path: str,
+) -> None:
+    if entry != {
+        "name": name,
+        "path": path,
+        "branch": "main",
+        "worktree_clean": True,
+    }:
+        raise RuntimeError("第 8 步仓库 clean 交接事实不符合约定")
+
+
+def _step_eight_handoff(
+    run_dir: Path, state: dict[str, Any], workspace: Path
+) -> list[str]:
+    previous = _read_json(run_dir / "steps" / "08.json", "第 8 步成功结果不可读取")
+    names = previous.get("applicable_repositories")
+    result_repositories = previous.get("repositories")
+    if (
+        previous.get("step") != 8
+        or previous.get("status") != "success"
+        or previous.get("applicable") is not True
+        or previous.get("outputs") != []
+        or not isinstance(names, list)
+        or not names
+        or names[0] != "root"
+        or any(name not in {"root", "frontend", "backend"} for name in names)
+        or len(set(names)) != len(names)
+        or not isinstance(result_repositories, list)
+        or len(result_repositories) != len(names)
+    ):
+        raise RuntimeError("第 8 步仓库 clean 交接结果不符合约定")
+
+    state_names = state.get("applicable_repositories")
+    state_repositories = state.get("repositories")
+    if state_names != names or not isinstance(state_repositories, list) or len(state_repositories) != len(names):
+        raise RuntimeError("第 8 步仓库 clean 交接状态不符合约定")
+
+    for index, name in enumerate(names):
+        relative_path = "." if name == "root" else name
+        absolute_path = str(_repository_path(workspace, name).resolve())
+        _validate_repository_entry(
+            result_repositories[index], name=name, path=relative_path
+        )
+        _validate_repository_entry(
+            state_repositories[index], name=name, path=absolute_path
+        )
+    return names
+
+
+def _document_contents(workspace: Path, relative: Path, label: str) -> str:
+    try:
+        path = resolve_workspace_output(workspace, relative.as_posix())
+    except ValueError as error:
+        raise RuntimeError(f"{label}路径不符合约定") from error
+    current = workspace
+    for part in relative.parts:
+        current /= part
+        if current.is_symlink():
+            raise RuntimeError(f"{label}路径不能包含符号链接")
+    if not path.is_file():
+        raise RuntimeError(f"{label}不是普通文件")
+    try:
+        content = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        raise RuntimeError(f"{label}不可读取") from error
+    if not content.strip():
+        raise RuntimeError(f"{label}不能为空")
+    return content
+
+
+def validate_inputs(
+    run_dir: Path, state: dict[str, Any]
+) -> tuple[Path, list[str], list[str], str, str]:
+    position = (state.get("step"), state.get("current_step"), state.get("current_node"))
+    if position not in {(STEP, STEP, CURRENT_NODE), (STEP + 1, STEP + 1, NEXT_NODE)}:
+        raise RuntimeError("运行状态不位于工程架构设计锚点")
+    workspace = _workspace_from_state(state)
+    product_outputs = load_product_outputs(run_dir, workspace)
+    verify_existing_readiness_success(run_dir)
+    checklist = checklist_contents(workspace)
+    if checklist is None:
+        raise RuntimeError("第 5 步项目准备清单不存在或不可读取")
+    verify_existing_solution_success(run_dir)
+    if design_repair(workspace) is not None:
+        raise RuntimeError("第 7 步既有成功缺少非空技术方案文档")
+    design = _document_contents(workspace, DESIGN_PATH, "总体技术方案")
+    names = _step_eight_handoff(run_dir, state, workspace)
+    return workspace, product_outputs, names, checklist, design
+
+
+def _git_run(path: Path, *args: str, allowed_returncodes: tuple[int, ...] = (0,)) -> subprocess.CompletedProcess[str]:
+    try:
+        completed = subprocess.run(
+            ["git", *args],
+            cwd=path,
+            text=True,
+            capture_output=True,
+            timeout=120,
+        )
+    except FileNotFoundError as error:
+        raise RuntimeError("未安装 Git") from error
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError("Git 命令超时") from error
+    if completed.returncode not in allowed_returncodes:
+        raise RuntimeError("无法读取 Git 仓库状态")
+    return completed
+
+
+def _git_read(path: Path, *args: str) -> str:
+    return _git_run(path, *args).stdout.rstrip("\n")
+
+
+def _repository_facts(workspace: Path, names: list[str]) -> list[dict[str, Any]]:
+    repositories: list[dict[str, Any]] = []
+    for name in names:
+        repository = _repository_path(workspace, name)
+        if repository.is_symlink() or not repository.is_dir():
+            raise RuntimeError("权威 Git 仓库路径不存在或是符号链接")
+        path = repository.resolve()
+        top_level = Path(_git_read(path, "rev-parse", "--show-toplevel")).resolve()
+        if top_level != path:
+            raise RuntimeError("Git 仓库顶层目录与权威仓库路径不一致")
+        if _git_read(path, "branch", "--show-current") != "main":
+            raise RuntimeError("Git 仓库分支不是 main")
+        status = _git_read(path, "status", "--porcelain=v1", "--untracked-files=all")
+        repositories.append(
+            {
+                "name": name,
+                "path": str(path),
+                "branch": "main",
+                "worktree_clean": status == "",
+                "status": status,
+            }
+        )
+    return repositories
+
+
+def _document_status(workspace: Path) -> str:
+    return _git_read(
+        workspace,
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all",
+        "--",
+        ARCHITECTURE_PATH.as_posix(),
+    )
+
+
+def _document_tracked(workspace: Path) -> bool:
+    completed = _git_run(
+        workspace,
+        "ls-files",
+        "--error-unmatch",
+        "--",
+        ARCHITECTURE_PATH.as_posix(),
+        allowed_returncodes=(0, 1),
+    )
+    return completed.returncode == 0
+
+
+def _verify_worktree_boundary(
+    workspace: Path, names: list[str]
+) -> tuple[list[dict[str, Any]], str]:
+    repositories = _repository_facts(workspace, names)
+    for repository in repositories[1:]:
+        if not repository["worktree_clean"]:
+            raise RuntimeError("工程架构设计期间子仓库必须保持 clean")
+    root_status = repositories[0]["status"]
+    document_status = _document_status(workspace)
+    if " -> " in root_status or root_status != document_status:
+        raise RuntimeError("产品根仓库存在固定工程架构文档范围外的修改")
+    return repositories, root_status
+
+
+def architecture_repair(workspace: Path) -> str | None:
+    try:
+        path = resolve_workspace_output(workspace, ARCHITECTURE_PATH.as_posix())
+    except ValueError as error:
+        raise RuntimeError("工程架构设计文档路径不符合约定") from error
+    current = workspace
+    for part in ARCHITECTURE_PATH.parts:
+        current /= part
+        if current.is_symlink():
+            raise RuntimeError("工程架构设计文档路径不能包含符号链接")
+    if not path.exists():
+        return ARCHITECTURE_REPAIR_PROMPT
+    if not path.is_file():
+        raise RuntimeError("工程架构设计文档必须是普通文件")
+    try:
+        if not path.read_text(encoding="utf-8").strip():
+            return ARCHITECTURE_REPAIR_PROMPT
+    except (OSError, UnicodeError) as error:
+        raise RuntimeError("工程架构设计文档不可读取") from error
+    return None
+
+
+def _conversation_reference(state: dict[str, Any]) -> Path | None:
+    references = state.get("decision_conversations")
+    if references is None:
+        return None
+    if not isinstance(references, dict):
+        raise RuntimeError("工程架构决策历史引用不符合约定")
+    reference = references.get(CONVERSATION_KEY)
+    if reference is None:
+        return None
+    expected = Path("conversations") / f"{CONVERSATION_KEY}.json"
+    if not isinstance(reference, dict) or reference.get("path") != expected.as_posix():
+        raise RuntimeError("工程架构决策历史引用不符合约定")
+    return expected
+
+
+def _session(state: dict[str, Any]) -> str | None:
+    sessions = state.get("claude_sessions")
+    if sessions is None:
+        return None
+    if not isinstance(sessions, dict):
+        raise RuntimeError("工程架构 Claude session 状态不符合约定")
+    value = sessions.get(CONVERSATION_KEY)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise RuntimeError("工程架构 Claude session ID 不符合约定")
+    return value
+
+
+def _safe_conversation_path(run_dir: Path) -> Path:
+    resolved_run_dir = run_dir.resolve()
+    conversations = run_dir / "conversations"
+    conversations_present = conversations.exists() or conversations.is_symlink()
+    if conversations_present:
+        if conversations.is_symlink() or not conversations.is_dir():
+            raise RuntimeError("工程架构 conversations 路径必须是非符号链接目录")
+        resolved_conversations = conversations.resolve()
+        if resolved_conversations.parent != resolved_run_dir:
+            raise RuntimeError("工程架构 conversations 路径越出运行目录")
+    else:
+        resolved_conversations = resolved_run_dir / "conversations"
+
+    path = conversations / f"{CONVERSATION_KEY}.json"
+    if path.exists() or path.is_symlink():
+        if path.is_symlink() or not path.is_file():
+            raise RuntimeError("工程架构决策历史必须是非符号链接普通文件")
+        if path.resolve().parent != resolved_conversations:
+            raise RuntimeError("工程架构决策历史路径越出 conversations 目录")
+    return path
+
+
+def _conversation_messages(path: Path) -> list[dict[str, str]]:
+    conversation = _read_json(path, "工程架构决策历史不可读取")
+    if set(conversation) != {"messages"}:
+        raise RuntimeError("工程架构决策历史内容不符合约定")
+    messages = conversation.get("messages")
+    if not isinstance(messages, list) or not messages:
+        raise RuntimeError("工程架构决策历史内容不符合约定")
+    normalized: list[dict[str, str]] = []
+    for message in messages:
+        if (
+            not isinstance(message, dict)
+            or set(message) != {"role", "content"}
+            or message.get("role") not in {"system", "assistant", "user"}
+            or not isinstance(message.get("content"), str)
+        ):
+            raise RuntimeError("工程架构决策历史消息不符合约定")
+        normalized.append({"role": message["role"], "content": message["content"]})
+    if normalized[0]["role"] != "system":
+        raise RuntimeError("工程架构决策历史首条消息必须是 system")
+    return normalized
+
+
+def _has_structured_decision(messages: list[dict[str, str]]) -> bool:
+    for message in messages:
+        if message["role"] != "assistant":
+            continue
+        try:
+            parse_agent_decision(message["content"])
+        except ValueError:
+            continue
+        return True
+    return False
+
+
+def _fresh_artifacts_present(run_dir: Path, state: dict[str, Any]) -> bool:
+    sessions = state.get("claude_sessions")
+    references = state.get("decision_conversations")
+    conversation_path = _safe_conversation_path(run_dir)
+    return (
+        isinstance(sessions, dict)
+        and CONVERSATION_KEY in sessions
+        or isinstance(references, dict)
+        and CONVERSATION_KEY in references
+        or conversation_path.exists()
+        or conversation_path.is_symlink()
+        or CONVERSATION_KEY in state
+    )
+
+
+def _validate_execution_anchor(
+    run_dir: Path,
+    state: dict[str, Any],
+    *,
+    fresh: bool,
+    initial_agent_prompt: str,
+) -> bool:
+    if fresh and _fresh_artifacts_present(run_dir, state):
+        raise RuntimeError("新鲜工程架构设计入口不得包含既有执行产物")
+
+    session = _session(state)
+    reference = _conversation_reference(state)
+    path = _safe_conversation_path(run_dir)
+    path_present = path.exists() or path.is_symlink()
+    if path_present and reference is None:
+        raise RuntimeError("工程架构设计恢复存在未引用的决策历史")
+    if reference is not None and not path_present:
+        raise RuntimeError("工程架构设计恢复缺少原决策历史")
+    if path_present and (path.is_symlink() or not path.is_file()):
+        raise RuntimeError("工程架构设计恢复决策历史必须是非符号链接普通文件")
+
+    messages = _conversation_messages(path) if path_present else []
+    section = state.get(CONVERSATION_KEY)
+    if section is not None and not isinstance(section, dict):
+        raise RuntimeError("工程架构设计执行状态不符合约定")
+    section_has_facts = isinstance(section, dict) and bool(section)
+    history_has_agent_reply = any(message["role"] == "user" for message in messages)
+    history_has_decision = _has_structured_decision(messages)
+    history_has_commit_prompt = any(
+        message == {"role": "assistant", "content": COMMIT_REPAIR_PROMPT}
+        for message in messages
+    )
+    execution_facts = (
+        session is not None
+        or section_has_facts
+        or history_has_agent_reply
+        or history_has_decision
+        or history_has_commit_prompt
+    )
+    if execution_facts and session is None:
+        raise RuntimeError("工程架构设计恢复缺少原 Claude session")
+    if session is not None and reference is None:
+        raise RuntimeError("工程架构设计恢复缺少原决策历史引用")
+
+    if session is None and messages:
+        allowed = [
+            messages[:1],
+            [
+                messages[0],
+                {"role": "assistant", "content": initial_agent_prompt},
+            ],
+        ]
+        if messages not in allowed:
+            raise RuntimeError("工程架构设计无 session 历史包含 Agent 执行事实")
+
+    if state.get("status") == "blocked":
+        try:
+            tail = messages[-1]
+            if tail["role"] != "assistant":
+                raise ValueError
+            decision = parse_agent_decision(tail["content"])
+        except (IndexError, KeyError, ValueError):
+            raise RuntimeError("工程架构设计恢复缺少有效的 blocked 决策历史") from None
+        if decision.verdict != "blocked":
+            raise RuntimeError("工程架构设计恢复历史尾部不是 blocked 决策")
+    return execution_facts
+
+
+def _commit_requested(run_dir: Path, state: dict[str, Any]) -> bool:
+    path = _safe_conversation_path(run_dir)
+    if _session(state) is None:
+        return False
+    relative = _conversation_reference(state)
+    if relative is None:
+        return False
+    if path != run_dir / relative:
+        raise RuntimeError("工程架构决策历史引用路径不符合约定")
+    if not path.is_file():
+        raise RuntimeError("工程架构决策历史不存在")
+    messages = _conversation_messages(path)
+    for index, message in enumerate(messages[:-1]):
+        reply = messages[index + 1]
+        if (
+            message == {"role": "assistant", "content": COMMIT_REPAIR_PROMPT}
+            and reply["role"] == "user"
+            and bool(reply["content"].strip())
+        ):
+            return True
+    return False
+
+
+def _result_repositories(repositories: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "name": repository["name"],
+            "path": repository["path"],
+            "branch": repository["branch"],
+            "worktree_clean": repository["worktree_clean"],
+        }
+        for repository in repositories
+    ]
+
+
+def _completion_ready(
+    run_dir: Path,
+    state: dict[str, Any],
+    workspace: Path,
+    names: list[str],
+) -> tuple[bool, list[dict[str, Any]]]:
+    repositories, root_status = _verify_worktree_boundary(workspace, names)
+    ready = (
+        architecture_repair(workspace) is None
+        and _commit_requested(run_dir, state)
+        and root_status == ""
+        and _document_tracked(workspace)
+    )
+    return ready, repositories
+
+
+def verify_existing_success(run_dir: Path) -> dict[str, Any]:
+    existing = _read_json(run_dir / "steps" / "09.json", "第 9 步成功结果不可读取")
+    expected_keys = {
+        "step",
+        "name",
+        "status",
+        "summary",
+        "applicable",
+        "outputs",
+        "blocked",
+        "error",
+    }
+    if (
+        set(existing) != expected_keys
+        or existing.get("step") != STEP
+        or existing.get("name") != NAME
+        or existing.get("status") != "success"
+        or existing.get("applicable") is not True
+        or existing.get("outputs") != [ARCHITECTURE_PATH.as_posix()]
+        or existing.get("blocked") is not None
+        or existing.get("error") is not None
+    ):
+        raise RuntimeError("第 9 步成功结果不可复用")
+    return existing
+
+
+def advance_success(
+    run_dir: Path,
+    state: dict[str, Any],
+    names: list[str],
+    repositories: list[dict[str, Any]],
+) -> dict[str, Any]:
+    saved = result(
+        "success",
+        "engineering-architecture 已生成固定工程架构设计文档并完成提交核验。",
+        outputs=[ARCHITECTURE_PATH.as_posix()],
+    )
+    write_step_result(run_dir, STEP, saved)
+    state.update(
+        {
+            "status": "success",
+            "phase": "project_initialization",
+            "step": STEP + 1,
+            "current_step": STEP + 1,
+            "current_node": NEXT_NODE,
+            "applicable_repositories": names,
+            "repositories": _result_repositories(repositories),
+            "blocked": None,
+            "error": None,
+        }
+    )
+    write_state(run_dir, state)
+    return saved
+
+
+def initial_prompt(product_outputs: list[str], names: list[str]) -> str:
+    product_references = "\n".join(f"- @./{output}" for output in product_outputs)
+    engineering_references = "\n".join(
+        "- 产品根工程：@./" if name == "root" else f"- {name} 工程：@./{name}"
+        for name in names
+    )
+    return f"""/engineering-architecture
+请基于权威领域资料和当前实际工程，创建或更新唯一固定产物 `docs/design/工程架构设计.md`。
+
+权威产品定义：
+{product_references}
+
+项目准备事实：
+- @./{CHECKLIST.as_posix()}
+
+总体技术方案：
+- @./{DESIGN_PATH.as_posix()}
+
+实际工程：
+{engineering_references}
+
+文档应把总体技术方案落实为可执行的工程结构和协作规则，明确各工程及模块职责、目录和代码组织、依赖方向与边界、关键接口和数据契约、配置与环境管理、错误与可观测性约定、测试和质量门禁、构建部署运行方式、安全约束、技术债及演进规则；区分现有工程事实、确认决定、目标、假设和待确认事项，并与实际工程保持一致。
+
+只允许创建或更新固定产物，不得实现业务功能、修改工程代码或配置、修改 `CLAUDE.md`、`AGENTS.md` 或其它项目规则、执行 Git 写操作、处理秘密。最终完整回复须列出文档路径、依据的工程事实、主要架构决定、风险与未决事项、未验证范围。"""
+
+
+async def run(
+    run_dir: Path,
+    state: dict[str, Any],
+    *,
+    agent_runner=run_claude,
+    decision_runner=request_decision,
+    config_loader=LLMConfig.load,
+) -> dict[str, Any]:
+    workspace, product_outputs, names, checklist, design = validate_inputs(run_dir, state)
+    position = (state.get("step"), state.get("current_step"), state.get("current_node"))
+    existing_step_status = step_result_status(run_dir, STEP)
+    initial_agent_prompt = initial_prompt(product_outputs, names)
+    fresh = (
+        position == (STEP, STEP, CURRENT_NODE)
+        and state.get("status") == "success"
+        and existing_step_status != "success"
+    )
+    started = _validate_execution_anchor(
+        run_dir,
+        state,
+        fresh=fresh,
+        initial_agent_prompt=initial_agent_prompt,
+    )
+    repositories, root_status = _verify_worktree_boundary(workspace, names)
+
+    if position == (STEP + 1, STEP + 1, NEXT_NODE) and state.get("status") == "success":
+        verify_existing_success(run_dir)
+        ready, repositories = _completion_ready(run_dir, state, workspace, names)
+        if not ready:
+            raise RuntimeError("第 9 步成功后固定文档或仓库状态发生漂移")
+        return result(
+            "success",
+            "engineering-architecture 已生成固定工程架构设计文档并完成提交核验，确认既有成功。",
+            outputs=[ARCHITECTURE_PATH.as_posix()],
+        )
+
+    if position != (STEP, STEP, CURRENT_NODE):
+        raise RuntimeError("运行状态不位于工程架构设计锚点")
+
+    if existing_step_status == "success":
+        verify_existing_success(run_dir)
+        ready, repositories = _completion_ready(run_dir, state, workspace, names)
+        if not ready:
+            raise RuntimeError("第 9 步既有成功缺少有效固定文档或 clean 仓库")
+        return advance_success(run_dir, state, names, repositories)
+
+    if not started and (root_status != "" or any(not item["worktree_clean"] for item in repositories)):
+        raise RuntimeError("首次工程架构 Agent 执行前第 8 步权威仓库必须全仓 clean")
+
+    if state.get("status") != "blocked":
+        state.update(
+            {"current_step": STEP, "status": "running", "blocked": None, "error": None}
+        )
+        write_state(run_dir, state)
+
+    decision_spec = replace(
+        DECISION_LOOP_SPEC,
+        decision_system_prompt=render_decision_system_prompt(
+            ENGINEERING_ARCHITECTURE_DECISION_RULES,
+            {
+                "产品定义": product_output_contents(workspace, product_outputs),
+                "项目准备清单": checklist,
+                "总体技术方案": design,
+                "权威工程": names,
+                "固定输出": ARCHITECTURE_PATH.as_posix(),
+            },
+        ),
+    )
+
+    def completion_verifier() -> str | None:
+        verified_workspace, _, verified_names, _, _ = validate_inputs(run_dir, state)
+        _, verified_root_status = _verify_worktree_boundary(
+            verified_workspace, verified_names
+        )
+        repair = architecture_repair(verified_workspace)
+        if repair is not None:
+            return repair
+        if not _commit_requested(run_dir, state):
+            return COMMIT_REPAIR_PROMPT
+        if verified_root_status != "" or not _document_tracked(verified_workspace):
+            return COMMIT_REPAIR_PROMPT
+        return None
+
+    async def _verified_decision_runner(
+        messages: list[dict[str, str]],
+        config: Any,
+        *,
+        system_prompt: str,
+    ) -> Any:
+        _verify_worktree_boundary(workspace, names)
+        return await decision_runner(
+            messages,
+            config,
+            system_prompt=system_prompt,
+        )
+
+    decision = await run_agent_decision_loop(
+        run_dir,
+        state,
+        workspace,
+        decision_spec,
+        initial_agent_prompt,
+        completion_verifier,
+        agent_runner=agent_runner,
+        decision_runner=_verified_decision_runner,
+        config_loader=config_loader,
+    )
+
+    if decision.verdict == "blocked":
+        ready, repositories = _completion_ready(run_dir, state, workspace, names)
+        if ready:
+            return advance_success(run_dir, state, names, repositories)
+        outputs = (
+            [ARCHITECTURE_PATH.as_posix()]
+            if architecture_repair(workspace) is None
+            else []
+        )
+        blocked = {
+            "reason": decision.reason,
+            "required_inputs": decision.required_inputs,
+            "resume_phase": "project_initialization",
+            "resume_node": CURRENT_NODE,
+            "resume_step": STEP,
+        }
+        saved = result(
+            "blocked",
+            decision.reason,
+            outputs=outputs,
+            blocked=blocked,
+        )
+        write_step_result(run_dir, STEP, saved)
+        state.update(
+            {
+                "status": "blocked",
+                "step": STEP,
+                "current_step": STEP,
+                "current_node": CURRENT_NODE,
+                "blocked": blocked,
+                "error": None,
+            }
+        )
+        write_state(run_dir, state)
+        raise EngineeringArchitectureBlocked(
+            decision.reason, decision.required_inputs, outputs
+        )
+
+    ready, repositories = _completion_ready(run_dir, state, workspace, names)
+    if not ready:
+        raise RuntimeError("工程架构设计完成核验后固定文档或仓库状态不符合约定")
+    return advance_success(run_dir, state, names, repositories)

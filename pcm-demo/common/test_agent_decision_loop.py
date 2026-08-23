@@ -752,7 +752,7 @@ class AgentDecisionTest(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertTrue(prompt.startswith("<role>\n"))
-        self.assertTrue(prompt.endswith("</require>"))
+        self.assertTrue(prompt.endswith("</output>\n"))
         for tag in (
             "<role>",
             "</role>",
@@ -760,8 +760,10 @@ class AgentDecisionTest(unittest.IsolatedAsyncioTestCase):
             "</project_context>",
             "<responsibility>",
             "</responsibility>",
-            "<require>",
-            "</require>",
+            "<completion>",
+            "</completion>",
+            "<output>",
+            "</output>",
         ):
             self.assertIn(tag, prompt)
         for required in (
@@ -769,11 +771,21 @@ class AgentDecisionTest(unittest.IsolatedAsyncioTestCase):
             "assistant 是你此前发给 Agent 的指令或结构化回复",
             "user 是 Agent 返回给你的完整执行结果",
             "completed 表示领域工作已完成",
-            "只包含 verdict、answer、reason 和 required_inputs",
+            '"verdict": "completed | continue | blocked"',
+            "首字符必须是 {，末字符必须是 }",
+            "`completed`：`answer` 必须是空字符串",
+            "`continue`：`answer` 必须是非空的下一步指令",
+            "`blocked`：`answer` 必须是空字符串",
+            "`reason` 始终必须是非空字符串",
+            "禁止 JSON 之外的任何文本",
             "原始项目资料 &lt;tag&gt; &amp; 内容",
         ):
             self.assertIn(required, prompt)
-        self.assertNotIn("严格 JSON", prompt)
+        self.assertEqual(prompt.count("completed 表示领域工作已完成"), 1)
+        responsibility = prompt.partition("<responsibility>")[2].partition("</responsibility>")[0]
+        completion = prompt.partition("<completion>")[2].partition("</completion>")[0]
+        self.assertNotIn("completed 表示领域工作已完成", responsibility)
+        self.assertIn("completed 表示领域工作已完成", completion)
         self.assertNotIn("```", prompt)
 
     def test_strict_invariants_and_legacy_actions(self) -> None:

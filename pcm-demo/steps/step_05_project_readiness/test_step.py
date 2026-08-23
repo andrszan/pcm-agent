@@ -203,7 +203,7 @@ class ProjectReadinessTests(unittest.TestCase):
                 *,
                 system_prompt: str,
             ) -> tuple[dict[str, object], int, str]:
-                for tag in ("role", "project_context", "responsibility", "require"):
+                for tag in ("role", "project_context", "responsibility", "completion", "output"):
                     self.assertIn(f"<{tag}>", system_prompt)
                     self.assertIn(f"</{tag}>", system_prompt)
                 for required in (

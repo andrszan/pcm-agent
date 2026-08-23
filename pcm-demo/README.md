@@ -13,6 +13,7 @@
 - [第 6 步：项目化基础工程](steps/step_06_project_bootstrap/README.md)
 - [第 7 步：总体技术方案](steps/step_07_solution_design/README.md)
 - [第 8 步：首次提交适用仓库](steps/step_08_initialize_repositories/README.md)
+- [第 9 步：工程架构设计](steps/step_09_engineering_architecture/README.md)
 
 每个步骤的业务代码、测试和详细运行说明都在对应步骤目录中。根 README 只提供导航。
 
@@ -25,13 +26,13 @@ uv sync
 uv run python -m unittest discover -s . -t . -p 'test*.py' -v
 ```
 
-该入口从 `pcm-demo/` 根递归发现 `common/` 与 `steps/` 测试。当前第 8 步专属 17 项、公共循环 24 项、第 4/6/7 步回归 31 项、定向 74 项及全量 112 项均已通过；`compileall`、`git diff --check` 通过，IDE 无诊断，独立审查无高、中问题。
+该入口从 `pcm-demo/` 根递归发现 `common/` 与 `steps/` 测试。当前第 9 步专属 29 项、公共循环 24 项、第 7 步 8 项、第 8 步 17 项，相关定向 78 项及全量 141 项均已通过；`compileall`、`git diff --check` 通过，IDE 对第 9 步无诊断。本轮文档更新后的最终审查由主代理执行。
 
 ## 最近真实验证
 
 隔离 run `agent-loop-step7-20260822T190149Z` 已真实验证公共循环的第 7 步路径：初次环境内部 Explore 子代理模型错误超时后保留 session 与初始对话；仅在隔离历史追加普通 assistant 提示后从同一 session 恢复，完成正常 `success`、两次 `completed` 裁决和固定方案文档补完核验，最终推进到第 8 步。隔离副本未修改既有 `step01-mendmark`；该测试提示和文档置空 failpoint 均不属于生产代码或生产 prompt。
 
-Probe C 的早期成功证据保留于 `probe-c-20260822T185623Z`：普通决定为 `continue`（2 次格式尝试），boundary 为 `blocked`（1 次）。这些以及 `probe-c-20260822T200038Z` 的格式重试相关结果都是旧合同下的历史事实。现行 `request_decision` 要求调用方显式传入完整 XML system prompt，并将其原样用于一次 `responses.parse`，以 Pydantic `AgentDecision` 取得结构化输出；没有公共默认或隐藏追加 prompt，也没有格式重试。现行 XML prompt 已完成一次真实交接事实回放，但 Probe C 尚未按新合同单独重跑，服务重复稳定性仍是验证缺口。
+Probe C 的早期成功证据保留于 `probe-c-20260822T185623Z`，后续格式重试结果均为旧合同历史。现行 `request_decision` 使用五段 XML system prompt、一次 `responses.parse` 和 Pydantic `AgentDecision`，没有公共默认、隐藏追加 prompt 或格式重试；该合同已经由第 9 步 fresh 真实运行和合法最终 JSON decision 验证。
 
 第 8 步首个真实 run `step08-real-20260823-a` 是**旧“唯一初始提交证明”合同**下的失败历史：第 1 步依次出现代码围栏、Responses `incomplete`、自创字段，收紧严格 JSON prompt 后同 run 成功；第 3 步一次 `ValidationError` 后同 run 重试成功；第 7 步 API 500 暴露 failed `07.json` 错误阻断恢复，修正为只有 `status=success` 才复用后同 session 成功。第 8 步因模板快照的 `.coverage` 成为根仓未跟踪垃圾，Agent 未提交，而决策模型重复索取调用方授权并耗尽 8 轮；该 run 未产生任何三仓提交。
 
@@ -47,4 +48,12 @@ Probe C 的早期成功证据保留于 `probe-c-20260822T185623Z`：普通决定
 
 backend 提交摘要中的 Ruff、格式、build 通过和 `pytest` 14 passed、1 skipped（数据库集成测试需显式 `DB_*`）是 Agent 报告，不是本次 Python verifier 条件，也不改变第 6 步历史项目化验证。`step08-real-20260823-a/b` 继续仅作为旧“唯一初始提交证明”合同历史，不再用于说明当前合同尚未真实联调；本次首次成功包含 run-local 恢复指令，不能宣称环境内部子代理问题已经解决或无需恢复。
 
-Git 忽略 run `prompt-role-replay-20260823` 已使用现行完整 XML system prompt 重建交接事实回放：复用 `step08-real-20260823-a` 中已成功完成的 `solution_design` 真实 Agent 对话和现行项目文件，真实 AI-compatible 服务以 `attempts=1` 返回 `completed`；`result.json` 记录四个 XML section 和当前 prompt 哈希。该回放不是新的 Claude Agent SDK 执行，也不代表重复调用稳定性已经得到证明。
+第 9 步代码、自动化和真实验收均已完成。旧失败历史包括账号 free quota / `use free tier only` 导致的 HTTP 403、服务恢复后返回非 JSON 普通文本，以及 `completed` 携带非空 `answer`；最终根因定位为旧 `render_decision_system_prompt` 将步骤规则混入 responsibility、硬编码并重复 completion 语义且缺少独立 output。用户将公共 prompt 重构为 `role/project_context/responsibility/completion/output` 五段，补齐 f-string JSON 花括号转义和 `AgentDecision` 字段组合约束，并同步 common 与第 2/5/6/7/9 步测试。
+
+按用户要求两次清理第 9 步局部 result、conversation、session、private state 和失败生成的未跟踪架构文档后，保留第 0～8 步历史与三仓提交并执行 fresh 运行。最终唯一 session 为 `f41fc439-4c46-434f-b3e9-d15c18c89601`，conversation 共 11 条：`system → assistant 初始 → user → assistant continue → user → assistant completed → assistant commit prompt → user → assistant continue → user → assistant completed`。首轮 Agent 请求确认后，负责人合法 `continue` 要求创建固定文档；Agent 创建约 32 KB 文档，只有根仓固定文档 dirty；负责人 `completed` 后 verifier 同 session 发送固定 `/commit-changes`。
+
+commit-changes 执行轮发现文档中的 frontend Git 事实矛盾，严格未修改、未暂存、未提交并报告。外层负责人随后通过普通 `continue` 授权通用 Claude Agent 仅修正固定文档并提交；Agent 精确完成。产品根提交为 `ead14dffe19bc6417634c24c7bb1103602c3b772`，message `docs: 新增工程架构设计`，仅新增 `docs/design/工程架构设计.md`，376 行、32928 字节；未 push，frontend/backend 无变化。最终严格 JSON decision 为 `completed`，`steps/09.json` 为 success，state 推进到 `project:10_ui_ux_framework`。
+
+独立核验确认 root/frontend/backend 均为自身 top-level、`main`、clean，固定文档 tracked。同 run 幂等重跑后 conversation 仍为 11 条，session 和 root HEAD 不变，没有再次调用 Agent、决策服务或产生新提交。`run_step.py` 只对 schema 完整的第 8、9 步 success 保护既有 result 和已推进 state；后续重跑失败不会覆盖 success 或回退节点，残缺 success 不保护，其它步骤保持原行为。第 10 步仍按需，当前进入其合同讨论。
+
+Git 忽略 run `prompt-role-replay-20260823` 保留旧四段 XML prompt 的历史交接回放；它不是现行五段 prompt 的证据。现行 `role/project_context/responsibility/completion/output` 合同已由第 9 步 fresh 真实运行验证。

@@ -125,21 +125,33 @@ def render_decision_system_prompt(
 3. 工作尚未完成时，在 answer 中给 Agent 一条明确、可直接执行的下一步指令。
 4. 根据 Agent 返回的执行结果判断当前工作是否已经完成。
 5. 只有缺少当前环境无法取得的不可替代外部资源时才能 blocked；不得用 Mock、假凭据或虚构资源消除阻塞。
-
-当前工作的判断标准：
-{responsibility.strip()}
 </responsibility>
 
-<require>
-返回 AgentDecision 定义的结构化结果，只包含 verdict、answer、reason 和 required_inputs。
+<completion>
+当前工作的判断标准：
+{responsibility.strip()}
+</completion>
 
-verdict 只能是 completed、continue 或 blocked：
-- completed 表示你根据 Agent 返回的执行结果相信当前工作已经完成；answer 必须为空，required_inputs 必须为空数组。
-- continue 表示仍需向 Agent 发送下一条明确指令；answer 必须是非空指令，required_inputs 必须为空数组。
-- blocked 仅表示缺少当前环境无法取得的不可替代外部资源；answer 必须为空，required_inputs 必须列出非空的解除条件。
+<output>
+只返回一个严格 JSON 对象：
 
-reason 必须说明本轮决定的依据。
-</require>"""
+{{
+  "verdict": "completed | continue | blocked",
+  "answer": "string",
+  "reason": "string",
+  "required_inputs": ["string"]
+}}
+
+首字符必须是 {{，末字符必须是 }}。字段名和字符串值必须使用双引号。
+字段组合必须满足：
+- `completed`：`answer` 必须是空字符串，`required_inputs` 必须是空数组。
+- `continue`：`answer` 必须是非空的下一步指令，`required_inputs` 必须是空数组。
+- `blocked`：`answer` 必须是空字符串，`required_inputs` 必须是非空数组，列出非空的解除条件。
+- `reason` 始终必须是非空字符串，必须说明本轮回复的依据。
+禁止 Markdown、代码围栏、YAML、注释。
+禁止 JSON 之外的任何文本。
+</output>
+"""
 
 
 def count_decisions(messages: list[dict[str, Any]]) -> int:
