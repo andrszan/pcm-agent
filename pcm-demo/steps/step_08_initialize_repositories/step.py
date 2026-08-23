@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -9,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from common.agent_decision_loop import AgentDecisionLoopSpec, run_agent_decision_loop
 from common.claude_agent import ClaudeRunResult, run_claude
-from common.decision import request_decision
+from common.decision import render_decision_system_prompt, request_decision
 from common.state import write_state, write_step_result
 from config import LLMConfig
 from steps.step_01_create_workspace.workspace import git, inspect_repository
@@ -47,15 +48,11 @@ INITIAL_COMMITS_REPAIR_PROMPT = (
     "其中仓库名称和顺序必须与权威清单完全一致。"
 )
 
-INITIALIZE_REPOSITORIES_DECISION_SYSTEM_PROMPT = """根据最新 Agent 回复判断仓库初始提交工作是否完成。
-
-- completed：权威仓库清单中的每个独立仓库均已有恰好一个无父提交的初始基线提交，工作区干净，根仓未纳入子仓或 gitlink，且最终回复最后一个非空行给出了完整、严格的 INITIAL_COMMITS_JSON 声明。
+INITIALIZE_REPOSITORIES_DECISION_RULES = """- completed：权威仓库清单中的每个独立仓库均已有恰好一个无父提交的初始基线提交，工作区干净，根仓未纳入子仓或 gitlink，且最终回复最后一个非空行给出了完整、严格的 INITIAL_COMMITS_JSON 声明。
 - continue：提交、核验或最终声明尚不完整，但可继续使用当前项目事实完成。
 - blocked：只能用于缺少当前环境无法取得的真实外部账号、凭据、私有数据、授权、专用设备、付费服务、合法 Git 作者身份、强制签名凭据或线下动作。
 
-你代表调用方。Agent 请求可由当前项目事实和既定约束决定的确认或授权时，必须直接在 answer 中作出明确决定，不得要求另一个调用方再提供授权文本；也不得授权修改工作树、改写历史或绕过检查来完成提交。
-
-填写 verdict、answer、reason 和 required_inputs。completed 的 answer 和 required_inputs 为空；continue 必须给出非空 answer 且 required_inputs 为空；blocked 的 answer 为空且 required_inputs 非空。reason 说明判断依据。直接输出结构化结果。"""
+Agent 请求可由当前项目事实和既定约束决定的确认或授权时，你必须直接在 answer 中作出明确决定，不得要求另一个调用方再提供授权文本；也不得授权修改工作树、改写历史或绕过检查来完成提交。"""
 
 DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     key=CONVERSATION_KEY,
@@ -64,7 +61,9 @@ DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     max_decision_rounds=MAX_DECISION_ROUNDS,
     max_turns=INITIALIZE_REPOSITORIES_MAX_TURNS,
     max_budget_usd=INITIALIZE_REPOSITORIES_MAX_BUDGET_USD,
-    decision_system_prompt=INITIALIZE_REPOSITORIES_DECISION_SYSTEM_PROMPT,
+    decision_system_prompt=render_decision_system_prompt(
+        INITIALIZE_REPOSITORIES_DECISION_RULES, {}
+    ),
 )
 
 
@@ -581,11 +580,28 @@ async def run(
             return INITIAL_COMMITS_REPAIR_PROMPT
         return None if declared == commits else INITIAL_COMMITS_REPAIR_PROMPT
 
+    decision_spec = replace(
+        DECISION_LOOP_SPEC,
+        decision_system_prompt=render_decision_system_prompt(
+            INITIALIZE_REPOSITORIES_DECISION_RULES,
+            {
+                "有序仓库": [
+                    {"name": name, "path": "." if name == "root" else name}
+                    for name in names
+                ],
+                "组装白名单事实": prompt_assembly(assembly),
+                "初始仓库基线": (
+                    "每个独立仓库使用 main；初始基线完成条件是每仓只有一个无父提交，"
+                    "工作区保持干净，根仓不包含子仓。"
+                ),
+            },
+        ),
+    )
     decision = await run_agent_decision_loop(
         run_dir,
         state,
         workspace,
-        DECISION_LOOP_SPEC,
+        decision_spec,
         initial_prompt(assembly, names),
         completion_verifier,
         agent_runner=_observing_agent_runner(run_dir, state, workspace, names, agent_runner),

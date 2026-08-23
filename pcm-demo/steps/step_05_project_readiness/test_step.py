@@ -23,7 +23,7 @@ from steps.step_05_project_readiness.step import (
     CHECKLIST,
     CURRENT_NODE,
     NEXT_NODE,
-    PROJECT_READINESS_DECISION_SYSTEM_PROMPT,
+    PROJECT_READINESS_DECISION_RULES,
     ProjectReadinessBlocked,
     checklist_contents,
     checklist_present,
@@ -133,14 +133,17 @@ class ProjectReadinessTests(unittest.TestCase):
             "error": None,
         }
         write_state(run_dir, state)
+        resource_list = root / "可信开发资源清单.md"
+        resource_list.write_text("资源清单正文不应内联\n", encoding="utf-8")
         return run_dir, workspace, state
 
     def run_step(self, run_dir: Path, state: dict, **kwargs: object) -> dict:
+        resource_list = run_dir.parent / "可信开发资源清单.md"
         return asyncio.run(
             run(
                 run_dir,
                 state,
-                resource_loader=lambda: (Path("/resource-list"), "test"),
+                resource_loader=lambda: (resource_list, "test"),
                 **kwargs,
             )
         )
@@ -181,7 +184,7 @@ class ProjectReadinessTests(unittest.TestCase):
         self.assertNotIn("origin", prompt)
         for forbidden in ("第 5 步", "第5步", "PCM", "节点", "阶段", "调用 Skill"):
             self.assertNotIn(forbidden, prompt)
-            self.assertNotIn(forbidden, PROJECT_READINESS_DECISION_SYSTEM_PROMPT)
+            self.assertNotIn(forbidden, PROJECT_READINESS_DECISION_RULES)
 
     def test_completed_decision_advances_after_checklist_and_preserves_agent_raw_text(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -200,7 +203,24 @@ class ProjectReadinessTests(unittest.TestCase):
                 *,
                 system_prompt: str,
             ) -> tuple[dict[str, object], int, str]:
-                self.assertEqual(system_prompt, PROJECT_READINESS_DECISION_SYSTEM_PROMPT)
+                for tag in ("role", "project_context", "responsibility", "require"):
+                    self.assertIn(f"<{tag}>", system_prompt)
+                    self.assertIn(f"</{tag}>", system_prompt)
+                for required in (
+                    "最高项目负责人、工程负责人、专业开发者和 Agent 专家",
+                    "assistant 是你此前发给 Agent 的指令或结构化回复",
+                    "user 是 Agent 返回给你的完整执行结果",
+                    "项目准备清单已经生成",
+                    "# 定义",
+                    "适用工程",
+                    "基础工程选择",
+                    '"readable": true',
+                ):
+                    self.assertIn(required, system_prompt)
+                self.assertNotEqual(system_prompt, PROJECT_READINESS_DECISION_RULES)
+                self.assertIn(str((run_dir.parent / "可信开发资源清单.md").resolve()), system_prompt)
+                for forbidden in ("资源清单正文不应内联", "file:///templates.git", "git_url", "origin"):
+                    self.assertNotIn(forbidden, system_prompt)
                 decision_inputs.append(copy.deepcopy(messages))
                 current = decision("completed", reason="清单与当前事实均已核验")
                 return current.model_dump(), 1, current.model_dump_json()

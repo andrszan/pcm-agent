@@ -198,7 +198,26 @@ class ProjectBootstrapTests(unittest.TestCase):
                 self.assertNotIn(forbidden, prompt)
             self.assertEqual(calls[0]["max_turns"], PROJECT_BOOTSTRAP_MAX_TURNS)
             self.assertEqual(calls[0]["max_budget_usd"], PROJECT_BOOTSTRAP_MAX_BUDGET_USD)
-            self.assertEqual(system_prompts, [DECISION_LOOP_SPEC.decision_system_prompt] * 2)
+            self.assertEqual(len(system_prompts), 2)
+            for system_prompt in system_prompts:
+                for tag in ("role", "project_context", "responsibility", "require"):
+                    self.assertIn(f"<{tag}>", system_prompt)
+                    self.assertIn(f"</{tag}>", system_prompt)
+                for required in (
+                    "最高项目负责人、工程负责人、专业开发者和 Agent 专家",
+                    "assistant 是你此前发给 Agent 的指令或结构化回复",
+                    "user 是 Agent 返回给你的完整执行结果",
+                    "产品根 README 和各适用工程的项目身份",
+                    "# 项目需求说明",
+                    "# 产品功能说明",
+                    "# 项目准备清单",
+                    '"frontend"',
+                    '"commit_sha"',
+                ):
+                    self.assertIn(required, system_prompt)
+                self.assertNotEqual(system_prompt, DECISION_LOOP_SPEC.decision_system_prompt)
+                for forbidden in ("file:///templates.git", "git_url", "origin"):
+                    self.assertNotIn(forbidden, system_prompt)
 
             saved = read_state(run_dir)
             self.assertEqual((saved["step"], saved["current_node"]), (7, NEXT_NODE))

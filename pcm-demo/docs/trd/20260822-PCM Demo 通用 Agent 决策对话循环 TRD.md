@@ -90,10 +90,10 @@ flowchart LR
 负责：
 
 - 定义统一 `AgentDecision`；
+- 将统一角色、消息语义、字段关系、步骤领域 `DECISION_RULES` 与已验证项目上下文渲染为新 conversation 的完整 XML system prompt；
 - 构造决策模型输入；
-- 使用步骤提供的 decision system prompt；
-- 统一附加严格 JSON 输出约束；
-- 对结构化格式错误执行唯一一次重试；
+- 要求调用方显式传入该 system prompt，并原样传给一次 `responses.parse` 调用；
+- 使用 Pydantic `AgentDecision` 取得结构化输出，不追加公共默认或隐藏格式 prompt，也不做格式重试。
 - 解析新决定和兼容旧 `action` 记录。
 
 ### 3.3 `common/agent_decision_loop.py`
@@ -116,7 +116,7 @@ flowchart LR
 
 - 校验上游结果和当前现场；
 - 生成 Agent 初始 Prompt；
-- 定义领域 decision system prompt；
+- 仅维护本步骤的领域 `DECISION_RULES`，并在调用公共循环前以已验证项目上下文生成动态 system snapshot；
 - 定义程序完成验证与 repair prompt；
 - 将公共 blocked 结果映射为步骤异常；
 - 写入 `steps/NN.json` 并推进下一节点。
@@ -136,7 +136,7 @@ required_inputs: string[]
 
 | verdict | answer | required_inputs | 含义 |
 |---|---|---|---|
-| `completed` | 空 | 空 | Agent 回复表明领域任务已经完成 |
+| `completed` | 空 | 空 | 负责人根据 Agent 的执行结果相信当前领域任务已完成，仍须通过步骤程序核验 |
 | `continue` | 非空 | 空 | 需要将明确指令发送回 Agent |
 | `blocked` | 空 | 非空 | 缺少不可替代外部资源 |
 
@@ -153,7 +153,7 @@ skill_name             必须实际加载的 Skill / slash command
 max_decision_rounds     最大结构化决定数
 max_turns               单次 Agent SDK turn 上限
 max_budget_usd          单次 Agent SDK 成本上限
-decision_system_prompt  当前领域完成判断条件
+decision_system_prompt 由统一渲染器生成的完整 system snapshot
 legacy_completion_messages  仅用于读取旧记录
 ```
 
@@ -254,9 +254,9 @@ runs/<run-id>/conversations/<key>.json
 
 角色约定：
 
-- `system`：本次 run 实际使用的决策 system prompt；
-- `assistant`：发给 Agent 的初始/继续/修复指令，或决策模型 JSON；
-- `user`：Claude Agent SDK 返回的完整真实回复。
+- `system`：新 conversation 保存的动态 system snapshot；恢复时严格读取历史 `messages[0]`，不重渲染或覆盖；
+- `assistant`：实际使用 Claude Code Agent 的项目负责人、工程负责人和 Agent 专家发给 Agent 的初始、继续或修复指令，或该负责人每轮返回的 `AgentDecision` JSON；
+- `user`：Claude Agent SDK 返回的完整真实 Agent 回复。
 
 ```mermaid
 stateDiagram-v2
@@ -376,7 +376,7 @@ Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重�
 - 输入、状态、路径或交接错误；
 - SDK、API、解析或程序错误；
 - Git、文件或完成验证冲突；
-- 唯一结构化重试后仍无法形成合法决定。
+- 无法形成合法结构化决定。
 
 `blocked` 和 `failed` 都终止本次程序运行。`continue` 只存在于公共循环内部，不成为第四种步骤结果。
 
@@ -385,27 +385,23 @@ Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重�
 每个步骤分别维护：
 
 1. Agent 初始 Prompt；
-2. decision system prompt；
+2. 领域 `DECISION_RULES`；
 3. 程序 repair prompt。
+
+`common/decision.py` 仅在新 conversation 创建时，将统一负责人角色、完整 conversation 的消息语义、`AgentDecision` 字段关系、该步骤领域规则和项目上下文渲染为完整 XML system snapshot；公共循环首次保存该 snapshot。恢复已有历史时严格使用 `messages[0]`，不依据当前文件重新渲染或覆盖历史。
 
 统一要求：
 
-- 首行 slash command 可显式选择当前能力；正文不写步骤编号、PCM 节点、阶段、session、轮次或 Skill 编排；
-- 正文只写领域任务、权威输入、固定产物、真实验证与边界；
-- 不复制 Skill 的完整执行流程；
-- decision system prompt 只定义领域完成、继续和阻塞标准；
-- repair prompt 只说明程序发现的固定缺口；
-- JSON 格式约束由 `common/decision.py` 统一追加，不在每个步骤重复。
+- snapshot 的 XML 标签严格为 `<role>`、`<project_context>`、`<responsibility>`、`<require>`；AI-compatible 角色是实际使用 Claude Code Agent 的项目负责人、工程负责人、专业开发者和 Agent 专家，`assistant` 是其此前发给 Agent 的指令或结构化回复，`user` 是 Agent 返回的完整执行结果；
+- `completed` 只表示负责人根据 Agent 执行结果相信当前任务完成，步骤程序仍以现有文件、Git、命令和交接 verifier 二次核验；
+- 首行 slash command 只属于 Agent initial prompt；该 prompt 正文不写步骤编号、PCM 节点、阶段、session 或 Skill 编排；
+- `request_decision` 的 system prompt 为必传参数，并原样传给一次 `responses.parse`；Pydantic `AgentDecision` 是唯一结构化输出合同，没有公共默认 system prompt、公共 JSON 追加 prompt 或格式重试；
+- 项目上下文范围固定为：第 2 步初稿原文和目标路径；第 5 步产品定义原文、适用工程、选型白名单投影及资源清单仅路径/可读性；第 6、7 步产品定义原文、准备清单原文、适用工程和组装白名单投影；第 8 步有序仓库相对路径、组装白名单投影和最小基线说明；第 8 步其余 Git、marker、`observed_heads` 与 verifier 不变；
+- 选型和组装投影不包含 `git_url`、`origin`、`remote`。资源清单正文和 `.env` 不进入项目上下文；资源清单仍按步骤 Agent initial prompt 的既有授权处理；
+- 项目上下文只做标准 XML 转义；
+- repair prompt 只说明程序发现的固定缺口。
 
-输入最小化：
-
-- 第 5 步只传递 readiness 所需的选型投影；
-- 第 6、7 步只传递白名单组装事实；
-- 第 8 步只传递有序权威仓库清单与白名单组装事实，由该步骤而非公共循环核验每个 Git 事实；
-- 不向 Prompt 传递 `git_url`、`origin` 或无关工程内容；
-- 第 7 步只读取足以支撑方案主张的工程事实，不要求机械扫描整个代码库。
-
-## 11. 完整回复与敏感信息
+## 11. 完整回复与输入边界
 
 新 run 的 Agent 回复在以下位置保持完全一致：
 
@@ -415,11 +411,7 @@ Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重�
 
 不进行后处理摘要或脱敏替换。run 目录由 Git 忽略。
 
-该存储合同不代表允许 Agent 输出秘密：
-
-- Agent Prompt 仍禁止主动展示秘密、完整 `.env` 或认证信息；
-- SDK/API 异常只保存安全类型、status 和 terminal reason；
-- 步骤错误、日志和用户输出不展示异常正文中的敏感值。
+资源清单正文和 `.env` 因输入来源边界不进入决策项目上下文。SDK/API 异常仍只保存类型、status 和 terminal reason。
 
 ## 12. 步骤适配
 
@@ -455,11 +447,11 @@ Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重�
 
 自动化验证：
 
-- 公共循环 23 项测试；
+- 公共循环 24 项测试；
 - 步骤测试共 85 项，其中第 8 步专属 14 项覆盖 root-only/三仓、单 Agent、repair、blocked 后部分提交恢复、最近观察 SHA、防 shallow、根 `.gitignore`、结果/state 中断和 CLI；
-- 全量 108 项 `unittest`；
-- `compileall`、`git diff --check` 和 IDE 诊断；
-- 独立只读审查及两项问题修复复核。
+- 五步与公共循环定向测试 71 项；
+- 全量 109 项 `unittest`；
+- `compileall`、`git diff --check` 通过；IDE 唯一剩余 warning 是编辑器未解析 Pydantic 环境，不是代码错误。
 
 兼容验证：
 
@@ -469,10 +461,12 @@ Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重�
 
 真实集成验证：
 
+- Git 忽略 run `prompt-role-replay-20260823` 已使用现行完整 XML system snapshot 重建交接事实回放：复用 `step08-real-20260823-a` 中已成功完成的 `solution_design` 真实 Agent 对话和现行项目文件，真实 AI-compatible 服务以 `attempts=1` 返回 `completed`，`result.json` 保存 XML section 和当前 prompt 哈希；这不是新的 Claude Agent SDK 执行，也不证明服务重复稳定。
+- 首次尝试复用旧隔离第 7 步工作区时，在请求 API 前因不满足现行第 4 步 Git 元数据合同停止；最终改用现行交接事实回放，不将该前置停止记录为失败 run。
 - 隔离 run：`agent-loop-step7-20260822T190149Z`；
 - 新 `solution_design` session 完成 init、错误现场保留和同 session 恢复；
 - 真实 Agent 正常结束并生成技术方案；
-- 决策服务经过严格 JSON 限定返回 `completed`；
+- 决策服务曾在旧格式约束下返回 `completed`；该历史不证明现行 XML prompt；
 - 隔离验证注入文档置空，触发固定 repair prompt；
 - 原 session 补回文档并再次 `completed`；
 - conversation 尾部为 `completed`，无旧 sentinel 或 `pending_agent_prompt`；
@@ -485,7 +479,6 @@ Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重�
 
 Probe C：
 
-- `probe-c-20260822T200038Z` 中普通决定为 `continue`、外部资源决定为 `blocked`，均一次解析成功；
-- 此前重复调用曾出现非 JSON 和 `status=incomplete`；
-- 当前实现严格返回 `failed`，不增加第三次重试或手写宽松解析；
-- AI-compatible 服务重复稳定性继续作为正式 PCM 的验证输入。
+- `probe-c-20260822T200038Z` 中普通决定为 `continue`、外部资源决定为 `blocked`，均一次解析成功；这是旧格式重试合同下的历史事实；
+- 现行实现要求步骤显式传入 XML system prompt，并以 Pydantic `AgentDecision` 调用一次 `responses.parse`，没有公共格式重试或隐藏追加 prompt；
+- 该服务在现行 prompt 下仍需重新验证，且其重复稳定性继续作为正式 PCM 的验证输入。

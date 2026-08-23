@@ -12,8 +12,19 @@ from typing import Any
 DEMO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(DEMO_ROOT))
 
-from common.decision import AgentDecision, SYSTEM_PROMPT, request_decision  # noqa: E402
+from common.decision import (  # noqa: E402
+    AgentDecision,
+    render_decision_system_prompt,
+    request_decision,
+)
 from config import LLMConfig  # noqa: E402
+
+PROBE_DECISION_SYSTEM_PROMPT = render_decision_system_prompt(
+    """completed 表示 Agent 的回复足以确认当前工作已经完成。
+continue 表示还需要向 Agent 发出明确的完成或收尾指令。
+blocked 仅表示完成任务缺少当前环境无法取得的真实外部资源。""",
+    {"验证目标": "验证普通继续或完成决定，以及不可替代外部资源阻塞决定。"},
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -37,23 +48,25 @@ async def probe(run_dir: Path) -> dict[str, Any]:
     config = LLMConfig.load()
     ordinary, ordinary_attempts, _ = await request_decision(
         [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": PROBE_DECISION_SYSTEM_PROMPT},
             {
                 "role": "user",
                 "content": "当前产物已经存在，Agent 请求明确指令以完成正式文档写入或收尾。请决定。",
             },
         ],
         config,
+        system_prompt=PROBE_DECISION_SYSTEM_PROMPT,
     )
     boundary, boundary_attempts, _ = await request_decision(
         [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": PROBE_DECISION_SYSTEM_PROMPT},
             {
                 "role": "user",
                 "content": "Agent 完成任务必须取得真实支付商户账号和生产密钥，当前资源清单没有这些资源。请决定。",
             },
         ],
         config,
+        system_prompt=PROBE_DECISION_SYSTEM_PROMPT,
     )
     ordinary_decision = AgentDecision.model_validate(ordinary)
     boundary_decision = AgentDecision.model_validate(boundary)

@@ -226,7 +226,29 @@ class InitializeRepositoriesTests(unittest.TestCase):
                 self.assertIsNone(calls[0]["resume_session_id"])
                 self.assertEqual(calls[0]["max_turns"], INITIALIZE_REPOSITORIES_MAX_TURNS)
                 self.assertEqual(calls[0]["max_budget_usd"], INITIALIZE_REPOSITORIES_MAX_BUDGET_USD)
-                self.assertEqual(decisions, [DECISION_LOOP_SPEC.decision_system_prompt])
+                self.assertEqual(len(decisions), 1)
+                system_prompt = decisions[0]
+                for tag in ("role", "project_context", "responsibility", "require"):
+                    self.assertIn(f"<{tag}>", system_prompt)
+                    self.assertIn(f"</{tag}>", system_prompt)
+                for required in (
+                    "最高项目负责人、工程负责人、专业开发者和 Agent 专家",
+                    "assistant 是你此前发给 Agent 的指令或结构化回复",
+                    "user 是 Agent 返回给你的完整执行结果",
+                    "权威仓库清单中的每个独立仓库",
+                    "有序仓库",
+                    "初始仓库基线",
+                    '"name": "root"',
+                    '"path": "."',
+                ):
+                    self.assertIn(required, system_prompt)
+                if outputs:
+                    self.assertIn('"commit_sha"', system_prompt)
+                else:
+                    self.assertIn('"frontend": null', system_prompt)
+                self.assertNotEqual(system_prompt, DECISION_LOOP_SPEC.decision_system_prompt)
+                for forbidden in ("file:///templates.git", "git_url", "origin", "remote", "# 总体技术方案"):
+                    self.assertNotIn(forbidden, system_prompt)
                 prompt = calls[0]["prompt"]
                 self.assertTrue(prompt.startswith("/commit-changes\n"))
                 self.assertIn("权威仓库清单", prompt)

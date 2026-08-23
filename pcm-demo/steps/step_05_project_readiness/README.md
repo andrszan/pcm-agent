@@ -16,10 +16,14 @@
 
 ## 统一决策与恢复
 
+本步骤只维护 readiness 的 `DECISION_RULES`。新 conversation 的完整 XML system snapshot 由 `common/decision.py` 渲染，严格包含 `<role>`、`<project_context>`、`<responsibility>`、`<require>` 四段：AI-compatible 角色是实际使用 Claude Code Agent 的项目负责人、工程负责人、专业开发者和 Agent 专家；`assistant` 是其此前发给 Agent 的指令或结构化回复，`user` 是 Agent 返回的完整执行结果。项目上下文仅包括两份产品定义原文、适用工程、选型白名单投影，以及资源清单的绝对路径和可读性；不读取或内联资源清单正文或 `.env`。恢复严格使用历史 `messages[0]`，不重渲染或覆盖。
+
+项目上下文只做标准 XML 转义。
+
 每次 Agent 调用保存 init 核验、session 和安全的终止摘要；完整真实 Agent 回复先作为决策历史 `user` 消息保存，再交给步骤专属决策 system prompt 生成统一 `AgentDecision`：
 
 - `continue` 的非空 `answer` 原样发给同一 session；它是内部循环，不产生步骤结果。
-- `completed` 后程序重新核验前序交接、产品根和全部适用子仓的 Git 边界（各自 top-level、`main`、unborn HEAD、空 index）及非空普通清单。清单可安全补完时，向同一 session 追加固定清单修复提示后继续；交接、路径、Git 或文件类型冲突为 `failed`。
+- `completed` 表示负责人根据 Agent 执行结果相信任务完成；程序随后重新核验前序交接、产品根和全部适用子仓的 Git 边界（各自 top-level、`main`、unborn HEAD、空 index）及非空普通清单。清单可安全补完时，向同一 session 追加固定清单修复提示后继续；交接、路径、Git 或文件类型冲突为 `failed`。
 - `blocked` 只表示当前环境不可取得的真实账号、凭据、私有数据、授权、专用设备、素材、付费服务或线下动作；写入终止前同样复核上述 Git 边界。CLI 保持原有三态结果格式，并在清单已存在时保留其输出引用。
 - `error_max_turns`、`error_max_budget_usd` 只在有 session 和非空回复时进入裁决；最终完成前必须恢复一次正常 `success`。400/429/500、连接、CLI/进程、无 `ResultMessage` 与其它 SDK/API 错误返回 `failed`，没有外层自定义 HTTP 重试。
 

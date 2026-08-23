@@ -16,10 +16,14 @@
 
 ## 统一决策循环
 
+新 conversation 的完整 XML system snapshot 由 `common/decision.py` 渲染，严格包含 `<role>`、`<project_context>`、`<responsibility>`、`<require>` 四段：AI-compatible 角色是实际使用 Claude Code Agent 的项目负责人、工程负责人、专业开发者和 Agent 专家；`assistant` 是其此前发给 Agent 的指令或结构化回复，`user` 是 Agent 返回的完整执行结果。步骤只维护产品定义的 `DECISION_RULES`；首次保存 snapshot 时嵌入已核验的初稿原文和两份目标路径，恢复已有对话时严格使用历史 `messages[0]`，不重渲染或覆盖。
+
+项目上下文只做标准 XML 转义。
+
 本步骤通过 `common/agent_decision_loop.py` 运行与恢复：每次 Agent 调用先持久化 session、终止摘要和**完整真实回复**，再将回复作为决策历史的 `user` 消息交给 `AgentDecision` 裁决。
 
 - 决定只有 `completed`、`continue`、`blocked`；`continue.answer` 原样恢复同一 session，`blocked` 只表示不可替代的外部资源缺失。
-- `completed` 不直接推进步骤。程序重新核验两份目标文档均为非空普通文件；缺失或为空时，向同一 session 追加固定修复提示并继续。路径、交接或核验冲突为 `failed`。
+- `completed` 表示负责人根据 Agent 执行结果相信任务完成，但不直接推进步骤。程序重新核验两份目标文档均为非空普通文件；缺失或为空时，向同一 session 追加固定修复提示并继续。路径、交接或核验冲突为 `failed`。
 - 正常 `success`、`error_max_turns` 和 `error_max_budget_usd` 只是在进入裁决前的 SDK 终止结果；后两者必须同时具有 session 与非空回复，且后续必须取得正常 `success` 才能最终完成。API 400/429/500、连接或 CLI/进程错误、无 `ResultMessage` 和其它 SDK 错误均为 `failed`，不在外层自定义 HTTP 重试。
 - 对话文件的尾部是恢复和调度事实：`user` 尾部先裁决，`continue` 尾部发送其 `answer`，`completed` 尾部先核验，`blocked` 尾部终止；只有显式从 `blocked` 重跑时才在原 session 重新核验。旧 `action` 与旧完成 sentinel 仅只读兼容，旧记录不会转换回写。
 

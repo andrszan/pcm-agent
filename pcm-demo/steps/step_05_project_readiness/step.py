@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from common.agent_decision_loop import AgentDecisionLoopSpec, run_agent_decision_loop
 from common.claude_agent import run_claude
-from common.decision import request_decision
+from common.decision import render_decision_system_prompt, request_decision
 from common.files import resolve_workspace_output
 from common.state import step_result_status, write_state, write_step_result
 from config import LLMConfig, load_dev_resource_list
@@ -28,13 +30,9 @@ MAX_DECISION_ROUNDS = 6
 PROJECT_READINESS_MAX_TURNS = 24
 PROJECT_READINESS_MAX_BUDGET_USD = 8.0
 
-PROJECT_READINESS_DECISION_SYSTEM_PROMPT = """根据当前项目准备核验工作和 Agent 对话填写 verdict、answer、reason 与 required_inputs。
-
-completed 表示项目准备清单已经生成，且当前产品定义、实际工程和可用开发资源足以确认进入基础工程项目化前的条件；answer 必须为空，required_inputs 必须为空数组。
-continue 表示还需向自动化开发者给出明确指令以核验、补全或修复项目准备清单；answer 必须是非空指令，required_inputs 必须为空数组。
-blocked 仅表示缺少当前环境无法取得的真实外部账号、凭据、私有数据、客户授权、专用设备、素材、付费服务或线下动作；answer 必须为空，required_inputs 必须列出非空解除条件。
-
-AI-compatible 模型代表自动化开发者，可对当前资料足以支持的产品和执行事项作出决定；资料歧义或存在多种合理方案时应选择合理方案继续，不得因此 blocked。reason 说明决定依据。直接输出结构化结果，不要使用 Markdown 或代码围栏。"""
+PROJECT_READINESS_DECISION_RULES = """completed 表示项目准备清单已经生成，且当前产品定义、实际工程和可用开发资源足以确认进入基础工程项目化前的条件。
+continue 表示还需给出明确指令以核验、补全或修复项目准备清单。
+blocked 仅表示缺少当前环境无法取得的真实外部账号、凭据、私有数据、客户授权、专用设备、素材、付费服务或线下动作。"""
 
 DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     key=CONVERSATION_KEY,
@@ -43,7 +41,7 @@ DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     max_decision_rounds=MAX_DECISION_ROUNDS,
     max_turns=PROJECT_READINESS_MAX_TURNS,
     max_budget_usd=PROJECT_READINESS_MAX_BUDGET_USD,
-    decision_system_prompt=PROJECT_READINESS_DECISION_SYSTEM_PROMPT,
+    decision_system_prompt=render_decision_system_prompt(PROJECT_READINESS_DECISION_RULES, {}),
     legacy_completion_messages=(
         "已完成 project-readiness：项目准备清单已生成并通过文件事实核验。",
     ),
@@ -164,6 +162,33 @@ def load_product_outputs(run_dir: Path, workspace: Path) -> list[str]:
     if len({path.resolve() for path in resolved}) != 2:
         raise RuntimeError("第 2 步产品定义产物不能指向同一文件")
     return outputs
+
+
+def product_output_contents(workspace: Path, outputs: list[str]) -> dict[str, str]:
+    """读取已通过路径和非空核验的产品定义正文。"""
+
+    contents: dict[str, str] = {}
+    for output in outputs:
+        try:
+            path = resolve_workspace_output(workspace, output)
+            content = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError, ValueError) as error:
+            raise RuntimeError("第 2 步产品定义产物不可读取") from error
+        if not content.strip():
+            raise RuntimeError("第 2 步产品定义产物不是非空普通文件")
+        contents[output] = content
+    return contents
+
+
+def resource_list_facts(resource_list: Path) -> dict[str, str | bool]:
+    """返回已验证资源清单的非敏感位置事实，不读取其正文。"""
+
+    if not resource_list.is_absolute() or resource_list.is_symlink():
+        raise RuntimeError("可信开发资源清单必须是非符号链接绝对路径")
+    resolved = resource_list.resolve()
+    if not resolved.is_file() or resolved.is_symlink() or not os.access(resolved, os.R_OK):
+        raise RuntimeError("可信开发资源清单必须是可读的普通文件")
+    return {"path": str(resolved), "readable": True}
 
 
 def load_selection(run_dir: Path) -> FoundationSelectionResult:
@@ -326,6 +351,19 @@ async def run(
         raise RuntimeError("运行状态不位于项目准备核验锚点")
 
     resource_list, _ = resource_loader()
+    resource_facts = resource_list_facts(resource_list)
+    decision_spec = replace(
+        DECISION_LOOP_SPEC,
+        decision_system_prompt=render_decision_system_prompt(
+            PROJECT_READINESS_DECISION_RULES,
+            {
+                "产品定义": product_output_contents(workspace, product_outputs),
+                "适用工程": assembly["outputs"],
+                "基础工程选择": readiness_selection_projection(selection),
+                "可信开发资源清单": resource_facts,
+            },
+        ),
+    )
     if state.get("status") != "blocked":
         state.update(
             {"current_step": STEP, "status": "running", "blocked": None, "error": None}
@@ -342,7 +380,7 @@ async def run(
         run_dir,
         state,
         workspace,
-        DECISION_LOOP_SPEC,
+        decision_spec,
         initial_prompt(product_outputs, assembly["outputs"], selection, resource_list),
         verify_completed,
         agent_runner=agent_runner,

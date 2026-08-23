@@ -16,10 +16,14 @@ Agent 负责有限范围项目化：项目身份、基础配置、README、必�
 
 ## 统一决策与恢复
 
-每轮完整真实 Agent 回复都会保存为对话的 `user` 消息，并由步骤专属精简 decision system prompt 产生统一 `AgentDecision`：
+本步骤只维护 bootstrap 的 `DECISION_RULES`。新 conversation 的完整 XML system snapshot 由 `common/decision.py` 渲染，严格包含 `<role>`、`<project_context>`、`<responsibility>`、`<require>` 四段：AI-compatible 角色是实际使用 Claude Code Agent 的项目负责人、工程负责人、专业开发者和 Agent 专家；`assistant` 是其此前发给 Agent 的指令或结构化回复，`user` 是 Agent 返回的完整执行结果。项目上下文仅包括两份产品定义原文、项目准备清单原文、适用工程和组装白名单投影。恢复严格使用历史 `messages[0]`，不重渲染或覆盖。
+
+项目上下文只做标准 XML 转义。
+
+每轮完整真实 Agent 回复都会保存为对话的 `user` 消息；完整 XML system prompt 原样传给一次 `responses.parse`，以 Pydantic `AgentDecision` 取得统一结构化结果：
 
 - `continue` 的 `answer` 原样恢复同一 session；`blocked` 仅表示不可替代外部资源；其它决策或运行错误为 `failed`。
-- `completed` 后仍由程序重验交接、目录、根仓及适用子仓的 Git 边界（各自 top-level、`main`、unborn HEAD、空 index）、`.coverage` 处理和产品根 README。README 或 `.coverage` 可安全补完时，追加固定修复提示并在同一 session 继续；边界冲突不会修补或覆盖，直接 `failed`。
+- `completed` 表示负责人根据 Agent 执行结果相信任务完成；程序随后重验交接、目录、根仓及适用子仓的 Git 边界（各自 top-level、`main`、unborn HEAD、空 index）、`.coverage` 处理和产品根 README。README 或 `.coverage` 可安全补完时，追加固定修复提示并在同一 session 继续；边界冲突不会修补或覆盖，直接 `failed`。
 - 写入 `blocked` 终止前同样重验 Git 边界和 `.coverage`；`error_max_turns`、`error_max_budget_usd` 有 session 和非空回复时可进入裁决，但必须在后续正常 `success` 后才可最终完成。400/429/500、连接、CLI/进程、无 `ResultMessage` 和其它 SDK/API 错误为 `failed`；无外层自定义 HTTP 重试。
 
 对话尾部决定恢复动作：`user` 先裁决，`continue` 执行 answer，`completed` 先核验，`blocked` 停止；从 `blocked` 显式重跑才重新核验。状态仅保存 session、对话路径、最后一次 Agent 终止摘要和短暂待写入原文，不再写 `pending_agent_prompt`、决策轮次或 Python 完成声明。旧 `action` 和旧完成 sentinel 仅保持只读兼容。

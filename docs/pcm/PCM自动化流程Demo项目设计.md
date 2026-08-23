@@ -49,7 +49,7 @@ python run_all.py \
 - 第 4 步：只读取第 3 步结果，以浅 clone、来源核验、run-owned 临时 payload、拒绝上游 `.git`/符号链接、对每个适用 payload 执行 `git init -b main` 并核验自身 top-level、`main`、unborn HEAD、空 index、至少一个不被自身 ignore 的可提交文件后原子 `os.rename` 组装工程，保存实际来源和 Git 边界证据并推进到第 5 步；
 - 第 5～7 步：接受上述适用子仓边界，持续在 `completed` 和 `blocked` 终止前复核 `main` / unborn / 空 index；只有 `status=success` 的结果可幂等复用，`failed` / `blocked` 结果不会阻断恢复；
 - 第 8 步：在一个产品根 Claude Agent SDK session 中显式调用 `commit-changes`；Agent 对 `['root', *steps/04.json.outputs]` 中每个独立、`main` / unborn / 空 index 仓按单仓合同创建唯一初始提交，Python 只作真实 Git verifier，保存 `applicable_repositories`、各仓 SHA 和仓库证据；
-- 第 2/5/6/7/8 步共用薄公共循环：每轮完整真实 Agent 回复均先进入 `AgentDecision(completed/continue/blocked)`，`completed` 后才由步骤程序核验；第 8 步的 Git 合同不进入公共循环；
+- 第 2/5/6/7/8 步共用薄公共循环：每轮完整真实 Agent 回复均先进入负责人返回的 `AgentDecision(completed/continue/blocked)`，负责人相信 `completed` 后仍由步骤程序核验；新 conversation 保存动态 system snapshot，第 8 步的 Git 合同不进入公共循环；
 - `run_step.py` 对第 0～8 步提供单步运行入口。
 
 “已完成至第 8 步”不自动声明完整初始化阶段完成。当前代码接受第 0～8 步；第 9 步及以后仍未实现，继续按确认合同、代码、测试和真实验证的顺序增量推进。
@@ -95,7 +95,7 @@ Demo 不建设：
 - 正式 PCM 的权限、审计、计费和运维体系；
 - 为尚未实现的步骤提前创建空壳模块、抽象基类或通用插件框架。
 
-Demo 只保留跑通完整流程必需的步骤代码、薄封装、JSON 状态、脱敏日志和真实验证证据。
+Demo 只保留跑通完整流程必需的步骤代码、薄封装、JSON 状态和真实验证证据。
 
 ## 四、黄金项目输入
 
@@ -199,7 +199,7 @@ pcm-demo/
 uv run python -m unittest discover -s . -t . -p 'test*.py' -v
 ```
 
-当前实际 `unittest` 输出为 108 项，其中公共循环 23 项、步骤测试 85 项，第 8 步专属 14 项。
+本次机械对齐后的实际 `unittest` 计数及 `compileall`、`git diff --check` 结果以本轮执行记录为准。
 
 ## 七、执行架构与职责
 
@@ -219,7 +219,7 @@ uv run python -m unittest discover -s . -t . -p 'test*.py' -v
 
 ### 1. AI-compatible 决策模型
 
-AI-compatible 模型代表原人工调度者，负责所有可基于当前输入、项目事实、工具和已提供资源完成的产品、技术、文档、流程与执行决策，包括回答、批准、继续、方案选择、候选分流和需求化取舍。
+AI-compatible 模型是实际使用 Claude Code Agent 的项目负责人、工程负责人和 Agent 专家，负责所有可基于当前输入、项目事实、工具和已提供资源完成的产品、技术、文档、流程与执行决策，包括回答、批准、继续、方案选择、候选分流和需求化取舍。它读取完整 conversation：`assistant` 是负责人发给 Agent 的初始、继续或修复指令，或负责人每轮返回的 `AgentDecision` JSON；`user` 是 Agent 完整真实回复。
 
 它不直接获得整个工作区和 Shell 权限。Python 编排器只提供当前决定所需的最小事实，并按领域键持久化完整编排历史。run 目录受 Git 忽略保护；Agent 仍不得主动披露秘密。只有不可替代外部资源缺失时才返回 `blocked`；输入、结构、状态或调用错误返回 `failed`。
 
@@ -317,15 +317,27 @@ Python 负责确定性操作和最终状态裁决：
 
 公共循环使第 2/5/6/7/8 步共享 `AgentDecision(completed/continue/blocked)`、对话尾部恢复与 SDK 错误边界：`completed` 后才执行步骤核验，若固定产物、marker 或尚未提交的仓可安全补完则追加普通修复提示并继续同一 session，否则失败；`continue` 留在内部，`blocked` 或失败终止。第 8 步的多仓 Git 合同、`observed_heads` 和真实 verifier 仍由步骤自身负责，公共循环不成为 Git DSL。`error_max_turns` / `error_max_budget_usd` 有 session 与非空回复时可裁决，但必须在正常 `success` 后才可最终完成；400/429/500、连接/CLI/进程、无 Result、`terminal_reason` 为 `aborted_streaming`/`aborted_tools`，以及 `success` 下未知终止原因均在裁决前失败，且无外层自定义 HTTP 重试。旧 `action` 非 `blocked` 映射为 `continue`；若旧 `answer` 为空则使用固定安全兼容 continue 提示，绝不将旧控制 JSON 转发给 Agent。
 
+### 4. 动态决策 XML system snapshot 与项目上下文
+
+第 2、5、6、7、8 步各自只维护领域 `DECISION_RULES`。每次新 conversation 创建前，`common/decision.py` 将统一负责人角色、完整 conversation 的角色语义、`AgentDecision` 字段关系、该步骤规则和项目上下文渲染为完整 XML system snapshot；标签严格为 `<role>`、`<project_context>`、`<responsibility>`、`<require>`。公共循环首次保存该 snapshot。恢复既有 conversation 时严格使用历史 `messages[0]`，不重新渲染或覆盖。
+
+项目上下文范围固定为：第 2 步初稿原文和目标路径；第 5 步产品定义原文、适用工程、选型白名单投影和资源清单的绝对路径/可读性（不读或内联资源清单正文）；第 6、7 步产品定义原文、准备清单原文、适用工程和组装白名单投影；第 8 步有序仓库相对路径、组装白名单投影和最小基线说明。第 8 步的 Git、marker、`observed_heads` 和 verifier 继续由步骤私有逻辑处理。
+
+选型和组装投影不含 `git_url`、`origin`、`remote`，`.env` 与资源清单正文因输入来源边界不进入项目上下文。渲染器仅对项目上下文做标准 XML 转义。`request_decision` 要求显式传入该完整 XML prompt，将其原样传给一次 `responses.parse`，并以 Pydantic `AgentDecision` 取得结构化输出；没有公共默认或隐藏追加 prompt，也没有格式重试。Agent initial prompt、conversation schema、公共循环状态机、repair/session/错误分类和第 8 步 Git 逻辑均不变，未引入 `task_contract`。
+
 **重构后第 7 步隔离真实验证。** 新 run `agent-loop-step7-20260822T190149Z` 在外部复制工作区运行，未修改既有 `step01-mendmark`；session `e8000375-2698-4ccf-9927-ccb9ca627ca2` 的 init 确认 cwd、`solution-design` Skill、slash command 和 Fable 模型。首次 Agent 尝试内置 Explore 子代理时发生环境内部未识别模型并超时，未返回 ResultMessage；循环保存 session 与初始 conversation、未推进成功。仅在隔离验证历史中追加普通 assistant 的“不使用子代理、直接工具完成”提示后，从同一 session 恢复。该测试提示不进入生产 prompt，环境内部子代理错误也不是公共循环缺陷。
 
-恢复后 Agent 正常 `success`（44 turns，约 `$3.800742`），生成约 44 KB 技术方案。AI-compatible 服务对同一真实回复首返 YAML 风格结构，当时唯一格式重试提示要求花括号、双引号并禁止 YAML，第二次返回严格 JSON `completed`。测试包装器只在隔离副本首次 completed 后将技术方案置空，verifier 返回固定 `DESIGN_REPAIR_PROMPT`；公共循环保留真实 completed JSON、追加普通 assistant repair 提示、恢复同一已保存 session，Agent 补回非空文档，第二次真实裁决再次 `completed`。最终 `steps/07.json` 为 `success`，状态为 `project:08_initialize_repositories`，conversation 尾部为 `completed`，无旧 completion sentinel 或 `pending_agent_prompt`。当前自动化证据为公共循环 23 项、步骤测试 85 项、全量 108 项。
+恢复后 Agent 正常 `success`（44 turns，约 `$3.800742`），生成约 44 KB 技术方案。AI-compatible 服务对同一真实回复首返 YAML 风格结构；当时旧合同执行格式重试后返回 `completed`。测试包装器只在隔离副本首次 completed 后将技术方案置空，verifier 返回固定 `DESIGN_REPAIR_PROMPT`；公共循环保留真实 completed JSON、追加普通 assistant repair 提示、恢复同一已保存 session，Agent 补回非空文档，第二次真实裁决再次 `completed`。最终 `steps/07.json` 为 `success`，状态为 `project:08_initialize_repositories`，conversation 尾部为 `completed`，无旧 completion sentinel 或 `pending_agent_prompt`。该真实决定是旧 prompt 合同下的历史证据；本次自动化计数以本轮执行记录为准。
 
-Probe C 的早期成功证据为 `probe-c-20260822T185623Z`：普通 `continue`（attempts=2）、外部支付 `blocked`（attempts=1）；后续最终验证连续两次失败：普通决定在唯一重试后仍返回带“验证：”前缀的非 JSON `ValidationError`，以及普通成功后 boundary 返回 Responses `status=incomplete`；代码均按合同 `failed`，未增加第三次重试或手写解析。随后 `common/decision.py` 使首次请求与唯一格式重试都附加相同的严格 JSON、首尾花括号、双引号、禁止 YAML 约束，步骤 system prompt 保持只负责领域条件。更新后真实复跑 `probe-c-20260822T200038Z` 通过：ordinary `continue`（attempts=1）、boundary `blocked`（attempts=1）。该前置约束后的单次成功确认能力可用，但不消除服务格式/完成状态波动，重复稳定性仍是验证缺口。
+Probe C 的早期成功证据为 `probe-c-20260822T185623Z`：普通 `continue`（attempts=2）、外部支付 `blocked`（attempts=1）；后续格式重试和 `probe-c-20260822T200038Z` 的结果均为旧合同历史。现行公共决策层要求显式完整 XML system prompt，并以 Pydantic `AgentDecision` 调用一次 `responses.parse`；不追加公共默认或隐藏格式 prompt，也不做格式重试。现行 prompt 仍需真实复跑，服务重复稳定性仍是验证缺口。
 
 **第 8 步真实验证。** `step08-real-20260823-a` 必须保留为失败事实：第 1 步真实服务依次返回代码围栏、Responses `incomplete` 和自创字段；收紧为严格 JSON、禁止代码围栏并列明五个唯一字段后同 run 成功。第 3 步首次 `ValidationError` 后同 run 重试成功。第 7 步 API 500 后，failed `07.json` 曾被误作成功锚点而阻断恢复；改为仅 `status=success` 可复用后，同一 session 成功。第 8 步因管理模板 Plugin 快照包含已跟踪 `.coverage`，它成为产品根未跟踪垃圾；Agent 按单仓合同未提交，但决策模型多轮追问“调用方授权”并耗尽 8 轮。该失败 run 未产生任何根、前端或后端提交。
 
 修复后的 `step08-real-20260823-b` 第 0～5 步一次通过；第 6 步真实清除 `.coverage`，三仓仍为 `main` / unborn / 空 index，第 7 步成功。第 8 步只有 session `64aa707c-268c-48c8-bb3f-f67f62abe75e`，conversation 角色顺序为 `system → assistant → user → assistant`，一次 Agent 回复、一次 `completed` 裁决完成。root `c1eb33dfa5bda91a0d7f9aeeb41d8fefe10a6fca`、frontend `5997213c34c09ea6ba4e740e35f9df77d2d45d82`、backend `5d8dd95d8c42370697d25e6ecaf400bab42785b3` 均为干净 `main` 上唯一无父提交；根 tree 不含前端、后端或 gitlink，状态推进到 `project:09_engineering_architecture`。同 run 重跑幂等复用，SHA 不变且不再次调用 Agent。
+
+### 动态 prompt 交接事实回放
+
+Git 忽略 run `prompt-role-replay-20260823` 已使用现行完整 XML system prompt 重建交接事实回放：复用 `step08-real-20260823-a` 中已成功完成的 `solution_design` 真实 Agent 对话和现行项目文件，真实 AI-compatible 服务以 `attempts=1` 返回 `completed`，`result.json` 保存四个 XML section 和当前 prompt 哈希。该回放不代表新的 Claude Agent SDK 执行，不把第 2、5、6、8 步伪称为分别新建 session 重跑，也不证明服务重复稳定。
 
 ### 阶段一：第 12～19 步逐需求开发
 
@@ -519,7 +531,7 @@ python run_all.py --run-id <run-id> --from-node phase_2:audit
 ## 十二、后续实现顺序
 
 1. 保持第 0～8 步已确认的业务边界不变；
-2. 公共循环 23 项、步骤测试 85 项（第 8 步专属 14 项）、全量 108 项自动化测试已通过；隔离新 session 已真实验证第 7 步，`step08-real-20260823-b` 已真实验证第 8 步单 session 多仓首次提交，历史失败 run 保留为恢复与 prompt 边界证据；
+2. 公共循环 24 项、步骤测试 85 项（第 8 步专属 14 项）、全量 109 项自动化测试已通过；隔离新 session 已真实验证第 7 步，`step08-real-20260823-b` 已真实验证第 8 步单 session 多仓首次提交，历史失败 run 保留为恢复与 prompt 边界证据；
 3. 第 9 步及以后进入前仍须先确认合同；
 4. 合同确认后先实现代码并通过测试和真实验证，再同步设计文档并提交；
 5. 不提前实现第 9～19 步或阶段二空壳；

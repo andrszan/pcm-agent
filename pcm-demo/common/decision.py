@@ -1,22 +1,14 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Literal
+from xml.sax.saxutils import escape
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from common.openai_responses import parse_response
 from config import LLMConfig
 
-SYSTEM_PROMPT = """根据给定的 Agent 对话作出明确决定，并填写 verdict、answer、reason 和 required_inputs。
-
-verdict 只能是 completed、continue 或 blocked：
-- completed 表示 Agent 已完成可核验的工作；answer 必须为空，required_inputs 必须为空数组。
-- continue 表示需要向 Agent 发送下一条明确指令；answer 必须是非空指令，required_inputs 必须为空数组。
-- blocked 仅表示缺少当前环境无法取得的真实外部账号、凭据、私有数据、客户授权、专用设备、素材、付费服务或线下动作；answer 必须为空，required_inputs 必须列出非空的解除条件。
-
-reason 必须说明决定依据。你拥有基于当前输入、项目事实、可用工具和已提供资源能够完成的全部产品、技术、文档、流程和执行决策权。存在多个合理方案、资料歧义、重大取舍或不可逆设计决定时，选择一个方案并说明理由，不要因此 blocked。不得用 Mock、假凭据或虚构资源消除阻塞。直接填写结构化输出，不要使用 Markdown 或代码围栏。"""
-JSON_FORMAT_PROMPT = """只返回一个严格 JSON 对象：首字符必须是 {，末字符必须是 }，字段名和字符串值必须使用双引号。禁止 YAML 键值行、Markdown、代码围栏和 JSON 之外的任何文本。"""
-FORMAT_RETRY_PROMPT = """上一次响应未遵守严格 JSON 格式。本次重新填写全部字段，输出形态必须类似 {"verdict":"continue","answer":"明确指令","reason":"判断依据","required_inputs":[]}。"""
 LEGACY_CONTINUE_PROMPT = "请重新核验当前工作和已有产物，继续完成尚未满足的内容并报告结果。"
 
 
@@ -102,6 +94,54 @@ def parse_agent_decision(value: Any) -> AgentDecision:
     return AgentDecision.model_validate(value)
 
 
+def render_decision_system_prompt(
+    responsibility: str, project_context: dict[str, Any]
+) -> str:
+    """将负责人角色、项目上下文、职责和输出要求渲染为完整 XML system prompt。"""
+
+    if not isinstance(responsibility, str) or not responsibility.strip():
+        raise ValueError("负责人职责不能为空")
+    context_json = escape(
+        json.dumps(project_context, ensure_ascii=False, indent=2, sort_keys=True)
+    )
+    return f"""<role>
+你是当前项目的最高项目负责人、工程负责人、专业开发者和 Agent 专家。
+
+你正在亲自使用 Claude Code Agent 完成项目开发。你负责理解项目、向 Agent 下达指令、回答 Agent 的问题、作出产品与工程决定，并根据 Agent 返回的执行结果决定继续、完成或阻塞。
+
+对话中的 assistant 是你此前发给 Agent 的指令或结构化回复，user 是 Agent 返回给你的完整执行结果。
+</role>
+
+<project_context>
+以下内容是当前工作的权威项目资料：
+{context_json}
+</project_context>
+
+<responsibility>
+根据权威项目资料、完整对话、你此前发出的指令和 Agent 最新返回的执行结果完成以下职责：
+
+1. 回答 Agent 提出的产品、技术、文档、流程和执行问题。
+2. 只要当前资料、项目事实、可用工具和已提供资源足以作出决定，就由你直接选择合理方案并说明理由。
+3. 工作尚未完成时，在 answer 中给 Agent 一条明确、可直接执行的下一步指令。
+4. 根据 Agent 返回的执行结果判断当前工作是否已经完成。
+5. 只有缺少当前环境无法取得的不可替代外部资源时才能 blocked；不得用 Mock、假凭据或虚构资源消除阻塞。
+
+当前工作的判断标准：
+{responsibility.strip()}
+</responsibility>
+
+<require>
+返回 AgentDecision 定义的结构化结果，只包含 verdict、answer、reason 和 required_inputs。
+
+verdict 只能是 completed、continue 或 blocked：
+- completed 表示你根据 Agent 返回的执行结果相信当前工作已经完成；answer 必须为空，required_inputs 必须为空数组。
+- continue 表示仍需向 Agent 发送下一条明确指令；answer 必须是非空指令，required_inputs 必须为空数组。
+- blocked 仅表示缺少当前环境无法取得的不可替代外部资源；answer 必须为空，required_inputs 必须列出非空的解除条件。
+
+reason 必须说明本轮决定的依据。
+</require>"""
+
+
 def count_decisions(messages: list[dict[str, Any]]) -> int:
     count = 0
     for message in messages:
@@ -119,24 +159,14 @@ async def request_decision(
     messages: list[dict[str, Any]],
     config: LLMConfig,
     *,
-    system_prompt: str = SYSTEM_PROMPT,
+    system_prompt: str,
     output_model: type[BaseModel] = AgentDecision,
 ) -> tuple[dict[str, Any], int, str]:
     input_model = DecisionInput.model_validate({"messages": messages})
-    attempts = 0
-    initial_prompt = f"{system_prompt}\n\n{JSON_FORMAT_PROMPT}"
-    for current_prompt in (initial_prompt, f"{initial_prompt}\n\n{FORMAT_RETRY_PROMPT}"):
-        attempts += 1
-        try:
-            decision = await parse_response(
-                config,
-                system_prompt=current_prompt,
-                input_model=input_model,
-                output_model=output_model,
-            )
-        except ValidationError:
-            if attempts == 2:
-                raise
-            continue
-        return decision.model_dump(), attempts, decision.model_dump_json()
-    raise RuntimeError("决策模型未返回结构化结果")
+    decision = await parse_response(
+        config,
+        system_prompt=system_prompt,
+        input_model=input_model,
+        output_model=output_model,
+    )
+    return decision.model_dump(), 1, decision.model_dump_json()

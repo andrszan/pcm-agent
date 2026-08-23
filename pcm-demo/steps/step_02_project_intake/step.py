@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from common.agent_decision_loop import AgentDecisionLoopSpec, run_agent_decision_loop
 from common.claude_agent import run_claude
-from common.decision import request_decision
+from common.decision import render_decision_system_prompt, request_decision
 from common.files import resolve_workspace_output, sha256, write_json
 from common.state import write_state
 from config import LLMConfig
@@ -24,13 +25,9 @@ MAX_DECISION_ROUNDS = 6
 PROJECT_INTAKE_MAX_TURNS = 12
 PROJECT_INTAKE_MAX_BUDGET_USD = 4.0
 
-PROJECT_INTAKE_DECISION_SYSTEM_PROMPT = """根据当前产品定义工作和 Agent 对话填写 verdict、answer、reason 与 required_inputs。
-
-completed 表示两份正式产品定义文档已经生成，且当前事实足以确认其非空并可用；answer 必须为空，required_inputs 必须为空数组。
-continue 表示还需向自动化开发者给出明确指令以澄清产品或完成、修复这两份文档；answer 必须是非空指令，required_inputs 必须为空数组。
-blocked 仅表示缺少当前环境无法取得的真实外部账号、凭据、私有数据、客户授权、专用设备、素材、付费服务或线下动作；answer 必须为空，required_inputs 必须列出非空解除条件。
-
-AI-compatible 模型代表自动化开发者，可对当前资料足以支持的产品和执行事项作出决定；资料歧义或存在多种合理方案时应选择合理方案继续，不得因此 blocked。reason 说明决定依据。直接输出结构化结果，不要使用 Markdown 或代码围栏。"""
+PROJECT_INTAKE_DECISION_RULES = """completed 表示两份正式产品定义文档已经生成，且当前事实足以确认其非空并可用。
+continue 表示还需给出明确指令以澄清产品或完成、修复这两份文档。
+blocked 仅表示缺少当前环境无法取得的真实外部账号、凭据、私有数据、客户授权、专用设备、素材、付费服务或线下动作。"""
 
 DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     key=CONVERSATION_KEY,
@@ -39,7 +36,7 @@ DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     max_decision_rounds=MAX_DECISION_ROUNDS,
     max_turns=PROJECT_INTAKE_MAX_TURNS,
     max_budget_usd=PROJECT_INTAKE_MAX_BUDGET_USD,
-    decision_system_prompt=PROJECT_INTAKE_DECISION_SYSTEM_PROMPT,
+    decision_system_prompt=render_decision_system_prompt(PROJECT_INTAKE_DECISION_RULES, {}),
     legacy_completion_messages=(
         "已完成 project-intake：两份正式产品定义文档已生成并通过文件事实核验。",
     ),
@@ -143,6 +140,15 @@ def validate_inputs(run_dir: Path, state: dict[str, Any]) -> tuple[Path, Path]:
     return workspace, draft
 
 
+def draft_contents(draft: Path) -> str:
+    """读取已经通过输入核验的产品初稿正文。"""
+
+    try:
+        return draft.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        raise RuntimeError("产品初稿不可读取") from error
+
+
 def output_contents(workspace: Path) -> dict[str, str] | None:
     """返回可用正式文档；缺失或空文件可修复，路径异常必须失败。"""
 
@@ -231,11 +237,24 @@ async def run(
             return completion_repair_prompt()
         return None
 
+    decision_spec = replace(
+        DECISION_LOOP_SPEC,
+        decision_system_prompt=render_decision_system_prompt(
+            PROJECT_INTAKE_DECISION_RULES,
+            {
+                "产品初稿": {
+                    "path": draft.relative_to(workspace).as_posix(),
+                    "content": draft_contents(draft),
+                },
+                "目标产品定义文档": [path.as_posix() for path in OUTPUTS],
+            },
+        ),
+    )
     decision = await run_agent_decision_loop(
         run_dir,
         state,
         workspace,
-        DECISION_LOOP_SPEC,
+        decision_spec,
         initial_prompt(draft, workspace),
         verify_completed,
         agent_runner=agent_runner,

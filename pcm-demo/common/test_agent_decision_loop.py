@@ -25,6 +25,7 @@ from common.decision import (  # noqa: E402
     AgentDecision,
     count_decisions,
     parse_agent_decision,
+    render_decision_system_prompt,
     request_decision,
 )
 from common.files import write_json  # noqa: E402
@@ -744,6 +745,37 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
 
 
 class AgentDecisionTest(unittest.IsolatedAsyncioTestCase):
+    def test_rendered_system_prompt_uses_complete_xml_contract(self) -> None:
+        prompt = render_decision_system_prompt(
+            "completed 表示领域工作已完成；continue 表示仍可继续；blocked 仅限外部输入缺失。",
+            {"产品初稿": {"content": "原始项目资料 <tag> & 内容"}},
+        )
+
+        self.assertTrue(prompt.startswith("<role>\n"))
+        self.assertTrue(prompt.endswith("</require>"))
+        for tag in (
+            "<role>",
+            "</role>",
+            "<project_context>",
+            "</project_context>",
+            "<responsibility>",
+            "</responsibility>",
+            "<require>",
+            "</require>",
+        ):
+            self.assertIn(tag, prompt)
+        for required in (
+            "最高项目负责人、工程负责人、专业开发者和 Agent 专家",
+            "assistant 是你此前发给 Agent 的指令或结构化回复",
+            "user 是 Agent 返回给你的完整执行结果",
+            "completed 表示领域工作已完成",
+            "只包含 verdict、answer、reason 和 required_inputs",
+            "原始项目资料 &lt;tag&gt; &amp; 内容",
+        ):
+            self.assertIn(required, prompt)
+        self.assertNotIn("严格 JSON", prompt)
+        self.assertNotIn("```", prompt)
+
     def test_strict_invariants_and_legacy_actions(self) -> None:
         with self.assertRaises(ValueError):
             AgentDecision(
@@ -772,7 +804,7 @@ class AgentDecisionTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(legacy_approve.verdict, "continue")
 
-    async def test_request_decision_retries_validation_error_once_with_override_prompt(self) -> None:
+    async def test_request_decision_uses_exact_required_system_prompt_once(self) -> None:
         calls: list[str] = []
         result = AgentDecision(
             verdict="completed", answer="", reason="已完成", required_inputs=[]
@@ -780,55 +812,27 @@ class AgentDecisionTest(unittest.IsolatedAsyncioTestCase):
 
         async def fake_parse_response(*_args: object, **kwargs: object) -> AgentDecision:
             calls.append(str(kwargs["system_prompt"]))
-            if len(calls) == 1:
-                AgentDecision.model_validate(
-                    {
-                        "verdict": "continue",
-                        "answer": "",
-                        "reason": "无效",
-                        "required_inputs": [],
-                    }
-                )
             return result
 
         with patch("common.decision.parse_response", new=fake_parse_response):
             data, attempts, raw = await request_decision(
-                [{"role": "system", "content": "历史 system"}],
+                [{"role": "system", "content": "完整 XML system"}],
                 object(),  # type: ignore[arg-type]
-                system_prompt="覆盖 system",
+                system_prompt="完整 XML system",
             )
 
         self.assertEqual(data, result.model_dump())
         self.assertEqual(parse_agent_decision(data), result)
         self.assertEqual(raw, result.model_dump_json())
-        self.assertEqual(attempts, 2)
-        self.assertTrue(calls[0].startswith("覆盖 system"))
-        self.assertIn("只返回一个严格 JSON 对象", calls[0])
-        self.assertIn("禁止 YAML", calls[0])
-        self.assertIn("上一次响应未遵守严格 JSON 格式", calls[1])
+        self.assertEqual(attempts, 1)
+        self.assertEqual(calls, ["完整 XML system"])
 
-    async def test_request_decision_stops_after_one_format_retry(self) -> None:
-        calls = 0
-
-        async def invalid_parse_response(*_args: object, **_kwargs: object) -> AgentDecision:
-            nonlocal calls
-            calls += 1
-            return AgentDecision.model_validate(
-                {
-                    "verdict": "completed",
-                    "answer": "不允许",
-                    "reason": "无效",
-                    "required_inputs": [],
-                }
+    async def test_request_decision_requires_explicit_system_prompt(self) -> None:
+        with self.assertRaises(TypeError):
+            await request_decision(  # type: ignore[call-arg]
+                [{"role": "system", "content": "历史 system"}],
+                object(),  # type: ignore[arg-type]
             )
-
-        with patch("common.decision.parse_response", new=invalid_parse_response):
-            with self.assertRaises(ValueError):
-                await request_decision(
-                    [{"role": "system", "content": "历史 system"}],
-                    object(),  # type: ignore[arg-type]
-                )
-        self.assertEqual(calls, 2)
 
 
 if __name__ == "__main__":

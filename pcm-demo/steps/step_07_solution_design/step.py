@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from common.agent_decision_loop import AgentDecisionLoopSpec, run_agent_decision_loop
 from common.claude_agent import run_claude
-from common.decision import request_decision
+from common.decision import render_decision_system_prompt, request_decision
 from common.files import resolve_workspace_output
 from common.state import step_result_status, write_state, write_step_result
 from config import LLMConfig
@@ -16,9 +17,11 @@ from steps.step_04_assemble_foundation.step import (
     workspace_from_state,
 )
 from steps.step_05_project_readiness.step import (
+    checklist_contents,
     checklist_present,
     load_product_outputs,
     load_selection,
+    product_output_contents,
     verify_existing_readiness_success,
 )
 from steps.step_06_project_bootstrap.step import (
@@ -42,13 +45,9 @@ LEGACY_COMPLETION_MESSAGES = (
     "已完成 solution-design：总体技术方案已生成并通过完成条件与工程事实核验。",
 )
 
-SOLUTION_DESIGN_DECISION_SYSTEM_PROMPT = """根据最新 Agent 回复判断总体技术方案是否完成。
-
-- completed：固定技术方案文档已写入；基于实际工程事实明确了系统边界、主要技术选择、交付单元、跨单元协作、关键风险和未决事项，并清晰区分工程事实、确认决定、目标、假设和待确认事项；没有把业务实现或 Git 写操作混入工作。
+SOLUTION_DESIGN_DECISION_RULES = """- completed：固定技术方案文档已写入；基于实际工程事实明确了系统边界、主要技术选择、交付单元、跨单元协作、关键风险和未决事项，并清晰区分工程事实、确认决定、目标、假设和待确认事项；没有把业务实现或 Git 写操作混入工作。
 - continue：文档、事实核对或方案内容尚不完整，但可使用已有资料和工具继续完成。
-- blocked：只能用于缺少当前环境无法取得的真实外部账号、凭据、私有数据、授权、专用设备、付费服务或线下动作。
-
-填写 verdict、answer、reason 和 required_inputs。completed 的 answer 和 required_inputs 为空；continue 必须给出非空 answer 且 required_inputs 为空；blocked 的 answer 为空且 required_inputs 非空。reason 说明判断依据。直接输出结构化结果。"""
+- blocked：只能用于缺少当前环境无法取得的真实外部账号、凭据、私有数据、授权、专用设备、付费服务或线下动作。"""
 
 DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     key=CONVERSATION_KEY,
@@ -57,7 +56,7 @@ DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     max_decision_rounds=MAX_DECISION_ROUNDS,
     max_turns=SOLUTION_DESIGN_MAX_TURNS,
     max_budget_usd=SOLUTION_DESIGN_MAX_BUDGET_USD,
-    decision_system_prompt=SOLUTION_DESIGN_DECISION_SYSTEM_PROMPT,
+    decision_system_prompt=render_decision_system_prompt(SOLUTION_DESIGN_DECISION_RULES, {}),
     legacy_completion_messages=LEGACY_COMPLETION_MESSAGES,
 )
 DESIGN_REPAIR_PROMPT = "固定技术方案文档缺失或为空。请仅创建或补全 docs/design/技术方案.md，然后报告结果。"
@@ -279,11 +278,26 @@ async def run(
         )
         write_state(run_dir, state)
 
+    checklist_content = checklist_contents(workspace)
+    if checklist_content is None:
+        raise RuntimeError("第 5 步项目准备清单不存在或不可读取")
+    decision_spec = replace(
+        DECISION_LOOP_SPEC,
+        decision_system_prompt=render_decision_system_prompt(
+            SOLUTION_DESIGN_DECISION_RULES,
+            {
+                "产品定义": product_output_contents(workspace, product_outputs),
+                "项目准备清单": checklist_content,
+                "适用工程": outputs,
+                "组装白名单事实": prompt_assembly(assembly),
+            },
+        ),
+    )
     decision = await run_agent_decision_loop(
         run_dir,
         state,
         workspace,
-        DECISION_LOOP_SPEC,
+        decision_spec,
         initial_prompt(product_outputs, assembly, outputs),
         completion_verifier,
         agent_runner=agent_runner,

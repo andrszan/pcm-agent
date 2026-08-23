@@ -221,7 +221,26 @@ class SolutionDesignTests(unittest.TestCase):
                 self.assertNotIn(forbidden, prompt)
             self.assertEqual(calls[0]["max_turns"], SOLUTION_DESIGN_MAX_TURNS)
             self.assertEqual(calls[0]["max_budget_usd"], SOLUTION_DESIGN_MAX_BUDGET_USD)
-            self.assertEqual(system_prompts, [DECISION_LOOP_SPEC.decision_system_prompt] * 2)
+            self.assertEqual(len(system_prompts), 2)
+            for system_prompt in system_prompts:
+                for tag in ("role", "project_context", "responsibility", "require"):
+                    self.assertIn(f"<{tag}>", system_prompt)
+                    self.assertIn(f"</{tag}>", system_prompt)
+                for required in (
+                    "最高项目负责人、工程负责人、专业开发者和 Agent 专家",
+                    "assistant 是你此前发给 Agent 的指令或结构化回复",
+                    "user 是 Agent 返回给你的完整执行结果",
+                    "固定技术方案文档已写入",
+                    "# 项目需求说明",
+                    "# 产品功能说明",
+                    "# 项目准备清单",
+                    '"frontend"',
+                    '"commit_sha"',
+                ):
+                    self.assertIn(required, system_prompt)
+                self.assertNotEqual(system_prompt, DECISION_LOOP_SPEC.decision_system_prompt)
+                for forbidden in ("file:///templates.git", "git_url", "origin"):
+                    self.assertNotIn(forbidden, system_prompt)
 
             saved = read_state(run_dir)
             self.assertEqual((saved["step"], saved["current_node"]), (8, NEXT_NODE))
@@ -252,10 +271,10 @@ class SolutionDesignTests(unittest.TestCase):
             self.assertEqual(reused["status"], "success")
             self.assertIn("确认既有成功", reused["summary"])
 
-    def test_agent_reply_is_preserved_without_redaction(self) -> None:
+    def test_agent_reply_is_preserved_as_raw_text(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))
-            agent_text = 'token=top-secret password="json-password" clientSecret=camel-secret'
+            agent_text = "完整 Agent 原文，包含方案完成情况与后续事项。"
 
             async def interrupted_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
                 current = agent_result(cwd=kwargs["cwd"], text=agent_text)  # type: ignore[arg-type, index]

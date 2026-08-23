@@ -18,8 +18,9 @@ from common.files import sha256, write_json
 from common.state import read_state, write_state
 from steps.step_01_create_workspace import initialize_root_repository
 from steps.step_02_project_intake.step import (
+    DECISION_LOOP_SPEC,
     OUTPUTS,
-    PROJECT_INTAKE_DECISION_SYSTEM_PROMPT,
+    PROJECT_INTAKE_DECISION_RULES,
     ProjectIntakeBlocked,
     initial_prompt,
     run,
@@ -68,7 +69,12 @@ class ProjectIntakeTests(unittest.TestCase):
         (workspace / ".claude").mkdir(parents=True)
         (workspace / "docs").mkdir()
         draft = root / "draft.md"
-        draft.write_text("# 产品初稿\n", encoding="utf-8")
+        draft.write_text(
+            "# 产品初稿\n"
+            "这是用于生成正式产品定义的权威初稿内容。\n"
+            "目标用户需要清晰的产品范围和功能说明。\n",
+            encoding="utf-8",
+        )
         (workspace / "docs/产品初稿.md").write_bytes(draft.read_bytes())
         write_json(
             run_dir / "steps/01.json",
@@ -136,7 +142,7 @@ class ProjectIntakeTests(unittest.TestCase):
         self.assertIn("只处理产品定义文档", prompt)
         for forbidden in ("第 2 步", "第2步", "PCM", "节点", "阶段", "调用 Skill"):
             self.assertNotIn(forbidden, prompt)
-            self.assertNotIn(forbidden, PROJECT_INTAKE_DECISION_SYSTEM_PROMPT)
+            self.assertNotIn(forbidden, PROJECT_INTAKE_DECISION_RULES)
 
     def test_completed_then_repair_then_completed_uses_same_session_and_raw_reply(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -168,7 +174,20 @@ class ProjectIntakeTests(unittest.TestCase):
                 *,
                 system_prompt: str,
             ) -> tuple[dict[str, object], int, str]:
-                self.assertEqual(system_prompt, PROJECT_INTAKE_DECISION_SYSTEM_PROMPT)
+                for tag in ("role", "project_context", "responsibility", "require"):
+                    self.assertIn(f"<{tag}>", system_prompt)
+                    self.assertIn(f"</{tag}>", system_prompt)
+                for required in (
+                    "最高项目负责人、工程负责人、专业开发者和 Agent 专家",
+                    "assistant 是你此前发给 Agent 的指令或结构化回复",
+                    "user 是 Agent 返回给你的完整执行结果",
+                    "两份正式产品定义文档已经生成",
+                    "# 产品初稿",
+                    "这是用于生成正式产品定义的权威初稿内容。",
+                    "目标产品定义文档",
+                ):
+                    self.assertIn(required, system_prompt)
+                self.assertNotEqual(system_prompt, PROJECT_INTAKE_DECISION_RULES)
                 decision_inputs.append(copy.deepcopy(messages))
                 current = next(outcomes)
                 return current.model_dump(), 1, current.model_dump_json()
@@ -284,7 +303,7 @@ class ProjectIntakeTests(unittest.TestCase):
                 run_dir / "conversations/project_intake.json",
                 {
                     "messages": [
-                        {"role": "system", "content": PROJECT_INTAKE_DECISION_SYSTEM_PROMPT},
+                        {"role": "system", "content": DECISION_LOOP_SPEC.decision_system_prompt},
                         {"role": "assistant", "content": "历史初始指令"},
                         {"role": "user", "content": "历史 Agent 原文"},
                         {"role": "assistant", "content": legacy_completion},
