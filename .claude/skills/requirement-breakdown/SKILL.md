@@ -182,13 +182,13 @@ Mock 可支持单元测试、组件状态和难以稳定制造的外部故障，
 默认建议路径：
 
 ```text
-docs/backlog/<项目或范围名称>-backlog.md
+docs/backlog/backlog.md
 ```
 
 推荐结构：
 
 ```markdown
-# <项目或范围名称> Backlog
+# Backlog
 
 ## 范围说明
 ## 拆分思路
