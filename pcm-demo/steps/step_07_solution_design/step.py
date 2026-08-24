@@ -217,7 +217,7 @@ def initial_prompt(
     project_references = "\n".join(f"- @./{output}" for output in outputs)
     assembly_json = json.dumps(prompt_assembly(assembly), ensure_ascii=False, indent=2)
     return f"""/solution-design
-调用方已授权你直接在当前项目创建或更新总体技术方案文档。请基于真实工程事实完成设计，不实施业务功能。
+我授权你直接在当前项目创建或更新总体技术方案文档。请基于真实工程事实完成设计，不实施业务功能。
 
 权威产品定义：
 {product_references}

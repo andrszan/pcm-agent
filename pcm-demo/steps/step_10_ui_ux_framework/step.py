@@ -735,7 +735,7 @@ def initial_prompt(
 ) -> str:
     product_references = "\n".join(f"- @./{output}" for output in product_outputs)
     return f"""/ui-ux-framework
-调用方已授权你在当前项目按 bootstrap 模式建立产品级 UI/UX 框架。请基于权威领域资料和实际前端工程创建或更新唯一固定产物 `docs/ui-ux/framework.md`。
+我授权你在当前项目按 bootstrap 模式建立产品级 UI/UX 框架。请基于权威领域资料和实际前端工程创建或更新唯一固定产物 `docs/ui-ux/framework.md`。
 
 权威产品定义：
 {product_references}

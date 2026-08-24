@@ -26,7 +26,7 @@ INITIALIZE_REPOSITORIES_DECISION_RULES = """- completed：权威仓库清单中�
 - continue：仍有可在当前项目中完成的仓库变更或核验工作。
 - blocked：只能用于缺少当前环境无法取得的真实外部账号、凭据、私有数据、授权、专用设备、付费服务、合法 Git 作者身份、强制签名凭据或线下动作。
 
-Agent 请求可由当前项目事实和既定约束决定的确认或授权时，你必须直接在 answer 中作出明确决定，不得要求另一个调用方再提供授权文本；也不得授权改写历史、切换分支或绕过检查。"""
+Agent 请求可由当前项目事实和既定约束决定的确认或授权时，你必须直接在 answer 中作出明确决定；但不得授权改写历史、切换分支或绕过检查。"""
 
 class InitializeRepositoriesBlocked(RuntimeError):
     def __init__(
