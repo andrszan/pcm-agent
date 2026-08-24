@@ -17,6 +17,7 @@
 - [第 10 步：产品级 UI/UX 框架](steps/step_10_ui_ux_framework/README.md)
 - [第 11 步：拆分 Backlog](steps/step_11_requirement_breakdown/README.md)
 - [第 12 步：解析 Backlog 并初始化需求注册表](steps/step_12_initialize_requirement_registry/README.md)
+- [第 13 步：选择需求并建立统一需求分支](steps/step_13_select_requirement/README.md)
 
 每个步骤的业务代码、测试和详细运行说明都在对应步骤目录中。根 README 只提供导航。
 
@@ -29,7 +30,7 @@ uv sync
 uv run python -m unittest discover -s . -t . -p 'test*.py' -v
 ```
 
-该入口从 `pcm-demo/` 根递归发现 `common/` 与 `steps/` 测试。第 11 步本体 9 项与 CLI 6 项，共 15 项；第 12 步本体 11 项与 CLI 6 项，共 17 项；两步定向共 32 项、全量 194 项均已通过。`compileall`、`git diff --check` 通过；IDE 对第 12 步 `step.py`、`test_step.py`、`test_cli.py` 和 `run_step.py` 无诊断，独立只读审查最终没有高、中置信发现。Ruff 未安装，未执行 Ruff。
+该入口从 `pcm-demo/` 根递归发现 `common/` 与 `steps/` 测试。第 12 步本体 11 项与 CLI 6 项，共 17 项；第 13 步本体 19 项与 CLI 9 项，共 28 项；两步定向共 45 项、全量 222 项均已通过。`compileall`、`git diff --check` 通过；IDE 对第 12、13 步和 `run_step.py` 无诊断，独立审查的 3 项中置信问题已修复，复核无高、中置信发现。Ruff 未安装，未执行 Ruff。
 
 ## 最近真实验证
 
@@ -57,7 +58,7 @@ backend 提交摘要中的 Ruff、格式、build 通过和 `pytest` 14 passed、
 
 commit-changes 执行轮发现文档中的 frontend Git 事实矛盾，严格未修改、未暂存、未提交并报告。外层负责人随后通过普通 `continue` 授权通用 Claude Agent 仅修正固定文档并提交；Agent 精确完成。产品根提交为 `ead14dffe19bc6417634c24c7bb1103602c3b772`，message `docs: 新增工程架构设计`，仅新增 `docs/design/工程架构设计.md`，376 行、32928 字节；未 push，frontend/backend 无变化。最终严格 JSON decision 为 `completed`，`steps/09.json` 为 success，state 推进到 `project:10_ui_ux_framework`。
 
-独立核验确认 root/frontend/backend 均为自身 top-level、`main`、clean，固定文档 tracked。同 run 幂等重跑后 conversation 仍为 11 条，session 和 root HEAD 不变，没有再次调用 Agent、决策服务或产生新提交。`run_step.py` 只对 schema 完整的第 8～12 步 success 保护既有 result 和已推进 state；后续重跑失败不会覆盖 success 或回退节点，残缺 success 不保护，其它步骤保持原行为。
+独立核验确认 root/frontend/backend 均为自身 top-level、`main`、clean，固定文档 tracked。同 run 幂等重跑后 conversation 仍为 11 条，session 和 root HEAD 不变，没有再次调用 Agent、决策服务或产生新提交。`run_step.py` 对第 8～12 步 schema 完整 success 保持固定保护；第 13 步只保护当前 active/cycle 的完整 scoped success，失败或残缺 scoped result 可以重跑恢复。
 
 第 10 步代码、自动化和真实验收已完成。`step01-mendmark` 的第 8 步权威仓库为 `root/frontend/backend`，故适用；session `2d052d9a-b9fd-4fcd-b5f9-ff724f25dbc1` 正常完成（5 turns、`$3.207112`、7 条 conversation、固定 commit prompt 恰好一次）。fresh 调用中内置 Explore 子代理曾输出未识别模型 `gpt-5.6-terra[1m]` 警告，但主 Agent 同一次调用继续并 success，未追加人工或 run-history 恢复提示。产品根提交 `0ceee1bb8b5836f64112ded0c8fd3cf7fbd1f29c` 仅新增 206 行、25580 字节的 `docs/ui-ux/framework.md`，未 push；root/frontend/backend 均为自身 top-level、`main`、clean。`steps/10.json` 是 `applicable: true` 的唯一固定输出 success；其后第 11 步已经消费该严格交接。幂等重跑不增加 conversation、提交或 Agent/决策调用，session、root HEAD 与前后端 SHA 均不变；不适用路径仅有自动化覆盖。
 
@@ -69,5 +70,7 @@ commit-changes 执行轮发现文档中的 frontend Git 事实矛盾，严格未
 
 真实 Responses 成功提取 BR-001～BR-014 共 14 条，标题、连续 `order` 1～14 和依赖均与 Backlog 总览和详情卡一致；注册表全部为 `pending`、`completion: null`。来源 Backlog SHA-256 为 `707c4b91924542e9cbd282fba53cc8857b8ea1fcbdfb7a820c208d0573d759bb`，root `main` SHA 为 `0232d8136c075cb61a6617a95e1504b67bd9acd1`。state 已进入第 13 步 `phase_1:select_requirement`，`active_requirement`、`requirement_cycle` 均为 `null`，未新增 `completed_requirements` 或 `phase_two`，也没有新 Claude session 或负责人决策 conversation。产品 root/frontend/backend 分别为 `0232d8136c075cb61a6617a95e1504b67bd9acd1`、`dbab574dbe4d83a02323a750afd04de007565ac5`、`9682be837759c20f1a9ebbdf8fa2cfc09c2768d4`，三仓仍为 `main`、clean。
 
-幂等真实重跑使用不可用模型配置仍 success，证明未加载模型；`steps/12.json` 与 state 字节不变，最终 result SHA-256 为 `8f829cb3d4935a9dcd07bea2dd8f0df2a22369c433ba4320938e2a9461f41fb0`，state SHA-256 为 `73fd0cb99c39f64f9ef210a171799f79baaee87a417a18f5db74f5b5374470f7`。第 13 步及以后尚未实现；阶段一第 13～18 步合同仍仅为后续目标合同。
+幂等真实重跑使用不可用模型配置仍 success，证明未加载模型；`steps/12.json` 与 state 字节不变，最终 result SHA-256 为 `8f829cb3d4935a9dcd07bea2dd8f0df2a22369c433ba4320938e2a9461f41fb0`，state SHA-256 为 `73fd0cb99c39f64f9ef210a171799f79baaee87a417a18f5db74f5b5374470f7`。
+
+第 13 步随后以零 AI、零 Agent、零 Skill 的确定性路径选择 `BR-001`，先保存仅含 ID 的 `active_requirement` 与含 `branch: req/br-001`、各仓 `base_sha`、`return_node_after_completion` 的 cycle，再仅建立三仓同名本地分支。success 仅写入 `steps/requirements/BR-001/13.json`，state 进入 `phase_1_requirement_development` / `requirement:14_trd_design`、`step/current_step: 14`；注册表为 13 pending、0 completed，`BR-001` 为 active。scoped result SHA-256 为 `d37d9dfdaa6ba5c885842f0f6fc6046b027bd11454441182093a185f7fdaacab`，state SHA-256 为 `a6fc435c28010061ca3dd369b571221193b6a534e0d977158cdce215a8f2bc48`。root/frontend/backend 均为 clean `req/br-001`，记录 base 分别为 `0232d8136c075cb61a6617a95e1504b67bd9acd1`、`dbab574dbe4d83a02323a750afd04de007565ac5`、`9682be837759c20f1a9ebbdf8fa2cfc09c2768d4`，各仓 HEAD、local `main` 与 target 均相等，ahead/behind 均为 0；无产品文件改动、commit、merge 或 push。幂等重跑后 scoped result、state 和三仓 ref 字节/事实不变。第 14 步尚未实现；第 14～18 步和阶段二仍是后续工作。
 Git 忽略 run `prompt-role-replay-20260823` 保留旧四段 XML prompt 的历史交接回放；它不是现行五段 prompt 的证据。现行 `role/project_context/responsibility/completion/output` 合同已由第 9 步 fresh 真实运行验证。

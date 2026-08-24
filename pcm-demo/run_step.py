@@ -10,7 +10,14 @@ from secrets import token_hex
 from typing import Any
 
 from common.files import sha256
-from common.state import create_run_dir, read_state, write_state, write_step_result
+from common.state import (
+    create_run_dir,
+    read_state,
+    requirement_step_result_path,
+    write_requirement_step_result,
+    write_state,
+    write_step_result,
+)
 from config import LLMConfig, load_template_repository, load_workspace_root
 from steps.step_00_product_draft import run as run_product_draft
 from steps.step_01_create_workspace import (
@@ -66,6 +73,14 @@ from steps.step_11_requirement_breakdown.step import CURRENT_NODE as REQUIREMENT
 from steps.step_12_initialize_requirement_registry import result as requirement_registry_result
 from steps.step_12_initialize_requirement_registry import run as run_requirement_registry
 from steps.step_12_initialize_requirement_registry.step import has_complete_success as has_requirement_registry_success
+from steps.step_13_select_requirement import result as requirement_selection_result
+from steps.step_13_select_requirement import run as run_requirement_selection
+from steps.step_13_select_requirement.step import (
+    CURRENT_NODE as SELECT_REQUIREMENT_NODE,
+    NoPendingRequirements,
+    failure_scope as requirement_selection_failure_scope,
+    has_complete_success as has_requirement_selection_success,
+)
 
 DEMO_ROOT = Path(__file__).resolve().parent
 
@@ -508,6 +523,15 @@ async def run_step_twelve(args: argparse.Namespace) -> tuple[Path, dict[str, Any
     return run_dir, await run_requirement_registry(run_dir, read_state(run_dir))
 
 
+def run_step_thirteen(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
+    if not args.run_id:
+        raise ValueError("第 13 步需要 --run-id")
+    run_dir = run_dir_for(args.run_id)
+    if not run_dir.is_dir():
+        raise ValueError(f"运行记录不存在：{args.run_id}")
+    return run_dir, run_requirement_selection(run_dir, read_state(run_dir))
+
+
 def sha256_bytes(data: bytes) -> str:
     import hashlib
 
@@ -544,12 +568,13 @@ def run_step_zero(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
 
 def main() -> int:
     args = parse_args()
-    if args.step not in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}:
+    if args.step not in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13}:
         print(f"步骤尚未实现：{args.step}", file=sys.stderr)
         return 2
 
     run_dir: Path | None = None
     error_message = ""
+    no_pending = False
     try:
         if args.step == 0:
             run_dir, result = run_step_zero(args)
@@ -588,8 +613,10 @@ def main() -> int:
                         run_dir, result = asyncio.run(run_step_ten(args))
                     elif args.step == 11:
                         run_dir, result = asyncio.run(run_step_eleven(args))
-                    else:
+                    elif args.step == 12:
                         run_dir, result = asyncio.run(run_step_twelve(args))
+                    else:
+                        run_dir, result = run_step_thirteen(args)
     except ProjectIntakeBlocked as error:
         result = project_intake_result(
             "blocked",
@@ -724,7 +751,26 @@ def main() -> int:
             result_factory = requirement_registry_result
         else:
             result_factory = workspace_result
-        if args.step == 12:
+        if args.step == 13:
+            scope = None
+            if run_dir is not None:
+                try:
+                    scope = requirement_selection_failure_scope(run_dir, read_state(run_dir))
+                except Exception:  # noqa: BLE001 - 失败结果只能使用可安全确认的活动需求。
+                    scope = None
+            result = requirement_selection_result(
+                "failed",
+                "需求选择失败。",
+                requirement_id=scope[0] if scope else None,
+                branch=scope[1] if scope else None,
+                error={
+                    "type": type(error).__name__,
+                    "message": "需求选择未完成。",
+                },
+            )
+            error_message = "需求选择失败。"
+            no_pending = isinstance(error, NoPendingRequirements)
+        elif args.step == 12:
             result = result_factory(
                 "failed",
                 "需求注册表初始化失败。",
@@ -746,12 +792,50 @@ def main() -> int:
         detail = result.get("blocked") or result.get("error") or {}
         error_message = str(detail.get("reason") or detail.get("message") or result["summary"])
 
-    protected_success = (
-        run_dir is not None
-        and args.step in {8, 9, 10, 11, 12}
-        and has_step_success(run_dir, args.step)
-    )
-    if run_dir is not None and args.step in {1, 2, 5, 6, 7, 8, 9, 10, 11, 12}:
+    selection_scope: tuple[str, str] | None = None
+    if run_dir is not None and args.step == 13:
+        try:
+            selection_state = read_state(run_dir)
+            selection_scope = requirement_selection_failure_scope(run_dir, selection_state)
+            protected_success = has_requirement_selection_success(run_dir, selection_state)
+        except Exception:  # noqa: BLE001 - 状态损坏时仍需返回脱敏失败信息。
+            protected_success = False
+    else:
+        protected_success = (
+            run_dir is not None
+            and args.step in {8, 9, 10, 11, 12}
+            and has_step_success(run_dir, args.step)
+        )
+
+    if run_dir is not None and args.step == 13:
+        if result["status"] != "success" and not protected_success:
+            try:
+                state = read_state(run_dir)
+            except Exception:  # noqa: BLE001 - 状态损坏时不能构造 scoped 失败结果。
+                state = None
+            if state is not None and selection_scope is not None:
+                state.update(
+                    {
+                        "status": "failed",
+                        "step": 13,
+                        "current_step": 13,
+                        "current_node": SELECT_REQUIREMENT_NODE,
+                        "blocked": None,
+                        "error": result["error"],
+                    }
+                )
+                write_state(run_dir, state)
+                write_requirement_step_result(run_dir, selection_scope[0], 13, result)
+            elif state is not None and not no_pending:
+                state.update(
+                    {
+                        "status": "failed",
+                        "blocked": None,
+                        "error": result["error"],
+                    }
+                )
+                write_state(run_dir, state)
+    elif run_dir is not None and args.step in {1, 2, 5, 6, 7, 8, 9, 10, 11, 12}:
         if result["status"] != "success" and not protected_success:
             try:
                 state = read_state(run_dir)
@@ -785,14 +869,23 @@ def main() -> int:
             write_step_result(run_dir, args.step, result)
 
     if run_dir is not None:
+        scoped_path: Path | None = None
+        if args.step == 13:
+            requirement_id = result.get("requirement_id")
+            if isinstance(requirement_id, str):
+                try:
+                    scoped_path = requirement_step_result_path(run_dir, requirement_id, 13)
+                except ValueError:
+                    scoped_path = None
         if result["status"] != "success":
+            detail_path = scoped_path if scoped_path is not None else run_dir / "state.json"
             print(
                 f"步骤 {args.step} {result['status']}：{error_message}\n"
-                f"详细结果：{run_dir / 'steps' / f'{args.step:02d}.json'}",
+                f"详细结果：{detail_path}",
                 file=sys.stderr,
             )
         else:
-            print(run_dir / "steps" / f"{args.step:02d}.json")
+            print(scoped_path or run_dir / "steps" / f"{args.step:02d}.json")
     else:
         print(result["summary"], file=sys.stderr)
     return 0 if result["status"] == "success" else 1

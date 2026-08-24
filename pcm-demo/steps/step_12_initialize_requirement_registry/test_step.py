@@ -167,6 +167,9 @@ class RequirementRegistryTests(unittest.TestCase):
             RequirementStatic(id=" REQ-1 ", title=" 功能 ", order=1, depends_on=[" REQ-0 "]).model_dump(),
             {"id": "REQ-1", "title": "功能", "order": 1, "depends_on": ["REQ-0"]},
         )
+        for identifier in ("REQ.001", "REQ/001", "../REQ-001"):
+            with self.subTest(identifier=identifier), self.assertRaises(ValidationError):
+                RequirementStatic(id=identifier, title="功能", order=1, depends_on=[])
         calls: list[dict] = []
 
         async def fake_model(config: object, **kwargs: object) -> RequirementCatalog:
@@ -294,6 +297,7 @@ class RequirementRegistryTests(unittest.TestCase):
             "missing": self.requirements()[:2],
             "invented": [*self.requirements()[:2], {"id": "REQ-999", "title": "虚构", "order": 3, "depends_on": []}],
             "duplicate-id": [self.requirements()[0], {"id": "REQ-001", "title": "订单管理", "order": 2, "depends_on": []}, self.requirements()[2]],
+            "casefold-duplicate-id": [self.requirements()[0], {"id": "req-001", "title": "订单管理", "order": 2, "depends_on": []}, self.requirements()[2]],
             "duplicate-order": [self.requirements()[0], {**self.requirements()[1], "order": 1}, self.requirements()[2]],
             "non-continuous-order": [self.requirements()[0], {**self.requirements()[1], "order": 3}, {**self.requirements()[2], "order": 4}],
             "title-mismatch": [{**self.requirements()[0], "title": "不同标题"}, *self.requirements()[1:]],

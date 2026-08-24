@@ -1,10 +1,18 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
 from common.files import write_json
+
+
+REQUIREMENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+
+
+def is_valid_requirement_id(value: object) -> bool:
+    return isinstance(value, str) and REQUIREMENT_ID_PATTERN.fullmatch(value) is not None
 
 
 def create_run_dir(runs_dir: Path, run_id: str) -> Path:
@@ -50,3 +58,26 @@ def write_state(run_dir: Path, state: dict[str, Any]) -> None:
 
 def write_step_result(run_dir: Path, step: int, result: dict[str, Any]) -> None:
     write_json(run_dir / "steps" / f"{step:02d}.json", result)
+
+
+def requirement_step_result_path(run_dir: Path, requirement_id: str, step: int) -> Path:
+    if not is_valid_requirement_id(requirement_id):
+        raise ValueError("无效需求 ID")
+    if type(step) is not int or step < 0:
+        raise ValueError("无效步骤编号")
+    requirements = run_dir / "steps" / "requirements"
+    for directory in (run_dir, run_dir / "steps", requirements, requirements / requirement_id):
+        if directory.is_symlink():
+            raise ValueError("需求结果目录不能是符号链接")
+    return requirements / requirement_id / f"{step:02d}.json"
+
+
+def write_requirement_step_result(
+    run_dir: Path, requirement_id: str, step: int, result: dict[str, Any]
+) -> None:
+    path = requirement_step_result_path(run_dir, requirement_id, step)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path = requirement_step_result_path(run_dir, requirement_id, step)
+    if path.is_symlink():
+        raise ValueError("需求结果目录不能是符号链接")
+    write_json(path, result)

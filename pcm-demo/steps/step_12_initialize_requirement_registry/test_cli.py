@@ -211,7 +211,7 @@ class StepTwelveCLITests(unittest.TestCase):
         self.assertEqual((state["step"], state["current_step"], state["current_node"]), (13, 13, NEXT_NODE))
         self.assertEqual(state["status"], "failed")
 
-        with patch.object(self.cli, "parse_args", return_value=self.args(run_dir.name, 13)):
+        with patch.object(self.cli, "parse_args", return_value=self.args(run_dir.name, 14)):
             self.assertEqual(self.cli.main(), 2)
         shutil.rmtree(run_dir)
 

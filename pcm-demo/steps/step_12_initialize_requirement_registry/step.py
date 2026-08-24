@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from common.files import sha256
 from common.openai_responses import parse_response
-from common.state import write_state, write_step_result
+from common.state import is_valid_requirement_id, write_state, write_step_result
 from config import LLMConfig
 from steps.step_11_requirement_breakdown.step import BACKLOG_PATH, verify_existing_success
 
@@ -49,12 +49,21 @@ class RequirementStatic(BaseModel):
             raise ValueError("字段不能为空")
         return value
 
+    @field_validator("id")
+    @classmethod
+    def requirement_id_is_safe_path_segment(cls, value: str) -> str:
+        if not is_valid_requirement_id(value):
+            raise ValueError("需求 ID 不符合路径约定")
+        return value
+
     @field_validator("depends_on")
     @classmethod
     def strip_dependencies(cls, values: list[str]) -> list[str]:
         normalized = [value.strip() for value in values]
         if any(not value for value in normalized):
             raise ValueError("依赖 ID 不能为空")
+        if any(not is_valid_requirement_id(value) for value in normalized):
+            raise ValueError("依赖 ID 不符合路径约定")
         return normalized
 
 
@@ -425,6 +434,8 @@ def _validate_static_rules(requirements: list[RequirementStatic]) -> None:
     orders = [requirement.order for requirement in requirements]
     if len(set(identifiers)) != len(identifiers):
         raise RuntimeError("需求 ID 不唯一")
+    if len({identifier.casefold() for identifier in identifiers}) != len(identifiers):
+        raise RuntimeError("需求 ID 忽略大小写后不唯一")
     if len(set(orders)) != len(orders) or sorted(orders) != list(range(1, len(orders) + 1)):
         raise RuntimeError("需求 order 必须从 1 连续编号")
     known = set(identifiers)
