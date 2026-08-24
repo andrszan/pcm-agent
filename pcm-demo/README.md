@@ -14,6 +14,7 @@
 - [第 7 步：总体技术方案](steps/step_07_solution_design/README.md)
 - [第 8 步：首次提交适用仓库](steps/step_08_initialize_repositories/README.md)
 - [第 9 步：工程架构设计](steps/step_09_engineering_architecture/README.md)
+- [第 10 步：产品级 UI/UX 框架](steps/step_10_ui_ux_framework/README.md)
 
 每个步骤的业务代码、测试和详细运行说明都在对应步骤目录中。根 README 只提供导航。
 
@@ -26,7 +27,7 @@ uv sync
 uv run python -m unittest discover -s . -t . -p 'test*.py' -v
 ```
 
-该入口从 `pcm-demo/` 根递归发现 `common/` 与 `steps/` 测试。当前第 9 步专属 29 项、公共循环 24 项、第 7 步 8 项、第 8 步 17 项，相关定向 78 项及全量 141 项均已通过；`compileall`、`git diff --check` 通过，IDE 对第 9 步无诊断。本轮文档更新后的最终审查由主代理执行。
+该入口从 `pcm-demo/` 根递归发现 `common/` 与 `steps/` 测试。当前第 10 步本体 16 项与 CLI 5 项，共 21 项；第 9 步专属 29 项、公共循环 24 项、第 7 步 8 项、第 8 步 17 项，相关定向 99 项及全量 162 项均已通过；`compileall`、`git diff --check` 通过，新增 README 的 no-index whitespace 检查通过，IDE 对第 10 步 `step.py`、`test_step.py`、`test_cli.py` 和 `run_step.py` 无诊断。
 
 ## 最近真实验证
 
@@ -54,6 +55,7 @@ backend 提交摘要中的 Ruff、格式、build 通过和 `pytest` 14 passed、
 
 commit-changes 执行轮发现文档中的 frontend Git 事实矛盾，严格未修改、未暂存、未提交并报告。外层负责人随后通过普通 `continue` 授权通用 Claude Agent 仅修正固定文档并提交；Agent 精确完成。产品根提交为 `ead14dffe19bc6417634c24c7bb1103602c3b772`，message `docs: 新增工程架构设计`，仅新增 `docs/design/工程架构设计.md`，376 行、32928 字节；未 push，frontend/backend 无变化。最终严格 JSON decision 为 `completed`，`steps/09.json` 为 success，state 推进到 `project:10_ui_ux_framework`。
 
-独立核验确认 root/frontend/backend 均为自身 top-level、`main`、clean，固定文档 tracked。同 run 幂等重跑后 conversation 仍为 11 条，session 和 root HEAD 不变，没有再次调用 Agent、决策服务或产生新提交。`run_step.py` 只对 schema 完整的第 8、9 步 success 保护既有 result 和已推进 state；后续重跑失败不会覆盖 success 或回退节点，残缺 success 不保护，其它步骤保持原行为。第 10 步仍按需，当前进入其合同讨论。
+独立核验确认 root/frontend/backend 均为自身 top-level、`main`、clean，固定文档 tracked。同 run 幂等重跑后 conversation 仍为 11 条，session 和 root HEAD 不变，没有再次调用 Agent、决策服务或产生新提交。`run_step.py` 只对 schema 完整的第 8～10 步 success 保护既有 result 和已推进 state；后续重跑失败不会覆盖 success 或回退节点，残缺 success 不保护，其它步骤保持原行为。
 
+第 10 步代码、自动化和真实验收现已完成。`step01-mendmark` 的第 8 步权威仓库为 `root/frontend/backend`，故适用；session `2d052d9a-b9fd-4fcd-b5f9-ff724f25dbc1` 正常完成（5 turns、`$3.207112`、7 条 conversation、固定 commit prompt 恰好一次）。fresh 调用中内置 Explore 子代理曾输出未识别模型 `gpt-5.6-terra[1m]` 警告，但主 Agent 同一次调用继续并 success，未追加人工或 run-history 恢复提示。产品根提交 `0ceee1bb8b5836f64112ded0c8fd3cf7fbd1f29c` 仅新增 206 行、25580 字节的 `docs/ui-ux/framework.md`，未 push；root/frontend/backend 均为自身 top-level、`main`、clean。`steps/10.json` 是 `applicable: true` 的唯一固定输出 success，state 已推进至 `project:11_requirement_breakdown`。幂等重跑不增加 conversation、提交或 Agent/决策调用，session、root HEAD 与前后端 SHA 均不变；不适用路径仅有自动化覆盖。第 11 步尚待实现。
 Git 忽略 run `prompt-role-replay-20260823` 保留旧四段 XML prompt 的历史交接回放；它不是现行五段 prompt 的证据。现行 `role/project_context/responsibility/completion/output` 合同已由第 9 步 fresh 真实运行验证。

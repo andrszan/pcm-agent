@@ -387,7 +387,7 @@ PCM Demo 只保存支持继续运行所必需的状态：
 - 输出：`steps/08.json` 的 `outputs` 固定为空，并保存 `applicable_repositories` 和 `repositories` 列表；每项为相对 `path`、`branch`、`worktree_clean`。状态保存同样事实但路径为绝对路径，成功推进到 `project:09_engineering_architecture`。
 - 完成条件：每仓自身 top-level、`main` 且 `status --porcelain` 为空。无需检查 HEAD、提交是否产生、提交数、父提交、SHA、marker、历史替换或根 tree。
 - 恢复：`completed` 后 Python 只读复验；仍 dirty 则以固定 repair prompt 继续同一 session。`blocked` 后重读，已全干净直接成功，仍 dirty 才保存 blocked。恢复也先读现场，已全干净直接成功，仍 dirty 才恢复原 session。`failed` / `blocked` 的步骤结果不能当作成功；只有 `status=success` 可幂等复用。成功后的第 9 步状态若权威仓库变 dirty，拒绝复用，避免第 8 步替后续修改提交。
-- 自动化说明：决策只有 `completed`、`continue`、`blocked`；不执行 push。当前自动化基线为第 9 步专属 29 项、公共循环 24 项、第 7 步 8 项、第 8 步 17 项、相关定向 78 项和全量 141 项通过；`compileall`、`git diff --check` 通过，IDE 对第 9 步无诊断。本轮文档更新后的最终审查由主代理执行。
+- 自动化说明：决策只有 `completed`、`continue`、`blocked`；不执行 push。当前自动化基线为第 10 步本体 16 项与 CLI 5 项、第 9 步专属 29 项、公共循环 24 项、第 7 步 8 项、第 8 步 17 项、相关定向 99 项和全量 162 项通过；`compileall`、`git diff --check` 及新增 README 的 no-index whitespace 检查通过，IDE 对第 10 步 `step.py`、`test_step.py`、`test_cli.py` 和 `run_step.py` 无诊断。
 - 真实验证：当前合同已在真实 run `pcm-demo/runs/step01-mendmark` 和产品工作区 `/Users/zhou/resource/fireworks/ANDRSZAN/pcm-products/mendmark` 完成验证；run 目录名与 state 内历史 `run_id` 不一致是既有已知事实。权威仓库为 `root/frontend/backend`，第 4 步 `outputs` 为 `frontend/backend`；首次执行前三仓均为自身 top-level、`main`、dirty 且 HEAD 不存在。
 - 环境恢复：首次执行只启动 `initialize_repositories` session `f6d42df8-13e5-437b-ada3-eef1015ecc87`。Agent 尝试内置 Explore 时遇到环境未识别模型 `gpt-5.6-sol[1m]`，无 Result、无 Git 变化，挂起进程停止后保存 session、conversation 和 init 证据；这是环境内部子代理问题，不是第 8 步业务或 Git 逻辑失败。仅在 Git 忽略的真实 run 历史中追加普通恢复指令“不要使用子代理/Explore，直接工具完成”，生产 prompt 和代码未改变，并恢复同一 session。
 - 提交与决策：Agent 先创建 frontend `dbab574dbe4d83a02323a750afd04de007565ac5`、backend `9682be837759c20f1a9ebbdf8fa2cfc09c2768d4` 两个本地提交；随后针对根仓运行时产物和 `.agents/plugins/superpowers/.git` 请求决策。AI-compatible 负责人返回 `continue`，授权删除 61 个 `.in_use/*`、`.orphaned_at`、`.coverage` 运行时产物、补 `.gitignore`、移除嵌套 `.git`，并将 superpowers 作为普通受控插件快照而非 submodule 提交。root 创建 `02ba4c1`、`ae72c31`、`5eeeacd217bbd27e03483b1b6d32915c721aadd9` 三个本地提交；全程未 push。
@@ -404,26 +404,27 @@ PCM Demo 只保存支持继续运行所必需的状态：
 - 输出：唯一固定产物 `docs/design/工程架构设计.md`。
 - 完成条件：固定文档为非空普通文件且被根仓 Git 跟踪；根仓及所有适用子仓都是各自自身 top-level、位于 `main` 且 clean；固定提交调用锚点有效。Python 只读 Git，不读取 HEAD、SHA、提交数或历史，不执行 Git 写操作。
 - 恢复与安全：fresh 入口要求全仓 clean 且拒绝任何预置的第 9 步 session、conversation 引用、私有状态或历史文件；已有执行事实时缺失原 session、conversation 引用或历史文件均失败；conversation 文件或其父目录为符号链接时拒绝。conversation 尾部为 Agent `user` 时先请求决定，不重复 Agent 或新建 session。成功后推进 `project:10_ui_ux_framework`；第 10 步仍按需。
-- 自动化验证：第 9 步专属 29 项、公共循环 24 项、第 7 步 8 项、第 8 步 17 项，相关定向 78 项和全量 141 项均通过；`compileall`、`git diff --check` 通过，IDE 对第 9 步无诊断。
+- 自动化验证：第 10 步本体 16 项与 CLI 5 项、第 9 步专属 29 项、公共循环 24 项、第 7 步 8 项、第 8 步 17 项，相关定向 99 项和全量 162 项均通过；`compileall`、`git diff --check` 及新增 README 的 no-index whitespace 检查通过，IDE 对第 10 步 `step.py`、`test_step.py`、`test_cli.py` 和 `run_step.py` 无诊断。
 - 旧失败与根因：曾依次出现 free quota / `use free tier only` 导致的 HTTP 403、访问恢复后的非 JSON 普通文本，以及 `completed` 携带非空 `answer`。根因是旧 `render_decision_system_prompt` 将步骤规则混入 responsibility、硬编码并重复 completion 语义且缺少 output。用户将公共 prompt 重构为 `role/project_context/responsibility/completion/output` 五段，补齐 f-string JSON 花括号转义和 `AgentDecision` 字段组合约束，并同步 common 与第 2/5/6/7/9 步测试。
 - fresh 真实运行：按用户要求两次清理第 9 步局部 result、conversation、session、private state 和失败生成的未跟踪文档，保留第 0～8 步历史与三仓提交。最终唯一 session `f41fc439-4c46-434f-b3e9-d15c18c89601`，conversation 11 条：`system → assistant 初始 → user → assistant continue → user → assistant completed → assistant commit prompt → user → assistant continue → user → assistant completed`。
 - 执行事实：首轮 Agent 请求确认，负责人合法 `continue` 后创建约 32 KB 固定文档；负责人 `completed` 后 verifier 同 session 发送 `/commit-changes`。该 Skill 发现 frontend Git 事实矛盾，严格未修改、未暂存、未提交并报告；外层负责人普通 `continue` 授权通用 Agent 仅修正文档并精确提交。
 - 完成证据：产品根提交 `ead14dffe19bc6417634c24c7bb1103602c3b772`，message `docs: 新增工程架构设计`，仅新增固定文档，376 行、32928 字节；未 push，frontend/backend 无变化。最终 decision 为合法严格 JSON `completed`，`steps/09.json` success，state success 并推进 `project:10_ui_ux_framework`。
-- 幂等证据：独立核验 root/frontend/backend 自身 top-level、`main`、clean，文档 tracked；同 run 重跑后 conversation 仍 11 条，session 和 root HEAD 不变，无 Agent、decision 或新提交调用。`run_step.py` 只对 schema 完整的第 8、9 步 success 保护既有 result 和已推进 state；后续重跑失败不覆盖 success、不回退节点，残缺 success 不保护，其它步骤保持原入口行为。第 9 步已真实成功，当前进入仍按需的第 10 步合同讨论。
+- 幂等证据：独立核验 root/frontend/backend 自身 top-level、`main`、clean，文档 tracked。同 run 幂等重跑后 conversation 仍 11 条，session 和 root HEAD 不变，无 Agent、decision 或新提交调用。第 9 步的历史证据保持不变；现行 `run_step.py` 对 schema 完整的第 8～10 步 success 保护既有 result 和已推进 state，后续重跑失败不覆盖 success、不回退节点，残缺 success 不保护，其它步骤保持原入口行为。第 10 步现已真实成功并推进 `project:11_requirement_breakdown`，第 11 步待实现。
 
 ### 第 10 步：产品级 UI/UX 框架
 
-- 能力：`ui-ux-framework`。
-- 适用：项目尚无能够指导后续需求的产品级框架，现有框架明显失真，或当前问题会改变产品表面、主导航、Shell、全局视觉语义、共享组件语义或客户定制边界。
-- 输入：产品定义、总体技术方案、工程事实、已有产品级 UI/UX 框架文档约定和调用方提供的相关设计资料。
-- 输出：项目已有权威框架文档时沿用实际路径，不重复创建、迁移或并行维护；没有既有约定且确认适用时，默认创建或更新综合文档 `docs/ui-ux/framework.md`；不适用时只形成明确结论和依据，不创建该文档或空目录。
-- 完成条件：适用时，实际框架文档路径明确，产品表面、信息架构、Shell、导航和跨需求体验约束已经确认，高影响决定已经取得确认，且没有把单需求设计或页面实现混入框架；不适用时，依据充分且没有产生框架文档副作用。
-- 自动化说明：这是按需的项目级能力，不是每个需求的固定前置步骤。步骤结果显式记录适用性和实际输出相对路径，后续步骤从结果读取而不猜测默认文件；适用文档完成后提交根仓库，不适用时不创建空文档或空目录。
+- 能力：`ui-ux-framework`。它仍只建立、校正或演进跨需求稳定的产品级框架，不负责单项需求设计、页面实现或开发验收。
+- Demo v1 适用性：仅由 `steps/08.json` 与 state 完全一致的 `applicable_repositories` 是否包含 `frontend` 确定；程序不扫描目录，也不让 Agent 判断。该规则是当前前后端交付单元模型的 Demo 简化，不改变通用 Skill 对已有项目和显式既有路径的更广语义。
+- 输入：无论适用与否，严格读取第 8 步权威仓库交接与第 9 步 success 结果（唯一 `docs/design/工程架构设计.md`）；适用时还读取第 2 步两份产品定义输出、第 5 步清单、第 7 步总体技术方案和实际 `frontend/` 工程。
+- 不适用：只作上述交接核验，拒绝任意状态遗留的本步骤 session、conversation、私有执行状态或历史文件；零 Git、Agent、决策、LLM 配置和 `docs/ui-ux/` 副作用，写入 `success`、`applicable: false`、`outputs: []` 并推进第 11 步。此分支由自动化覆盖，黄金项目不走此分支。
+- 适用动作与输出：单一键/session 为 `ui_ux_framework`，初始提示首行 `/ui-ux-framework` 并明确 `bootstrap`；只允许创建或更新 `docs/ui-ux/framework.md`，禁止单需求设计、代码、配置、项目规则和 Git。Demo v1 成功结果为 `applicable: true` 与该唯一输出；已有项目接入和显式既有路径属于未来扩展，不能据此把当前固定路径泛化为通用 Skill 的永久限制。
+- 完成、恢复与安全：`completed` 后先 repair 缺失或空文档，再无论是否有 diff 都在原 session exact 调用一次 `/commit-changes`；锚点为 exact prompt、紧邻非空 Agent `user` 回复和原 session。文档必须非空、非符号链接、已 tracked，全部权威仓库必须是自身 top-level、`main`、clean；Python 只读 Git。fresh、resume、blocked、写入中断、幂等与符号链接规则同第 9 步同构且保持步骤私有，`run_step.py` 只保护 schema 完整的第 8～10 步 success，残缺 success 不保护。
+- 自动化与真实验证：第 10 步本体 16 项和 CLI 5 项通过，全量 162 项通过。`step01-mendmark` 真实适用运行生成并以根仓本地提交 `0ceee1bb8b5836f64112ded0c8fd3cf7fbd1f29c` 提交唯一固定文档，state 推进 `project:11_requirement_breakdown`；同 run 幂等重跑没有新调用或提交。fresh 调用的内置 Explore 子代理曾输出未识别模型 `gpt-5.6-terra[1m]` 警告，主 Agent 同次调用继续并 success；不适用路径没有真实运行证据。
 
 ### 第 11 步：拆分 Backlog
 
 - 能力：`requirement-breakdown`。
-- 输入：产品定义、总体方案、必要的工程架构、按需 UI/UX 框架结论，以及当前工程事实。
+- 输入：产品定义、总体方案、必要工程架构、当前工程事实，以及第 10 步结果的 `status`、`applicable` 和 `outputs`；不从默认路径或目录扫描猜测 UI/UX 框架交接对象。
 - 输出：完整覆盖最终产品范围的 Backlog 总览和需求详情卡，以及由一个或多个完整正式需求组成的首条验证切片。
 - 完成条件：需求具有明确产品结果、范围、依赖、验收方向和建议顺序；已检查可以合并、删除或推迟确认的复杂度；首条验证切片能够尽早验证关键假设，并明确尚未覆盖的最终范围。它不是 MVP、半完成需求、Mock 演示或范围缩减。
 - 自动化说明：完成后提交根仓库，进入阶段一；首条验证切片只是 Backlog 的建议顺序，不触发产品体验审计。
