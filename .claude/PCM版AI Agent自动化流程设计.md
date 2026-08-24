@@ -22,7 +22,8 @@ PCM 自动化流程接收一份产品初稿；资料不足时先形成产品初�
 → 首次提交适用仓库
 → 必要的工程架构设计和按需 UI/UX 框架
 → Backlog 拆分
-→ 阶段一：逐需求形成 TRD、实现、验证、状态收尾、复盘和合并
+→ 解析 Backlog 并初始化需求注册表
+→ 阶段一：逐需求建立统一分支、形成 TRD、实现验证、规则复盘、统一提交和合并
 → 阶段二：全项目级集成产品体验审计、候选分流、修复回归和完整复审
 → 项目最终验收
 ```
@@ -76,8 +77,9 @@ AI 决策能力代替人工调度者处理流程中所有能够基于当前输�
 - 回答 Skill 或 Agent 提出的澄清、确认和方案选择问题；
 - 判断文档是否满足当前步骤完成条件并批准定稿；
 - 选择产品范围、技术方案、实现方式和非阻断建议的处理结果；
-- 判断是否继续当前会话、修正当前步骤产物或结束当前步骤；
-- 从 Backlog 选择下一个满足依赖的需求。
+- 判断是否继续当前会话、修正当前步骤产物或结束当前步骤。
+
+需求注册表初始化后的需求选择是确定性调度，不属于 AI 语义决策：Python 根据注册表中的依赖完成事实和 `order`，选择顺序最靠前的可开发需求。
 
 存在多个合理方案、资料歧义或重大取舍时，AI 仍应选择并记录理由，不因需要判断而转交开发者。只有缺少当前资源清单之外、模型与当前环境无法取得的不可替代外部资源时才返回 `blocked`，例如第三方账号、付费服务、客户私有数据、专用设备、外部授权或线下动作。输入不完整、状态冲突或本地现场无法确定性继续属于 `failed`，修复输入或现场后重试当前步骤。
 
@@ -86,6 +88,8 @@ Python 程序直接负责：
 - 校验项目文件夹名为单段小写 kebab-case，并根据配置的产品工作区根目录计算最终路径；
 - 对配置的模板仓库执行 Git 浅克隆、记录分支和 commit、清理上游 Git 历史、初始化产品文档目录并原子发布工作区；
 - 读写运行状态；
+- 使用 OpenAI Responses API 和 Pydantic 从正式 Backlog 提取需求静态字段，并校验 ID、顺序和依赖图；
+- 根据需求注册表确定性选择下一条可开发需求，并维护活动需求、分支、session、提交、合并和完成状态；
 - 创建和检查目录；
 - 调用 Claude Agent SDK；
 - 执行 Git、测试、构建和启动命令；
@@ -153,109 +157,130 @@ Demo 和默认 PCM 流程只进行本地文件修改、测试、构建、服务�
 
 ## 四、运行上下文与恢复
 
-PCM Demo 只保存支持继续运行所必需的状态：
+PCM Demo 只保存支持继续运行所必需的状态。第 12 步成功后的目标快照如下；它只表示需求注册表已经初始化，尚未选择活动需求或创建需求分支：
 
 ```json
 {
   "run_id": "20260816-153000",
   "status": "running",
-  "input": {
-    "type": "product_draft",
-    "source_path": "/absolute/path/to/产品初稿.md",
-    "source_sha256": "<sha256>",
-    "content": "<完整 UTF-8 初稿内容>",
-    "published_path": "/products/family-meal-planner/docs/产品初稿.md"
-  },
-  "project": {
-    "topic_name": "家庭食材管理与一周膳食计划系统",
-    "project_directory_name": "family-meal-planner",
-    "extraction": {
-      "directory_name_source": "generated",
-      "reason": "初稿未提供仓库名，根据选题生成"
-    }
-  },
   "workspace": {
-    "root": "/products",
-    "root_source": "PCM_WORKSPACE_ROOT",
-    "staging_path": "/products/family-meal-planner.pcm-tmp-20260816-153000",
     "final_path": "/products/family-meal-planner"
   },
-  "template": {
-    "repository": "<configured-template-repository>",
-    "remote_url": "<configured-template-repository>",
-    "default_branch": "main",
-    "actual_branch": "main",
-    "commit_sha": "<sha>"
-  },
-  "publication_phase": "git_initialized",
-  "initialization_evidence": {
-    "template_capabilities_present": true,
-    "upstream_git_removed": true,
-    "docs_reinitialized": true,
-    "draft_hash_matches": true,
-    "source_draft_unchanged": true,
-    "renamed_to_final_path": true,
-    "root_git_initialized": true,
-    "root_git_is_final_path": true,
-    "root_git_initially_had_no_commits": true
-  },
   "applicable_repositories": ["root", "frontend", "backend"],
-  "repositories": {
-    "root": {
-      "path": "/products/family-meal-planner",
-      "branch": "feat/req-002",
-      "worktree_clean": true
-    },
-    "frontend": {
-      "path": "/products/family-meal-planner/frontend",
-      "branch": "main",
-      "worktree_clean": true
-    },
-    "backend": {
-      "path": "/products/family-meal-planner/backend",
-      "branch": "main",
-      "worktree_clean": true
-    }
-  },
   "phase": "phase_1_requirement_development",
-  "current_node": "requirement:19_merge_root",
-  "active_requirement": "REQ-002",
-  "completed_requirements": ["REQ-001"],
-  "requirement_cycle": {
-    "root_requirement_branch": "feat/req-002",
-    "development_session": "session-id",
-    "step_17_commit": "<step-17-root-commit-sha>",
-    "step_18": {
-      "outcome": "no_change",
-      "commit": null
+  "current_node": "phase_1:select_requirement",
+  "step": 13,
+  "current_step": 13,
+  "requirement_registry": {
+    "schema_version": 1,
+    "source": {
+      "path": "docs/backlog/backlog.md",
+      "sha256": "<backlog-sha256>",
+      "root_main_sha": "<root-main-sha>"
     },
-    "step_19_merge_evidence": null,
-    "return_node_after_completion": "phase_1:select_requirement"
+    "requirements": [
+      {
+        "id": "REQ-001",
+        "title": "身份与访问",
+        "order": 1,
+        "depends_on": [],
+        "status": "pending",
+        "completion": null
+      },
+      {
+        "id": "REQ-002",
+        "title": "物品档案",
+        "order": 2,
+        "depends_on": ["REQ-001"],
+        "status": "pending",
+        "completion": null
+      }
+    ]
   },
-  "claude_sessions": {
-    "project_intake": "session-id",
-    "REQ-002:trd": "session-id"
-  },
+  "active_requirement": null,
+  "requirement_cycle": null,
   "phase_two": null,
-  "decision_conversations": {
-    "project_intake": {
-      "path": "conversations/project_intake.json",
-      "turn": 3
-    }
+  "blocked": null
+}
+```
+
+需求静态字段 `id`、`title`、`order` 和 `depends_on` 来自第 12 步的 Pydantic 结构化提取；`status`、`completion`、活动需求、分支、session、提交、合并和恢复位置只由 Python 根据真实执行事实维护。第 12 步必须校验 ID 与 order 唯一、依赖引用存在、无自依赖、依赖图无环，并确认模型没有遗漏或虚构 Backlog 中的正式需求。已有合法注册表且 Backlog SHA-256 未变化时直接复用，不重新调用模型或重置动态状态；阶段一期间出现未知 Backlog 变化时返回 `failed`，不得静默覆盖注册表。
+
+第 17 步已经完成统一提交、准备执行第 18 步合并时，活动需求快照至少包含：
+
+```json
+{
+  "phase": "phase_1_requirement_development",
+  "current_node": "requirement:18_merge",
+  "active_requirement": "REQ-002",
+  "requirement_registry": {
+    "requirements": [
+      {
+        "id": "REQ-001",
+        "status": "completed"
+      },
+      {
+        "id": "REQ-002",
+        "status": "active"
+      }
+    ]
+  },
+  "requirement_cycle": {
+    "requirement_id": "REQ-002",
+    "branch": "req/req-002",
+    "development_session_id": "session-id",
+    "repositories": {
+      "root": {
+        "base_sha": "<root-base-sha>",
+        "tip_sha": "<root-tip-sha>",
+        "merged": false
+      },
+      "frontend": {
+        "base_sha": "<frontend-base-sha>",
+        "tip_sha": "<frontend-tip-sha>",
+        "merged": false
+      },
+      "backend": {
+        "base_sha": "<backend-base-sha>",
+        "tip_sha": "<backend-tip-sha>",
+        "merged": false
+      }
+    },
+    "retrospective": {
+      "outcome": "no_change"
+    },
+    "return_node_after_completion": "phase_1:select_requirement"
   },
   "blocked": null
 }
 ```
 
-上例是第 18 步已经得到 `no_change`、准备执行第 19 步的阶段一快照；初始化证据只记录首次发布事实，`repositories` 始终反映恢复时重新核验的当前仓库状态。未进入阶段二时 `phase_two` 必须为 `null`。
+需求只使用 `pending`、`active` 和 `completed` 三种持久化生命周期；具体进度由 `phase/current_node` 和 `requirement_cycle` 表达，阻塞信息与生命周期正交。只有第 18 步完成所有适用仓库的 `--ff-only` 合并、SHA 与 clean 核验以及分支清理后，Python 才把活动需求改为 `completed` 并清空 `active_requirement` 与 `requirement_cycle`。
 
-在阶段二审计和候选分流节点中，`requirement_cycle` 为 `null`；阶段二只保存当前审计轮和候选处理所需的最小状态：
+在阶段二审计和候选分流节点中，`requirement_cycle` 为 `null`；顶层 `requirement_registry` 始终保留，继续作为需求生命周期唯一真源，阶段二只在此基础上增加当前审计轮和候选处理所需的最小状态：
 
 ```json
 {
   "phase": "phase_2_full_product_audit",
   "current_node": "phase_2:route_candidates",
   "applicable_repositories": ["root", "frontend", "backend"],
+  "requirement_registry": {
+    "source": {
+      "path": "docs/backlog/backlog.md",
+      "sha256": "<backlog-sha256>",
+      "root_main_sha": "<root-main-sha>"
+    },
+    "requirements": [
+      {
+        "id": "REQ-001",
+        "status": "completed"
+      },
+      {
+        "id": "REQ-002",
+        "status": "completed"
+      }
+    ]
+  },
   "requirement_cycle": null,
   "phase_two": {
     "audit": {
@@ -277,16 +302,16 @@ PCM Demo 只保存支持继续运行所必需的状态：
 }
 ```
 
-上例是全项目审计已成功并原子推进到候选分流节点的阶段二快照，因此审计结果已经存在，而 `candidate_routing` 和 `pooling_evidence` 仍为 `null`；它们只在各自节点成功后写入并推进到下一节点。
+上例是全项目审计已成功并原子推进到候选分流节点的阶段二快照；为简洁只展示注册表项的 ID 和生命周期，实际静态字段继续保留。需求注册表保存全部既有动态状态，审计结果已经存在，而 `candidate_routing` 和 `pooling_evidence` 仍为 `null`；它们只在各自节点成功后写入并推进到下一节点。
 
-不适用的交付单元不进入 `applicable_repositories`，并在对应步骤结果中显式记录 `not-applicable`；后续版本指纹、分支、验证和工作树检查只遍历该列表。阶段二处理已入池需求时临时使用 `phase: phase_2_requirement_remediation` 和 `requirement_cycle`，并将 `return_node_after_completion` 记录为 `phase_2:regress_and_reaudit`；第 19 步完成后返回阶段二，而不是重新进入阶段一选取普通需求。
+不适用的交付单元不进入 `applicable_repositories`，并在对应步骤结果中显式记录 `not-applicable`；后续版本指纹、分支、验证和工作树检查只遍历该列表。阶段二处理已入池需求时临时使用 `phase: phase_2_requirement_remediation` 和 `requirement_cycle`，并将 `return_node_after_completion` 记录为 `phase_2:regress_and_reaudit`；第 18 步完成后返回阶段二，而不是重新进入阶段一选取普通需求。
 
 恢复与幂等规则：
 
 1. 每个节点开始前保存 `phase`、`current_node` 和已核验输入；节点成功后原子保存输出、事实证据和下一节点；阻塞或失败时保存原因并退出。
 2. 使用 `--resume <run-id>` 加载原工作区和状态；恢复时只重跑当前节点，先重新核验文件、分支、提交、工作树和外部条件，不依据历史文字直接跳过。
-3. 已有 Claude Agent SDK session 时优先恢复：第 13 步恢复 TRD session，第 15 步和第 18 步恢复同一 `development_session`。第 18 步恢复前必须确认根仓库仍是同一需求分支，且 diff 仅允许位于 `.claude/rules/`。
-4. 第 17 步以根需求分支上的状态同步提交为幂等锚点；第 18 步只接受 `no_change` 或 `committed` 两种结果：前者不提交，后者记录精确提交；两者成功时都原子推进 `current_node` 到第 19 步。第 19 步以根 `main` 合并提交和根仓库及适用交付单元的分支、提交、工作树检查作为合并证据。已存在且与记录一致的事实可确认成功，冲突或归属不明则返回 `failed` 并保留现场。
+3. 已有 Claude Agent SDK session 时优先恢复：第 14 步恢复 TRD session，第 15、16 步恢复同一 `development_session_id`。第 16 步核验本次调用前后的增量只涉及根仓库 `.claude/rules/`，不得因为第 14、15 步已有的合法未提交变更而要求全量 diff 只能位于该目录。
+4. 第 12 步以合法需求注册表和 Backlog 指纹为幂等锚点；第 13 步以活动需求、统一分支计划和各仓 `main` 基线为恢复锚点；第 17 步以每个 dirty 仓的最终分支 tip SHA 为提交锚点。第 18 步按非 root 代码仓先、root 最后的固定顺序执行 `git merge --ff-only`：若某仓 `main` 已等于记录的 tip，可确认该仓已合并；若仍等于记录的 base，则继续合并；其它 SHA、非 fast-forward、dirty 或历史操作冲突均返回 `failed`。全部仓库核验和分支清理成功后才写入 `completed`。
 5. 阶段二每轮审计先记录 `applicable_repositories` 中各仓库 `main` 的版本指纹和独立 SDK session。相同且工作树清楚的指纹恢复原审计或读取已持久化结果，不重复制造候选；修复合并后版本指纹变化，才建立新的全项目复审轮次。
 6. 候选分流和入池均保存证据引用。恢复时按候选的稳定事实、已有归属和正式 ID 检查，已入池的候选不得再次分配 ID；入池分支、提交或合并证据冲突时返回 `failed`，不猜测补写 Backlog。
 7. Claude Agent SDK 的多轮上下文由其 session 保存，状态只记录稳定的领域键和 session ID；AI-compatible 决策接口按领域键将完整、脱敏的编排消息历史原子写入 `runs/<run-id>/conversations/<key>.json`，每轮携带该历史继续调用。不同阶段和活动需求使用独立历史，`state.json` 只记录文件引用和当前轮次。
@@ -424,83 +449,82 @@ PCM Demo 只保存支持继续运行所必需的状态：
 ### 第 11 步：拆分 Backlog
 
 - 能力：`requirement-breakdown`，随后在同一 Claude session 中由 completion verifier 精确调用一次 `commit-changes`。
-- 输入：严格读取第 2 步两份 outputs、第 5 步清单、第 7 步技术方案、第 8 步 result/state 完全一致的权威仓库 clean 交接、第 9 步唯一工程架构文档，以及严格第 10 步 success。第 10 步 `applicable: true` 时读取唯一 `docs/ui-ux/framework.md`；`applicable: false` 时必须为 `outputs: []`，不读取或扫描该文档。程序不从默认路径、目录扫描、Agent 文字或历史补充交接。
-- 执行动作与输出：单一键/session 为 `requirement_breakdown`，初始提示首行 `/requirement-breakdown`，上限 48 turns、`$16`、8 轮 `AgentDecision`。只允许创建或更新唯一固定产物 `docs/backlog/backlog.md`；Agent 不得实施需求、修改代码/测试/配置/项目规则或其它文档，也不得在初始工作执行 Git 写操作。负责人 `completed` 后先 repair 缺失或空文档，再无论有无 diff 都在原 session exact 调用一次 `/commit-changes`。
-- Backlog 边界：Backlog 记录正式需求的范围、目标、验收要点、依赖和风险，不记录“待开发”“开发中”“已完成”“阻塞”等需求开发状态。活动需求、完成情况和恢复位置由调用方的外部结构化状态管理；业务对象或业务流程自身的状态仍可作为需求内容。
-- 完成、工作树与恢复：固定文档须非空、非符号链接、已 tracked；root 与全部权威子仓均为自身 top-level、`main`、clean，运行中根仓只允许固定 Backlog 文档 dirty，Python 只读 Git。提交锚点要求 exact prompt、紧邻非空 Agent `user` 回复和原 session。fresh 拒绝预置 session/conversation/private state/history；resume 必须保有原 session、引用和非符号链接历史，blocked 仅对应不可替代外部资源，failed 保留现场重跑。完整 success 可在 result/state 写入中断后归一化恢复并幂等复验；第 8～11 步合同均保持局部实现，不改 `common`、不抽 Git DSL。
-- 成功推进：`steps/11.json` 为 `applicable: true` 和唯一输出；state 进入 `phase_1_requirement_development` / `phase_1:select_requirement`，`step/current_step` 均为 12，`active_requirement`、`requirement_cycle` 为 `null`，不新增 `completed_requirements` 或 `phase_two`。`run_step.py` 已支持第 0～11 步，并严格保护完整的第 8～11 步 success。
-- 自动化与真实验证：第 11 步本体 8 项与 CLI 5 项、公共循环及第 7～11 步相关 112 项、全量 175 项均通过；`compileall`、`git diff --check` 通过，IDE 对第 11 步和入口无诊断，独立只读审查无高置信发现。真实 `step01-mendmark` run 中，session `af7d198c-b090-44d8-9d92-ae0738150854` 生成约 59,140 字节、约 1,110 行 Backlog（14 项 BR，完整覆盖 E.1，未自动纳入 E.2/E.3，首条验证切片为完整 BR-001～BR-006）；无需求开发状态列/字段，业务状态保留。最终同一 session 的 exact commit 一次，根仓未 push 提交 `2aaa743a97d96fe93deaaaaa13a94e4c414369a2`（`docs: 建立 MendMark 首版正式 Backlog`）仅新增该文档，三仓 `main`/clean；幂等重跑无新调用或提交。负责人 Responses 的瞬时 failed 依靠正常原节点重跑恢复；两次未注入 conversation 的只读诊断不作为正式决定，未添加 HTTP 重试或修改生产 prompt。
+- 输入：严格读取第 2 步两份产品定义、第 5 步准备清单、第 7 步总体技术方案、第 8 步权威仓库 clean 交接、第 9 步工程架构，以及严格第 10 步交接。
+- 输出：唯一固定产物 `docs/backlog/backlog.md`。
+- Backlog 边界：记录正式需求的范围、目标、验收要点、依赖和风险，不记录 pending、active、completed、blocked 或恢复位置等需求开发生命周期。
+- 完成条件：Backlog 非空、已 tracked，提交调用锚点有效，全部权威仓库为各自自身 top-level、`main`、clean。
+- 目标推进：第 11 步仍只生成和提交 Backlog；后续实现应把下一节点设为 `phase_1:initialize_requirement_registry`，由第 12 步初始化需求注册表，第 11 步本身不写注册表。
+- 当前 Demo 事实：已实现代码仍推进到旧 `phase_1:select_requirement` / step 12 占位入口，尚无需求注册表。第 11 步本体 8 项与 CLI 5 项、公共循环及第 7～11 步相关 112 项、全量 175 项均已通过；真实 `step01-mendmark` 已生成并提交固定 Backlog。这些事实不得在第 12 步实现和真实验证前改写为新合同已经落地。
 
-## 六、阶段一：逐需求开发
+## 六、阶段一：注册需求并逐需求开发
 
-阶段一只执行第 12～19 步。`trd-design` 与 `dev-workflow` 对每个正式需求完成需求级体验设计、实现和真实验收。首条验证切片、局部改动、单页面、单需求、内测或发布前这些局部时点均不单独触发审计。只有当前已知正式范围内全部需求完成第 19 步后，才进入阶段二。
+第 12 步位于需求循环之前，只初始化或核验需求注册表。第 13～18 步才是单需求循环；`trd-design` 与 `dev-workflow` 对每个正式需求完成需求级体验设计、实现和真实验收。首条验证切片、局部改动、单页面、单需求、内测或发布前这些局部时点均不单独触发全项目审计。
 
-### 第 12 步：选择需求并建立根仓库需求分支
+### 第 12 步：解析 Backlog 并初始化需求注册表
 
-- 输入：根仓库 `main` 的 Backlog、`applicable_repositories` 中各仓库的 `main` 基线，以及外部结构化状态中的已完成需求事实。
-- 输出：唯一活动需求、根仓库需求分支和开始前仓库事实。
-- 完成条件：依赖满足、需求范围明确，根仓库从最新 `main` 建立正确分支。
-- 自动化说明：AI 选择满足依赖且建议顺序最靠前的需求；Git 脚本记录 `root_requirement_branch`。
+- 执行方式：直接使用 OpenAI Python SDK `responses.parse` 和 Pydantic 输入输出，不调用 Claude Agent SDK 或任何 Skill。
+- 输入：第 11 步结果引用的唯一正式 Backlog、根仓库 `main` SHA 和当前运行状态。
+- 模型输出：每条正式需求只包含 `id`、`title`、`order` 和 `depends_on`；模型不得输出生命周期、活动需求、分支、session、提交、合并或恢复字段。
+- 程序校验：ID 与 order 唯一，依赖均引用已存在需求，不允许自依赖和依赖环，且提取结果不得遗漏或虚构 Backlog 中的正式需求。
+- 输出：需求注册表、Backlog 路径和 SHA-256、根仓 `main` 基线；所有动态状态由 Python 初始化和维护，Backlog 不被修改。
+- 完成条件：注册表结构合法，全部需求初始化为 `pending`，没有活动需求或需求分支，状态推进到 `phase_1:select_requirement` / step 13。
+- 幂等与恢复：已有合法注册表且 Backlog SHA-256 未变化时零模型调用复用，不重置动态状态；阶段一期间出现未知 Backlog 变化、既有需求被删除或静态身份冲突时返回 `failed`。
 
-### 第 13 步：形成最终活动 TRD
+### 第 13 步：选择需求并建立统一需求分支
+
+- 输入：合法需求注册表、`applicable_repositories` 和各仓库本地 `main` 事实。
+- 选择：Python 从 `pending` 需求中筛选所有依赖均为 `completed` 的候选，并按 `order` 选择最靠前的一项；不调用 AI。没有 pending 需求时进入阶段二；仍有 pending 却无可选项时按依赖或状态错误返回 `failed`。
+- 分支：先保存活动需求和统一分支计划，再对全部 `applicable_repositories`（包含 root）执行全局预检；每个仓库都从自身 clean local `main` 建立相同分支名并记录 `base_sha`，不按 TRD 推断“受影响仓库”，也不硬编码 frontend/backend。
+- 完成条件：唯一活动需求为 `active`，所有适用仓库都位于同名需求分支，分支均指向记录的 `main` 基线。
+- 恢复：已建立且指向正确基线的分支可复用；分支存在但指向其它 SHA、工作树出现未知修改或部分现场归属不明时返回 `failed`。
+
+### 第 14 步：形成活动 TRD
 
 - 能力：`trd-design`。
-- 输入：活动需求、产品资料、总体方案、适用的工程架构和 UI/UX 框架结论、当前代码事实，以及其它相关产品或设计资料。
-- 输出：可直接指导实现的最终活动 TRD 和 TRD session。
-- 完成条件：范围、行为、技术方案、验证场景和需求级用户体验设计已经收敛；用户可见需求已检查能否删除或合并步骤、字段、决策和跳转，并明确用户术语、内容主次、主要行动、关键文案意图、状态与恢复。
-- 自动化说明：`trd-design` 独立完成单需求体验设计。核心任务、信息架构、状态表达或视觉方向存在多个实质方案，且实现后返工成本明显时，外层允许在本步骤取得任务流、关键状态草图、可抛弃原型或真实项目窄范围预览等最低成本证据；不固定工具或过程产物。若 TRD 暴露跨需求产品体验骨架问题，外层可以在本步骤处理 `ui-ux-framework`，但不拆出审计步骤。活动 TRD 可在本步骤内修正，完成后精确提交根仓库需求分支。
-
-### 第 14 步：建立代码仓库需求分支
-
-- 输入：最终 TRD 和代码仓库 `main` 状态。
-- 输出：所有受影响代码仓库的功能分支。
-- 完成条件：受影响仓库从最新 `main` 建立正确功能分支；不受影响仓库不机械建分支。
-- 自动化说明：脚本依据 TRD 和仓库事实执行，并记录各仓分支基线。
+- 输入：活动需求完整详情、产品资料、总体方案、工程架构、适用 UI/UX 框架、当前代码事实和统一需求分支。
+- 输出：可直接指导实现的活动 TRD 和 TRD session。
+- 完成条件：范围、行为、技术方案、验证场景和需求级体验设计已经收敛；用户可见需求已检查不必要步骤、字段、决策和跳转。
+- Git 边界：不调用 `commit-changes`，不暂存、不提交、不合并；活动 TRD 作为当前需求分支上的待提交变更保留。
 
 ### 第 15 步：实现与验证
 
-- 能力：`dev-workflow` 和按仓库调用的 `commit-changes`。
-- 输入：最终活动 TRD、受影响仓库和当前开发环境。
-- 输出：实现代码、测试、真实验证证据、代码仓本地提交和 `development_session`。
-- 完成条件：`dev-workflow` 完成适用测试、构建、运行、联调、浏览器交互、实际读取的真实渲染结果验收及独立审查；受影响仓库变更已精确提交。
-- 自动化说明：实现和验证问题在本步骤内持续修复。涉及 UI 时必须实际读取代表性截图判断任务简化、文案和视觉层级，不能以 DOM、组件代码或操作成功代替；无适用 UI 变化时不机械执行视觉检查。不可替代资源缺失时阻塞并保存开发 session。
+- 能力：`dev-workflow`。
+- 输入：活动 TRD、统一需求分支、全部适用仓库和当前开发环境。
+- 输出：实现代码、测试、真实验证证据、必要的活动 TRD 调整和 `development_session_id`。
+- 完成条件：完成适用测试、构建、运行、联调、浏览器交互、实际读取的真实渲染结果验收及独立审查；实现和验证问题在本步骤内部持续修复。
+- Git 边界：不调用 `commit-changes`，不暂存、不提交、不合并；不可替代资源缺失时阻塞并保存同一开发 session。
 
-### 第 16 步：合并代码仓库并在 `main` 最终验证
+### 第 16 步：在原开发 session 复盘执行规则
 
-- 输入：受影响代码仓库的功能分支和验证证据。
-- 输出：代码仓库 `main` 上的合并结果和最终验证结果。
-- 完成条件：功能分支提交完整，合并成功，相关测试和检查在 `main` 上通过。
-- 自动化说明：按仓库顺序执行；冲突、验证失败或仓库事实不清楚时停留在本步骤修复或返回 `failed`，不进入状态收尾。
+- 能力：`session-rule-retrospective`。
+- 输入：第 15 步保存的 `development_session_id`、失败记录、修复过程、AI 决策和已核验证据。
+- 执行动作：必须恢复原 `dev-workflow` Claude Agent SDK session，不得新建替代 session；只允许本次调用新增或修改根仓库 `.claude/rules/`。
+- 输出：必要规则增量或 `no_change`。
+- 完成条件：复盘通过 Skill 的准入和去重标准；程序比较调用前后增量，不能因为第 14、15 步已有的合法未提交 TRD 或实现变更而错误要求全量 diff 只位于 `.claude/rules/`。
+- Git 边界：不暂存、不提交、不合并；session 无法恢复、增量越界或分支事实冲突时返回 `failed`。
 
-### 第 17 步：同步外部需求状态并提交根需求分支
+### 第 17 步：统一提交需求变更
 
-- 能力：负责活动文档维护的 Agent 和 `commit-changes`。
-- 输入：代码仓库 `main` 的真实合并和验证结果，以及当前活动需求的外部结构化状态。
-- 输出：与真实代码和验证证据一致的活动 TRD、外部状态更新证据，以及根需求分支提交。
-- 完成条件：不得把需求开发完成状态写入 Backlog；状态同步和活动文档变更已经精确提交到 `root_requirement_branch`，并记录可恢复的提交事实。外部状态的具体 schema、持久化位置和第 17 步收尾合同留到阶段一第 12～19 步实现前确认，不在此提前设计。
-- 自动化说明：未完成或仍有阻塞时不得标记完成。当前需求若使首条验证切片闭环，本步骤只基于切片内各需求的 `dev-workflow` 证据记录已验证假设、实际结果、仍未验证范围及对后续产品定义、UI/UX 框架、Backlog 或顺序的影响；具体恢复锚点随阶段一合同一并确认。
+- 能力：按仓库分别显式调用 `commit-changes`。
+- 输入：第 14～16 步形成的全部已验证待提交变更、各仓记录的 `base_sha` 和统一需求分支。
+- 执行动作：对每个 dirty 的适用仓库调用一次 `commit-changes`；clean 仓库报告无需提交，不制造空提交。提交能力不得修改工作树内容，只整理和提交已有变更。
+- 输出：每个仓库最终需求分支 `tip_sha` 和提交事实。
+- 完成条件：所有适用仓库工作树 clean、分支正确，dirty 仓已有可追溯提交，clean 仓仍保持原基线；本步骤不合并，也不把需求标记为 `completed`。
 
-### 第 18 步：在原开发 session 复盘执行规则
+### 第 18 步：程序化合并并完成需求
 
-- 能力：`session-rule-retrospective`、显式 Git 脚本和适用的 `commit-changes`。
-- 输入：同一需求的 `development_session`、失败记录、修复过程、AI 决策记录和已核验的纠正证据。
-- 执行动作：确认根仓库仍位于同一 `root_requirement_branch` 后，恢复原 `dev-workflow` Claude Agent SDK session 执行 `session-rule-retrospective`；程序只允许该次调用修改根仓库 `.claude/rules/`。
-- 输出：必要的规则增量，或 `no_change`；有增量时输出同一根需求分支上的精确提交。
-- 完成条件：复盘结果已通过 Skill 的准入和去重标准；无规则变更时记录 `step_18.outcome: no_change` 并成功结束且不提交；有规则变更时仅提交 `.claude/rules/`，记录 `step_18.outcome: committed` 和提交 SHA。
-- 自动化说明：不创建复盘分支，不修改代码、Backlog、TRD 或其它文件。任何越界 diff、session 不可恢复或根分支事实冲突都返回 `failed`，不以新会话或新分支替代原会话。
-
-### 第 19 步：最后合并根仓库并检查适用仓库
-
-- 输入：已完成第 17、18 步的根仓库需求分支，以及 `applicable_repositories` 中各仓库的当前事实。
-- 输出：根仓库 `main` 合并结果和全部适用仓库的全局状态检查证据。
-- 完成条件：根需求分支最后合并到根仓库 `main`；根仓库及各适用交付单元的分支、提交和工作树均符合预期，并已保存 `step_19_merge_evidence`。
-- 自动化说明：根仓库最后合并，确保最终文档和规则都建立在代码已合并且已验证的事实之上。成功后清理活动需求状态；尚有可开发正式需求时继续阶段一。
+- 执行方式：只使用确定性 Python 和 Git，不调用 Claude Agent SDK、AI 决策模型或 Skill。
+- 输入：各仓 `base_sha`、需求分支 `tip_sha`、第 15 步验证证据和第 17 步提交事实。
+- 合并顺序：全部非 root 代码仓先，root 最后；每仓切回 `main` 后只允许执行 `git merge --ff-only <requirement-branch>`，不创建普通 merge commit，不自动解决冲突。
+- 完成核验：各仓 `main` 等于记录的 `tip_sha`，工作树和 index clean，无进行中的 Git 历史操作；全部仓库合并成功后再删除本地需求分支。
+- 状态完成：只有所有适用仓库完成上述核验和分支清理后，Python 才把活动需求写为 `completed`，记录完成证据并清空活动 cycle。尚有 pending 需求时回到第 13 步；全部当前正式需求完成时进入阶段二。
+- 恢复：某仓 `main` 已等于记录的 tip 时确认已合并；仍等于 base 时继续 ff-only 合并；其它 SHA、非 fast-forward、dirty、分支或提交事实冲突均保留现场并返回 `failed`。由于合并后的文件树与第 15 步已验证并在第 17 步提交的需求分支一致，不机械重跑完整业务验证，但 Git 事实核验不可省略。
 
 ## 七、阶段二：全项目级集成产品体验审计与迭代
 
 ### 1. 进入条件、范围和运行条件
 
-阶段一完成当前已知正式范围内全部需求的第 12～19 步后，才可进入阶段二。进入前重新核验根仓库及 `applicable_repositories` 中各适用交付单元均在清楚的 `main` 事实，且产品是完整可集成运行的版本。
+阶段一完成第 12 步需求注册表初始化，且当前已知正式范围内全部需求均完成第 13～18 步循环后，才可进入阶段二。进入前重新核验所有 `applicable_repositories`（其中包含 root）均处于清楚的 `main` 事实，且产品是完整可集成运行的版本。
 
 外层编排器从产品定义、正式 Backlog、已完成 TRD、当前代码、路由、测试和可运行行为建立审计范围，至少包含：当前正式范围内全部主要用户任务、主要用户角色和跨页面闭环；多个真实产品表面或模块；可访问环境、虚构测试身份、可复位数据和清理方式；代表性桌面及窄屏和适用辅助技术路径；允许写入及禁止资金、外发、生产数据和其它高影响副作用；已有验收、UI/UX 框架和限制。
 
@@ -527,11 +551,11 @@ Skill 从真实任务出发执行声明范围内的动态审计，实际读取�
 
 需求化由外层完成，不由审计 Skill完成。单个内聚候选可按既有 Backlog 结构形成正式需求；需要合并、拆分、排序或重算依赖时，外层显式调用 `requirement-breakdown`；需要更新权威产品定义时，外层显式调用 `project-intake`。候选在用户结果、范围、证据、依赖和验收方向齐全前不得获得正式 ID。
 
-符合准入条件的候选在根仓库最新 `main` 上通过一次短期入池分支写入正式 Backlog：创建分支，新增 ID、总览项和详情卡，检查依赖和顺序，调用 `commit-changes` 精确提交，再显式合并回根 `main`。外层保存入池分支、提交、合并和工作树检查作为 `pooling_evidence`。入池仅创建后续可选择的需求，不创建活动 TRD、代码分支或完成状态。
+符合准入条件的候选在根仓库最新 `main` 上通过一次短期入池分支写入正式 Backlog：创建分支，新增 ID、总览项和详情卡，检查依赖和顺序，调用 `commit-changes` 精确提交，再显式合并回根 `main`。外层保存入池分支、提交、合并和工作树检查，并持久化“正式需求 ID → 原审计候选”映射作为 `pooling_evidence`。入池仅创建后续可选择的需求，不创建活动 TRD、代码分支或完成状态。
 
 ### 4. 复用需求循环、针对原发现回归和完整复审
 
-每个已入池的正式需求都从根仓库最新 `main` 完整复用第 12～19 步：新建活动 TRD、开发、代码合并、状态同步、原 session 规则复盘和最后根仓库合并。该复用期间仍不调用 `product-experience-audit`，也不回写已归档的历史需求。
+一批已入池的正式需求先按第 12 步同样的静态解析、哈希和 Python 动态状态语义原子增量加入既有需求注册表，保留所有既有需求的动态状态。随后需求循环不接收调用方指定的需求参数，而是每次由第 13 步从注册表确定性选择下一条可开发需求；第 18 步完成后，外层依据实际完成的正式需求 ID 查询 `pooling_evidence` 中的候选映射，再执行对应原发现回归。该增量协调和映射边界在阶段二实现时落实；当前不提前建立公共协调器。修复期间仍不调用 `product-experience-audit`，也不回写已归档的历史需求。
 
 每个修复完成后，外层针对原候选执行回归：重走原复现任务、受影响状态及相邻跨页面路径，核验原障碍已消失且未引入新的任务断点。该回归证据保存至对应候选分流记录；已有单元测试、单需求验收或实现者结论不能替代它。
 
@@ -544,7 +568,7 @@ Skill 从真实任务出发执行声明范围内的动态审计，实际读取�
 1. 最新完整审计版本来自 `applicable_repositories` 中各仓库清楚的 `main` 事实，并已覆盖当前正式范围内全部主要用户任务以及多个产品表面/模块；
 2. 适用动态任务已在真实浏览器和真实开发/测试服务执行，主要界面和关键状态有实际读取的代表性截图和相称动态证据；
 3. 经核验候选、重复项、未纳入项、覆盖缺口和高影响边界均已保存并完成分流；
-4. 所有自动入池的正式需求均完成第 12～19 步，并通过针对原发现的体验回归；
+4. 所有自动入池的正式需求均已增量加入需求注册表并完成第 13～18 步，并通过针对原发现的体验回归；
 5. 最后一轮完整复审没有新增符合需求化政策的候选，也没有未处理的高信心阻断或高优先级问题；
 6. 与主要任务有关的环境、角色、数据、视口、辅助技术和动态证据覆盖缺口已经关闭；
 7. `applicable_repositories` 中各仓库均位于预期 `main`，工作树无意外变更，最终结果和仍适用的限制已经汇总。
@@ -553,7 +577,7 @@ Skill 从真实任务出发执行声明范围内的动态审计，实际读取�
 
 ## 八、循环、结束和运行方式
 
-PCM 先完成阶段一，再运行阶段二；阶段二新入池需求仍复用第 12～19 步，而非在审计 Skill 中直接修复：
+PCM 先执行一次第 12 步初始化需求注册表，再以第 13～18 步完成阶段一，随后运行阶段二；阶段二新入池需求先增量协调进注册表，再复用第 13～18 步，而非在审计 Skill 中直接修复：
 
 ```python
 class StopRun(Exception):
@@ -577,16 +601,25 @@ def run_all():
             audit = require_success(run_full_product_audit_in_independent_session())
             routed = require_success(route_audit_candidates(audit))
             require_success(resolve_required_coverage_gaps(routed))
-            pooled_requirements = require_success(
+            pooling = require_success(
                 productize_and_pool_eligible_candidates(routed)
             )
+            require_success(
+                reconcile_pooled_requirements_into_registry(pooling)
+            )
 
-            for requirement in pooled_requirements:
-                require_success(run_requirement_cycle_steps_12_to_19(requirement))
-                require_success(regress_original_audit_finding(requirement))
+            while has_pending_pooled_requirement(pooling):
+                completed_requirement_id = require_success(
+                    run_next_requirement_cycle_steps_13_to_18()
+                )
+                require_success(
+                    regress_original_audit_finding(
+                        pooling.candidate_for(completed_requirement_id)
+                    )
+                )
 
             if phase_two_completion_conditions_met(
-                audit, routed, pooled_requirements
+                audit, routed, pooling
             ):
                 return success_result()
 
