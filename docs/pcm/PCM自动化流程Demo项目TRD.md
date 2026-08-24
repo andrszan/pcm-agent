@@ -734,7 +734,7 @@ PCM 在请求前读取该领域完整编排历史。首次保存动态 `system` 
 | 7 总体技术方案 | `solution-design` | 产品定义、已组装并项目化的工程事实、开发约束、选型 | 总体技术方案与当前工程一致，不重新选型或组装 |
 | 8 首次提交适用仓库 | 首次全仓提交检查与干净基线节点；全干净时零调用，dirty 时一个产品根 Claude Agent SDK session 显式调用 `commit-changes`，Python 不执行 Git 写操作 | 仅 `['root', *steps/04.json.outputs]` 为权威仓库；每仓自身 top-level、`main`、工作树干净，保存 `applicable_repositories` 与仓库事实 |
 | 9 工程架构设计 | 必要步骤；`engineering-architecture` 后在同一 session 固定调用一次 `commit-changes` | 第 2 步两份产品定义、第 5 步准备清单、第 7 步总体技术方案和第 8 步 clean 交接 | 固定文档已非空且 tracked、提交锚点有效、全仓自身 top-level / `main` / clean；真实成功并推进第 10 步 |
-| 10 产品级 UI/UX 框架（按需） | `ui-ux-framework` | 产品定义、总体方案、工程事实、相关设计资料 | 产品表面、信息架构、Shell、导航和跨需求体验约束已确认并提交根仓库，或明确不适用 |
+| 10 产品级 UI/UX 框架（按需） | `ui-ux-framework` | 产品定义、总体方案、工程事实、已有框架文档约定和相关设计资料 | 适用时沿用已有权威文档，或默认创建 `docs/ui-ux/framework.md`，确认跨需求体验约束并提交根仓库；不适用时保存依据且不创建空文档或目录 |
 | 11 拆分 Backlog | `requirement-breakdown` | 产品定义、总体方案、必要工程架构、按需 UI/UX 结论、工程事实 | Backlog 覆盖最终范围，详情卡清楚，首条验证切片由完整正式需求组成；由 `commit-changes` 精确提交根仓库后进入阶段一 |
 
 #### 第 8 步已实现合同
@@ -774,6 +774,12 @@ PCM 在请求前读取该领域完整编排历史。首次保存动态 `system` 
 产品根提交 `ead14dffe19bc6417634c24c7bb1103602c3b772`，message `docs: 新增工程架构设计`，仅新增固定文档，376 行、32928 字节；未 push，frontend/backend 无变化。最终 decision 为合法严格 JSON `completed`，`steps/09.json` 和 state success，推进 `project:10_ui_ux_framework`。
 
 独立核验 root/frontend/backend 均为自身 top-level、`main`、clean，文档 tracked。同 run 幂等重跑后 conversation 仍 11 条，session 和 root HEAD 不变，无 Agent、decision 或新提交调用。第 10 步仍按需。
+
+#### 第 10 步已确认的默认文档约定
+
+第 10 步尚未实现，本轮只确认文档落点与交接原则。项目已有权威产品级 UI/UX 框架文档时，沿用实际路径，不重复创建、迁移或并行维护；项目没有既有约定且确认适用时，默认创建或更新 `docs/ui-ux/framework.md`；不适用时不创建该文档或空目录，只保存明确依据。
+
+未来步骤结果必须显式保存适用性和实际输出相对路径。后续 Backlog 与活动 TRD 从步骤结果读取真实框架结论和文档路径，不得以默认路径存在与否代替按需判定，也不得从固定路径猜测交接对象。按需判定、输入身份、Agent prompt、session 与决策循环、提交执行锚点、完成条件、失败、阻塞、恢复和真实验证方式仍需在实现前继续确认。
 
 这些只是上位流程边界。每一步进入实现前，仍需对照原手稿、当前流程和当时工程事实，逐项确认具体输入身份、确定性动作、Agent 提示、输出 schema、完成条件、失败、阻塞、恢复和验证方法。
 
@@ -1159,7 +1165,7 @@ PCM_DEV_RESOURCE_LIST=
 1. Agent SDK、捆绑 Claude Code 或模型版本变化时，需重新记录并复核相关探针；
 2. `/project-intake`、`/project-readiness`、`/project-bootstrap` 和 `/solution-design` 已验证；其它目标 Skill 的实际调用名、参数、plugin namespace 和 init 发现结果需逐步验证；
 3. `run_all.py` 在何时建立，以及第 0～9 步现有入口如何与新节点协议复用；
-4. 第 10 步按需判定如何基于真实工程和产品事实实现；
+4. 第 10 步默认文档落点和下游交接边界已经确认；按需判定、输入身份、Agent prompt、session、提交、完成条件、失败、阻塞、恢复和验证方式仍待实现前确认；
 5. 阶段一受影响仓库识别、分支命名、合并顺序、主分支最终验证和第 17～19 步幂等锚点；
 6. 阶段二真实浏览器通道、测试身份、可复位数据、截图读取、辅助技术路径和外部审查能力；
 7. 阶段二审计结果、候选分流、入池和原发现回归证据的最小持久化格式；

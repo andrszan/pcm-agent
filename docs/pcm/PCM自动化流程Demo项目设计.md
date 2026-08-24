@@ -288,7 +288,7 @@ Python 负责确定性操作和最终状态裁决：
 | 7 | 总体技术方案 | 调用 `solution-design`，基于已组装并项目化的工程事实设计 | 总体技术方案 |
 | 8 | 首次提交适用仓库 | 以固定权威仓库清单执行首次全仓提交检查；全干净零调用直接成功，dirty 时一个 `commit-changes` session 处理必要提交，Python 只读复验 | `applicable_repositories` 与仓库干净事实 |
 | 9 | 工程架构设计 | 必要步骤；调用 `engineering-architecture` 生成固定文档，并在同一 session 固定调用一次 `commit-changes` 核验 | `docs/design/工程架构设计.md` 已 tracked，全仓 clean，真实成功并推进第 10 步 |
-| 10 | 产品级 UI/UX 框架（按需） | 调用 `ui-ux-framework` 建立跨需求稳定体验框架 | 适用时形成 UI/UX 框架并通过 `commit-changes` 提交根仓库；否则记录不适用证据 |
+| 10 | 产品级 UI/UX 框架（按需） | 调用 `ui-ux-framework` 建立跨需求稳定体验框架 | 适用时沿用已有权威文档，或默认创建 `docs/ui-ux/framework.md` 并通过 `commit-changes` 提交根仓库；否则记录不适用证据且不创建空文档或目录 |
 | 11 | 拆分 Backlog | 调用 `requirement-breakdown` 覆盖最终产品范围 | Backlog 总览、详情卡、首条验证切片，并通过 `commit-changes` 提交根仓库后进入阶段一 |
 
 第 3 步已经按以下边界实现并验证：
@@ -367,6 +367,12 @@ Probe C 的早期成功和格式重试结果均为旧合同历史。现行公共
 产品根提交 `ead14dffe19bc6417634c24c7bb1103602c3b772`，message `docs: 新增工程架构设计`，仅新增固定文档，376 行、32928 字节；未 push，frontend/backend 无变化。最终 decision 为合法严格 JSON `completed`，`steps/09.json` 和 state 均为 success，状态推进到 `project:10_ui_ux_framework`。
 
 独立核验 root/frontend/backend 均为自身 top-level、`main`、clean，固定文档 tracked。同 run 幂等重跑后 conversation 仍 11 条，session 和 root HEAD 不变，没有 Agent、decision 或新提交调用。
+
+### 第 10 步已确认的默认文档约定
+
+第 10 步仍是按需能力且尚未实现。本轮只确认产品级 UI/UX 框架的文档落点和下游交接边界，不表示输入身份、按需判定、Agent prompt、session、提交锚点、失败、阻塞、恢复和验证合同已经全部确认。
+
+项目已有权威产品级 UI/UX 框架文档时，沿用其实际路径，不重复创建、迁移或并行维护。项目没有既有约定且确认本能力适用时，默认创建或更新综合文档 `docs/ui-ux/framework.md`；确认不适用时不创建该文档或空目录，只保存明确依据。未来第 10 步结果必须显式记录适用性和实际输出相对路径，第 11 步从步骤结果读取真实交接对象，不因存在默认路径而直接猜测文件。
 
 ### 动态 prompt 交接事实回放
 
@@ -565,7 +571,7 @@ python run_all.py --run-id <run-id> --from-node phase_2:audit
 
 1. 保持第 0～9 步已确认并真实验证的业务边界不变；
 2. 第 9 步专属 29 项、公共循环 24 项、第 7 步 8 项、第 8 步 17 项、相关定向 78 项及全量 141 项自动化测试已通过；真实 run `step01-mendmark` 已完成第 8、9 步合同验证，第 9 步固定文档、提交、状态推进和幂等重跑证据完整；
-3. 第 10 步进入前先确认按需 UI/UX 框架合同；
+3. 第 10 步已确认默认文档落点和下游交接边界；进入实现前继续确认按需判定、输入、操作、完成、提交、失败、阻塞、恢复和验证合同；
 4. 合同确认后先实现代码并通过测试和真实验证，再同步设计文档并提交；
 5. 不提前实现第 10～19 步或阶段二空壳；
 6. 每个阶段只根据真实运行发现补充最小公共能力；
