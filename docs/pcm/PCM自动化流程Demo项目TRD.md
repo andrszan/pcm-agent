@@ -797,8 +797,6 @@ conversation 共 7 条：`system → assistant 初始 → user → assistant com
 
 ### 阶段一：第 12～19 步单需求循环
 
-阶段一只执行第 12～19 步，不调用 `product-experience-audit`。
-
 | 步骤 | 名称 | 核心边界 |
 | --- | --- | --- |
 | 12 | 选择需求并建立根仓库需求分支 | AI 选择依赖满足且顺序靠前的需求；根仓库从最新 `main` 建唯一活动分支 |

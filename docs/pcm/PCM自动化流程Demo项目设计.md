@@ -407,7 +407,6 @@ Git 忽略 run `prompt-role-replay-20260823` 保留旧四段 XML prompt 的历�
 
 阶段一约束：
 
-- 不在单需求、单页面、首条验证切片或局部 UI 改动后调用 `product-experience-audit`；
 - `trd-design` 与 `dev-workflow` 共同完成需求级体验设计、真实运行和验收；
 - 当前步骤发现可修正问题时在本步骤内部修正并重新核验，外层编号不回退；
 - `commit-changes` 是唯一负责精确暂存和本地提交的 Skill；建分支、切换和合并由显式 Git 脚本执行；

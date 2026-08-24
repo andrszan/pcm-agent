@@ -23,7 +23,7 @@
 
 - 每次新启动 Claude Code CLI 会话后，必须先执行一次 `/reload-plugin`，确认本项目已启用插件及其 Skills 已加载，再开始执行流程；同一会话内无需重复执行。
 - 产品定义、总体方案、工程架构、Backlog、单需求 TRD、开发实现等大型领域步骤，建议分别新开会话，减少上下文污染。
-- UI/UX 框架按跨需求影响显式调用；`product-experience-audit` 只在阶段二对完整集成产品执行全项目级审计，不插入阶段一的单需求、验证切片或里程碑验收。
+- UI/UX 框架按跨需求影响显式调用；`product-experience-audit` 只在阶段二对完整集成产品执行全项目级审计。
 - `commit-changes` 是独立职责，但只是短时 Git 操作，不强制新开会话。
 - `session-rule-retrospective` 默认在被复盘的原开发会话中执行；新会话通常缺少真实失败、根因和用户纠正证据。
 
