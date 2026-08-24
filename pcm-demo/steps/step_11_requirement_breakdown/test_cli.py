@@ -23,6 +23,9 @@ from steps.step_11_requirement_breakdown.step import (
 
 
 class StepElevenCLITests(unittest.TestCase):
+    def test_handoff_targets_requirement_registry_initialization(self) -> None:
+        self.assertEqual(NEXT_NODE, "phase_1:initialize_requirement_registry")
+
     def setUp(self) -> None:
         import run_step as cli
 

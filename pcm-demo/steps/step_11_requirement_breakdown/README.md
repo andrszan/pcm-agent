@@ -57,13 +57,13 @@ Agent 不得实施需求，或修改代码、测试、配置、项目规则、�
 - **resume**：必须具有原 session、conversation 引用和非符号链接历史；缺失或不一致不得静默新建会话。conversation 父目录、叶文件和 Backlog 路径均拒绝符号链接。
 - **blocked**：保存当前第 11 步、原因、所需外部输入及可用 Backlog 输出；补齐资源后从原 session 恢复。若现场已经满足成功条件，正常归一化成功。
 - **failed**：输入、状态、文件、Git、SDK 或决定错误保留现场并停留在第 11 步，修复后重跑；不以历史文字替代现场核验。
-- **success**：`steps/11.json` 严格为 `applicable: true` 和唯一输出 `docs/backlog/backlog.md`。状态进入 `phase_1_requirement_development` / `phase_1:select_requirement`，`step` 与 `current_step` 均为 12，`active_requirement`、`requirement_cycle` 均为 `null`；本步骤不新增 `completed_requirements` 或 `phase_two`。
+- **success**：`steps/11.json` 严格为 `applicable: true` 和唯一输出 `docs/backlog/backlog.md`。状态进入 `phase_1_requirement_development` / `phase_1:initialize_requirement_registry`，`step` 与 `current_step` 均为 12，`active_requirement`、`requirement_cycle` 均为 `null`；本步骤不新增 `completed_requirements` 或 `phase_two`。
 
-result/state 写入中断可由完整 success 结果、固定文档、提交锚点和全仓 clean 恢复；幂等重跑会重新核验现场而不重复调用。`run_step.py` 仅保护 schema 完整的第 8～11 步 success，残缺 success 不受保护。第 8～11 步的 Git 与提交合同保持各步骤局部实现，不修改 `common/`，不抽取 Git DSL。
+result/state 写入中断可由完整 success 结果、固定文档、提交锚点和全仓 clean 恢复；幂等重跑会重新核验现场而不重复调用。`run_step.py` 仅保护 schema 完整的第 8～12 步 success，残缺 success 不受保护。第 8～11 步的 Git 与提交合同保持各步骤局部实现，不修改 `common/`，不抽取 Git DSL。
 
 ## 自动化与真实验证
 
-自动化已通过第 11 步本体 8 项和 CLI 5 项，共 13 项；公共循环及第 7～11 步相关定向 112 项、全量递归 `unittest` 175 项均通过。`compileall`、`git diff --check` 通过，IDE 对第 11 步 `step.py`、`test_step.py`、`test_cli.py` 及 `run_step.py` 无诊断；独立只读审查没有高置信发现。
+自动化已通过第 11 步本体 9 项与 CLI 6 项，共 15 项；第 12 步本体 11 项与 CLI 6 项，共 17 项；两步定向共 32 项、全量递归 `unittest` 194 项均通过。`compileall`、`git diff --check` 通过；IDE 对第 12 步 `step.py`、`test_step.py`、`test_cli.py` 及 `run_step.py` 无诊断，独立只读审查最终没有高、中置信发现。Ruff 未安装，未执行 Ruff。
 
 真实 run 为 `pcm-demo/runs/step01-mendmark`，产品工作区为 `/Users/zhou/resource/fireworks/ANDRSZAN/pcm-products/mendmark`，权威仓库为 `root/frontend/backend`。运行前，旧 Skill 已精确同步并由真实 `/commit-changes` 单独提交 `9263d28`；该提交只修改 Skill、未 push，且三仓 clean，是使用新 Backlog 合同的测试前置，不是第 11 步输出。
 
@@ -71,4 +71,6 @@ result/state 写入中断可由完整 success 结果、固定文档、提交锚�
 
 负责人 Responses 决策曾三次在正常 run 后瞬时写入 failed（前两次在生成回复后，第三次在提交回复后）。两次独立同上下文只读诊断均得到合法 `completed`，但未注入正式 conversation；最终依靠正常原节点重跑恢复，未添加自定义 HTTP 重试或修改生产 prompt。最终 conversation 共 7 条：`system → assistant 初始 → user 生成回复 → assistant completed → assistant exact commit prompt → user 提交回复 → assistant completed`；exact commit 恰好一次且使用同一 session。
 
-产品根创建未 push 提交 `2aaa743a97d96fe93deaaaaa13a94e4c414369a2`，message 为 `docs: 建立 MendMark 首版正式 Backlog`，仅新增 `docs/backlog/backlog.md`；frontend/backend SHA 不变，三仓均为 `main`、clean 且各自 top-level。最终 `steps/11.json` 为 success，state 已推进阶段一入口。幂等重跑后 session、7 条 conversation、root/frontend/backend SHA 均不变，没有新调用或提交。
+产品根创建未 push 提交 `2aaa743a97d96fe93deaaaaa13a94e4c414369a2`，message 为 `docs: 建立 MendMark 首版正式 Backlog`，仅新增 `docs/backlog/backlog.md`；frontend/backend SHA 不变，三仓均为 `main`、clean 且各自 top-level。该历史 `steps/11.json` success 当时进入旧 `phase_1:select_requirement` / step 12 占位入口。第 12 步真实运行前严格核验该旧 state：第 11 步 strict success、`active_requirement` 与 `requirement_cycle` 均为 `null`、无注册表、无 `12.json`，root/frontend/backend 均为自身 `main`、clean；仅 run-local 将 `current_node` 规范化为 `phase_1:initialize_requirement_registry`，state SHA-256 从 `c153ec8c9d39d82806009c7052988695fe10d3a384566f00f852c2c8b4b02ee8` 变为 `eecf476c3b6c401c9db6a41f9f3ca398056eb509de956c93b0f9fae55f0ec170`。生产代码不接受旧 `select_requirement` / step 12 入口，也未添加 legacy 兼容。
+
+规范化后第 12 步已在同一真实 run 成功完成，state 进入第 13 步 `phase_1:select_requirement`，并初始化全部 `pending`、`completion: null` 的 14 项 BR 注册表；该结果及幂等重跑的具体来源指纹、产品 SHA 与零模型调用证据见[第 12 步说明](../step_12_initialize_requirement_registry/README.md)。

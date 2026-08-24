@@ -89,6 +89,9 @@ def decision(
 
 
 class RequirementBreakdownTests(unittest.TestCase):
+    def test_handoff_targets_requirement_registry_initialization(self) -> None:
+        self.assertEqual(NEXT_NODE, "phase_1:initialize_requirement_registry")
+
     def make_run(
         self,
         root: Path,

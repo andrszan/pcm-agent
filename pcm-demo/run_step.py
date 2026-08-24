@@ -63,6 +63,9 @@ from steps.step_11_requirement_breakdown import RequirementBreakdownBlocked
 from steps.step_11_requirement_breakdown import result as requirement_breakdown_result
 from steps.step_11_requirement_breakdown import run as run_requirement_breakdown
 from steps.step_11_requirement_breakdown.step import CURRENT_NODE as REQUIREMENT_BREAKDOWN_NODE
+from steps.step_12_initialize_requirement_registry import result as requirement_registry_result
+from steps.step_12_initialize_requirement_registry import run as run_requirement_registry
+from steps.step_12_initialize_requirement_registry.step import has_complete_success as has_requirement_registry_success
 
 DEMO_ROOT = Path(__file__).resolve().parent
 
@@ -99,7 +102,7 @@ def run_dir_for(run_id: str) -> Path:
 
 
 def has_step_success(run_dir: Path, step: int) -> bool:
-    if step not in {8, 9, 10, 11}:
+    if step not in {8, 9, 10, 11, 12}:
         return False
     try:
         existing = json.loads(
@@ -107,6 +110,8 @@ def has_step_success(run_dir: Path, step: int) -> bool:
         )
     except (OSError, UnicodeError, json.JSONDecodeError):
         return False
+    if step == 12:
+        return has_requirement_registry_success(existing)
     if step == 10:
         applicable = existing.get("applicable") if isinstance(existing, dict) else None
         return (
@@ -494,6 +499,15 @@ async def run_step_eleven(args: argparse.Namespace) -> tuple[Path, dict[str, Any
     return run_dir, await run_requirement_breakdown(run_dir, read_state(run_dir))
 
 
+async def run_step_twelve(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
+    if not args.run_id:
+        raise ValueError("第 12 步需要 --run-id")
+    run_dir = run_dir_for(args.run_id)
+    if not run_dir.is_dir():
+        raise ValueError(f"运行记录不存在：{args.run_id}")
+    return run_dir, await run_requirement_registry(run_dir, read_state(run_dir))
+
+
 def sha256_bytes(data: bytes) -> str:
     import hashlib
 
@@ -530,7 +544,7 @@ def run_step_zero(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
 
 def main() -> int:
     args = parse_args()
-    if args.step not in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}:
+    if args.step not in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}:
         print(f"步骤尚未实现：{args.step}", file=sys.stderr)
         return 2
 
@@ -572,8 +586,10 @@ def main() -> int:
                         run_dir, result = asyncio.run(run_step_nine(args))
                     elif args.step == 10:
                         run_dir, result = asyncio.run(run_step_ten(args))
-                    else:
+                    elif args.step == 11:
                         run_dir, result = asyncio.run(run_step_eleven(args))
+                    else:
+                        run_dir, result = asyncio.run(run_step_twelve(args))
     except ProjectIntakeBlocked as error:
         result = project_intake_result(
             "blocked",
@@ -704,14 +720,27 @@ def main() -> int:
             result_factory = ui_ux_framework_result
         elif args.step == 11:
             result_factory = requirement_breakdown_result
+        elif args.step == 12:
+            result_factory = requirement_registry_result
         else:
             result_factory = workspace_result
-        result = result_factory(
-            "failed",
-            f"第 {args.step} 步执行失败。",
-            error={"type": type(error).__name__, "message": str(error)},
-        )
-        error_message = f"{type(error).__name__}: {error}"
+        if args.step == 12:
+            result = result_factory(
+                "failed",
+                "需求注册表初始化失败。",
+                error={
+                    "type": type(error).__name__,
+                    "message": "需求注册表初始化未完成。",
+                },
+            )
+            error_message = "需求注册表初始化失败。"
+        else:
+            result = result_factory(
+                "failed",
+                f"第 {args.step} 步执行失败。",
+                error={"type": type(error).__name__, "message": str(error)},
+            )
+            error_message = f"{type(error).__name__}: {error}"
 
     if result["status"] != "success" and not error_message:
         detail = result.get("blocked") or result.get("error") or {}
@@ -719,10 +748,10 @@ def main() -> int:
 
     protected_success = (
         run_dir is not None
-        and args.step in {8, 9, 10, 11}
+        and args.step in {8, 9, 10, 11, 12}
         and has_step_success(run_dir, args.step)
     )
-    if run_dir is not None and args.step in {1, 2, 5, 6, 7, 8, 9, 10, 11}:
+    if run_dir is not None and args.step in {1, 2, 5, 6, 7, 8, 9, 10, 11, 12}:
         if result["status"] != "success" and not protected_success:
             try:
                 state = read_state(run_dir)
@@ -731,10 +760,11 @@ def main() -> int:
             if state is not None:
                 update = {
                     "status": result["status"],
-                    "current_step": args.step,
                     "blocked": result["blocked"],
                     "error": result["error"],
                 }
+                if args.step != 12:
+                    update["current_step"] = args.step
                 if args.step == 5:
                     update.update({"step": 5, "current_node": PROJECT_READINESS_NODE})
                 elif args.step == 6:

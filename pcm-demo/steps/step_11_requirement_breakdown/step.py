@@ -28,7 +28,7 @@ from steps.step_07_solution_design.step import (
 STEP = 11
 NAME = "拆分 Backlog"
 CURRENT_NODE = "project:11_requirement_breakdown"
-NEXT_NODE = "phase_1:select_requirement"
+NEXT_NODE = "phase_1:initialize_requirement_registry"
 CONVERSATION_KEY = "requirement_breakdown"
 SKILL_NAME = "requirement-breakdown"
 BACKLOG_PATH = Path("docs/backlog/backlog.md")

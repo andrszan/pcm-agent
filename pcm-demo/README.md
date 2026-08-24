@@ -16,6 +16,7 @@
 - [第 9 步：工程架构设计](steps/step_09_engineering_architecture/README.md)
 - [第 10 步：产品级 UI/UX 框架](steps/step_10_ui_ux_framework/README.md)
 - [第 11 步：拆分 Backlog](steps/step_11_requirement_breakdown/README.md)
+- [第 12 步：解析 Backlog 并初始化需求注册表](steps/step_12_initialize_requirement_registry/README.md)
 
 每个步骤的业务代码、测试和详细运行说明都在对应步骤目录中。根 README 只提供导航。
 
@@ -28,7 +29,7 @@ uv sync
 uv run python -m unittest discover -s . -t . -p 'test*.py' -v
 ```
 
-该入口从 `pcm-demo/` 根递归发现 `common/` 与 `steps/` 测试。第 11 步本体 8 项与 CLI 5 项，共 13 项；公共循环及第 7～11 步相关定向 112 项、全量 175 项均已通过；`compileall`、`git diff --check` 通过，新增 README 的 no-index whitespace 检查通过，IDE 对第 11 步 `step.py`、`test_step.py`、`test_cli.py` 和 `run_step.py` 无诊断。
+该入口从 `pcm-demo/` 根递归发现 `common/` 与 `steps/` 测试。第 11 步本体 9 项与 CLI 6 项，共 15 项；第 12 步本体 11 项与 CLI 6 项，共 17 项；两步定向共 32 项、全量 194 项均已通过。`compileall`、`git diff --check` 通过；IDE 对第 12 步 `step.py`、`test_step.py`、`test_cli.py` 和 `run_step.py` 无诊断，独立只读审查最终没有高、中置信发现。Ruff 未安装，未执行 Ruff。
 
 ## 最近真实验证
 
@@ -56,11 +57,17 @@ backend 提交摘要中的 Ruff、格式、build 通过和 `pytest` 14 passed、
 
 commit-changes 执行轮发现文档中的 frontend Git 事实矛盾，严格未修改、未暂存、未提交并报告。外层负责人随后通过普通 `continue` 授权通用 Claude Agent 仅修正固定文档并提交；Agent 精确完成。产品根提交为 `ead14dffe19bc6417634c24c7bb1103602c3b772`，message `docs: 新增工程架构设计`，仅新增 `docs/design/工程架构设计.md`，376 行、32928 字节；未 push，frontend/backend 无变化。最终严格 JSON decision 为 `completed`，`steps/09.json` 为 success，state 推进到 `project:10_ui_ux_framework`。
 
-独立核验确认 root/frontend/backend 均为自身 top-level、`main`、clean，固定文档 tracked。同 run 幂等重跑后 conversation 仍为 11 条，session 和 root HEAD 不变，没有再次调用 Agent、决策服务或产生新提交。`run_step.py` 只对 schema 完整的第 8～11 步 success 保护既有 result 和已推进 state；后续重跑失败不会覆盖 success 或回退节点，残缺 success 不保护，其它步骤保持原行为。
+独立核验确认 root/frontend/backend 均为自身 top-level、`main`、clean，固定文档 tracked。同 run 幂等重跑后 conversation 仍为 11 条，session 和 root HEAD 不变，没有再次调用 Agent、决策服务或产生新提交。`run_step.py` 只对 schema 完整的第 8～12 步 success 保护既有 result 和已推进 state；后续重跑失败不会覆盖 success 或回退节点，残缺 success 不保护，其它步骤保持原行为。
 
 第 10 步代码、自动化和真实验收已完成。`step01-mendmark` 的第 8 步权威仓库为 `root/frontend/backend`，故适用；session `2d052d9a-b9fd-4fcd-b5f9-ff724f25dbc1` 正常完成（5 turns、`$3.207112`、7 条 conversation、固定 commit prompt 恰好一次）。fresh 调用中内置 Explore 子代理曾输出未识别模型 `gpt-5.6-terra[1m]` 警告，但主 Agent 同一次调用继续并 success，未追加人工或 run-history 恢复提示。产品根提交 `0ceee1bb8b5836f64112ded0c8fd3cf7fbd1f29c` 仅新增 206 行、25580 字节的 `docs/ui-ux/framework.md`，未 push；root/frontend/backend 均为自身 top-level、`main`、clean。`steps/10.json` 是 `applicable: true` 的唯一固定输出 success；其后第 11 步已经消费该严格交接。幂等重跑不增加 conversation、提交或 Agent/决策调用，session、root HEAD 与前后端 SHA 均不变；不适用路径仅有自动化覆盖。
 
 第 11 步已在同一真实 run 与产品工作区完成验证。运行前旧 `requirement-breakdown` Skill 已按新合同精确同步，并以真实 `/commit-changes` 单独提交 `9263d28`（只改 Skill、未 push、三仓 clean）；它是测试前置，不是步骤输出。session `af7d198c-b090-44d8-9d92-ae0738150854` 的 init 确认 Skill/slash command、产品根 cwd、Fable 5、Claude Code 2.1.233 和 `bypassPermissions`。fresh 调用的内置 Explore 子代理有未识别模型 `gpt-5.6-terra[1m]` 警告，但主 Agent 同次 success；首次生成 Result 为 15 turns、`$5.789825`。生成的 `docs/backlog/backlog.md` 约 59,140 字节、约 1,110 行，含 14 项 BR 需求，完整覆盖 E.1、未自动纳入 E.2/E.3，首条验证切片为完整的 BR-001～BR-006；文档没有需求开发状态列或字段，业务状态保留。
 
-负责人 Responses 决策曾三次在正常 run 后瞬时写入 failed；两次独立同上下文只读诊断虽得到合法 `completed`，均未注入正式 conversation。依靠正常原节点重跑恢复，未添加自定义 HTTP 重试或修改生产 prompt。最终 conversation 为 7 条：`system → assistant 初始 → user 生成回复 → assistant completed → assistant exact commit prompt → user 提交回复 → assistant completed`，exact commit 恰好一次且使用同一 session。产品根未 push 提交 `2aaa743a97d96fe93deaaaaa13a94e4c414369a2`（`docs: 建立 MendMark 首版正式 Backlog`）仅新增 Backlog，frontend/backend SHA 不变；三仓均在 `main` 且 clean。`steps/11.json` success 后 state 已进入 `phase_1_requirement_development` / `phase_1:select_requirement`、第 12 步，`active_requirement` 和 `requirement_cycle` 为 `null`，未新增 `completed_requirements` 或 `phase_two`。幂等重跑后 session、conversation 和三仓 SHA 均不变，无新调用或提交；后续从第 12 步开始，状态管理细节待实现前讨论。
+负责人 Responses 决策曾三次在正常 run 后瞬时写入 failed；两次独立同上下文只读诊断虽得到合法 `completed`，均未注入正式 conversation。依靠正常原节点重跑恢复，未添加自定义 HTTP 重试或修改生产 prompt。最终 conversation 为 7 条：`system → assistant 初始 → user 生成回复 → assistant completed → assistant exact commit prompt → user 提交回复 → assistant completed`，exact commit 恰好一次且使用同一 session。产品根未 push 提交 `2aaa743a97d96fe93deaaaaa13a94e4c414369a2`（`docs: 建立 MendMark 首版正式 Backlog`）仅新增 Backlog，frontend/backend SHA 不变；三仓均在 `main` 且 clean。该历史 `steps/11.json` success 当时进入旧 `phase_1:select_requirement` / step 12 占位入口。
+
+第 12 步真实运行前严格核验旧 state：第 11 步 strict success、`active_requirement` 与 `requirement_cycle` 均为 `null`、无 `requirement_registry`、无 `steps/12.json`，root/frontend/backend 均为自身 top-level、`main`、clean。仅在 run-local 将 `current_node` 从旧入口规范化为 `phase_1:initialize_requirement_registry`；state SHA-256 从 `c153ec8c9d39d82806009c7052988695fe10d3a384566f00f852c2c8b4b02ee8` 变为 `eecf476c3b6c401c9db6a41f9f3ca398056eb509de956c93b0f9fae55f0ec170`。生产代码未添加 legacy 兼容。
+
+真实 Responses 成功提取 BR-001～BR-014 共 14 条，标题、连续 `order` 1～14 和依赖均与 Backlog 总览和详情卡一致；注册表全部为 `pending`、`completion: null`。来源 Backlog SHA-256 为 `707c4b91924542e9cbd282fba53cc8857b8ea1fcbdfb7a820c208d0573d759bb`，root `main` SHA 为 `0232d8136c075cb61a6617a95e1504b67bd9acd1`。state 已进入第 13 步 `phase_1:select_requirement`，`active_requirement`、`requirement_cycle` 均为 `null`，未新增 `completed_requirements` 或 `phase_two`，也没有新 Claude session 或负责人决策 conversation。产品 root/frontend/backend 分别为 `0232d8136c075cb61a6617a95e1504b67bd9acd1`、`dbab574dbe4d83a02323a750afd04de007565ac5`、`9682be837759c20f1a9ebbdf8fa2cfc09c2768d4`，三仓仍为 `main`、clean。
+
+幂等真实重跑使用不可用模型配置仍 success，证明未加载模型；`steps/12.json` 与 state 字节不变，最终 result SHA-256 为 `8f829cb3d4935a9dcd07bea2dd8f0df2a22369c433ba4320938e2a9461f41fb0`，state SHA-256 为 `73fd0cb99c39f64f9ef210a171799f79baaee87a417a18f5db74f5b5374470f7`。第 13 步及以后尚未实现；阶段一第 13～18 步合同仍仅为后续目标合同。
 Git 忽略 run `prompt-role-replay-20260823` 保留旧四段 XML prompt 的历史交接回放；它不是现行五段 prompt 的证据。现行 `role/project_context/responsibility/completion/output` 合同已由第 9 步 fresh 真实运行验证。
