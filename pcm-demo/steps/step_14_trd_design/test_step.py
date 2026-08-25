@@ -14,7 +14,7 @@ from unittest.mock import patch
 DEMO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(DEMO_ROOT))
 
-from common.claude_agent import ClaudeRunResult
+from common.claude_agent import ClaudeRunResult, run_claude
 from common.files import write_json
 from common.state import read_state, write_state
 from steps.step_13_select_requirement.step import run as select_requirement
@@ -24,12 +24,10 @@ from steps.step_14_trd_design.step import (
     NEXT_NODE,
     PHASE,
     STEP,
-    TRD_AGENT_TOOLS,
     TRD_DESIGN_DECISION_RULES,
     TRDDesignBlocked,
     _context,
     _status_entries,
-    _trd_agent_hooks,
     _verify_refs,
     failure_scope,
     has_complete_success,
@@ -622,12 +620,12 @@ class TRDDesignTests(unittest.TestCase):
             self.assertEqual((run_dir / "state.json").read_bytes(), before)
             self.assertNotIn("trd_path", read_state(run_dir)["requirement_cycle"])
 
-    def test_default_agent_runner_receives_restricted_tools_and_write_hook(self) -> None:
+    def test_default_agent_runner_uses_common_runner_without_tool_overrides(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))
             captured: dict[str, object] = {}
 
-            async def restricted_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
+            async def default_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
                 captured.update(kwargs)
                 self.write_trd(workspace, read_state(run_dir))
                 return agent_result(workspace)
@@ -635,66 +633,18 @@ class TRDDesignTests(unittest.TestCase):
             async def decide(*_: object, **__: object) -> tuple[dict, int, str]:
                 return decision("completed")
 
-            with patch(
-                "steps.step_14_trd_design.step.run_claude",
-                new=restricted_agent,
-            ):
-                self.run_step(
-                    run_dir,
-                    state,
-                    decision_runner=decide,
-                    config_loader=lambda: object(),
-                    today_provider=lambda: date(2026, 8, 25),
-                )
-            self.assertEqual(captured["tools"], TRD_AGENT_TOOLS)
-            hooks = captured["hooks"]
-            self.assertIsInstance(hooks, dict)
-            self.assertIn("PreToolUse", hooks)
-
-    def test_real_agent_tool_policy_has_no_bash_and_only_allows_exact_trd_write(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            run_dir, workspace, state = self.make_run(Path(directory))
-            state["requirement_cycle"]["trd_path"] = (
-                "docs/trd/2026-08-25-BR-001-身份、角色访问与站内消息入口.md"
+            self.assertIs(run.__kwdefaults__["agent_runner"], run_claude)
+            self.run_step(
+                run_dir,
+                state,
+                agent_runner=default_agent,
+                decision_runner=decide,
+                config_loader=lambda: object(),
+                today_provider=lambda: date(2026, 8, 25),
             )
-            context = _context(run_dir, state)
-            hooks = _trd_agent_hooks(
-                context, state["requirement_cycle"]["trd_path"]
-            )
-            callback = hooks["PreToolUse"][0].hooks[0]
-            allowed = asyncio.run(
-                callback(
-                    {
-                        "tool_name": "Write",
-                        "tool_input": {
-                            "file_path": str(
-                                workspace / state["requirement_cycle"]["trd_path"]
-                            )
-                        },
-                    },
-                    None,
-                    {"signal": None},
-                )
-            )
-            denied = asyncio.run(
-                callback(
-                    {
-                        "tool_name": "Edit",
-                        "tool_input": {"file_path": str(workspace / "README.md")},
-                    },
-                    None,
-                    {"signal": None},
-                )
-            )
-            self.assertEqual(
-                allowed["hookSpecificOutput"]["permissionDecision"], "allow"
-            )
-            self.assertEqual(
-                denied["hookSpecificOutput"]["permissionDecision"], "deny"
-            )
-            self.assertNotIn("Bash", TRD_AGENT_TOOLS)
-            self.assertNotIn("Agent", TRD_AGENT_TOOLS)
-            self.assertNotIn("NotebookEdit", TRD_AGENT_TOOLS)
+            self.assertEqual(Path(captured["cwd"]).resolve(), workspace.resolve())
+            self.assertNotIn("tools", captured)
+            self.assertNotIn("hooks", captured)
 
     def test_failure_scope_and_git_environment_are_scoped(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

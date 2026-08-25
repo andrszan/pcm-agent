@@ -26,7 +26,7 @@ docs/trd/<YYYY-MM-DD>-<requirement-id>-<requirement-title>.md
 
 日期只取首次执行日。完成全局只读预检后，程序先将精确 `trd_path` 写入 `requirement_cycle`，再启动 Agent；恢复时只读取该值，不因日期或标题变化重算。目标路径也会原样写入初始 `/trd-design` prompt。已存在的父路径必须是非符号链接目录；路径冲突在 intent 前无副作用失败。
 
-Claude Agent 在产品根运行，conversation、session 和私有执行状态使用 `trd_design_<requirement-id>` 隔离。步骤复用公共 `agent_decision_loop` 和结构化 `AgentDecision`，但不调用 `/commit-changes`。默认 Agent 仅暴露 `Read`、`Glob`、`Grep`、`Write`、`Edit` 和 `Skill`，没有 `Bash`、`Agent` 或 `NotebookEdit`；`PreToolUse` hook 只允许 `Write/Edit` 指向已持久化的 exact TRD。
+Claude Agent 在产品根运行，conversation、session 和私有执行状态使用 `trd_design_<requirement-id>` 隔离。步骤复用公共 `agent_decision_loop`、默认 `run_claude()` 工具配置和结构化 `AgentDecision`，不设置 `permission_mode`、`tools`、`allowed_tools`、`disallowed_tools` 或步骤私有 tool hook；项目 `.claude/settings.json` 与 Claude Code 默认加载语义继续是权限和工具行为的权威来源。prompt 明确只允许创建指定活动 TRD并禁止 Git 写操作，Python 负责调用前、决定前和完成时的文件、分支、index、ref 与工作树事实核验。
 
 成功 result 只写：
 
@@ -47,7 +47,7 @@ steps/requirements/<requirement-id>/14.json
 - 全部仓库仍在统一需求分支，`HEAD/main/target/base` 全部相等；
 - 原 requirement-scoped session 和 conversation 锚点完整。
 
-负责人 completion 规则还要求：阻碍实现的高影响决定已经明确采用当前基线；Agent 回复不能仅因“已经列出实现前待确认事项”就被判定完成。文档缺失或为空时只向原 session 发送固定补全提示。任何范围外修改、暂存、提交、ref 漂移、分支漂移或进行中的 Git 历史都直接失败并保留现场，不自动 reset、restore 或清理。
+负责人 completion 规则还要求：阻碍实现的高影响决定已经明确采用当前基线；Agent 回复不能仅因“已经列出实现前待确认事项”就被判定完成。文档缺失或为空时只向原 session 发送固定补全提示。任何最终可见的范围外修改、暂存、提交、ref 漂移、分支漂移或进行中的 Git 历史都直接失败并保留现场，不自动 reset、restore 或清理。该核验证明完成现场不存在 Git 写入结果或越界变更，不把最终状态核验夸大为对整个 Agent 执行历史的绝对取证；若未来需要不可绕过的执行隔离，应在项目级权限或沙箱合同中统一设计，而不是由单个领域步骤覆盖工具配置。
 
 成功先写 scoped result，再推进到 `requirement:15_development` / step 15。活动需求仍为 `active`，`completion` 仍为 `null`；第 15 步尚未实现。
 
@@ -67,15 +67,15 @@ steps/requirements/<requirement-id>/14.json
 
 已执行并通过：
 
-- 第 14 步本体 14 项；
+- 第 14 步本体 13 项；
 - 第 14 步 CLI 6 项；
-- 公共 Agent 决策循环与 Claude runner 25 项；
+- 公共 Agent 决策循环与 Claude runner 24 项；
 - 第 13 步本体与 CLI 28 项；
-- 上述定向共 73 项；
-- 从 `pcm-demo/` 根递归发现的全量 243 项 `unittest`；
+- 上述定向共 71 项；
+- 从 `pcm-demo/` 根递归发现的全量 241 项 `unittest`；
 - `compileall`、`git diff --check` 和全工作区 IDE diagnostics。
 
-独立审查先后发现 fresh CLI 副作用、Agent Git 写入可绕过、bisect 漏检和 TRD 父路径冲突 4 项中置信问题，均已修复并补测试。Ruff 未安装，未为检查增加依赖。
+独立审查发现的 fresh CLI 副作用、bisect 漏检和 TRD 父路径冲突等确定性边界问题均已修复并补测试。为回应“最终 Git 状态不能证明 Agent 从未进行临时写入”的审查意见，曾短暂增加步骤私有工具白名单和 `PreToolUse` hook；用户复核后确认该方案不是领域步骤必要条件，且与项目统一权限设计冲突，现已删除并增加默认 runner 无工具覆盖测试。最终复核无高、中置信问题。Ruff 未安装，未为检查增加依赖。
 
 ## 真实验证
 
@@ -110,6 +110,8 @@ system
 - TRD SHA-256：`ab17a9f94d85b2b96efa3839f94d6608cad98710f41c41ccb009f71f93d12c1d`
 
 产品 root 恰好只有该 TRD 为未跟踪文件；frontend/backend clean；三仓 index 为空且 `HEAD/main/target` 分别等于记录 base。没有产品提交、merge 或 push，也没有 `/commit-changes`。推进后的幂等重跑不读取 Git、不调用 Agent 或负责人服务，state/result/conversation/TRD 四者字节不变，session 和 Agent 结果不变。
+
+恢复默认工具配置发生在上述真实 Agent 运行完成之后，因此没有为了验证权限参数删除而重跑或改写已成功的 TRD session。当前生产路径直接使用已被第 2/5/6/7/8/9/10/11 步真实运行验证过的公共默认 runner；第 14 步自动化明确断言默认 `agent_runner` 为 `run_claude`，且公共循环调用中不存在 `tools/hooks` 覆盖。活动 TRD、result、state、conversation 和产品 Git 现场均未因此改变。
 
 ## 运行
 

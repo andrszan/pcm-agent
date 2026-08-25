@@ -742,40 +742,6 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(updates[-1].terminal_reason, "api_error")
         self.assertEqual(updates[-1].api_error_status, 429)
         self.assertTrue(updates[-1].has_errors)
-    async def test_restricted_tools_and_hooks_are_forwarded_to_sdk_options(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            workspace = Path(directory)
-            write_json(workspace / "plugins-lock.json", {"version": 1, "plugins": []})
-            captured: dict[str, object] = {}
-
-            async def fake_query(*_args: object, **kwargs: object):
-                captured["options"] = kwargs["options"]
-                yield SystemMessage(
-                    subtype="init",
-                    data={"session_id": "session-1", "cwd": str(workspace)},
-                )
-                yield ResultMessage(
-                    subtype="success",
-                    duration_ms=1,
-                    duration_api_ms=1,
-                    is_error=False,
-                    num_turns=1,
-                    session_id="session-1",
-                    result="完成",
-                )
-
-            hooks = {"PreToolUse": []}
-            with patch("common.claude_agent.query", new=fake_query):
-                await run_claude(
-                    "测试提示",
-                    cwd=workspace,
-                    tools=["Read", "Write"],
-                    hooks=hooks,
-                )
-
-        options = captured["options"]
-        self.assertEqual(options.tools, ["Read", "Write"])
-        self.assertEqual(options.hooks, hooks)
 
 
 class AgentDecisionTest(unittest.IsolatedAsyncioTestCase):

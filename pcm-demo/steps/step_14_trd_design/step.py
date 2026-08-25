@@ -9,8 +9,6 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Callable
 
-from claude_agent_sdk import HookMatcher
-
 from common.agent_decision_loop import AgentDecisionLoopSpec, run_agent_decision_loop
 from common.claude_agent import run_claude
 from common.decision import parse_agent_decision, render_decision_system_prompt, request_decision
@@ -40,7 +38,6 @@ BACKLOG_PATH = Path("docs/backlog/backlog.md")
 MAX_DECISION_ROUNDS = 8
 TRD_DESIGN_MAX_TURNS = 48
 TRD_DESIGN_MAX_BUDGET_USD = 16.0
-TRD_AGENT_TOOLS = ["Read", "Glob", "Grep", "Write", "Edit", "Skill"]
 
 _HEX_SHA = re.compile(r"^[0-9a-f]{40,64}$")
 _FORBIDDEN_TITLE_CHARACTERS = set('<>:"/\\|?*')
@@ -378,43 +375,6 @@ def _safe_trd_path(workspace: Path, relative_value: str) -> Path:
         return resolve_workspace_output(workspace, relative.as_posix())
     except ValueError as error:
         raise RuntimeError("活动 TRD 路径不符合约定") from error
-
-
-def _trd_agent_hooks(context: dict[str, Any], trd_path: str) -> dict[str, list[HookMatcher]]:
-    workspace = context["workspace"].resolve()
-    target = _safe_trd_path(context["workspace"], trd_path).resolve()
-
-    async def restrict_write(
-        hook_input: Any,
-        _tool_use_id: str | None,
-        _hook_context: Any,
-    ) -> dict[str, Any]:
-        tool_name = hook_input.get("tool_name") if isinstance(hook_input, dict) else None
-        tool_input = hook_input.get("tool_input") if isinstance(hook_input, dict) else None
-        path_value = tool_input.get("file_path") if isinstance(tool_input, dict) else None
-        allowed = False
-        if tool_name in {"Write", "Edit"} and isinstance(path_value, str):
-            candidate = Path(path_value)
-            if not candidate.is_absolute():
-                candidate = workspace / candidate
-            allowed = candidate.resolve() == target
-        return {
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "allow" if allowed else "deny",
-                "permissionDecisionReason": (
-                    "只允许写入当前活动 TRD。"
-                    if not allowed
-                    else "当前写入路径是唯一活动 TRD。"
-                ),
-            }
-        }
-
-    return {
-        "PreToolUse": [
-            HookMatcher(matcher="Write|Edit", hooks=[restrict_write])
-        ]
-    }
 
 
 def _validate_title(title: str) -> None:
@@ -916,7 +876,7 @@ async def run(
     run_dir: Path,
     state: dict[str, Any],
     *,
-    agent_runner=None,
+    agent_runner=run_claude,
     decision_runner=request_decision,
     config_loader=LLMConfig.load,
     today_provider: Callable[[], date] = date.today,
@@ -1043,18 +1003,6 @@ async def run(
         _verify_boundary(context, trd_path)
         return await decision_runner(messages, config, system_prompt=system_prompt)
 
-    effective_agent_runner = agent_runner
-    if agent_runner is None:
-        async def restricted_agent_runner(prompt: str, **kwargs: Any) -> Any:
-            return await run_claude(
-                prompt,
-                tools=TRD_AGENT_TOOLS,
-                hooks=_trd_agent_hooks(context, trd_path),
-                **kwargs,
-            )
-
-        effective_agent_runner = restricted_agent_runner
-
     decision = await run_agent_decision_loop(
         run_dir,
         state,
@@ -1062,7 +1010,7 @@ async def run(
         decision_spec,
         agent_prompt,
         completion_verifier,
-        agent_runner=effective_agent_runner,
+        agent_runner=agent_runner,
         decision_runner=_verified_decision_runner,
         config_loader=config_loader,
     )
