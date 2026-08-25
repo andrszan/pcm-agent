@@ -9,9 +9,9 @@
 - 第 2 步 `steps/02.json.outputs` 指向的两份非空产品定义；
 - 第 5 步固定项目准备清单 `docs/requirements/项目准备清单.md`；
 - 第 7 步固定总体技术方案 `docs/design/技术方案.md`；
-- 第 8 步成功结果和状态中的有序 `applicable_repositories`、`repositories` clean 交接事实。
+- 第 8 步成功 result/state 一致的有序 `applicable_repositories`，且第 8 步 `outputs` 必须为空。
 
-运行状态必须位于 `project:09_engineering_architecture`。产品工作区必须位于状态记录的独立工作区根下且不是符号链接；第 8 步列出的每个权威仓库必须是自身 Git top-level、位于 `main` 且 clean。Python 不从固定前后端目录、Agent 回复或其它历史文字补充仓库。
+运行状态必须位于 `project:09_engineering_architecture`。第 8 步只交接合法、有序的仓库名称；不逐项回放旧 `repositories` 的 path、branch 或 clean 字段。产品工作区必须位于状态记录的独立工作区根下且不是符号链接；本步骤在当前现场只读核验每个权威仓库均为自身 Git top-level、位于 `main` 且 clean。Python 不从固定前后端目录、Agent 回复或其它历史文字补充仓库。
 
 ## Agent、决策与固定产物
 
@@ -25,55 +25,37 @@
 
 `AgentDecision` 的输出约束为：`completed` 时 `answer` 为空且 `required_inputs` 为空；`continue` 时 `answer` 非空且 `required_inputs` 为空；`blocked` 时 `answer` 为空且 `required_inputs` 非空；所有结果的 `reason` 均非空。公共层使用一次 `responses.parse` 和 Pydantic 输出，不手写解析、不注入决定、不格式重试。
 
-Agent 基于权威输入和实际工程，把总体技术方案落实为可执行的工程结构与协作规则。初始工程架构调用只允许创建或更新固定文档，不得实现业务功能、修改工程代码或配置、修改项目规则、执行 Git 写操作或处理秘密。每次请求 AI-compatible 决定前，步骤都会重新核验仓库工作树边界；范围外修改不会进入负责人裁决。
+Agent 基于权威输入和实际工程，把总体技术方案落实为可执行的工程结构与协作规则。初始工程架构调用只允许创建或更新固定文档，不得实现业务功能、修改工程代码或配置、修改项目规则、执行 Git 写操作或处理秘密。每次请求 AI-compatible 决定前，步骤都会重新核验当前 Git-visible 工作树边界；当前可见的范围外修改会使现场核验失败。
 
-## 完成核验与提交执行锚点
+## 完成核验、提交与恢复
 
-负责人返回 `completed` 后，程序 completion verifier 按固定顺序处理：
+负责人返回 `completed` 后，程序先 repair 缺失或空的 `docs/design/工程架构设计.md`；repair 只允许补全该固定文档。文档有效后，重新核验工作树边界：仅当根仓有未提交变化、该变化只涉及固定文档时，才在原 session 发送 `/commit-changes`。固定文档已经 tracked 且全仓 clean 时，直接满足提交交付条件，不制造无变化调用。`commit-changes` 仍只在实际需要时处理固定文档；Python 不执行 `add`、`commit`、`push` 或其它 Git 写操作。
 
-1. 文档缺失或为空时，向原 session 发送固定文档 repair prompt，只允许补全 `docs/design/工程架构设计.md`，禁止其它修改和 Git 写操作；
-2. 文档存在后，无论相对当前提交是否发生变化，都必须向同一 session 发送一次固定 `/commit-changes` repair prompt；
-3. 该提交提示只授权 `commit-changes` 核验并在适用时暂存、提交固定文档；如果发现文档事实矛盾，Skill 可以严格不修改、不暂存、不提交并报告；
-4. 提交执行锚点接受 conversation 中任意一条与固定 commit prompt 完全相等的 `assistant` 消息，只要其后紧邻同一 conversation 的非空 `user` Agent 回复且状态仍记录原 Claude session；它不要求该 prompt 位于最后一个 user 之前，也不强制工程架构和提交拆成固定轮次；
-5. commit-changes 执行轮结束后，外层负责人仍可通过普通 `continue` 限定通用 Claude Agent 只修正固定文档并精确提交。这是公共循环的后续指令，不是 commit-changes Skill 内部越权行为。
+**证据边界：** Python 只核验当前 Git-visible 工作树和 index；这不是不可绕过的安全隔离，不证明整个 Agent 执行历史未发生 Git 写入，也不覆盖 ignored 文件。本地 Demo 信任项目权限配置和 Agent 遵守领域约束；未来若要求不可绕过隔离，应在项目级权限或沙箱统一实现，而非由领域步骤解析 conversation 或扩展 Git DSL。
 
 最终成功必须同时满足：
 
 - 固定工程架构文档为非空、非符号链接普通文件且已被产品根 Git 跟踪；
-- 根仓库和全部适用子仓仍是各自自身 top-level、位于 `main` 且 clean；
-- 固定 `/commit-changes` 调用具有有效的紧邻 Agent 回复锚点；
-- `steps/09.json` 为 `status=success`、`applicable=true`，唯一输出为 `docs/design/工程架构设计.md`。
+- 根仓库和全部适用子仓在当前现场均为各自自身 top-level、位于 `main` 且 clean；
+- `steps/09.json` 为严格 `status=success`、`applicable=true`，唯一输出为 `docs/design/工程架构设计.md`。
 
-Python 只读 Git，只核验 top-level、当前分支、全仓/固定文档 status 和固定文档 tracked；不读取或保存 HEAD、SHA、提交数或历史形态，也不执行任何 Git 写操作。
+成功不依赖 exact commit prompt、紧邻 Agent 回复、conversation 角色/消息顺序或其它历史执行锚点。结果已写而状态推进中断，或完整 success 重跑时，只按严格 result schema、当前固定文档和当前 Git 事实补状态或确认成功。
 
-## 工作树边界、恢复与安全拒绝
+领域步骤继续使用公共 `run_agent_decision_loop` 保存、读取和解释完整 conversation；领域代码不解析消息 schema、角色顺序、尾部 decision、session/reference 组合或完整 commit prompt，也不把 conversation 作为长期成功证据。fresh 仅因本步骤 session、conversation reference、私有状态或 conversation 路径等既有执行产物而拒绝；resume 交由公共循环恢复原 session。run 目录是受控、Git 忽略的本地恢复状态，不建设防篡改日志。
 
-- fresh 入口第一次启动 Agent 前要求全体权威仓库 clean；任何既有 `engineering_architecture` session、conversation 引用、步骤私有状态或历史文件都使 fresh 入口失败；
-- Agent 开始后，所有适用子仓必须始终 clean；产品根只允许固定工程架构文档产生 dirty；
-- conversation 文件和 `conversations/` 父目录都必须位于当前 run 内且不是符号链接；conversation 叶文件或父目录为符号链接时均拒绝；
-- 已存在 Agent 执行事实时，恢复必须同时具备原 session、conversation 引用和实际历史文件；缺少锚点时拒绝静默新建 session；
-- conversation 尾部为 `user` 时先裁决，不重复 Agent；普通 `assistant` repair/continue 提示恢复原 session；
-- 只有完整 `status=success` 结果是幂等锚点。成功结果写入而状态推进中断时，重验固定文档、提交锚点和全仓 clean 后推进；成功后文档或仓库漂移则拒绝复用。
-- `run_step.py` 只对 schema 完整的第 8、9 步 success 保护既有 result 和已经推进的 state；后续重跑即使失败，也不会覆盖该 success 或把节点回退。字段残缺的 success 不构成保护锚点；其它步骤保持原有入口行为。
+负责人返回 `blocked` 时，始终保存 blocked result/state 并停在 `project:09_engineering_architecture`；即使本地固定文档已 tracked 且仓库 clean，也不得改判 success。补齐外部条件后由公共循环从原 session 恢复。
 
-成功后状态推进到 `project:10_ui_ux_framework`。第 10 步仍是按需的产品级 UI/UX 框架步骤。
+`run_step.py` 仅保护 schema 完整的 success；字段残缺不构成保护锚点。成功后状态推进到 `project:10_ui_ux_framework`。第 10 步仍是按需的产品级 UI/UX 框架步骤。
 
 ## 自动化验证
 
-已执行并通过：
+第 9～11 步新合同代码与自动化已完成：第 9～11 步本体测试合计 49 项通过；公共循环加第 9～11 步本体及第 10/11 步 CLI 定向回归共 84 项通过；PCM Demo 全量 268 项 `unittest` 通过（86.068 秒）；`compileall common steps run_step.py` 与 `git diff --check` 通过；目标第 9～11 步生产/测试和相关文档 IDE diagnostics 无新增问题（既有 pydantic 解析 warning 和第 12 步 unused hint 不属于本次）。尚未按新合同重新执行真实 Claude Agent、负责人 LLM 或 `/commit-changes` 集成；旧真实 run 仍仅为旧合同历史。
 
-- 第 9 步专属 29 项；
-- 公共循环 24 项；
-- 第 7 步 8 项；
-- 第 8 步 17 项；
-- 上述相关定向测试共 78 项；
-- 全量 `unittest` 141 项；
-- `compileall` 与 `git diff --check`；
-- IDE 对第 9 步无诊断。
+## 旧合同下的历史运行事实（非当前成功条件）
 
-先前审查中关于 Skill 职责概念的意见已经由用户纠正，不作为遗留问题；本轮文档更新后的最终审查由主代理执行。
+以下 session、11 条 conversation、exact commit prompt、commit-changes 发现文档事实矛盾及提交事实，均是旧合同下的历史运行路径；保留作排障和演进依据，不构成当前成功条件。
 
-## 真实验证
+### 旧合同详细事实
 
 旧失败时间线保留为根因证据：最初正式运行和恢复曾因 free quota / `use free tier only` 返回 HTTP 403；访问恢复后服务又曾返回非 JSON 普通文本；之后还出现过 `completed` 携带非空 `answer`。这些失败最终定位到旧 `render_decision_system_prompt` 设计：步骤规则混入 responsibility、completion 语义硬编码且重复，并缺少独立 output 合同。
 

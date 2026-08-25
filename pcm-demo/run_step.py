@@ -221,7 +221,19 @@ def has_step_success(run_dir: Path, step: int) -> bool:
         return False
     if step == 9:
         return (
-            existing.get("name") == "工程架构设计"
+            set(existing)
+            == {
+                "step",
+                "name",
+                "status",
+                "summary",
+                "applicable",
+                "outputs",
+                "blocked",
+                "error",
+            }
+            and bool(existing["summary"].strip())
+            and existing.get("name") == "工程架构设计"
             and existing.get("outputs") == ["docs/design/工程架构设计.md"]
         )
 

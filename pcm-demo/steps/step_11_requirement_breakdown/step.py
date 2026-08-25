@@ -8,7 +8,7 @@ from typing import Any
 
 from common.agent_decision_loop import AgentDecisionLoopSpec, run_agent_decision_loop
 from common.claude_agent import run_claude
-from common.decision import parse_agent_decision, render_decision_system_prompt, request_decision
+from common.decision import render_decision_system_prompt, request_decision
 from common.files import resolve_workspace_output
 from common.state import step_result_status, write_state, write_step_result
 from config import LLMConfig
@@ -131,72 +131,24 @@ def _repository_path(workspace: Path, name: str) -> Path:
     return workspace if name == "root" else workspace / name
 
 
-def _validate_repository_entry(entry: Any, *, name: str, path: str) -> None:
-    if entry != {
-        "name": name,
-        "path": path,
-        "branch": "main",
-        "worktree_clean": True,
-    }:
-        raise RuntimeError("第 8 步仓库 clean 交接事实不符合约定")
-
-
 def _step_eight_handoff(run_dir: Path, state: dict[str, Any]) -> tuple[Path, list[str]]:
     workspace = _workspace_from_state(state)
     previous = _read_json(run_dir / "steps" / "08.json", "第 8 步成功结果不可读取")
     names = previous.get("applicable_repositories")
-    result_repositories = previous.get("repositories")
-    expected_result_keys = {
-        "step",
-        "name",
-        "status",
-        "summary",
-        "applicable",
-        "outputs",
-        "blocked",
-        "error",
-        "applicable_repositories",
-        "repositories",
-    }
     if (
-        set(previous) != expected_result_keys
-        or previous.get("step") != 8
-        or previous.get("name") != "首次提交适用仓库"
+        previous.get("step") != 8
         or previous.get("status") != "success"
-        or not isinstance(previous.get("summary"), str)
-        or not previous["summary"].strip()
         or previous.get("applicable") is not True
         or previous.get("outputs") != []
-        or previous.get("blocked") is not None
-        or previous.get("error") is not None
         or not isinstance(names, list)
         or not names
         or names[0] != "root"
         or any(name not in {"root", "frontend", "backend"} for name in names)
         or len(set(names)) != len(names)
-        or not isinstance(result_repositories, list)
-        or len(result_repositories) != len(names)
     ):
         raise RuntimeError("第 8 步仓库 clean 交接结果不符合约定")
-
-    state_names = state.get("applicable_repositories")
-    state_repositories = state.get("repositories")
-    if (
-        state_names != names
-        or not isinstance(state_repositories, list)
-        or len(state_repositories) != len(names)
-    ):
+    if state.get("applicable_repositories") != names:
         raise RuntimeError("第 8 步仓库 clean 交接状态不符合约定")
-
-    for index, name in enumerate(names):
-        _validate_repository_entry(
-            result_repositories[index], name=name, path="." if name == "root" else name
-        )
-        _validate_repository_entry(
-            state_repositories[index],
-            name=name,
-            path=str(_repository_path(workspace, name).resolve()),
-        )
     return workspace, names
 
 
@@ -429,211 +381,30 @@ def backlog_repair(workspace: Path) -> str | None:
     return None
 
 
-def _conversation_reference(state: dict[str, Any]) -> Path | None:
-    references = state.get("decision_conversations")
-    if references is None:
-        return None
-    if not isinstance(references, dict):
-        raise RuntimeError("Backlog决策历史引用不符合约定")
-    reference = references.get(CONVERSATION_KEY)
-    if reference is None:
-        return None
-    expected = Path("conversations") / f"{CONVERSATION_KEY}.json"
-    if not isinstance(reference, dict) or reference.get("path") != expected.as_posix():
-        raise RuntimeError("Backlog决策历史引用不符合约定")
-    return expected
-
-
-def _session(state: dict[str, Any]) -> str | None:
-    sessions = state.get("claude_sessions")
-    if sessions is None:
-        return None
-    if not isinstance(sessions, dict):
-        raise RuntimeError("Backlog Claude session 状态不符合约定")
-    value = sessions.get(CONVERSATION_KEY)
-    if value is None:
-        return None
-    if not isinstance(value, str) or not value:
-        raise RuntimeError("Backlog Claude session ID 不符合约定")
-    return value
-
-
-def _safe_conversation_path(run_dir: Path) -> Path:
-    resolved_run_dir = run_dir.resolve()
-    conversations = run_dir / "conversations"
-    conversations_present = conversations.exists() or conversations.is_symlink()
-    if conversations_present:
-        if conversations.is_symlink() or not conversations.is_dir():
-            raise RuntimeError("Backlog conversations 路径必须是非符号链接目录")
-        resolved_conversations = conversations.resolve()
-        if resolved_conversations.parent != resolved_run_dir:
-            raise RuntimeError("Backlog conversations 路径越出运行目录")
-    else:
-        resolved_conversations = resolved_run_dir / "conversations"
-
-    path = conversations / f"{CONVERSATION_KEY}.json"
-    if path.exists() or path.is_symlink():
-        if path.is_symlink() or not path.is_file():
-            raise RuntimeError("Backlog决策历史必须是非符号链接普通文件")
-        if path.resolve().parent != resolved_conversations:
-            raise RuntimeError("Backlog决策历史路径越出 conversations 目录")
-    return path
-
-
-def _conversation_messages(path: Path) -> list[dict[str, str]]:
-    conversation = _read_json(path, "Backlog决策历史不可读取")
-    if set(conversation) != {"messages"}:
-        raise RuntimeError("Backlog决策历史内容不符合约定")
-    messages = conversation.get("messages")
-    if not isinstance(messages, list) or not messages:
-        raise RuntimeError("Backlog决策历史内容不符合约定")
-    normalized: list[dict[str, str]] = []
-    for message in messages:
-        if (
-            not isinstance(message, dict)
-            or set(message) != {"role", "content"}
-            or message.get("role") not in {"system", "assistant", "user"}
-            or not isinstance(message.get("content"), str)
-        ):
-            raise RuntimeError("Backlog决策历史消息不符合约定")
-        normalized.append({"role": message["role"], "content": message["content"]})
-    if normalized[0]["role"] != "system":
-        raise RuntimeError("Backlog决策历史首条消息必须是 system")
-    return normalized
-
-
-def _has_structured_decision(messages: list[dict[str, str]]) -> bool:
-    for message in messages:
-        if message["role"] != "assistant":
-            continue
-        try:
-            parse_agent_decision(message["content"])
-        except ValueError:
-            continue
-        return True
-    return False
-
-
 def _execution_artifacts_present(run_dir: Path, state: dict[str, Any]) -> bool:
     sessions = state.get("claude_sessions")
     references = state.get("decision_conversations")
-    conversation_path = _safe_conversation_path(run_dir)
+    conversation_path = run_dir / "conversations" / f"{CONVERSATION_KEY}.json"
     return (
         isinstance(sessions, dict)
         and CONVERSATION_KEY in sessions
         or isinstance(references, dict)
         and CONVERSATION_KEY in references
+        or CONVERSATION_KEY in state
         or conversation_path.exists()
         or conversation_path.is_symlink()
-        or CONVERSATION_KEY in state
     )
-
-
-def _validate_execution_anchor(
-    run_dir: Path,
-    state: dict[str, Any],
-    *,
-    fresh: bool,
-    initial_agent_prompt: str,
-) -> bool:
-    if fresh and _execution_artifacts_present(run_dir, state):
-        raise RuntimeError("新鲜Backlog入口不得包含既有执行产物")
-
-    session = _session(state)
-    reference = _conversation_reference(state)
-    path = _safe_conversation_path(run_dir)
-    path_present = path.exists() or path.is_symlink()
-    if path_present and reference is None:
-        raise RuntimeError("Backlog恢复存在未引用的决策历史")
-    if reference is not None and not path_present:
-        raise RuntimeError("Backlog恢复缺少原决策历史")
-    if path_present and (path.is_symlink() or not path.is_file()):
-        raise RuntimeError("Backlog恢复决策历史必须是非符号链接普通文件")
-
-    messages = _conversation_messages(path) if path_present else []
-    section = state.get(CONVERSATION_KEY)
-    if section is not None and not isinstance(section, dict):
-        raise RuntimeError("Backlog执行状态不符合约定")
-    section_has_facts = isinstance(section, dict) and bool(section)
-    history_has_agent_reply = any(message["role"] == "user" for message in messages)
-    history_has_decision = _has_structured_decision(messages)
-    history_has_commit_prompt = any(
-        message == {"role": "assistant", "content": COMMIT_REPAIR_PROMPT}
-        for message in messages
-    )
-    execution_facts = (
-        session is not None
-        or section_has_facts
-        or history_has_agent_reply
-        or history_has_decision
-        or history_has_commit_prompt
-    )
-    if execution_facts and session is None:
-        raise RuntimeError("Backlog恢复缺少原 Claude session")
-    if session is not None and reference is None:
-        raise RuntimeError("Backlog恢复缺少原决策历史引用")
-
-    if session is None and messages:
-        allowed = [
-            messages[:1],
-            [
-                messages[0],
-                {"role": "assistant", "content": initial_agent_prompt},
-            ],
-        ]
-        if messages not in allowed:
-            raise RuntimeError("Backlog无 session 历史包含 Agent 执行事实")
-
-    if state.get("status") == "blocked":
-        try:
-            tail = messages[-1]
-            if tail["role"] != "assistant":
-                raise ValueError
-            decision = parse_agent_decision(tail["content"])
-        except (IndexError, KeyError, ValueError):
-            raise RuntimeError("Backlog恢复缺少有效的 blocked 决策历史") from None
-        if decision.verdict != "blocked":
-            raise RuntimeError("Backlog恢复历史尾部不是 blocked 决策")
-    return execution_facts
-
-
-def _commit_requested(run_dir: Path, state: dict[str, Any]) -> bool:
-    path = _safe_conversation_path(run_dir)
-    if _session(state) is None:
-        return False
-    relative = _conversation_reference(state)
-    if relative is None:
-        return False
-    if path != run_dir / relative:
-        raise RuntimeError("Backlog决策历史引用路径不符合约定")
-    if not path.is_file():
-        raise RuntimeError("Backlog决策历史不存在")
-    messages = _conversation_messages(path)
-    for index, message in enumerate(messages[:-1]):
-        reply = messages[index + 1]
-        if (
-            message == {"role": "assistant", "content": COMMIT_REPAIR_PROMPT}
-            and reply["role"] == "user"
-            and bool(reply["content"].strip())
-        ):
-            return True
-    return False
 
 
 def _completion_ready(
-    run_dir: Path,
-    state: dict[str, Any],
-    workspace: Path,
-    names: list[str],
+    workspace: Path, names: list[str]
 ) -> tuple[bool, list[dict[str, Any]]]:
+    repair = backlog_repair(workspace)
     repositories, root_status = _verify_worktree_boundary(workspace, names)
-    ready = (
-        backlog_repair(workspace) is None
-        and _commit_requested(run_dir, state)
-        and root_status == ""
-        and _document_tracked(workspace)
+    return (
+        repair is None and root_status == "" and _document_tracked(workspace),
+        repositories,
     )
-    return ready, repositories
 
 
 def verify_existing_success(run_dir: Path) -> dict[str, Any]:
@@ -667,7 +438,7 @@ def verify_existing_success(run_dir: Path) -> dict[str, Any]:
 def advance_success(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
     saved = result(
         "success",
-        "requirement-breakdown 已生成固定 Backlog 文档并完成提交核验。",
+        "requirement-breakdown 已生成固定 Backlog 文档，固定文档和 Git 交付已核验。",
         outputs=[BACKLOG_PATH.as_posix()],
     )
     write_step_result(run_dir, STEP, saved)
@@ -758,22 +529,18 @@ async def run(
         and state.get("status") == "success"
         and existing_step_status != "success"
     )
-    started = _validate_execution_anchor(
-        run_dir,
-        state,
-        fresh=fresh,
-        initial_agent_prompt=initial_agent_prompt,
-    )
-    repositories, root_status = _verify_worktree_boundary(workspace, names)
+    started = _execution_artifacts_present(run_dir, state)
+    if fresh and started:
+        raise RuntimeError("新鲜 Backlog 入口不得包含既有执行产物")
 
     if position == (STEP + 1, STEP + 1, NEXT_NODE) and state.get("status") == "success":
         verify_existing_success(run_dir)
-        ready, _ = _completion_ready(run_dir, state, workspace, names)
+        ready, _ = _completion_ready(workspace, names)
         if not ready:
             raise RuntimeError("第 11 步成功后固定文档或仓库状态发生漂移")
         return result(
             "success",
-            "requirement-breakdown 已生成固定 Backlog 文档并完成提交核验，确认既有成功。",
+            "requirement-breakdown 已生成固定 Backlog 文档，固定文档和 Git 交付已核验，确认既有成功。",
             outputs=[BACKLOG_PATH.as_posix()],
         )
 
@@ -782,11 +549,12 @@ async def run(
 
     if existing_step_status == "success":
         verify_existing_success(run_dir)
-        ready, _ = _completion_ready(run_dir, state, workspace, names)
+        ready, _ = _completion_ready(workspace, names)
         if not ready:
             raise RuntimeError("第 11 步既有成功缺少有效固定文档或 clean 仓库")
         return advance_success(run_dir, state)
 
+    repositories, root_status = _verify_worktree_boundary(workspace, names)
     if not started and (
         root_status != "" or any(not item["worktree_clean"] for item in repositories)
     ):
@@ -817,18 +585,15 @@ async def run(
     )
 
     def completion_verifier() -> str | None:
-        verified_workspace, verified_names, *_ = validate_inputs(run_dir, state)
-        _, verified_root_status = _verify_worktree_boundary(
-            verified_workspace, verified_names
-        )
-        repair = backlog_repair(verified_workspace)
+        repair = backlog_repair(workspace)
         if repair is not None:
             return repair
-        if not _commit_requested(run_dir, state):
+        _, root_status = _verify_worktree_boundary(workspace, names)
+        if root_status != "":
             return COMMIT_REPAIR_PROMPT
-        if verified_root_status != "" or not _document_tracked(verified_workspace):
-            return COMMIT_REPAIR_PROMPT
-        return None
+        if _document_tracked(workspace):
+            return None
+        raise RuntimeError("固定 Backlog 文档未受 Git 跟踪，无法在 clean 仓库中完成")
 
     async def _verified_decision_runner(
         messages: list[dict[str, str]],
@@ -852,9 +617,6 @@ async def run(
     )
 
     if decision.verdict == "blocked":
-        ready, _ = _completion_ready(run_dir, state, workspace, names)
-        if ready:
-            return advance_success(run_dir, state)
         outputs = [BACKLOG_PATH.as_posix()] if backlog_repair(workspace) is None else []
         blocked = {
             "reason": decision.reason,
@@ -878,7 +640,7 @@ async def run(
         write_state(run_dir, state)
         raise RequirementBreakdownBlocked(decision.reason, decision.required_inputs, outputs)
 
-    ready, _ = _completion_ready(run_dir, state, workspace, names)
+    ready, _ = _completion_ready(workspace, names)
     if not ready:
-        raise RuntimeError("拆分 Backlog 完成核验后固定文档或仓库状态不符合约定")
+        raise RuntimeError("拆分 Backlog 固定文档或 Git 交付未通过核验")
     return advance_success(run_dir, state)

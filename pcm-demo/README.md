@@ -33,9 +33,11 @@ uv sync
 uv run python -m unittest discover -s . -t . -p 'test*.py' -v
 ```
 
-该入口从 `pcm-demo/` 根递归发现 `common/` 与 `steps/` 测试。第 16 步本体 19 项与 CLI 4 项，共 23 项；全量 273 项 `unittest` 均已通过。`compileall`、`git diff --check` 通过；Pyright langserver 未安装，未执行 IDE/LSP 诊断，能力仓未安装 Ruff，未执行 Ruff。独立只读审查在修复后最终无高、中置信缺陷。
+第 9～11 步新合同代码与自动化已完成：第 9～11 步本体测试合计 49 项通过；公共循环加第 9～11 步本体及第 10/11 步 CLI 定向回归共 84 项通过；PCM Demo 全量 268 项 `unittest` 通过（86.068 秒）；`compileall common steps run_step.py` 与 `git diff --check` 通过；目标第 9～11 步生产/测试和相关文档 IDE diagnostics 无新增问题（既有 pydantic 解析 warning 和第 12 步 unused hint 不属于本次）。尚未按新合同重新执行真实 Claude Agent、负责人 LLM 或 `/commit-changes` 集成；旧真实 run 仍仅为旧合同历史。
 
 ## 最近真实验证
+
+第 9～11 步下述 exact commit prompt、conversation 条数、提交和 `commit-changes` 发现文档矛盾的叙述，均是**旧合同下的历史运行事实/当时执行路径**，保留作排障和演进依据，不是当前成功条件。现行新合同以严格 result schema、固定文档和当前 Git 事实判定 success；验证正在进行。
 
 隔离 run `agent-loop-step7-20260822T190149Z` 已真实验证公共循环的第 7 步路径：初次环境内部 Explore 子代理模型错误超时后保留 session 与初始对话；仅在隔离历史追加普通 assistant 提示后从同一 session 恢复，完成正常 `success`、两次 `completed` 裁决和固定方案文档补完核验，最终推进到第 8 步。隔离副本未修改既有 `step01-mendmark`；该测试提示和文档置空 failpoint 均不属于生产代码或生产 prompt。
 
@@ -55,7 +57,7 @@ Probe C 的早期成功证据保留于 `probe-c-20260822T185623Z`，后续格式
 
 backend 提交摘要中的 Ruff、格式、build 通过和 `pytest` 14 passed、1 skipped（数据库集成测试需显式 `DB_*`）是 Agent 报告，不是本次 Python verifier 条件，也不改变第 6 步历史项目化验证。`step08-real-20260823-a/b` 继续仅作为旧“唯一初始提交证明”合同历史，不再用于说明当前合同尚未真实联调；本次首次成功包含 run-local 恢复指令，不能宣称环境内部子代理问题已经解决或无需恢复。
 
-第 9 步代码、自动化和真实验收均已完成。旧失败历史包括账号 free quota / `use free tier only` 导致的 HTTP 403、服务恢复后返回非 JSON 普通文本，以及 `completed` 携带非空 `answer`；最终根因定位为旧 `render_decision_system_prompt` 将步骤规则混入 responsibility、硬编码并重复 completion 语义且缺少独立 output。用户将公共 prompt 重构为 `role/project_context/responsibility/completion/output` 五段，补齐 f-string JSON 花括号转义和 `AgentDecision` 字段组合约束，并同步 common 与第 2/5/6/7/9 步测试。
+第 9 步以下代码、自动化和真实验收均为旧合同下的历史事实。旧失败历史包括账号 free quota / `use free tier only` 导致的 HTTP 403、服务恢复后返回非 JSON 普通文本，以及 `completed` 携带非空 `answer`；最终根因定位为旧 `render_decision_system_prompt` 将步骤规则混入 responsibility、硬编码并重复 completion 语义且缺少独立 output。用户将公共 prompt 重构为 `role/project_context/responsibility/completion/output` 五段，补齐 f-string JSON 花括号转义和 `AgentDecision` 字段组合约束，并同步 common 与第 2/5/6/7/9 步测试。
 
 按用户要求两次清理第 9 步局部 result、conversation、session、private state 和失败生成的未跟踪架构文档后，保留第 0～8 步历史与三仓提交并执行 fresh 运行。最终唯一 session 为 `f41fc439-4c46-434f-b3e9-d15c18c89601`，conversation 共 11 条：`system → assistant 初始 → user → assistant continue → user → assistant completed → assistant commit prompt → user → assistant continue → user → assistant completed`。首轮 Agent 请求确认后，负责人合法 `continue` 要求创建固定文档；Agent 创建约 32 KB 文档，只有根仓固定文档 dirty；负责人 `completed` 后 verifier 同 session 发送固定 `/commit-changes`。
 
@@ -63,9 +65,9 @@ commit-changes 执行轮发现文档中的 frontend Git 事实矛盾，严格未
 
 独立核验确认 root/frontend/backend 均为自身 top-level、`main`、clean，固定文档 tracked。同 run 幂等重跑后 conversation 仍为 11 条，session 和 root HEAD 不变，没有再次调用 Agent、决策服务或产生新提交。`run_step.py` 对第 8～12 步 schema 完整 success 保持固定保护；第 13 步只保护当前 active/cycle 的完整 scoped success，失败或残缺 scoped result 可以重跑恢复。
 
-第 10 步代码、自动化和真实验收已完成。`step01-mendmark` 的第 8 步权威仓库为 `root/frontend/backend`，故适用；session `2d052d9a-b9fd-4fcd-b5f9-ff724f25dbc1` 正常完成（5 turns、`$3.207112`、7 条 conversation、固定 commit prompt 恰好一次）。fresh 调用中内置 Explore 子代理曾输出未识别模型 `gpt-5.6-terra[1m]` 警告，但主 Agent 同一次调用继续并 success，未追加人工或 run-history 恢复提示。产品根提交 `0ceee1bb8b5836f64112ded0c8fd3cf7fbd1f29c` 仅新增 206 行、25580 字节的 `docs/ui-ux/framework.md`，未 push；root/frontend/backend 均为自身 top-level、`main`、clean。`steps/10.json` 是 `applicable: true` 的唯一固定输出 success；其后第 11 步已经消费该严格交接。幂等重跑不增加 conversation、提交或 Agent/决策调用，session、root HEAD 与前后端 SHA 均不变；不适用路径仅有自动化覆盖。
+第 10 步以下代码、自动化和真实验收均为旧合同下的历史事实。`step01-mendmark` 的第 8 步权威仓库为 `root/frontend/backend`，故适用；session `2d052d9a-b9fd-4fcd-b5f9-ff724f25dbc1` 正常完成（5 turns、`$3.207112`、7 条 conversation、固定 commit prompt 恰好一次）。fresh 调用中内置 Explore 子代理曾输出未识别模型 `gpt-5.6-terra[1m]` 警告，但主 Agent 同一次调用继续并 success，未追加人工或 run-history 恢复提示。产品根提交 `0ceee1bb8b5836f64112ded0c8fd3cf7fbd1f29c` 仅新增 206 行、25580 字节的 `docs/ui-ux/framework.md`，未 push；root/frontend/backend 均为自身 top-level、`main`、clean。`steps/10.json` 是 `applicable: true` 的唯一固定输出 success；其后第 11 步已经消费该严格交接。幂等重跑不增加 conversation、提交或 Agent/决策调用，session、root HEAD 与前后端 SHA 均不变；不适用路径仅有自动化覆盖。
 
-第 11 步已在同一真实 run 与产品工作区完成验证。运行前旧 `requirement-breakdown` Skill 已按新合同精确同步，并以真实 `/commit-changes` 单独提交 `9263d28`（只改 Skill、未 push、三仓 clean）；它是测试前置，不是步骤输出。session `af7d198c-b090-44d8-9d92-ae0738150854` 的 init 确认 Skill/slash command、产品根 cwd、Fable 5、Claude Code 2.1.233 和 `bypassPermissions`。fresh 调用的内置 Explore 子代理有未识别模型 `gpt-5.6-terra[1m]` 警告，但主 Agent 同次 success；首次生成 Result 为 15 turns、`$5.789825`。生成的 `docs/backlog/backlog.md` 约 59,140 字节、约 1,110 行，含 14 项 BR 需求，完整覆盖 E.1、未自动纳入 E.2/E.3，首条验证切片为完整的 BR-001～BR-006；文档没有需求开发状态列或字段，业务状态保留。
+第 11 步以下同一真实 run 与产品工作区验证为旧合同下的历史事实。运行前旧 `requirement-breakdown` Skill 已按新合同精确同步，并以真实 `/commit-changes` 单独提交 `9263d28`（只改 Skill、未 push、三仓 clean）；它是测试前置，不是步骤输出。session `af7d198c-b090-44d8-9d92-ae0738150854` 的 init 确认 Skill/slash command、产品根 cwd、Fable 5、Claude Code 2.1.233 和 `bypassPermissions`。fresh 调用的内置 Explore 子代理有未识别模型 `gpt-5.6-terra[1m]` 警告，但主 Agent 同次 success；首次生成 Result 为 15 turns、`$5.789825`。生成的 `docs/backlog/backlog.md` 约 59,140 字节、约 1,110 行，含 14 项 BR 需求，完整覆盖 E.1、未自动纳入 E.2/E.3，首条验证切片为完整的 BR-001～BR-006；文档没有需求开发状态列或字段，业务状态保留。
 
 负责人 Responses 决策曾三次在正常 run 后瞬时写入 failed；两次独立同上下文只读诊断虽得到合法 `completed`，均未注入正式 conversation。依靠正常原节点重跑恢复，未添加自定义 HTTP 重试或修改生产 prompt。最终 conversation 为 7 条：`system → assistant 初始 → user 生成回复 → assistant completed → assistant exact commit prompt → user 提交回复 → assistant completed`，exact commit 恰好一次且使用同一 session。产品根未 push 提交 `2aaa743a97d96fe93deaaaaa13a94e4c414369a2`（`docs: 建立 MendMark 首版正式 Backlog`）仅新增 Backlog，frontend/backend SHA 不变；三仓均在 `main` 且 clean。该历史 `steps/11.json` success 当时进入旧 `phase_1:select_requirement` / step 12 占位入口。
 
