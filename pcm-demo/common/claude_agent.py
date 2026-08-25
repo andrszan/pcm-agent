@@ -112,6 +112,7 @@ async def run_claude(
         plugins=load_plugins(cwd),
         max_turns=max_turns,
         max_budget_usd=max_budget_usd,
+        max_buffer_size=10 * 1024 * 1024,
         resume=resume_session_id,
         env=filtered_env(),
     )

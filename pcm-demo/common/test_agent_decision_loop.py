@@ -710,8 +710,10 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
             workspace = Path(directory)
             write_json(workspace / "plugins-lock.json", {"version": 1, "plugins": []})
             updates: list[ClaudeRunResult] = []
+            captured_options: list[Any] = []
 
-            async def fake_query(*_args: object, **_kwargs: object):
+            async def fake_query(*_args: object, **kwargs: object):
+                captured_options.append(kwargs["options"])
                 yield SystemMessage(
                     subtype="init",
                     data={"session_id": "session-1", "cwd": str(workspace)},
@@ -733,9 +735,12 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
                 result = await run_claude(
                     "测试提示",
                     cwd=workspace,
+                    resume_session_id="session-1",
                     on_update=updates.append,
                 )
 
+        self.assertEqual(captured_options[0].max_buffer_size, 10 * 1024 * 1024)
+        self.assertEqual(captured_options[0].resume, "session-1")
         self.assertEqual(result.terminal_reason, "api_error")
         self.assertEqual(result.api_error_status, 429)
         self.assertTrue(result.has_errors)

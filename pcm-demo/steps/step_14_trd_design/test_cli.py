@@ -297,10 +297,10 @@ class TRDDesignCLITests(unittest.TestCase):
             self.assertEqual(self.cli.main(), 1)
         self.assertFalse(result_path.exists())
 
-    def test_step_fifteen_remains_unimplemented(self) -> None:
+    def test_step_sixteen_remains_unimplemented(self) -> None:
         run_dir, _ = self.make_run()
         with patch.object(
-            self.cli, "parse_args", return_value=self.args(run_dir.name, step=15)
+            self.cli, "parse_args", return_value=self.args(run_dir.name, step=16)
         ):
             self.assertEqual(self.cli.main(), 2)
 
