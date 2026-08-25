@@ -81,6 +81,14 @@ from steps.step_13_select_requirement.step import (
     failure_scope as requirement_selection_failure_scope,
     has_complete_success as has_requirement_selection_success,
 )
+from steps.step_14_trd_design import TRDDesignBlocked
+from steps.step_14_trd_design import result as trd_design_result
+from steps.step_14_trd_design import run as run_trd_design
+from steps.step_14_trd_design.step import (
+    CURRENT_NODE as TRD_DESIGN_NODE,
+    failure_scope as trd_design_failure_scope,
+    has_complete_success as has_trd_design_success,
+)
 
 DEMO_ROOT = Path(__file__).resolve().parent
 
@@ -532,6 +540,15 @@ def run_step_thirteen(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
     return run_dir, run_requirement_selection(run_dir, read_state(run_dir))
 
 
+async def run_step_fourteen(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
+    if not args.run_id:
+        raise ValueError("第 14 步需要 --run-id")
+    run_dir = run_dir_for(args.run_id)
+    if not run_dir.is_dir():
+        raise ValueError(f"运行记录不存在：{args.run_id}")
+    return run_dir, await run_trd_design(run_dir, read_state(run_dir))
+
+
 def sha256_bytes(data: bytes) -> str:
     import hashlib
 
@@ -568,7 +585,7 @@ def run_step_zero(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
 
 def main() -> int:
     args = parse_args()
-    if args.step not in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13}:
+    if args.step not in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}:
         print(f"步骤尚未实现：{args.step}", file=sys.stderr)
         return 2
 
@@ -615,8 +632,10 @@ def main() -> int:
                         run_dir, result = asyncio.run(run_step_eleven(args))
                     elif args.step == 12:
                         run_dir, result = asyncio.run(run_step_twelve(args))
-                    else:
+                    elif args.step == 13:
                         run_dir, result = run_step_thirteen(args)
+                    else:
+                        run_dir, result = asyncio.run(run_step_fourteen(args))
     except ProjectIntakeBlocked as error:
         result = project_intake_result(
             "blocked",
@@ -728,6 +747,24 @@ def main() -> int:
             },
         )
         error_message = str(error)
+    except TRDDesignBlocked as error:
+        result = trd_design_result(
+            "blocked",
+            str(error),
+            requirement_id=error.requirement_id,
+            branch=error.branch,
+            trd_path=error.trd_path,
+            trd_session_id=error.trd_session_id,
+            outputs=error.outputs,
+            blocked={
+                "reason": str(error),
+                "required_inputs": error.required_inputs,
+                "resume_phase": "phase_1_requirement_development",
+                "resume_node": TRD_DESIGN_NODE,
+                "resume_step": 14,
+            },
+        )
+        error_message = str(error)
     except Exception as error:  # noqa: BLE001 - 顶层入口必须将所有步骤异常转换为结果。
         if args.step == 2:
             result_factory = project_intake_result
@@ -751,7 +788,27 @@ def main() -> int:
             result_factory = requirement_registry_result
         else:
             result_factory = workspace_result
-        if args.step == 13:
+        if args.step == 14:
+            scope = None
+            if run_dir is not None:
+                try:
+                    scope = trd_design_failure_scope(run_dir, read_state(run_dir))
+                except Exception:  # noqa: BLE001 - 失败结果只能使用可安全确认的活动需求。
+                    scope = None
+            result = trd_design_result(
+                "failed",
+                "活动 TRD 设计失败。",
+                requirement_id=scope["requirement_id"] if scope else None,
+                branch=scope["branch"] if scope else None,
+                trd_path=scope["trd_path"] if scope else None,
+                trd_session_id=scope["trd_session_id"] if scope else None,
+                error={
+                    "type": type(error).__name__,
+                    "message": "活动 TRD 设计未完成。",
+                },
+            )
+            error_message = "活动 TRD 设计失败。"
+        elif args.step == 13:
             scope = None
             if run_dir is not None:
                 try:
@@ -793,7 +850,15 @@ def main() -> int:
         error_message = str(detail.get("reason") or detail.get("message") or result["summary"])
 
     selection_scope: tuple[str, str] | None = None
-    if run_dir is not None and args.step == 13:
+    trd_scope: dict[str, str | None] | None = None
+    if run_dir is not None and args.step == 14:
+        try:
+            trd_state = read_state(run_dir)
+            trd_scope = trd_design_failure_scope(run_dir, trd_state)
+            protected_success = has_trd_design_success(run_dir, trd_state)
+        except Exception:  # noqa: BLE001 - 状态损坏时仍需返回脱敏失败信息。
+            protected_success = False
+    elif run_dir is not None and args.step == 13:
         try:
             selection_state = read_state(run_dir)
             selection_scope = requirement_selection_failure_scope(run_dir, selection_state)
@@ -807,7 +872,28 @@ def main() -> int:
             and has_step_success(run_dir, args.step)
         )
 
-    if run_dir is not None and args.step == 13:
+    if run_dir is not None and args.step == 14:
+        if result["status"] != "success" and not protected_success and trd_scope is not None:
+            try:
+                state = read_state(run_dir)
+            except Exception:  # noqa: BLE001 - 状态损坏时不能构造 scoped 失败结果。
+                state = None
+            if state is not None:
+                state.update(
+                    {
+                        "status": result["status"],
+                        "step": 14,
+                        "current_step": 14,
+                        "current_node": TRD_DESIGN_NODE,
+                        "blocked": result["blocked"],
+                        "error": result["error"],
+                    }
+                )
+                write_state(run_dir, state)
+                write_requirement_step_result(
+                    run_dir, str(trd_scope["requirement_id"]), 14, result
+                )
+    elif run_dir is not None and args.step == 13:
         if result["status"] != "success" and not protected_success:
             try:
                 state = read_state(run_dir)
@@ -870,11 +956,13 @@ def main() -> int:
 
     if run_dir is not None:
         scoped_path: Path | None = None
-        if args.step == 13:
+        if args.step in {13, 14}:
             requirement_id = result.get("requirement_id")
             if isinstance(requirement_id, str):
                 try:
-                    scoped_path = requirement_step_result_path(run_dir, requirement_id, 13)
+                    scoped_path = requirement_step_result_path(
+                        run_dir, requirement_id, args.step
+                    )
                 except ValueError:
                     scoped_path = None
         if result["status"] != "success":

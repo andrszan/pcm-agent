@@ -328,9 +328,9 @@ class SelectRequirementCLITests(unittest.TestCase):
         self.assertEqual((run_dir / "state.json").read_bytes(), before)
         self.assertFalse((run_dir / "steps/requirements").exists())
 
-    def test_step_fourteen_remains_unimplemented(self) -> None:
+    def test_step_fifteen_remains_unimplemented(self) -> None:
         run_dir = self.make_run()
-        with patch.object(self.cli, "parse_args", return_value=self.args(run_dir.name, 14)):
+        with patch.object(self.cli, "parse_args", return_value=self.args(run_dir.name, 15)):
             self.assertEqual(self.cli.main(), 2)
         shutil.rmtree(run_dir)
 

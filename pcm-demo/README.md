@@ -18,6 +18,7 @@
 - [第 11 步：拆分 Backlog](steps/step_11_requirement_breakdown/README.md)
 - [第 12 步：解析 Backlog 并初始化需求注册表](steps/step_12_initialize_requirement_registry/README.md)
 - [第 13 步：选择需求并建立统一需求分支](steps/step_13_select_requirement/README.md)
+- [第 14 步：形成活动 TRD](steps/step_14_trd_design/README.md)
 
 每个步骤的业务代码、测试和详细运行说明都在对应步骤目录中。根 README 只提供导航。
 
@@ -30,7 +31,7 @@ uv sync
 uv run python -m unittest discover -s . -t . -p 'test*.py' -v
 ```
 
-该入口从 `pcm-demo/` 根递归发现 `common/` 与 `steps/` 测试。第 12 步本体 11 项与 CLI 6 项，共 17 项；第 13 步本体 19 项与 CLI 9 项，共 28 项；两步定向共 45 项、全量 222 项均已通过。`compileall`、`git diff --check` 通过；IDE 对第 12、13 步和 `run_step.py` 无诊断，独立审查的 3 项中置信问题已修复，复核无高、中置信发现。Ruff 未安装，未执行 Ruff。
+该入口从 `pcm-demo/` 根递归发现 `common/` 与 `steps/` 测试。第 12 步本体 11 项与 CLI 6 项，共 17 项；第 13 步本体 19 项与 CLI 9 项，共 28 项；第 14 步本体 14 项与 CLI 6 项，共 20 项；第 12～14 步定向共 65 项。公共 Agent 决策循环与 Claude runner 25 项、第 13、14 步及公共层定向共 73 项、全量 243 项均已通过。`compileall`、`git diff --check` 和全工作区 IDE diagnostics 通过；独立审查先后发现 4 项中置信问题，均已修复并补测试，最终复核无高、中置信发现。Ruff 未安装，未执行 Ruff。
 
 ## 最近真实验证
 
@@ -72,5 +73,7 @@ commit-changes 执行轮发现文档中的 frontend Git 事实矛盾，严格未
 
 幂等真实重跑使用不可用模型配置仍 success，证明未加载模型；`steps/12.json` 与 state 字节不变，最终 result SHA-256 为 `8f829cb3d4935a9dcd07bea2dd8f0df2a22369c433ba4320938e2a9461f41fb0`，state SHA-256 为 `73fd0cb99c39f64f9ef210a171799f79baaee87a417a18f5db74f5b5374470f7`。
 
-第 13 步随后以零 AI、零 Agent、零 Skill 的确定性路径选择 `BR-001`，先保存仅含 ID 的 `active_requirement` 与含 `branch: req/br-001`、各仓 `base_sha`、`return_node_after_completion` 的 cycle，再仅建立三仓同名本地分支。success 仅写入 `steps/requirements/BR-001/13.json`，state 进入 `phase_1_requirement_development` / `requirement:14_trd_design`、`step/current_step: 14`；注册表为 13 pending、0 completed，`BR-001` 为 active。scoped result SHA-256 为 `d37d9dfdaa6ba5c885842f0f6fc6046b027bd11454441182093a185f7fdaacab`，state SHA-256 为 `a6fc435c28010061ca3dd369b571221193b6a534e0d977158cdce215a8f2bc48`。root/frontend/backend 均为 clean `req/br-001`，记录 base 分别为 `0232d8136c075cb61a6617a95e1504b67bd9acd1`、`dbab574dbe4d83a02323a750afd04de007565ac5`、`9682be837759c20f1a9ebbdf8fa2cfc09c2768d4`，各仓 HEAD、local `main` 与 target 均相等，ahead/behind 均为 0；无产品文件改动、commit、merge 或 push。幂等重跑后 scoped result、state 和三仓 ref 字节/事实不变。第 14 步尚未实现；第 14～18 步和阶段二仍是后续工作。
+第 13 步初次真实运行以零 AI、零 Agent、零 Skill 的确定性路径选择 `BR-001` 并建立三仓 `req/br-001`。第 14 步开始前，用户将新的 TRD 命名规则提交到产品 root，使 root `main` 和旧需求分支前进到 `a7d5509df6843a06315aa803d87285569b86e355`。经用户明确选择，先完整归档旧 run 现场，确认三仓旧需求分支均无独有提交后安全删除，只重置 BR-001 的第 13 步 cycle/result 并从最新 `main` 重跑。当前 cycle bases 为 root `a7d5509df6843a06315aa803d87285569b86e355`、frontend `dbab574dbe4d83a02323a750afd04de007565ac5`、backend `9682be837759c20f1a9ebbdf8fa2cfc09c2768d4`；三仓随后进入 clean `req/br-001`，没有需求实现提交、merge 或 push。
+
+第 14 步已在同一真实 run 完成。Python 在首次 Agent 调用前持久化 `docs/trd/2026-08-25-BR-001-身份、角色访问与站内消息入口.md`，并把同一路径放入 `/trd-design` 初始 prompt。唯一 Claude session 为 `b9ed4756-0acf-4666-b3f9-c8f3628c03f1`；首次负责人错误接受实现门槛后，主代理读取实际 TRD 拒绝语义完成，收紧生产 completion 规则并在正式 conversation 中追加一次普通复核指令，恢复同一 session 收敛 8 项决定。第二次 Agent success 后负责人服务因 free quota HTTP 403 保留 conversation 尾部 Agent 回复；额度恢复后原节点裁决为合法 `completed`。最终 conversation 为 7 条：`system → assistant 初始 → user → assistant completed → assistant 复核 → user → assistant completed`，没有 `/commit-changes`。state 位于 `requirement:15_development` / step 15；root 恰好只有唯一未跟踪 TRD，frontend/backend clean，三仓 index 为空且 `HEAD/main/target` 等于 base。推进后幂等重跑不调用 Agent、负责人服务或 Git，state/result/conversation/TRD 字节不变。result、state、conversation、TRD SHA-256 分别为 `05eeafaac4acc38873073657caebf9d661f898f4f7e24dc59220f60dcaec28c1`、`1f1f7a922ef481d0434be016246f72734fd0e12c9b2079710b5e328b9892cdf3`、`e43ba42fea08e24a14e67d6f2d0889c16cad1f56e219640f5fe63f36d41f5695`、`ab17a9f94d85b2b96efa3839f94d6608cad98710f41c41ccb009f71f93d12c1d`。第 15 步尚未实现。
 Git 忽略 run `prompt-role-replay-20260823` 保留旧四段 XML prompt 的历史交接回放；它不是现行五段 prompt 的证据。现行 `role/project_context/responsibility/completion/output` 合同已由第 9 步 fresh 真实运行验证。

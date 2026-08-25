@@ -208,18 +208,27 @@ def _cycle(
 ) -> tuple[str, dict[str, str]]:
     cycle = state.get("requirement_cycle")
     expected_branch = f"req/{requirement_id.lower()}"
+    required_keys = {
+        "requirement_id",
+        "branch",
+        "repositories",
+        "return_node_after_completion",
+    }
     if (
         not isinstance(cycle, dict)
-        or set(cycle) != {
-            "requirement_id",
-            "branch",
-            "repositories",
-            "return_node_after_completion",
+        or frozenset(cycle)
+        not in {
+            frozenset(required_keys),
+            frozenset(required_keys | {"trd_path"}),
         }
         or cycle.get("requirement_id") != requirement_id
         or cycle.get("branch") != expected_branch
         or cycle.get("return_node_after_completion") != CURRENT_NODE
         or not isinstance(cycle.get("repositories"), dict)
+        or (
+            "trd_path" in cycle
+            and (not isinstance(cycle["trd_path"], str) or not cycle["trd_path"])
+        )
     ):
         raise RuntimeError("活动需求 cycle 不符合约定")
     recorded = cycle["repositories"]

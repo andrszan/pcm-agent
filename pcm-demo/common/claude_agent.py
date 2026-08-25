@@ -98,6 +98,8 @@ async def run_claude(
     max_turns: int = 12,
     max_budget_usd: float = 2.0,
     on_update: Callable[[ClaudeRunResult], None] | None = None,
+    tools: list[str] | None = None,
+    hooks: dict[str, Any] | None = None,
 ) -> ClaudeRunResult:
     init: dict[str, Any] | None = None
     result: ResultMessage | None = None
@@ -114,6 +116,8 @@ async def run_claude(
         max_budget_usd=max_budget_usd,
         resume=resume_session_id,
         env=filtered_env(),
+        tools=tools,
+        hooks=hooks,
     )
 
     try:

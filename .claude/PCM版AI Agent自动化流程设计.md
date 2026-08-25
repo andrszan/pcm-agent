@@ -157,7 +157,7 @@ Demo 和默认 PCM 流程只进行本地文件修改、测试、构建、服务�
 
 ## 四、运行上下文与恢复
 
-PCM Demo 已实现第 13 步；其 success 后的现行状态结构如下。该快照表示一个活动需求的统一分支已经建立，下一步是尚未实现的第 14 步：
+PCM Demo 已实现第 14 步；其 success 后的现行状态结构如下。该快照表示活动 TRD 已形成并保留为待提交变更，下一步是尚未实现的第 15 步：
 
 ```json
 {
@@ -169,9 +169,9 @@ PCM Demo 已实现第 13 步；其 success 后的现行状态结构如下。该�
   },
   "applicable_repositories": ["root", "frontend", "backend"],
   "phase": "phase_1_requirement_development",
-  "current_node": "requirement:14_trd_design",
-  "step": 14,
-  "current_step": 14,
+  "current_node": "requirement:15_development",
+  "step": 15,
+  "current_step": 15,
   "requirement_registry": {
     "schema_version": 1,
     "source": {
@@ -199,6 +199,7 @@ PCM Demo 已实现第 13 步；其 success 后的现行状态结构如下。该�
       "frontend": {"base_sha": "<frontend-base-sha>"},
       "backend": {"base_sha": "<backend-base-sha>"}
     },
+    "trd_path": "docs/trd/<YYYY-MM-DD>-REQ-001-身份与访问.md",
     "return_node_after_completion": "phase_1:select_requirement"
   },
   "blocked": null
@@ -413,7 +414,7 @@ PCM Demo 已实现第 13 步；其 success 后的现行状态结构如下。该�
 - 输出：`steps/08.json` 的 `outputs` 固定为空，并保存 `applicable_repositories` 和 `repositories` 列表；每项为相对 `path`、`branch`、`worktree_clean`。状态保存同样事实但路径为绝对路径，成功推进到 `project:09_engineering_architecture`。
 - 完成条件：每仓自身 top-level、`main` 且 `status --porcelain` 为空。无需检查 HEAD、提交是否产生、提交数、父提交、SHA、marker、历史替换或根 tree。
 - 恢复：`completed` 后 Python 只读复验；仍 dirty 则以固定 repair prompt 继续同一 session。`blocked` 后重读，已全干净直接成功，仍 dirty 才保存 blocked。恢复也先读现场，已全干净直接成功，仍 dirty 才恢复原 session。`failed` / `blocked` 的步骤结果不能当作成功；只有 `status=success` 可幂等复用。成功后的第 9 步状态若权威仓库变 dirty，拒绝复用，避免第 8 步替后续修改提交。
-- 自动化说明：决策只有 `completed`、`continue`、`blocked`；不执行 push。当前自动化基线为第 12 步本体 11 项与 CLI 6 项、第 13 步本体 19 项与 CLI 9 项、两步定向 45 项、全量 222 项通过；`compileall`、`git diff --check`、IDE 通过，独立审查 3 项中置信问题已修复，复核无高、中置信发现。Ruff 未安装，未执行 Ruff。
+- 自动化说明：决策只有 `completed`、`continue`、`blocked`；不执行 push。当前自动化基线为第 12 步 17 项、第 13 步 28 项、第 14 步 20 项，第 12～14 步定向 65 项、全量 243 项通过；`compileall`、`git diff --check`、IDE 通过，独立审查发现的 4 项中置信问题均已修复并补测试，最终复核无高、中置信发现。Ruff 未安装，未执行 Ruff。
 - 真实验证：当前合同已在真实 run `pcm-demo/runs/step01-mendmark` 和产品工作区 `/Users/zhou/resource/fireworks/ANDRSZAN/pcm-products/mendmark` 完成验证；run 目录名与 state 内历史 `run_id` 不一致是既有已知事实。权威仓库为 `root/frontend/backend`，第 4 步 `outputs` 为 `frontend/backend`；首次执行前三仓均为自身 top-level、`main`、dirty 且 HEAD 不存在。
 - 环境恢复：首次执行只启动 `initialize_repositories` session `f6d42df8-13e5-437b-ada3-eef1015ecc87`。Agent 尝试内置 Explore 时遇到环境未识别模型 `gpt-5.6-sol[1m]`，无 Result、无 Git 变化，挂起进程停止后保存 session、conversation 和 init 证据；这是环境内部子代理问题，不是第 8 步业务或 Git 逻辑失败。仅在 Git 忽略的真实 run 历史中追加普通恢复指令“不要使用子代理/Explore，直接工具完成”，生产 prompt 和代码未改变，并恢复同一 session。
 - 提交与决策：Agent 先创建 frontend `dbab574dbe4d83a02323a750afd04de007565ac5`、backend `9682be837759c20f1a9ebbdf8fa2cfc09c2768d4` 两个本地提交；随后针对根仓运行时产物和 `.agents/plugins/superpowers/.git` 请求决策。AI-compatible 负责人返回 `continue`，授权删除 61 个 `.in_use/*`、`.orphaned_at`、`.coverage` 运行时产物、补 `.gitignore`、移除嵌套 `.git`，并将 superpowers 作为普通受控插件快照而非 submodule 提交。root 创建 `02ba4c1`、`ae72c31`、`5eeeacd217bbd27e03483b1b6d32915c721aadd9` 三个本地提交；全程未 push。
@@ -430,7 +431,7 @@ PCM Demo 已实现第 13 步；其 success 后的现行状态结构如下。该�
 - 输出：唯一固定产物 `docs/design/工程架构设计.md`。
 - 完成条件：固定文档为非空普通文件且被根仓 Git 跟踪；根仓及所有适用子仓都是各自自身 top-level、位于 `main` 且 clean；固定提交调用锚点有效。Python 只读 Git，不读取 HEAD、SHA、提交数或历史，不执行 Git 写操作。
 - 恢复与安全：fresh 入口要求全仓 clean 且拒绝任何预置的第 9 步 session、conversation 引用、私有状态或历史文件；已有执行事实时缺失原 session、conversation 引用或历史文件均失败；conversation 文件或其父目录为符号链接时拒绝。conversation 尾部为 Agent `user` 时先请求决定，不重复 Agent 或新建 session。成功后推进 `project:10_ui_ux_framework`；第 10 步仍按需。
-- 自动化验证：第 12 步本体 11 项与 CLI 6 项、第 13 步本体 19 项与 CLI 9 项，两步定向 45 项和全量 222 项均通过；`compileall`、`git diff --check`、IDE 通过，独立审查 3 项中置信问题已修复，复核无高、中置信发现。Ruff 未安装，未执行 Ruff。
+- 自动化验证：第 12 步 17 项、第 13 步 28 项、第 14 步 20 项，第 12～14 步定向 65 项和全量 243 项均通过；`compileall`、`git diff --check`、IDE 通过，独立审查发现的 4 项中置信问题均已修复并补测试，最终复核无高、中置信发现。Ruff 未安装，未执行 Ruff。
 - 旧失败与根因：曾依次出现 free quota / `use free tier only` 导致的 HTTP 403、访问恢复后的非 JSON 普通文本，以及 `completed` 携带非空 `answer`。根因是旧 `render_decision_system_prompt` 将步骤规则混入 responsibility、硬编码并重复 completion 语义且缺少 output。用户将公共 prompt 重构为 `role/project_context/responsibility/completion/output` 五段，补齐 f-string JSON 花括号转义和 `AgentDecision` 字段组合约束，并同步 common 与第 2/5/6/7/9 步测试。
 - fresh 真实运行：按用户要求两次清理第 9 步局部 result、conversation、session、private state 和失败生成的未跟踪文档，保留第 0～8 步历史与三仓提交。最终唯一 session `f41fc439-4c46-434f-b3e9-d15c18c89601`，conversation 11 条：`system → assistant 初始 → user → assistant continue → user → assistant completed → assistant commit prompt → user → assistant continue → user → assistant completed`。
 - 执行事实：首轮 Agent 请求确认，负责人合法 `continue` 后创建约 32 KB 固定文档；负责人 `completed` 后 verifier 同 session 发送 `/commit-changes`。该 Skill 发现 frontend Git 事实矛盾，严格未修改、未暂存、未提交并报告；外层负责人普通 `continue` 授权通用 Agent 仅修正文档并精确提交。
@@ -445,7 +446,7 @@ PCM Demo 已实现第 13 步；其 success 后的现行状态结构如下。该�
 - 不适用：只作上述交接核验，拒绝任意状态遗留的本步骤 session、conversation、私有执行状态或历史文件；零 Git、Agent、决策、LLM 配置和 `docs/ui-ux/` 副作用，写入 `success`、`applicable: false`、`outputs: []` 并推进第 11 步。此分支由自动化覆盖，黄金项目不走此分支。
 - 适用动作与输出：单一键/session 为 `ui_ux_framework`，初始提示首行 `/ui-ux-framework` 并明确 `bootstrap`；只允许创建或更新 `docs/ui-ux/framework.md`，禁止单需求设计、代码、配置、项目规则和 Git。Demo v1 成功结果为 `applicable: true` 与该唯一输出；已有项目接入和显式既有路径属于未来扩展，不能据此把当前固定路径泛化为通用 Skill 的永久限制。
 - 完成、恢复与安全：`completed` 后先 repair 缺失或空文档，再无论是否有 diff 都在原 session exact 调用一次 `/commit-changes`；锚点为 exact prompt、紧邻非空 Agent `user` 回复和原 session。文档必须非空、非符号链接、已 tracked，全部权威仓库必须是自身 top-level、`main`、clean；Python 只读 Git。fresh、resume、blocked、写入中断、幂等与符号链接规则同第 9 步同构且保持步骤私有，`run_step.py` 只保护 schema 完整的第 8～12 步 success，残缺 success 不保护。
-- 自动化与真实验证：第 10 步本体 16 项和 CLI 5 项通过；第 12 步本体 11 项与 CLI 6 项、第 13 步本体 19 项与 CLI 9 项，两步定向共 45 项、当前全量 222 项均通过。`compileall`、`git diff --check`、IDE 通过；独立审查 3 项中置信问题已修复，复核无高、中置信发现。Ruff 未安装，未执行 Ruff。`step01-mendmark` 真实适用运行生成并以根仓本地提交 `0ceee1bb8b5836f64112ded0c8fd3cf7fbd1f29c` 提交唯一固定文档，随后第 11 步严格消费该交接并进入阶段一；同 run 各步骤幂等重跑没有新调用或提交。fresh 调用的内置 Explore 子代理曾输出未识别模型 `gpt-5.6-terra[1m]` 警告，主 Agent 同次调用继续并 success；不适用路径没有真实运行证据。
+- 自动化与真实验证：第 10 步本体 16 项和 CLI 5 项通过；第 12 步 17 项、第 13 步 28 项、第 14 步 20 项，第 12～14 步定向共 65 项、当前全量 243 项均通过。`compileall`、`git diff --check`、IDE 通过；独立审查发现的 4 项中置信问题均已修复并补测试，最终复核无高、中置信发现。Ruff 未安装，未执行 Ruff。`step01-mendmark` 真实适用运行生成并以根仓本地提交 `0ceee1bb8b5836f64112ded0c8fd3cf7fbd1f29c` 提交唯一固定文档，随后第 11 步严格消费该交接并进入阶段一；同 run 各步骤幂等重跑没有新调用或提交。fresh 调用的内置 Explore 子代理曾输出未识别模型 `gpt-5.6-terra[1m]` 警告，主 Agent 同次调用继续并 success；不适用路径没有真实运行证据。
 
 ### 第 11 步：拆分 Backlog
 
@@ -472,20 +473,21 @@ PCM Demo 已实现第 13 步；其 success 后的现行状态结构如下。该�
 
 ### 第 13 步：选择需求并建立统一需求分支
 
-- **已实现范围**：纯 Python 确定性节点，零 AI、Claude Agent、Skill、产品文件改动、提交、合并和 push；`run_step.py` 已支持第 0～13 步，下一步第 14 步仍明确未实现。
+- **已实现范围**：纯 Python 确定性节点，零 AI、Claude Agent、Skill、产品文件改动、提交、合并和 push；`run_step.py` 已支持第 0～14 步，第 15 步仍明确未实现。
 - **输入与选择**：严格消费第 8 步有序 `applicable_repositories`、state 中精确对应 workspace 的仓库 descriptor，以及第 12 步完整 success/静态 catalog/注册表。只从 `pending` 中选择依赖均为 `completed` 且 `order` 最小的一项；没有 pending 时当前无副作用失败，阶段二转场延期；有 pending 而无候选是注册表状态错误。
-- **fresh 与 intent**：在任何 state/Git 写入前，全局核验全部适用仓为自身非符号链接 top-level、clean local `main`、HEAD/local `main` 相等、目标分支不存在且没有进行中的 merge、rebase、cherry-pick 或 revert。通过后先写 `active_requirement`（仅 ID）及 cycle：`branch: req/<lowercase-id>`、按仓名映射的 `base_sha`、`return_node_after_completion`，再以 `git switch -c <branch> <base>` 建立全部统一分支。
+- **fresh 与 intent**：在任何 state/Git 写入前，全局核验全部适用仓为自身非符号链接 top-level、clean local `main`、HEAD/local `main` 相等、目标分支不存在且没有进行中的 merge、rebase、cherry-pick 或 revert。通过后先写 `active_requirement`（仅 ID）及 cycle：`branch: req/<lowercase-id>`、按仓名映射的 `base_sha`、`return_node_after_completion`，再以 `git switch -c <branch> <base>` 建立全部统一分支。第 14 步可在 cycle 上追加经过校验的 `trd_path`，不改变第 13 步分支证据。
 - **结果、恢复与 CLI**：success 仅写 `steps/requirements/<ID>/13.json`，仓库 path 为 `.` 或仓库名，随后推进 `requirement:14_trd_design`。partial 现场按记录 base 恢复；scoped success 已写但 state 未推进时先只读核验 target/base/clean 后补 state；已推进第 14 步不读 Git。CLI 只保护当前 active/cycle 的完整 scoped success，intent 后失败写当前 scoped failure，失败、blocked 或残缺 result 可重跑覆盖，历史需求 result 不保护当前需求。
-- **真实验证**：`step01-mendmark` 选择 `BR-001`，三仓建立 clean `req/br-001`；state 到第 14 步，13 项仍 pending、0 项 completed。scoped result SHA-256 为 `d37d9dfdaa6ba5c885842f0f6fc6046b027bd11454441182093a185f7fdaacab`，state SHA-256 为 `a6fc435c28010061ca3dd369b571221193b6a534e0d977158cdce215a8f2bc48`；幂等重跑无新 Git、模型、Agent 或 Skill 调用，result/state/ref 不变。
-- **自动化**：第 12 步本体 11 项与 CLI 6 项、第 13 步本体 19 项与 CLI 9 项，两步定向 45 项、全量 222 项通过；`compileall`、`git diff --check`、IDE 通过。独立审查 3 项中置信问题已修复，复核无高、中置信发现；Ruff 未安装。
+- **真实验证**：初次 `step01-mendmark` 运行选择 `BR-001` 并建立三仓 `req/br-001`。第 14 步前用户将新 TRD 命名规则提交到产品 root，导致 root `main` 和旧需求分支从原记录 base 前进；经用户明确选择后，先完整归档 run，确认三仓旧需求分支均无独有提交并安全删除，只重置 BR-001 的第 13 步 cycle/result，再从最新 `main` 重跑。当前 bases 为 root `a7d5509df6843a06315aa803d87285569b86e355`、frontend `dbab574dbe4d83a02323a750afd04de007565ac5`、backend `9682be837759c20f1a9ebbdf8fa2cfc09c2768d4`；三仓随后为 clean `req/br-001`，无需求实现提交、merge 或 push。
+- **自动化**：第 12 步 17 项、第 13 步 28 项、第 14 步 20 项，第 12～14 步定向 65 项；公共循环与第 13、14 步定向 73 项、全量 243 项通过。`compileall`、`git diff --check`、IDE 通过；独立审查发现的 4 项中置信问题均已修复并补测试，最终复核无高、中置信发现；Ruff 未安装。
 
 ### 第 14 步：形成活动 TRD
 
-- 能力：`trd-design`。
-- 输入：活动需求完整详情、产品资料、总体方案、工程架构、适用 UI/UX 框架、当前代码事实和统一需求分支。
-- 输出：可直接指导实现的活动 TRD 和 TRD session。
-- 完成条件：范围、行为、技术方案、验证场景和需求级体验设计已经收敛；用户可见需求已检查不必要步骤、字段、决策和跳转。
-- Git 边界：不调用 `commit-changes`，不暂存、不提交、不合并；活动 TRD 作为当前需求分支上的待提交变更保留。
+- **已实现能力**：在产品根显式调用 `/trd-design`，使用 requirement-scoped `trd_design_<ID>` session、conversation、私有状态和 `steps/requirements/<ID>/14.json`；输入为活动需求完整详情、第 2/5/7/9/11 步权威文档、第 10 步适用时的 UI/UX 框架、实际代码事实和统一需求分支。
+- **路径 intent**：fresh 全局预检全部适用仓后，Python 按 `docs/trd/<YYYY-MM-DD>-<文档标识>-<简短名称>.md` 计算唯一路径，先写入 `requirement_cycle.trd_path`，再把同一路径放进初始 prompt；恢复只使用已持久化值。父路径必须是非符号链接目录，标题和路径不安全或冲突时在 intent 前无副作用失败。
+- **Agent 与决定边界**：默认 Agent 只暴露 `Read/Glob/Grep/Write/Edit/Skill`，没有 `Bash`、`Agent` 或 `NotebookEdit`；`PreToolUse` 只允许 `Write/Edit` exact TRD。负责人 `completed` 要求范围、行为、技术方案、验证、需求级体验及阻碍实现的高影响决定均已收敛，不能仅因实现门槛已被列出就判定完成；缺失或空文档只在原 session repair，不调用 `/commit-changes`。
+- **Git 与完成核验**：全程要求全部适用仓位于 cycle branch，`HEAD/main/target/base` 相等、无进行中 merge/rebase/cherry-pick/revert/bisect、index clean；非 root 仓必须 clean，root 只能有 exact 未跟踪 TRD。任何范围外修改、暂存、提交或 ref 漂移均失败并保留现场。
+- **恢复与状态**：fresh 预检失败不写 state/result；只有 path intent 时沿用原路径启动；已有执行事实必须恢复原 session/conversation；尾部 Agent 回复先裁决；blocked 只对应不可替代外部条件；完整 success 已写但 state 未推进时重验后只补 state。state 已进入第 15 步后只校验当前 scoped success 与状态结构，不读 Git 或文件。成功进入 `requirement:15_development` / step 15，BR-001 仍为 `active`、`completion: null`，活动 TRD 保留为待提交变更。
+- **真实验证**：`step01-mendmark` 固定输出 `docs/trd/2026-08-25-BR-001-身份、角色访问与站内消息入口.md`，唯一 session 为 `b9ed4756-0acf-4666-b3f9-c8f3628c03f1`。首次负责人错误接受 8 项实现门槛后，主代理读取实际 TRD 拒绝语义完成，收紧生产 completion 规则并在正式 conversation 追加一次普通复核指令，恢复同一 session 收敛决定。第二次 Agent success 后负责人服务因 free quota HTTP 403 保持尾部回复；额度恢复后原节点返回合法 `completed`。最终 conversation 7 条且无 `/commit-changes`；root 恰好只有唯一未跟踪 TRD，frontend/backend clean，三仓无 staged、新提交、merge 或 push。result/state/conversation/TRD SHA-256 分别为 `05eeafaac4acc38873073657caebf9d661f898f4f7e24dc59220f60dcaec28c1`、`1f1f7a922ef481d0434be016246f72734fd0e12c9b2079710b5e328b9892cdf3`、`e43ba42fea08e24a14e67d6f2d0889c16cad1f56e219640f5fe63f36d41f5695`、`ab17a9f94d85b2b96efa3839f94d6608cad98710f41c41ccb009f71f93d12c1d`；推进后幂等重跑四者字节不变且不调用 Agent、负责人服务或 Git。
 
 ### 第 15 步：实现与验证
 
