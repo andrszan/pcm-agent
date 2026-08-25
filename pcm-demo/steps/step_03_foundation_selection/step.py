@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from common.files import resolve_workspace_output
 from common.openai_responses import parse_response
@@ -14,11 +14,41 @@ from config import LLMConfig, load_template_catalog
 STEP = 3
 NAME = "基础工程选型"
 NEXT_NODE = "project:04_assemble_foundation"
-SYSTEM_PROMPT = """根据产品定义和候选模板，为产品选择适用的前端与后端基础工程。
+SYSTEM_PROMPT = """<task>
+根据产品定义和候选模板，为产品选择适用的前端与后端基础工程。
+</task>
 
-每个选择必须来自对应候选列表，并原样返回候选中的 id、git_url、default_branch 和 path，同时给出简短选择理由。产品明确不需要某个交付面时，对应字段返回 null。不得发明候选、修改候选来源字段或输出候选列表之外的方案。
+<selection_rules>
+- 产品需求和产品功能是判断交付面的权威依据。
+- frontend 只能从 frontend_candidates 中选择，backend 只能从 backend_candidates 中选择。
+- 产品明确需要某个交付面时，为该交付面选择最匹配的一个候选。
+- 产品明确不需要某个交付面时，对应结果返回 null。
+- candidate_id 必须原样来自对应候选列表，不得发明、改写或跨交付面选择候选。
+- reason 必须简短说明候选与产品需求的匹配关系，不得只复述候选名称。
+</selection_rules>
 
-只返回符合所提供结构化输出格式的严格 JSON 对象；不要使用 Markdown、代码围栏、YAML 或 JSON 之外的文本。"""
+<output>
+只返回以下结构的严格 JSON 对象：
+
+{
+  "frontend": {
+    "candidate_id": "frontend_candidates 中的候选 id",
+    "reason": "选择该前端候选的简短理由"
+  },
+  "backend": {
+    "candidate_id": "backend_candidates 中的候选 id",
+    "reason": "选择该后端候选的简短理由"
+  }
+}
+
+字段限制：
+- frontend 和 backend 必须始终存在，每个字段只能是上述对象或 null。
+- 非 null 对象只能包含 candidate_id 和 reason，两个字段都必须是非空字符串。
+- candidate_id 必须与对应候选的 id 完全一致。
+- 禁止增加、删除或重命名字段，不得返回候选的 git_url、default_branch、path、name 或 description。
+- 首字符必须是 {，末字符必须是 }。字段名和字符串值必须使用双引号。
+- 只返回 JSON 对象；不要返回 Markdown、代码围栏、YAML、注释、分析过程或 JSON 之外的任何文本。
+</output>"""
 
 
 class PreviousStepResult(BaseModel):
@@ -52,29 +82,71 @@ class TemplateCatalog(BaseModel):
 
 
 class TemplateCandidate(BaseModel):
-    id: str
-    git_url: str
-    default_branch: str
-    path: str
-    name: str
-    description: str
+    id: str = Field(min_length=1, description="候选模板的稳定标识。")
+    git_url: str = Field(min_length=1, description="候选模板所属 Git 仓库地址。")
+    default_branch: str = Field(min_length=1, description="候选模板仓库的默认分支。")
+    path: str = Field(min_length=1, description="候选模板在仓库中的相对路径。")
+    name: str = Field(min_length=1, description="候选模板名称。")
+    description: str = Field(min_length=1, description="候选模板能力说明。")
 
 
 class FoundationSelectionInput(BaseModel):
-    product_requirements: str
-    product_features: str
-    frontend_candidates: list[TemplateCandidate]
-    backend_candidates: list[TemplateCandidate]
+    product_requirements: str = Field(
+        min_length=1,
+        description="用于判断产品交付面的项目需求说明。",
+    )
+    product_features: str = Field(
+        min_length=1,
+        description="用于判断模板适配性的产品功能说明。",
+    )
+    frontend_candidates: list[TemplateCandidate] = Field(
+        description="允许选择的全部前端基础工程候选。"
+    )
+    backend_candidates: list[TemplateCandidate] = Field(
+        description="允许选择的全部后端基础工程候选。"
+    )
+
+
+class TemplateSelectionDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_id: str = Field(
+        min_length=1,
+        description="原样引用对应候选列表中的 id。",
+    )
+    reason: str = Field(
+        min_length=1,
+        description="说明该候选与产品需求匹配关系的简短理由。",
+    )
+
+    @field_validator("reason")
+    @classmethod
+    def strip_reason(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("选择理由不能为空")
+        return value
+
+
+class FoundationSelectionDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    frontend: TemplateSelectionDecision | None = Field(
+        description="前端基础工程选择；产品明确不需要前端时为 null。"
+    )
+    backend: TemplateSelectionDecision | None = Field(
+        description="后端基础工程选择；产品明确不需要后端时为 null。"
+    )
 
 
 class TemplateSelection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    id: str
-    git_url: str
-    default_branch: str
-    path: str
-    reason: str
+    id: str = Field(min_length=1)
+    git_url: str = Field(min_length=1)
+    default_branch: str = Field(min_length=1)
+    path: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
 
 
 class FoundationSelectionResult(BaseModel):
@@ -119,19 +191,67 @@ def load_selection_input(
     )
 
 
+def _candidate_index(
+    candidates: list[TemplateCandidate], delivery: str
+) -> dict[str, TemplateCandidate]:
+    index: dict[str, TemplateCandidate] = {}
+    for candidate in candidates:
+        if candidate.id in index:
+            raise RuntimeError(f"{delivery}候选模板 ID 不唯一")
+        index[candidate.id] = candidate
+    return index
+
+
+def _resolve_selection(
+    decision: TemplateSelectionDecision | None,
+    candidates: dict[str, TemplateCandidate],
+    delivery: str,
+) -> TemplateSelection | None:
+    if decision is None:
+        return None
+    candidate = candidates.get(decision.candidate_id)
+    if candidate is None:
+        raise RuntimeError(f"模型选择了不存在的{delivery}候选模板")
+    return TemplateSelection(
+        id=candidate.id,
+        git_url=candidate.git_url,
+        default_branch=candidate.default_branch,
+        path=candidate.path,
+        reason=decision.reason,
+    )
+
+
 async def select_foundations(
     selection_input: FoundationSelectionInput,
     config: LLMConfig,
     *,
     model_runner=parse_response,
 ) -> FoundationSelectionResult:
-    return await model_runner(
+    frontend_candidates = _candidate_index(
+        selection_input.frontend_candidates, "前端"
+    )
+    backend_candidates = _candidate_index(
+        selection_input.backend_candidates, "后端"
+    )
+    decision = await model_runner(
         config,
         system_prompt=SYSTEM_PROMPT,
         input_model=selection_input,
-        output_model=FoundationSelectionResult,
+        output_model=FoundationSelectionDecision,
         max_output_tokens=1024,
         max_retries=0,
+    )
+    return FoundationSelectionResult(
+        frontend=_resolve_selection(
+            decision.frontend,
+            frontend_candidates,
+            "前端",
+        ),
+        backend=_resolve_selection(
+            decision.backend,
+            backend_candidates,
+            "后端",
+        ),
     )
 
 

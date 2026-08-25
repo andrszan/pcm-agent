@@ -40,12 +40,16 @@ Demo 输入为本地产品初稿路径；正式 PCM 将来可把初稿字符串�
 
 ```json
 {
+  "status": "success",
   "topic_name": "修迹 MendMark 社区物品维修预约与进度协作系统",
-  "project_directory_name": "mendmark"
+  "project_directory_name": "mendmark",
+  "directory_name_source": "source",
+  "reason": "初稿已明确仓库名",
+  "blocked_reason": null
 }
 ```
 
-`project_directory_name` 必须是小写 kebab-case。初稿没有明确名称时允许模型生成，并记录来源和理由。
+`project_directory_name` 必须是小写 kebab-case。初稿没有明确名称时允许模型生成，并记录来源和理由；初稿无法确定明确产品选题时返回 `status: blocked`，其余身份结果字段为 `null`，当前步骤按既有规则记录为 `failed`。
 
 身份提取将产品初稿构造成 Pydantic 输入模型，并使用 OpenAI Python SDK `responses.parse(..., text_format=ProjectIdentity)`；结果直接从 `response.output_parsed` 取得，不手写 JSON Schema 或解析原始 JSON 字符串。
 

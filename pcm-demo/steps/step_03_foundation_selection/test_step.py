@@ -14,10 +14,11 @@ sys.path.insert(0, str(DEMO_ROOT))
 from common.files import write_json
 from common.state import read_state, write_state
 from steps.step_03_foundation_selection.step import (
+    FoundationSelectionDecision,
     FoundationSelectionInput,
-    FoundationSelectionResult,
     SYSTEM_PROMPT,
-    TemplateSelection,
+    TemplateCandidate,
+    TemplateSelectionDecision,
     load_selection_input,
     run,
     select_foundations,
@@ -89,20 +90,14 @@ class FoundationSelectionTests(unittest.TestCase):
         catalog_path.write_text(json.dumps(CATALOG, ensure_ascii=False), encoding="utf-8")
         return run_dir, state, catalog_path
 
-    def selection(self) -> FoundationSelectionResult:
-        return FoundationSelectionResult(
-            frontend=TemplateSelection(
-                id="web-next",
-                git_url="https://example.invalid/web.git",
-                default_branch="main",
-                path="templates/web-next",
+    def selection(self) -> FoundationSelectionDecision:
+        return FoundationSelectionDecision(
+            frontend=TemplateSelectionDecision(
+                candidate_id="web-next",
                 reason="产品需要浏览器界面。",
             ),
-            backend=TemplateSelection(
-                id="api-fastapi",
-                git_url="https://example.invalid/api.git",
-                default_branch="main",
-                path="templates/api-fastapi",
+            backend=TemplateSelectionDecision(
+                candidate_id="api-fastapi",
                 reason="产品需要业务 API。",
             ),
         )
@@ -128,8 +123,26 @@ class FoundationSelectionTests(unittest.TestCase):
         selection_input = FoundationSelectionInput(
             product_requirements="需要 Web 和 API。",
             product_features="用户通过浏览器完成任务。",
-            frontend_candidates=[],
-            backend_candidates=[],
+            frontend_candidates=[
+                TemplateCandidate(
+                    id="web-next",
+                    git_url="https://example.invalid/web.git",
+                    default_branch="main",
+                    path="templates/web-next",
+                    name="Next.js Web",
+                    description="Web 基础工程",
+                )
+            ],
+            backend_candidates=[
+                TemplateCandidate(
+                    id="api-fastapi",
+                    git_url="https://example.invalid/api.git",
+                    default_branch="main",
+                    path="templates/api-fastapi",
+                    name="FastAPI API",
+                    description="API 基础工程",
+                )
+            ],
         )
         result = asyncio.run(
             select_foundations(
@@ -139,13 +152,71 @@ class FoundationSelectionTests(unittest.TestCase):
             )
         )
         self.assertEqual(result.frontend.id, "web-next")
+        self.assertEqual(result.frontend.git_url, "https://example.invalid/web.git")
         self.assertIs(calls[0]["input_model"], selection_input)
-        self.assertIs(calls[0]["output_model"], FoundationSelectionResult)
+        self.assertIs(calls[0]["output_model"], FoundationSelectionDecision)
         self.assertEqual(calls[0]["system_prompt"], SYSTEM_PROMPT)
+        self.assertIn("<task>", SYSTEM_PROMPT)
+        self.assertIn("<output>", SYSTEM_PROMPT)
         self.assertIn("严格 JSON", SYSTEM_PROMPT)
+        self.assertIn("candidate_id", SYSTEM_PROMPT)
         self.assertIn("代码围栏", SYSTEM_PROMPT)
         for forbidden in ("PCM", "Skill", "第 3 步", "编排"):
             self.assertNotIn(forbidden, SYSTEM_PROMPT)
+
+    def test_rejects_unknown_and_duplicate_candidate_ids(self) -> None:
+        candidate = TemplateCandidate(
+            id="web-next",
+            git_url="https://example.invalid/web.git",
+            default_branch="main",
+            path="templates/web-next",
+            name="Next.js Web",
+            description="Web 基础工程",
+        )
+        selection_input = FoundationSelectionInput(
+            product_requirements="需要 Web。",
+            product_features="用户通过浏览器完成任务。",
+            frontend_candidates=[candidate],
+            backend_candidates=[],
+        )
+
+        async def unknown_runner(config, **kwargs):
+            return FoundationSelectionDecision(
+                frontend=TemplateSelectionDecision(
+                    candidate_id="unknown",
+                    reason="错误候选。",
+                ),
+                backend=None,
+            )
+
+        with self.assertRaisesRegex(RuntimeError, "不存在的前端候选模板"):
+            asyncio.run(
+                select_foundations(
+                    selection_input,
+                    SimpleNamespace(model="test-model"),
+                    model_runner=unknown_runner,
+                )
+            )
+
+        called = False
+
+        async def unexpected_runner(config, **kwargs):
+            nonlocal called
+            called = True
+            return FoundationSelectionDecision(frontend=None, backend=None)
+
+        duplicate_input = selection_input.model_copy(
+            update={"frontend_candidates": [candidate, candidate.model_copy()]}
+        )
+        with self.assertRaisesRegex(RuntimeError, "前端候选模板 ID 不唯一"):
+            asyncio.run(
+                select_foundations(
+                    duplicate_input,
+                    SimpleNamespace(model="test-model"),
+                    model_runner=unexpected_runner,
+                )
+            )
+        self.assertFalse(called)
 
     def test_run_saves_parsed_result_and_advances_state(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -17,7 +17,12 @@ catalog 路径优先级为 `--catalog-path`、进程环境 `PCM_TEMPLATE_CATALOG
 
 ## 输出
 
-Pydantic `FoundationSelectionResult` 包含 `frontend` 和 `backend`。每个适用选择直接包含：
+模型的 Pydantic 输出只包含 `frontend` 和 `backend` 的选择引用。每个适用选择包含：
+
+- `candidate_id`
+- `reason`
+
+不适用的交付面为 `null`。同一交付面的候选 ID 必须唯一；程序按 `candidate_id` 在对应输入候选中执行精确匹配，并从原候选回填：
 
 - `id`
 - `git_url`
@@ -25,6 +30,6 @@ Pydantic `FoundationSelectionResult` 包含 `frontend` 和 `backend`。每个适
 - `path`
 - `reason`
 
-不适用的交付面为 `null`。程序直接保存 `response.output_parsed.model_dump()` 到 `runs/<run-id>/steps/03.json.template_selection`，不手写 JSON Schema、不解析原始 JSON 字符串，也不执行第二套字段校验。
+最终完整结果保存到 `runs/<run-id>/steps/03.json.template_selection`，供后续步骤继续使用。模型无法选择候选列表之外的方案，也不负责复制仓库地址、分支或路径。
 
 成功后状态推进到 `project:04_assemble_foundation`。第 4 步尚未实现，入口仍明确返回“步骤尚未实现”。

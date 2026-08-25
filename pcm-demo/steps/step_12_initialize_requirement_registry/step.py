@@ -20,11 +20,43 @@ NAME = "解析 Backlog 并初始化需求注册表"
 CURRENT_NODE = "phase_1:initialize_requirement_registry"
 NEXT_NODE = "phase_1:select_requirement"
 PHASE = "phase_1_requirement_development"
-SYSTEM_PROMPT = """从提供的 Backlog Markdown 中提取正式需求详情卡的静态字段。
+SYSTEM_PROMPT = """<task>
+从提供的 Backlog Markdown 中提取所有正式需求详情卡的静态字段。
+</task>
 
-只提取正式需求详情卡，忽略目录、说明、示例和非正式标题。每一项都必须返回详情卡标题中的 id 与 title、详情卡出现顺序 order，以及该需求明确列出的 depends_on。id、title 和每个依赖 ID 必须保留其身份含义；没有依赖时 depends_on 返回空数组。不得遗漏正式需求、不得虚构需求或依赖。
+<formal_requirement_rules>
+- 只提取正式需求详情区中的需求详情卡，忽略目录、说明、示例、附录和非正式标题。
+- id 和 title 必须来自详情卡标题并原样保留，不得改写、缩写、补全或重新编号。
+- order 是正式需求详情卡在详情区中的出现顺序，必须从 1 开始连续编号。
+- depends_on 只包含该需求明确列出的前置需求 ID，必须保留原有顺序。
+- 没有明确前置依赖时，depends_on 返回空数组。
+- 不得根据正文猜测未明确列出的依赖，不得遗漏、合并、拆分或虚构正式需求。
+</formal_requirement_rules>
 
-输出只能包含 requirements 及其中每项的 id、title、order、depends_on；禁止增加其它字段。只返回符合所提供结构化输出格式的严格 JSON 对象；不要使用 Markdown、代码围栏、YAML 或 JSON 之外的文本。"""
+<output>
+只返回以下结构的严格 JSON 对象：
+
+{
+  "requirements": [
+    {
+      "id": "详情卡标题中的需求 ID",
+      "title": "详情卡标题中的完整需求标题",
+      "order": 1,
+      "depends_on": []
+    }
+  ]
+}
+
+字段限制：
+- requirements 必须包含全部且仅包含正式需求详情卡，数组顺序必须与详情卡出现顺序一致。
+- requirements 中每一项只能包含 id、title、order 和 depends_on。
+- id 和 title 必须是非空字符串；order 必须是从 1 开始连续递增的整数。
+- depends_on 必须是字符串数组，其中每一项都必须是 Backlog 中实际存在的正式需求 ID。
+- 没有依赖时 depends_on 必须是空数组，不得返回 null、空字符串或“无”。
+- 禁止增加、删除或重命名字段，禁止返回需求开发状态或其它动态字段。
+- 首字符必须是 {，末字符必须是 }。字段名和字符串值必须使用双引号。
+- 只返回 JSON 对象；不要返回 Markdown、代码围栏、YAML、注释、分析过程或 JSON 之外的任何文本。
+</output>"""
 
 
 class BacklogExtractionInput(BaseModel):

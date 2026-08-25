@@ -182,6 +182,13 @@ class RequirementRegistryTests(unittest.TestCase):
         self.assertEqual(calls[0]["max_retries"], 0)
         self.assertIs(calls[0]["input_model"].__class__, BacklogExtractionInput)  # type: ignore[index]
         self.assertIs(calls[0]["output_model"], RequirementCatalog)
+        self.assertIn("<task>", SYSTEM_PROMPT)
+        self.assertIn("<formal_requirement_rules>", SYSTEM_PROMPT)
+        self.assertIn("<output>", SYSTEM_PROMPT)
+        self.assertIn("严格 JSON", SYSTEM_PROMPT)
+        self.assertIn("代码围栏", SYSTEM_PROMPT)
+        for field in ("requirements", "id", "title", "order", "depends_on"):
+            self.assertIn(field, SYSTEM_PROMPT)
         for forbidden in ("第 12 步", "PCM", "session", "Skill"):
             self.assertNotIn(forbidden, SYSTEM_PROMPT)
 

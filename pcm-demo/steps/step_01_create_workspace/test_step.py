@@ -62,6 +62,7 @@ class WorkspaceStepTests(unittest.TestCase):
     def test_identity_contract(self) -> None:
         identity = validate_identity(
             {
+                "status": "success",
                 "topic_name": "修迹维修协作系统",
                 "project_directory_name": "mendmark",
                 "directory_name_source": "source",
@@ -70,9 +71,25 @@ class WorkspaceStepTests(unittest.TestCase):
             }
         )
         self.assertEqual(identity["project_directory_name"], "mendmark")
+        self.assertEqual(
+            validate_identity(
+                {
+                    "status": "blocked",
+                    "topic_name": None,
+                    "project_directory_name": None,
+                    "directory_name_source": None,
+                    "reason": None,
+                    "blocked_reason": "初稿没有明确产品选题",
+                }
+            )["blocked_reason"],
+            "初稿没有明确产品选题",
+        )
+        self.assertIn("<task>", SYSTEM_PROMPT)
+        self.assertIn("<output>", SYSTEM_PROMPT)
         self.assertIn("严格 JSON", SYSTEM_PROMPT)
         self.assertIn("代码围栏", SYSTEM_PROMPT)
         for field in (
+            "status",
             "topic_name",
             "project_directory_name",
             "directory_name_source",
@@ -83,6 +100,19 @@ class WorkspaceStepTests(unittest.TestCase):
         self.assertIn("禁止增加其它字段", SYSTEM_PROMPT)
         with self.assertRaises(ValueError):
             validate_identity({**identity, "project_directory_name": "Mend Mark"})
+        with self.assertRaises(ValueError):
+            validate_identity({**identity, "status": "blocked"})
+        with self.assertRaises(ValueError):
+            validate_identity(
+                {
+                    "status": "success",
+                    "topic_name": "修迹维修协作系统",
+                    "project_directory_name": "mendmark",
+                    "directory_name_source": "source",
+                    "reason": "初稿已明确仓库名",
+                    "blocked_reason": "不应同时阻塞",
+                }
+            )
 
     def test_workspace_root_precedence(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
