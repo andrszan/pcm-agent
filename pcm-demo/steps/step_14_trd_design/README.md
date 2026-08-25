@@ -49,7 +49,7 @@ steps/requirements/<requirement-id>/14.json
 
 负责人 completion 规则还要求：阻碍实现的高影响决定已经明确采用当前基线；Agent 回复不能仅因“已经列出实现前待确认事项”就被判定完成。文档缺失或为空时只向原 session 发送固定补全提示。任何最终可见的范围外修改、暂存、提交、ref 漂移、分支漂移或进行中的 Git 历史都直接失败并保留现场，不自动 reset、restore 或清理。该核验证明完成现场不存在 Git 写入结果或越界变更，不把最终状态核验夸大为对整个 Agent 执行历史的绝对取证；若未来需要不可绕过的执行隔离，应在项目级权限或沙箱合同中统一设计，而不是由单个领域步骤覆盖工具配置。
 
-成功先写 scoped result，再推进到 `requirement:15_development` / step 15。活动需求仍为 `active`，`completion` 仍为 `null`；第 15 步尚未实现。
+成功先写 scoped result，再推进到 `requirement:15_development` / step 15。活动需求仍为 `active`，`completion` 仍为 `null`。
 
 ## 恢复与幂等
 
@@ -73,7 +73,7 @@ steps/requirements/<requirement-id>/14.json
 - 第 13 步本体与 CLI 28 项；
 - 上述定向共 71 项；
 - 从 `pcm-demo/` 根递归发现的全量 241 项 `unittest`；
-- `compileall`、`git diff --check` 和全工作区 IDE diagnostics。
+- `compileall`、`git diff --check`；终版 Pyright langserver 未安装，未执行 IDE/LSP 诊断。
 
 独立审查发现的 fresh CLI 副作用、bisect 漏检和 TRD 父路径冲突等确定性边界问题均已修复并补测试。为回应“最终 Git 状态不能证明 Agent 从未进行临时写入”的审查意见，曾短暂增加步骤私有工具白名单和 `PreToolUse` hook；用户复核后确认该方案不是领域步骤必要条件，且与项目统一权限设计冲突，现已删除并增加默认 runner 无工具覆盖测试。最终复核无高、中置信问题。Ruff 未安装，未为检查增加依赖。
 

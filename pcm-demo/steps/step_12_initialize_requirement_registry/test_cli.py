@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 import sys
 import tempfile
 import unittest
@@ -198,7 +197,7 @@ class StepTwelveCLITests(unittest.TestCase):
         self.assertEqual(json.loads((run_dir / "steps/12.json").read_text(encoding="utf-8")), success)
         self.assertEqual(read_state(run_dir), self.advanced_state())
 
-    def test_incomplete_success_is_overwritten_and_unimplemented_range_returns_two(self) -> None:
+    def test_incomplete_success_is_overwritten(self) -> None:
         run_dir = self.make_run(self.advanced_state())
         write_json(run_dir / "steps/12.json", {"status": "success"})
         with (
@@ -210,10 +209,6 @@ class StepTwelveCLITests(unittest.TestCase):
         state = read_state(run_dir)
         self.assertEqual((state["step"], state["current_step"], state["current_node"]), (13, 13, NEXT_NODE))
         self.assertEqual(state["status"], "failed")
-
-        with patch.object(self.cli, "parse_args", return_value=self.args(run_dir.name, 16)):
-            self.assertEqual(self.cli.main(), 2)
-        shutil.rmtree(run_dir)
 
 
 if __name__ == "__main__":

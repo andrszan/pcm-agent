@@ -30,7 +30,7 @@ Agent 报告后端 Ruff/format/build、pytest 16 passed 1 skipped、真实 Postg
 
 ## 自动化与运行
 
-第 15 步本体 6 项、CLI 4 项，共 10 项；全量 252 项 `unittest`、`compileall`、`git diff --check` 和全工作区 IDE diagnostics 均已通过，独立只读审查无高、中置信发现。能力仓未安装 Ruff，未执行 Ruff。
+第 15 步本体 6 项、CLI 4 项，共 10 项；第 16 步终版为本体 19 项、CLI 4 项，共 23 项，当前全量 273 项 `unittest`、`compileall` 与 `git diff --check` 均已通过。Pyright langserver 未安装，未执行 IDE/LSP 诊断；能力仓未安装 Ruff，未执行 Ruff。独立只读审查在修复后最终无高、中置信缺陷。
 
 ```bash
 cd /Users/zhou/resource/fireworks/ANDRSZAN/pcm-agent-skills/pcm-demo

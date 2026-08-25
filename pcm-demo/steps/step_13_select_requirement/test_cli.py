@@ -3,7 +3,6 @@ from __future__ import annotations
 import contextlib
 import io
 import json
-import shutil
 import sys
 import tempfile
 import unittest
@@ -327,12 +326,6 @@ class SelectRequirementCLITests(unittest.TestCase):
             self.assertEqual(self.cli.main(), 1)
         self.assertEqual((run_dir / "state.json").read_bytes(), before)
         self.assertFalse((run_dir / "steps/requirements").exists())
-
-    def test_step_sixteen_remains_unimplemented(self) -> None:
-        run_dir = self.make_run()
-        with patch.object(self.cli, "parse_args", return_value=self.args(run_dir.name, 16)):
-            self.assertEqual(self.cli.main(), 2)
-        shutil.rmtree(run_dir)
 
 
 if __name__ == "__main__":
