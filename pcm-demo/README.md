@@ -34,7 +34,7 @@ uv sync
 uv run python -m unittest discover -s . -t . -p 'test*.py' -v
 ```
 
-第 17 步本体 11 项与 CLI 4 项，共 15 项通过；PCM Demo 全量 282 项 `unittest` 通过（82.099 秒），`compileall common steps run_step.py` 与 `git diff --check` 通过。独立只读审查修复首次内容完整性、完成后 merge commit 和 Git attributes 规范化边界后，最终无高、中置信发现。第 9～11 步现行新合同的真实 Agent 集成仍待后续单独验证，旧真实 run 继续只作为旧合同历史。
+第 17 步现行精简实现本体 10 项与 CLI 3 项，共 13 项通过；PCM Demo 全量 282 项 `unittest` 通过（120.021 秒），`compileall common steps run_step.py` 与 `git diff --check` 通过。第 17 步直接调用 `run_claude()`，不再使用工作树 fingerprint、Git 内容取证或 AI-compatible 负责人决策；独立只读审查最终无高、中置信发现。第 9～11 步现行新合同的真实 Agent 集成仍待后续单独验证，旧真实 run 继续只作为旧合同历史。
 
 ## 最近真实验证
 
@@ -95,10 +95,8 @@ Git 忽略 run `prompt-role-replay-20260823` 保留旧四段 XML prompt 的历�
 
 最终 `16.json` success、`outputs: []`，state 进入 `phase_1_requirement_development` / `requirement:17_commit` / step 17；BR-001 仍 active/completion null。root 保留 TRD、截图和规则未提交，frontend/backend 保留实现未提交，三仓均在 `req/br-001`、`HEAD`/`main`/target 等于 base、index clean。不可用 LLM 配置的幂等重跑仍 success，未调用模型或 Agent，关键 state、result、conversation 和规则文件字节不变；详细合同和 SHA-256 见[第 16 步 README](steps/step_16_rule_retrospective/README.md)。
 
-## 第 17 步真实验证
+## 第 17 步历史真实验证与现行兼容
 
-第 17 步在产品根创建唯一 `requirement_commit_BR-001` session `a00760f3-1760-4e2c-a985-477831a9277f`，初始 `/commit-changes` 恰好一次；conversation 为 `system → assistant 初始 → user Agent 回复 → assistant completed`。Agent normal success，58 turns、`$4.334054`，一次处理 root/frontend/backend 权威白名单。
+历史真实 run 曾使用 session `a00760f3-1760-4e2c-a985-477831a9277f` 创建 root 2 个、frontend 1 个、backend 1 个本地提交，并推进到 `requirement:18_merge` / step 18。提交 SHA、session、四条 decision conversation 和当时的 fingerprint 字段是旧实现的历史执行事实，不再是现行精简合同的完成条件。
 
-root 从 `a7d5509df6843a06315aa803d87285569b86e355` 前进到 `62ac0aea0a69ea95d6382adfc276adce808be964`，创建 `docs: 新增 BR-001 技术设计与界面验证` 和 `chore(agent): 约束容器化 Playwright 测试隔离` 两个提交；frontend 从 `dbab574dbe4d83a02323a750afd04de007565ac5` 前进到 `65764dee0b2655f1c674ec36fee527861ea5043c`；backend 从 `9682be837759c20f1a9ebbdf8fa2cfc09c2768d4` 前进到 `0e0bf9bb37e2abcf8c923c0fa4611c671da87640`。三仓均仍在 `req/br-001`，local `main` 保持 base，工作树/index clean，`base..tip` 无 merge commit，未 merge 或 push。
-
-`17.json` 与 cycle 保存上述 base/tip，cycle 每仓 `merged: false`；BR-001 仍 active/completion null，state 进入 `requirement:18_merge` / step 18。不可用 LLM 配置幂等重跑未调用 Agent 或负责人服务，state/result/conversation SHA-256 分别保持 `aa591d02093ec29d9b4ec2b7d06dfd4e1aac22a2097a19d864fb07e47a15512e`、`2f76b43287404bc828e1dfbe9df52a90fd53b3a388eaf36f3e7c54cc82fb8439`、`93978ff7dcdfa3479d094f0085807bae2166b3dbaffdf1c69c3973d096fc9d87`。详细合同见[第 17 步 README](steps/step_17_commit/README.md)。
+现行实现只保留仓库白名单、统一需求分支、local main/base、最终 clean、单一 direct session 和 base/tip 持久化；每次运行最多调用一次 Agent，不调用负责人模型或自动 repair。当前真实 run 没有回退重跑 fresh 提交，只执行 advanced 幂等兼容验证：使用不可用 LLM 配置运行第 17 步时不调用 Agent，state、`17.json` 和旧 conversation SHA-256 分别保持 `aa591d02093ec29d9b4ec2b7d06dfd4e1aac22a2097a19d864fb07e47a15512e`、`2f76b43287404bc828e1dfbe9df52a90fd53b3a388eaf36f3e7c54cc82fb8439`、`93978ff7dcdfa3479d094f0085807bae2166b3dbaffdf1c69c3973d096fc9d87`。详细合同见[第 17 步 README](steps/step_17_commit/README.md)。

@@ -106,7 +106,6 @@ from steps.step_16_rule_retrospective.step import (
     failure_scope as rule_retrospective_failure_scope,
     has_complete_success as has_rule_retrospective_success,
 )
-from steps.step_17_commit import RequirementCommitBlocked
 from steps.step_17_commit import result as requirement_commit_result
 from steps.step_17_commit import run as run_requirement_commit
 from steps.step_17_commit.step import (
@@ -814,18 +813,6 @@ def main() -> int:
                 "resume_phase": "project_initialization",
                 "resume_node": REQUIREMENT_BREAKDOWN_NODE,
                 "resume_step": 11,
-            },
-        )
-        error_message = str(error)
-    except RequirementCommitBlocked as error:
-        result = requirement_commit_result(
-            "blocked",
-            str(error),
-            requirement_id=error.requirement_id,
-            branch=error.branch,
-            blocked={
-                "reason": str(error),
-                "required_inputs": error.required_inputs,
             },
         )
         error_message = str(error)

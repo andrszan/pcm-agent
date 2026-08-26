@@ -2,56 +2,73 @@
 
 ## 职责
 
-本步骤在产品项目根创建一个 requirement-scoped Claude Agent session，并在初始提示中显式调用一次 `/commit-changes`。Agent 只处理运行状态中有序 `applicable_repositories` 白名单内的仓库，对每个仓库独立检查和提交：dirty 仓可按功能结果创建一个或多个本地提交，clean 仓不制造空提交。
+本步骤只负责调度 `commit-changes` 并记录提交结果：
 
-本步骤不实现或修复产品内容，不创建或切换分支，不 merge、rebase、reset、amend、改写历史或 push，也不把需求标记为 `completed`。第 18 步负责后续 ff-only 合并和生命周期完成。
+- 仓库集合只来自运行状态中的有序 `applicable_repositories` 白名单；
+- 有待提交变更时，在产品根调用一次 Claude Agent；
+- 每个仓库由 `commit-changes` 自行检查完整 diff、规划提交、精确暂存并创建本地提交；
+- Python 最终只核验仓库边界和工作树是否 clean，并记录各仓 `tip_sha`；
+- 不 merge、不删除分支、不 push，也不把需求标记为 `completed`。
 
-## 输入与前置条件
+提交内容完整性、提交分组、空提交、提交消息和 Git 历史操作属于 `commit-changes` 的职责。Python 不再重复实现工作树 fingerprint、blob/tree hashing、merge commit 或净零提交取证。
 
-步骤只接受：
+## 输入与最小前置检查
+
+步骤接受：
 
 - `phase_1_requirement_development` / `requirement:17_commit` / step 17；
 - 唯一 active requirement、对应 requirement cycle 和完整 scoped `16.json` success；
-- state 中有序、非空且以 root 开头的 `applicable_repositories` 与仓库绝对路径；
-- 每仓 cycle `base_sha` 和统一 `req/<lowercase-id>` 分支。
+- 统一 `req/<lowercase-id>` 分支；
+- 有序仓库白名单及每仓 `base_sha`。
 
-fresh 时 Python 逐仓只读核验：
+Agent 调用前，Python 对每个白名单仓库只检查：
 
-- 路径是该仓自身 Git top-level；
+- 路径不是符号链接，且是该仓自身 Git top-level；
 - 当前分支是统一需求分支；
-- `HEAD`、local `main`、需求分支 ref 均等于 `base_sha`；
-- index clean，且没有 merge、rebase、cherry-pick、revert 或 bisect；
-- 工作树可以 dirty。
+- local `main == base_sha`；
+- `HEAD` 等于需求分支 ref；
+- fresh 且尚无 commit session 时，`HEAD == base_sha`。
 
-Python 不扫描白名单外 Git 仓库，不硬编码 frontend/backend，不读取完整 diff 或规划提交。
+clean 判断固定使用：
 
-## 单 session 与内容保护
+```text
+git status --porcelain=v1 --untracked-files=all
+```
 
-只要存在 dirty 仓，步骤就在产品根使用单一 `requirement_commit_<ID>` session。一个 session 不等于一次 SDK turn：负责人 `continue`、完成 repair、blocked 解除和进程中断都恢复同一 session；初始 `/commit-changes` 只出现一次。
+因此不受仓库本地 `status.showUntrackedFiles` 配置影响。
 
-首次 Agent 调用前，state 为每仓保存：
+## 单一 direct session
 
-- 是否 dirty；
-- 一个 Git-visible 工作树 tree fingerprint。
+全仓 fresh clean 时直接记录 `tip_sha = base_sha`，零 Agent 调用，不制造空提交。
 
-fingerprint 由 index、unstaged 和未跟踪非 ignored 内容共同构成；普通文件使用 `git hash-object --path=<relative> --stdin`，遵循 `.gitattributes` clean filter、`working-tree-encoding` 和 EOL 规范化。恢复和完成时重新比对该 fingerprint，防止提交过程中修改、替换或丢弃已经验证的内容。最终还要求 `base..tip` 中没有 merge commit。
+存在 dirty 仓时，步骤直接调用 `common.claude_agent.run_claude()`：
 
-## 完成条件与结果
+- 首次 prompt 首行是 `/commit-changes`，并列出不可扩大的仓库白名单；
+- 不调用 AI-compatible 负责人模型，不创建 decision conversation；
+- 每次 `run()` 最多调用一次 Agent，不在同次执行中自动 repair 或 continue；
+- init 更新一取得 session ID 就写入 `state.claude_sessions.requirement_commit_<ID>`；
+- 调用异常或正常返回后仍 dirty 时，保留 session 和现场并返回 failed；
+- 下次运行只恢复同一 session 一次，恢复提示不再包含 slash command；
+- 已有 session 时，即使仓库已经 clean，也必须先取得一次正常 Agent 结束结果，不能用 clean 现场掩盖异常终止。
 
-所有仓库必须同时满足：
+Agent 结果必须是正常 `ClaudeRunResult.success`，且没有 API、exception、error 或异常终止；最终完成仍以白名单仓库真实 Git facts 为准，不解析 Agent 自然语言回复。
 
-- 仍在统一需求分支，local `main == base_sha`，`HEAD` 等于需求分支 ref；
-- 工作树和 index clean，无进行中的 Git 历史操作；
-- 初始 dirty 仓的 tip 是 base 的严格后代、文件树与 base 不同，且最终 HEAD tree 等于首次工作树 fingerprint；
-- 初始 clean 仓保持 `tip_sha == base_sha`。
+## 完成与恢复
 
-成功结果写入：
+完成时每仓必须满足：
+
+- 仍位于统一需求分支；
+- local `main == base_sha`；
+- `HEAD` 等于需求分支 ref；
+- `git status --porcelain=v1 --untracked-files=all` 为空。
+
+成功先写：
 
 ```text
 steps/requirements/<ID>/17.json
 ```
 
-`outputs` 恒为 `[]`，每仓只保存：
+每仓只记录：
 
 ```json
 {
@@ -62,9 +79,9 @@ steps/requirements/<ID>/17.json
 }
 ```
 
-随后 cycle 每仓写入 `{base_sha, tip_sha, merged: false}`，状态推进至 `requirement:18_merge` / step 18；active requirement 和 `completion: null` 保持不变。
+随后 cycle 写入 `{base_sha, tip_sha, merged: false}`，并推进 `requirement:18_merge` / step 18。需求仍为 active，`completion` 仍为 `null`。
 
-完整 success result 已写而 state 尚未推进时，重跑按 result 与当前 Git 事实补 state，不再次调用 Agent。推进到第 18 步后，第 17 步幂等重跑只验证 result/state 结构，不读取 Git 或调用模型，避免与第 18 步后续合法 ref 变化冲突。
+完整 success result 已写但 state 尚未推进时，只按当前 Git facts 补 state，不调用 Agent。已进入 step 18 后，第 17 步只核验 result/cycle 结构，不读取工作区或 Git，也不迁移、清理旧实现留下的 fingerprint、conversation 或 session 字段。
 
 ## 运行
 
@@ -72,29 +89,20 @@ steps/requirements/<ID>/17.json
 uv run python run_step.py --step 17 --run-id <run-id>
 ```
 
-## 自动化与真实验证
+## 验证
 
-第 17 步本体 11 项、CLI 4 项，共 15 项测试通过，覆盖：
+现行精简实现包含第 17 步本体 10 项、CLI 3 项，共 13 项测试，覆盖：
 
-- 动态多仓白名单和单产品根 session；
-- clean/dirty 混合、无空提交和多提交；
-- 同 session repair、partial multi-repository commit 恢复；
-- 首次内容替换/丢失、merge commit、空或净零差异提交拒绝；
-- `.gitattributes` clean filter 正常提交；
-- result→state 中断恢复、推进后幂等和 CLI success 保护。
+- 动态多仓白名单和全 clean 零 Agent；
+- 产品根一次 direct Agent 调用和 session 即时保存；
+- init 后异常、正常返回仍 dirty、非正常但已 clean 的同 session 单次恢复；
+- symlink 仓库拒绝和未跟踪文件 clean 判断；
+- 分支/main/target 边界；
+- result→state 恢复和 step18 旧字段兼容；
+- CLI 脱敏 failed 与完整 success 保护。
 
-PCM Demo 全量 283 项 `unittest`、`compileall common steps run_step.py` 与 `git diff --check` 通过。独立只读审查修复了首次内容完整性、完成后 merge commit 和 Git attributes 规范化问题，最终无高、中置信发现。
+PCM Demo 全量 282 项 `unittest`、`compileall common steps run_step.py` 与 `git diff --check` 通过。独立只读审查最终无高、中置信发现。
 
-真实 run `step01-mendmark` 使用 session `a00760f3-1760-4e2c-a985-477831a9277f`：conversation 为 `system → assistant 初始 → user Agent 回复 → assistant completed`，初始 `/commit-changes` 恰好一次；Agent normal success，58 turns，`$4.334054`。
+历史真实 run `step01-mendmark` 曾由旧实现创建 root 2 个、frontend 1 个、backend 1 个本地提交，并推进到 `requirement:18_merge`。这些提交 SHA、session 与 conversation 是历史执行事实，但旧 fingerprint、负责人 `completed` 和 decision conversation 不再是现行合同条件。
 
-实际提交结果：
-
-- root：base `a7d5509df6843a06315aa803d87285569b86e355` → tip `62ac0aea0a69ea95d6382adfc276adce808be964`，2 个提交；
-- frontend：base `dbab574dbe4d83a02323a750afd04de007565ac5` → tip `65764dee0b2655f1c674ec36fee527861ea5043c`，1 个提交；
-- backend：base `9682be837759c20f1a9ebbdf8fa2cfc09c2768d4` → tip `0e0bf9bb37e2abcf8c923c0fa4611c671da87640`，1 个提交。
-
-三仓均仍在 `req/br-001`，local `main` 未移动，工作树/index clean，无 merge commit、merge 或 push。BR-001 仍 active/completion null，state 位于 `requirement:18_merge`。以不可用 LLM 配置幂等重跑后，state/result/conversation SHA-256 分别保持：
-
-- `aa591d02093ec29d9b4ec2b7d06dfd4e1aac22a2097a19d864fb07e47a15512e`；
-- `2f76b43287404bc828e1dfbe9df52a90fd53b3a388eaf36f3e7c54cc82fb8439`；
-- `93978ff7dcdfa3479d094f0085807bae2166b3dbaffdf1c69c3973d096fc9d87`。
+当前真实 run 已在 step 18，没有回退或重跑 fresh 提交。现行精简代码已完成 advanced 幂等兼容验证：使用不可用 LLM 配置执行第 17 步时不调用 Agent，state、`17.json` 和旧 conversation 的 SHA-256 均保持不变。

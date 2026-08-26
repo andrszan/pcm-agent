@@ -157,7 +157,7 @@ Demo 和默认 PCM 流程只进行本地文件修改、测试、构建、服务�
 
 ## 四、运行上下文与恢复
 
-第 17 步已完成代码、自动化和真实集成验证：第 17 步本体 11 项与 CLI 4 项，共 15 项通过；PCM Demo 全量 282 项 `unittest`、`compileall common steps run_step.py` 与 `git diff --check` 通过，独立只读审查最终无高、中置信发现。`run_step.py` 支持第 0～17 步；以下先保留第 16 步 success 后的交接状态示例，随后第 17 步已将真实 `step01-mendmark` 推进到 `requirement:18_merge`。第 9～11 步现行新合同的真实 Agent 集成仍待后续单独验证，旧 conversation、exact commit prompt 和提交事实只作为旧合同历史。
+第 17 步现行精简实现本体 10 项与 CLI 3 项，共 13 项通过；PCM Demo 全量 282 项 `unittest`、`compileall common steps run_step.py` 与 `git diff --check` 通过，独立只读审查最终无高、中置信发现。第 17 步直接调用 `run_claude()`，不使用工作树 fingerprint、Git 内容取证或 AI-compatible 负责人决策。`run_step.py` 支持第 0～17 步；真实 `step01-mendmark` 已推进到 `requirement:18_merge`，现行代码保持其旧历史字段和结果字节不变。
 
 ```json
 {
@@ -509,12 +509,11 @@ Demo 和默认 PCM 流程只进行本地文件修改、测试、构建、服务�
 - **真实验证**：`step01-mendmark` / `/Users/zhou/resource/fireworks/ANDRSZAN/pcm-products/mendmark` 的 `BR-001` 首次在 baseline、alias、Agent 前发现 root/frontend/backend 的提前提交分别为 `8e44a6ebefda27fbdf1c79a4a53817918c3c3c95`、`4ea14479455cc137815356edfb985680d2973f82`、`1236b9cb533259eaecb23e6d0345d0a9797f8444`，与 bases `a7d5509df6843a06315aa803d87285569b86e355`、`dbab574dbe4d83a02323a750afd04de007565ac5`、`9682be837759c20f1a9ebbdf8fa2cfc09c2768d4` 冲突，依合同 failed 且没有 conversation 或产品变化。用户选择三仓 `git reset --mixed <cycle base>` 保留工作树、清空 index，并独立核验其与旧 tip 文件树一致；这是 run-local 现场恢复，不是生产提前提交兼容。恢复后复用 `e6bd1b82-39f9-41b2-9cc9-a69b281015dc`（retrospective alias 同 ID），Agent normal success（8 turns、`$6.9324520000000005`、`terminal_reason=completed`），conversation 为 `system → assistant 初始 → user Agent回复 → assistant completed`。唯一规则增量是 root `.claude/rules/frontend-playwright-container.md`，约束官方 Playwright 容器的 frontend 临时 `node_modules` volume/`.pnpm-store` 与清理检查。最终 root 保留 TRD、截图、规则未提交，frontend/backend 保留实现未提交，三仓均为 `req/br-001`、`HEAD/main/target=base`、index clean；幂等重跑的 state/result/conversation/rule SHA-256 依次为 `5f088ca5b3119026046103dff3592a314383e5ff550bcdc6b76d64702bf365c4`、`591b7310eceafc7c526750ae7b06688acc6625ffcbc5ec5d2b66ca6d4b25f5f6`、`3786e7039e4b2d2ba4dfe1b0b68f409fb47504e66ac830f18147a59619d7a90b`、`8a5eebbdc2a47ff58c035c61874f784b2e12048ee26100127b69e48821a0ac64`。
 ### 第 17 步：统一提交需求变更
 
-- **能力与 session**：在产品根创建单一 requirement-scoped session `requirement_commit_<ID>`，初始 prompt 只显式调用一次 `/commit-changes`。调用方传入 state 中有序、不可扩大的 `applicable_repositories` 白名单；Agent 在同一 session 内对每仓独立检查和提交，不自行发现其它 Git 仓库。
-- **输入与 preflight**：只消费当前 active requirement/cycle、完整 scoped 第 16 步 success、统一需求分支和各仓 `base_sha`。fresh 逐仓核验自身 top-level、`HEAD/main/target=base`、index clean、无进行中的 Git 历史操作；工作树允许 dirty。首次调用前为每仓保存 dirty 标记和一个 Git-visible 工作树 fingerprint。
-- **执行边界**：dirty 仓按可独立理解的功能结果创建一个或多个本地提交；clean 仓不制造空提交。不得修改或丢弃已验证内容，不得创建或切换分支、merge、rebase、reset、amend、改写历史或 push。Python 不规划提交或执行 Git 写操作。
-- **完成核验**：全部仓库仍在统一需求分支，`main==base`、`HEAD==target`、工作树/index clean；首次工作树 fingerprint 与最终 HEAD tree 一致，dirty 仓 tip 是 base 的严格后代且 `base..tip` 无 merge commit，clean 仓保持 `tip==base`。
-- **结果与恢复**：success 写 scoped `17.json`（`outputs: []`，有序保存每仓 `name/path/base_sha/tip_sha`），再将 cycle 每仓写为 `{base_sha, tip_sha, merged:false}` 并推进 `requirement:18_merge` / step 18。部分提交、repair、blocked 和进程中断均恢复同一 session；result→state 中断可只补状态，推进后幂等不读 Git、不调用模型。
-- **自动化与真实验证**：第 17 步本体 11 项、CLI 4 项，共 15 项；PCM Demo 全量 282 项通过，`compileall`、`git diff --check` 通过，独立只读审查最终无高、中置信发现。真实 `step01-mendmark` 使用 session `a00760f3-1760-4e2c-a985-477831a9277f`，conversation 4 条、初始 `/commit-changes` 一次，58 turns、`$4.334054`。root/frontend/backend tips 分别为 `62ac0aea0a69ea95d6382adfc276adce808be964`、`65764dee0b2655f1c674ec36fee527861ea5043c`、`0e0bf9bb37e2abcf8c923c0fa4611c671da87640`；三仓 clean、main 保持 base、无 merge 或 push，BR-001 仍 active/completion null。不可用 LLM 配置幂等重跑保持 state/result/conversation 字节不变。
+- **能力与 session**：在产品根直接调用 `run_claude()`，使用单一 `requirement_commit_<ID>` session。fresh dirty 时初始 prompt 只调用一次 `/commit-changes`；已有 session 时每次运行只恢复一次，恢复提示不重复 slash command。没有 AI-compatible 负责人决策或多轮 repair。
+- **输入与边界**：只消费当前 active requirement/cycle、完整 scoped 第 16 步 success、统一需求分支和各仓 `base_sha`。Python 只核验有序 `applicable_repositories` 白名单、仓库自身 top-level、非符号链接路径、`main==base`、`HEAD==target` 和包含未跟踪文件的 `status --porcelain`。
+- **执行职责**：diff 内容、提交分组、精确暂存、空提交和提交历史由 `commit-changes` 自己负责。Python 不读取完整 diff，不制作 fingerprint，不检查 blob/tree、merge commit 或净零提交，也不执行 Git 写操作。
+- **结果与恢复**：全仓 fresh clean 时零 Agent、`tip=base`。Agent init 后立即保存 session；调用异常、非正常结果或最终仍 dirty 时保留 session/现场并 failed，下次只 resume 同一 session 一次。success 写 scoped `17.json` 的 `name/path/base_sha/tip_sha`，cycle 写 `{base_sha,tip_sha,merged:false}` 并推进 step 18；result→state 可零 Agent 恢复，advanced 幂等忽略旧 fingerprint/conversation 字段。
+- **验证事实**：现行实现本体 10 项、CLI 3 项，共 13 项；全量 282 项、`compileall` 和 `git diff --check` 通过，独立只读审查无高、中置信发现。旧真实 run 的 4 个提交、session、conversation 与 fingerprint 是历史执行事实，不再是现行合同条件；现行代码已验证 step18 advanced 幂等时 state/result/旧 conversation 字节不变。
 
 ### 第 18 步：程序化合并并完成需求
 
