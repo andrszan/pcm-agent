@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from common.claude_agent import ClaudeRunResult, run_claude
 from common.decision import AgentDecision, count_decisions, parse_agent_decision, request_decision
 from common.files import write_json
+from common.openai_responses import ResponsesFailure
 from common.state import write_state
 from config import LLMConfig
 
@@ -26,6 +27,30 @@ _SAFE_EXCEPTION_TYPE = re.compile(r"[A-Za-z_][A-Za-z0-9_.]{0,127}\Z")
 _RECOVERABLE_SUBTYPES = {"error_max_turns", "error_max_budget_usd"}
 _NORMAL_TERMINAL_REASONS = {None, "completed"}
 _ABORTED_TERMINAL_REASONS = {"aborted_streaming", "aborted_tools"}
+_DECISION_FAILURE_MESSAGES = {
+    "configuration": "AI-compatible 裁决配置不可用",
+    "transport": "AI-compatible 裁决服务连接或请求超时",
+    "http": "AI-compatible 裁决服务 HTTP 请求失败",
+    "response": "AI-compatible 裁决响应不符合合同",
+    "internal": "AI-compatible 裁决本地处理失败",
+}
+
+
+class AIDecisionFailure(RuntimeError):
+    def __init__(self, diagnostic: dict[str, str | int]) -> None:
+        self.diagnostic = dict(diagnostic)
+        kind = self.diagnostic["kind"]
+        message = _DECISION_FAILURE_MESSAGES[str(kind)]
+        if "http_status" in self.diagnostic:
+            message = f"{message}（HTTP {self.diagnostic['http_status']}）"
+        super().__init__(message)
+
+    def as_error(self) -> dict[str, Any]:
+        return {
+            "type": type(self).__name__,
+            "message": str(self),
+            "decision_failure": dict(self.diagnostic),
+        }
 
 
 @dataclass(frozen=True)
@@ -268,6 +293,26 @@ def _clear_pending_agent_text(
     write_state(run_dir, state)
 
 
+def _raise_decision_failure(
+    run_dir: Path,
+    state: dict[str, Any],
+    spec: AgentDecisionLoopSpec,
+    diagnostic: dict[str, str | int],
+) -> None:
+    _state_section(state, spec)["last_decision_failure"] = dict(diagnostic)
+    write_state(run_dir, state)
+    raise AIDecisionFailure(diagnostic)
+
+
+def _clear_decision_failure(
+    run_dir: Path, state: dict[str, Any], spec: AgentDecisionLoopSpec
+) -> None:
+    section = _state_section(state, spec)
+    if "last_decision_failure" in section:
+        section.pop("last_decision_failure")
+        write_state(run_dir, state)
+
+
 def _discard_legacy_pending_prompt(
     run_dir: Path, state: dict[str, Any], spec: AgentDecisionLoopSpec
 ) -> None:
@@ -415,21 +460,43 @@ async def _request_next_decision(
 ) -> AgentDecision:
     _require_decision_capacity(messages, spec)
     try:
-        data, _attempts, raw = await decision_runner(
-            messages,
-            config_loader(),
-            system_prompt=messages[0]["content"],
-        )
-        decision = parse_agent_decision(data)
-        raw_decision = parse_agent_decision(raw)
+        config = config_loader()
     except asyncio.CancelledError:
         raise RuntimeError("AI-compatible 决策已取消") from None
-    except (Exception, ValidationError):
-        raise RuntimeError("AI-compatible 决策失败") from None
+    except Exception:
+        _raise_decision_failure(
+            run_dir, state, spec, {"kind": "configuration"}
+        )
+
+    try:
+        data, _attempts, raw = await decision_runner(
+            messages,
+            config,
+            system_prompt=messages[0]["content"],
+        )
+    except asyncio.CancelledError:
+        raise RuntimeError("AI-compatible 决策已取消") from None
+    except ResponsesFailure as error:
+        _raise_decision_failure(run_dir, state, spec, error.diagnostic)
+    except ValidationError:
+        _raise_decision_failure(run_dir, state, spec, {"kind": "response"})
+    except Exception:
+        _raise_decision_failure(run_dir, state, spec, {"kind": "internal"})
+
+    try:
+        decision = parse_agent_decision(data)
+        raw_decision = parse_agent_decision(raw)
+    except (TypeError, ValidationError):
+        _raise_decision_failure(run_dir, state, spec, {"kind": "response"})
     if not isinstance(raw, str) or decision != raw_decision:
-        raise RuntimeError("AI-compatible 决策返回不一致")
+        _raise_decision_failure(run_dir, state, spec, {"kind": "response"})
+
     messages.append({"role": "assistant", "content": raw})
-    _save_conversation(run_dir, state, spec, messages)
+    try:
+        _save_conversation(run_dir, state, spec, messages)
+    except Exception:
+        _raise_decision_failure(run_dir, state, spec, {"kind": "internal"})
+    _clear_decision_failure(run_dir, state, spec)
     return decision
 
 
@@ -503,6 +570,7 @@ async def run_agent_decision_loop(
 
         decision = _tail_decision(messages)
         if decision is not None:
+            _clear_decision_failure(run_dir, state, spec)
             if decision.verdict == "blocked":
                 if not blocked_resume_pending:
                     return decision

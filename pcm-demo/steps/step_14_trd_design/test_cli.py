@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, patch
 DEMO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(DEMO_ROOT))
 
+from common.agent_decision_loop import AIDecisionFailure
 from common.state import write_requirement_step_result, write_state
 from steps.step_14_trd_design.step import (
     CURRENT_NODE,
@@ -178,6 +179,30 @@ class TRDDesignCLITests(unittest.TestCase):
         )
         self.assertNotIn("secret=hidden", json.dumps(saved, ensure_ascii=False))
         self.assertNotIn("secret=hidden", stderr.getvalue())
+
+    def test_decision_failure_writes_safe_structured_diagnostic(self) -> None:
+        run_dir, _ = self.make_run()
+        stderr = io.StringIO()
+        error = AIDecisionFailure(
+            {"kind": "http", "http_status": 403, "request_id": "request-123"}
+        )
+        with (
+            patch.object(self.cli, "parse_args", return_value=self.args(run_dir.name)),
+            patch.object(self.cli, "run_step_fourteen", side_effect=error),
+            contextlib.redirect_stderr(stderr),
+        ):
+            self.assertEqual(self.cli.main(), 1)
+        saved = json.loads(
+            (run_dir / "steps/requirements/BR-001/14.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(saved["error"], error.as_error())
+        self.assertEqual(
+            json.loads((run_dir / "state.json").read_text(encoding="utf-8"))["error"],
+            error.as_error(),
+        )
+        self.assertIn("HTTP 403", stderr.getvalue())
 
     def test_blocked_exception_writes_scoped_blocked_result(self) -> None:
         run_dir, _ = self.make_run()

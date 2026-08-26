@@ -2,7 +2,7 @@
 
 > 本文定义正式 PCM 开发前的轻量 Python 验证项目。Demo 的目的不是提前实现正式 PCM，而是用可独立运行、可串联的一组脚本，真实验证 [`PCM 程序化调度的 AI Agent 产品开发流程`](../../.claude/PCM版AI%20Agent自动化流程设计.md)。
 >
-> 第 17 步旧实现已完成真实提交；现行精简实现本体 10 项、CLI 3 项，共 13 项。第 18 步本体 10 项、CLI 5 项，共 15 项；PCM Demo 全量 283 项 `unittest` 通过。`compileall common steps run_step.py` 与 `git diff --check` 通过，独立只读审查最终无第 14、16、17 或 18 步高、中置信问题。第 13 步现行实现直接消费当前需求注册表，不按新版第 12 步 schema 复验历史 result/source；第 17 步直接调用 `run_claude()`，第 18 步只使用确定性 Python/Git。真实 `step01-mendmark` 已完成 BR-001，并在第二轮成功选择 BR-002 后停留于第 14 步负责人裁决失败现场。
+> 第 17 步现行精简实现本体 10 项、CLI 3 项；第 18 步本体 10 项、CLI 5 项。PCM Demo 全量 288 项 `unittest`、`compileall common steps run_step.py` 与 `git diff --check` 通过。公共负责人裁决失败已结构化为 `configuration / transport / http / response / internal`，只允许合法 HTTP status 和白名单 request ID，不保存 provider message。真实 `step01-mendmark` 已完成 BR-001；BR-002 第 14 步已从原裁决失败现场零 Agent 恢复成功，第 15 步随后因 Claude Agent SDK `api_error` 停止。
 > 第 0～18 步均已完成代码、自动化和适用的真实验证。第 12 步现行合同已用自由格式 Backlog 真实提取 `BR-AI-001`～`BR-AI-003` 并完成零模型幂等重跑；历史 `step01-mendmark` 的 14 项 BR 注册表属于旧三字段 source 合同。第 13～17 步完成 BR-001 的统一分支、活动 TRD、实现验证、规则复盘和提交；第 18 步已将 root/frontend/backend ff-only 到记录 tip、删除需求分支并把 BR-001 标记为 completed。旧 403、非 JSON、非法 completed 和旧 prompt 设计只保留为已修复的根因历史；`step08-real-20260823-a/b` 的 prompt、API、`.coverage`、授权循环和提交事实继续仅属于旧“唯一初始提交证明”合同的历史运行。
 
 ## 一、验证目标
@@ -65,7 +65,7 @@ python run_all.py \
 - 第 18 步：只读取当前 active requirement/cycle、权威仓库路径和 scoped 第 17 步 success 的必要字段；以确定性 Python/Git 按非 root 在前、root 最后的顺序执行或恢复 ff-only 合并，逐仓保存 `merged:true`，全仓到 tip 后统一安全删除需求分支，先写 scoped `18.json` 再完成注册表生命周期；
 - `run_step.py` 对第 0～18 步提供单步运行入口；第 13～18 步按当前 active/cycle 保护 scoped success，失败只有在 state 仍位于自身锚点时才能持久化，不得降级已推进状态。
 
-当前代码已实现并真实成功验证第 0～18 步。第 12 步现行合同已用无 Git、自由格式 Backlog 的隔离 run `step12-ai-only-20260826` 完成真实 Responses 提取与不可连接模型配置幂等重跑；历史 `step01-mendmark` 的 14 项 BR 注册表属于旧三字段 source 合同。BR-001 已完成第 13～18 步，root/frontend/backend 的 local main tips 分别为 `62ac0aea0a69ea95d6382adfc276adce808be964`、`65764dee0b2655f1c674ec36fee527861ea5043c`、`0e0bf9bb37e2abcf8c923c0fa4611c671da87640`。第二轮第 13 步已在不迁移旧注册表来源的情况下选择 BR-002，并从上述 main 建立三仓 `req/br-002`；第 14 步 Agent 已生成活动 TRD，但负责人裁决调用失败，当前 active requirement/cycle、session、conversation、TRD 和分支现场均已保留，尚未进入第 15 步。
+当前代码已实现并真实成功验证第 0～18 步。BR-001 已完成第 13～18 步。第二轮第 13 步已在不迁移旧注册表来源的情况下选择 BR-002；第 14 步 Agent 生成活动 TRD 后首次负责人裁决失败，公共诊断改进完成后从同一 `system → assistant → user` conversation 零 Agent 恢复并推进第 15 步。第 15 步首次调用保存 development session `d8f7861e-ed3e-40c8-8bd4-b259af67c196` 后返回 `is_error:true` / `terminal_reason:api_error`，没有 Agent 回复、负责人裁决或产品实现改动，当前现场保留在第 15 步。
 
 ### 2. 从第 3 步起的重大变化
 
@@ -223,7 +223,7 @@ pcm-demo/
 uv run python -m unittest discover -s . -t . -p 'test*.py' -v
 ```
 
-当前终版实际验证为第 13 步本体 20 项与 CLI 10 项，共 30 项，第 17 步本体 10 项与 CLI 3 项，共 13 项；PCM Demo 全量 283 项 `unittest`、`compileall`、`git diff --check` 和相关 IDE diagnostics 通过。第 13 步新增旧三字段 `source` 的第二轮回归及受控错误可见性验证；真实 `step01-mendmark` 已从原失败现场直接恢复并选择 BR-002。Ruff 未安装，未执行 Ruff。
+当前终版实际验证包含第 13 步 30 项、公共裁决诊断相关定向 59 项和 PCM Demo 全量 288 项 `unittest`；`compileall`、`git diff --check` 和相关 IDE diagnostics 通过。真实 BR-002 已验证旧注册表 source 的第 13 步恢复，以及第 14 步裁决失败后的零 Agent 恢复。Ruff 未安装，未执行 Ruff。
 
 ## 七、执行架构与职责
 
@@ -513,7 +513,7 @@ Python 过滤 Git 子进程的 `GIT_*` 环境变量，按非 root 原顺序、ro
 
 最终所有仓库必须位于 main、`HEAD==main==tip`、clean、无进行中 Git 操作且需求分支不存在。步骤先写 root-first 的 scoped `18.json`，再把当前注册表项更新为 `completed` / `completion:{"step":18}`，清空 active requirement/cycle 并返回 cycle 记录节点。第 18 步本体 10 项、CLI 5 项，共 15 项；全量 282 项、`compileall`、`git diff --check` 通过，独立只读审查无高、中置信发现。
 
-真实 `step01-mendmark` 已将 frontend、backend、root 的 local main 分别 ff-only 到 `65764dee0b2655f1c674ec36fee527861ea5043c`、`0e0bf9bb37e2abcf8c923c0fa4611c671da87640`、`62ac0aea0a69ea95d6382adfc276adce808be964`，完成 BR-001 并删除 `req/br-001`。随后第二轮已从这些 main 建立 `req/br-002` 并推进第 14 步；当前 root 仅有 BR-002 活动 TRD 未跟踪，frontend/backend clean，三仓均在 `req/br-002`，尚未执行 BR-002 的开发、提交或合并。
+真实 `step01-mendmark` 已完成 BR-001，随后从各仓最新 main 建立 `req/br-002`。当前 root 仅有 BR-002 活动 TRD 未跟踪，frontend/backend clean，三仓均在 `req/br-002`。第 14 步已成功；第 15 步保存 development session 后因 Claude Agent SDK `api_error` 失败，尚未产生业务实现、提交或合并。
 
 ### 阶段二：全项目级集成产品体验审计与迭代
 

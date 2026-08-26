@@ -261,7 +261,7 @@ class WorkspaceStepTests(unittest.TestCase):
         self.assertEqual(calls[0]["input"][0]["role"], "system")
         self.assertIn('"text":"input"', calls[0]["input"][1]["content"])
 
-    def test_responses_parse_reports_access_error_details(self) -> None:
+    def test_responses_parse_reports_safe_access_diagnostic(self) -> None:
         import httpx
         import openai
 
@@ -285,7 +285,7 @@ class WorkspaceStepTests(unittest.TestCase):
                         "request_id": "body-request-id",
                         "error": {
                             "code": "PERMISSION_DENIED",
-                            "message": "quota exhausted; api_key=should-not-appear",
+                            "message": '{"authorization":"Bearer leak","api_key":"should-not-appear"}',
                         },
                     },
                 )
@@ -308,10 +308,17 @@ class WorkspaceStepTests(unittest.TestCase):
                     )
                 )
         message = str(raised.exception)
-        self.assertIn("PERMISSION_DENIED", message)
-        self.assertIn("body-request-id", message)
-        self.assertIn("quota exhausted", message)
-        self.assertIn("api_key=[REDACTED]", message)
+        self.assertEqual(
+            raised.exception.diagnostic,
+            {
+                "kind": "http",
+                "http_status": 403,
+                "request_id": "body-request-id",
+            },
+        )
+        self.assertIn("HTTP 403", message)
+        self.assertNotIn("PERMISSION_DENIED", message)
+        self.assertNotIn("authorization", message)
         self.assertNotIn("should-not-appear", message)
 
     def test_default_branch_parser(self) -> None:

@@ -302,6 +302,7 @@ claude_sessions.<key>
 decision_conversations.<key>.path
 <state_key>.last_agent_result
 <state_key>.pending_agent_text
+<state_key>.last_decision_failure
 ```
 
 不再新写：
@@ -343,6 +344,20 @@ sequenceDiagram
 4. 不重复调用 Agent。
 
 Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重新读取当前事实并继续”，不为 Demo 建设 exactly-once 协议。
+
+### 7.3 AI-compatible 裁决失败诊断
+
+负责人裁决失败时，公共循环不写伪 assistant 消息，也不改变 `user` 尾部恢复锚点。它只在 `<state_key>.last_decision_failure` 覆盖保存最后一次安全诊断，并通过专用 `AIDecisionFailure` 将同一对象交给步骤结果：
+
+```json
+{
+  "kind": "configuration | transport | http | response | internal",
+  "http_status": 403,
+  "request_id": "request-id"
+}
+```
+
+`kind` 是固定枚举；HTTP status 必须是合法整数，request ID 只接受长度不超过 128 的 `[A-Za-z0-9._:-]`。禁止持久化 provider message、异常原文、headers、URL、请求或响应 body、prompt、API Key、traceback、异常链和其它未列入白名单的字段。合法 assistant decision 成功写入 conversation 后清除该诊断；既有诊断不进入裁决上下文，不新增历史数组、时间戳、重试计数、日志或自动重试。
 
 ## 8. Agent SDK 结果分类
 
@@ -412,7 +427,7 @@ Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重�
 
 不进行后处理摘要或脱敏替换。run 目录是受控、Git 忽略的本地恢复状态，不建设防篡改日志。
 
-资源清单正文和 `.env` 因输入来源边界不进入决策项目上下文。SDK/API 异常仍只保存类型、status 和 terminal reason。
+资源清单正文和 `.env` 因输入来源边界不进入决策项目上下文。Claude Agent SDK 异常继续只保存安全终止分类；AI-compatible Responses/裁决异常只保存 `configuration / transport / http / response / internal`、合法 HTTP status 和白名单 request ID，不保存 provider message 或原始异常。
 
 ## 12. 步骤适配
 
@@ -452,7 +467,7 @@ Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重�
 
 自动化验证：
 
-- 第 9～11 步新合同代码与自动化已完成：第 9～11 步本体测试合计 49 项通过；公共循环加第 9～11 步本体及第 10/11 步 CLI 定向回归共 84 项通过；PCM Demo 全量 268 项 `unittest` 通过（86.068 秒）；`compileall common steps run_step.py` 与 `git diff --check` 通过；目标第 9～11 步生产/测试和相关文档 IDE diagnostics 无新增问题（既有 pydantic 解析 warning 和第 12 步 unused hint 不属于本次）。尚未按新合同重新执行真实 Claude Agent、负责人 LLM 或 `/commit-changes` 集成；旧真实 run 仍仅为旧合同历史。
+- 公共裁决失败诊断、Responses 安全异常、第 14 步零 Agent 恢复及 CLI 映射已完成；定向 59 项、PCM Demo 全量 288 项 `unittest`、`compileall common steps run_step.py`、`git diff --check` 和相关 IDE diagnostics 通过。诊断覆盖配置、传输、HTTP、响应合同与本地处理五类，provider message 即使包含 JSON 形式凭据也不会进入异常、state、result 或 stderr。
 
 兼容验证：
 
@@ -461,6 +476,9 @@ Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重�
 - 真实 run `step01-mendmark` 的目录名与 state 内历史 `run_id` 不一致是既有已知事实；当前第 8 步依据 state、产品路径和现场继续核验并已推进到第 9 步入口。
 
 真实集成验证：
+
+- BR-002 第 14 步首次 Agent 正常 `success` 并生成活动 TRD，随后负责人裁决异常因旧实现被压缩而失败；实现结构化诊断后，同一 `system → assistant → user` conversation 零 Agent 重跑，负责人返回合法 `completed`，既有 TRD 通过 verifier，步骤推进第 15 步。原始失败已无法追溯具体类别。
+- BR-002 第 15 步随后在 Agent 阶段返回 `is_error:true`、`terminal_reason:api_error`，没有 Agent 回复、负责人裁决或产品实现改动；该失败属于 Claude Agent SDK 结果分类，不产生 `last_decision_failure`，流程保留 development session 并停在第 15 步。
 
 - Git 忽略 run `prompt-role-replay-20260823` 保留旧四段 XML system snapshot 的历史回放，不再作为现行五段 prompt 证据；现行 prompt 已由第 9 步 fresh 真实运行验证。
 - 首次尝试复用旧隔离第 7 步工作区时，在请求 API 前因不满足现行第 4 步 Git 元数据合同停止；最终改用现行交接事实回放，不将该前置停止记录为失败 run。

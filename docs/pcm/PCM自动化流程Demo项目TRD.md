@@ -7,7 +7,7 @@
 > - [`PCM 自动化流程 Demo 项目设计`](./PCM自动化流程Demo项目设计.md)：定义 Demo 的目标、范围、黄金输入和最终完成标准；
 > - [`PCM 程序化调度的 AI Agent 产品开发流程`](../../.claude/PCM版AI%20Agent自动化流程设计.md)：定义第 0～18 步、阶段一、阶段二的流程语义、职责边界和停止条件。
 >
-> 第 17 步旧实现已完成真实提交并推进 `requirement:18_merge`；现行精简实现本体 10 项、CLI 3 项，共 13 项。第 18 步本体 10 项、CLI 5 项，共 15 项；PCM Demo 全量 283 项 `unittest`、`compileall common steps run_step.py` 与 `git diff --check` 通过，独立只读审查最终无第 14、16、17 或 18 步高、中置信问题。第 13 步直接消费当前需求注册表，不按新版第 12 步 schema 复验历史 result/source；第 17 步直接调用 `run_claude()`；第 18 步只使用确定性 Python/Git。真实 `step01-mendmark` 已完成 BR-001，并在第二轮成功选择 BR-002 后停留于第 14 步负责人裁决失败现场。
+> PCM Demo 全量 288 项 `unittest`、`compileall common steps run_step.py` 与 `git diff --check` 通过。公共负责人裁决失败已实现五类安全结构化诊断及成功清除，不保存 provider message。真实 `step01-mendmark` 已完成 BR-001；BR-002 第 14 步从原裁决失败现场零 Agent 恢复成功，第 15 步随后因 Claude Agent SDK `api_error` 停止，尚未进入负责人裁决或产品实现。
 
 ## 一、目标、当前范围与状态
 
@@ -841,7 +841,7 @@ conversation 共 7 条：`system → assistant 初始 → user → assistant com
 
 ### 阶段一：已实现第 12～18 步
 
-第 12 步位于需求循环之外；第 13～18 步已完成 BR-001 的选择、统一分支、活动 TRD、实现验证、规则复盘、统一提交、ff-only 合并、分支清理和 completed 生命周期更新。第二轮已完成 BR-002 的第 13 步选择与统一分支；第 14 步 Agent 已生成活动 TRD，但负责人裁决调用失败，`step01-mendmark` 当前保留在 `requirement:14_trd_design` / step 14。
+第 12 步位于需求循环之外；第 13～18 步已完成 BR-001。第二轮已完成 BR-002 的第 13、14 步；第 14 步负责人裁决失败现场通过同一 conversation 零 Agent 恢复。`step01-mendmark` 当前保留在 `requirement:15_development` / step 15，development session 已保存但首次 Agent 调用以 `api_error` 结束，未产生 Agent 回复或产品实现。
 
 #### 第 12 步已实现合同与真实运行
 
@@ -999,7 +999,7 @@ Git 子进程统一过滤 `GIT_*`。仓库按非 root 原顺序、root 最后的
 
 第 0～18 步同时使用 `current_step` 和必要的 `phase/current_node`。第 9～11 步 success 只以必要文档和当前 Git 事实为准；`run_step.py` 对第 8～12 步 success 保持固定保护，第 13～18 步按当前 active/cycle 保护 scoped result/state。前序步骤只校验自己拥有的核心投影，允许后续步骤追加自身字段；历史步骤的异常仅能在 state 仍位于该步骤锚点时持久化，不能改写已推进节点。
 
-当前真实 state 位于 `phase_1_requirement_development` / `requirement:14_trd_design`、`step/current_step: 14`。注册表含 14 项 BR：`BR-001` 为 completed、`BR-002` 为 active、其余 12 项 pending；`active_requirement` 为 `BR-002`，cycle 保存 `req/br-002`、三仓 base 和活动 TRD 路径。第 14 步 Agent 已正常生成非空 TRD并保存 session/conversation，但 AI-compatible 负责人裁决调用失败，state/result 为 failed，尚未进入第 15 步。root 仅有该 TRD 未跟踪，frontend/backend clean，三仓均位于 `req/br-002`。
+当前真实 state 位于 `phase_1_requirement_development` / `requirement:15_development`、`step/current_step: 15`。`BR-001` completed、`BR-002` active、其余 12 项 pending；cycle 保存 `req/br-002`、三仓 base、活动 TRD 和 development session `d8f7861e-ed3e-40c8-8bd4-b259af67c196`。第 15 步首次 Claude Agent 调用返回 `subtype:success` 但 `is_error:true`、`terminal_reason:api_error`、`has_errors:true`，conversation 仍只有 system 与初始 assistant 指令，没有 Agent 回复或负责人裁决。root 仅有活动 TRD 未跟踪，frontend/backend clean，三仓均在 `req/br-002`。
 
 已确认但尚未实现的流程是：
 
@@ -1245,7 +1245,7 @@ Git 子进程统一过滤 `GIT_*`。仓库按非 root 原顺序、root 最后的
 - 配置和敏感信息不泄露；
 - JSON、Markdown、状态和 SHA-256 读写；
 - 第 0～8、12～18 步状态转换；
-- 第 13 步本体 20 项与 CLI 10 项，共 30 项；第 18 步本体 10 项与 CLI 5 项，共 15 项。当前全量 283 项 `unittest` 通过，`compileall common steps run_step.py` 与 `git diff --check` 通过；
+- 第 13 步本体 20 项与 CLI 10 项，共 30 项；公共裁决诊断相关定向 59 项；当前全量 288 项 `unittest` 通过，`compileall common steps run_step.py` 与 `git diff --check` 通过；
 - 第 18 步覆盖动态仓库白名单、非 root 在前/root 最后、base/tip no-op、部分 merge、逐仓 merged state、全局 cleanup 前置、partial cleanup、result→state、上游增量字段兼容、真实 CLI、失败脱敏、完成状态防降级和 `GIT_*` 过滤；
 - 第 17 步现行精简实现覆盖动态多仓白名单、direct 产品根 session、全 clean 零 Agent、init 后 session 保存、异常/dirty/非正常结果的单次 resume、symlink 路径、未跟踪文件、result→state、advanced 旧字段兼容和 CLI success 保护；
 - 第 17 步现行 direct-run fresh 路径尚未重新执行真实 Claude Agent；旧真实 run 的提交、session 和 conversation 只作为历史执行事实，现行代码已完成 advanced 字节不变兼容验证。

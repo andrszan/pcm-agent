@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from common.agent_decision_loop import (  # noqa: E402
     BLOCKED_RESUME_PROMPT,
     RECOVERABLE_RESULT_PROMPT,
+    AIDecisionFailure,
     AgentDecisionLoopSpec,
     run_agent_decision_loop,
 )
@@ -28,6 +29,7 @@ from common.decision import (  # noqa: E402
     render_decision_system_prompt,
     request_decision,
 )
+from common.openai_responses import ResponsesFailure  # noqa: E402
 from common.files import write_json  # noqa: E402
 
 
@@ -224,6 +226,111 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(agent.calls, [])
         self.assertEqual(decisions.calls[0][0][-1], {"role": "user", "content": original})
         self.assertNotIn("pending_agent_text", self.state[self.spec.state_key])
+
+    async def test_configuration_failure_persists_safe_diagnostic(self) -> None:
+        self.save_conversation(
+            [
+                {"role": "system", "content": self.spec.decision_system_prompt},
+                {"role": "assistant", "content": "初始 Agent 提示"},
+                {"role": "user", "content": "已完成的 Agent 回复"},
+            ]
+        )
+
+        def invalid_config() -> object:
+            raise ValueError("LLM_API_KEY=secret")
+
+        with self.assertRaises(AIDecisionFailure) as raised:
+            await run_agent_decision_loop(
+                self.run_dir,
+                self.state,
+                self.workspace,
+                self.spec,
+                "初始 Agent 提示",
+                lambda: None,
+                agent_runner=FakeAgentRunner([]),
+                decision_runner=FakeDecisionRunner([]),
+                config_loader=invalid_config,  # type: ignore[arg-type]
+            )
+
+        self.assertEqual(raised.exception.diagnostic, {"kind": "configuration"})
+        self.assertEqual(
+            self.state[self.spec.state_key]["last_decision_failure"],
+            {"kind": "configuration"},
+        )
+        self.assertNotIn("secret", json.dumps(self.state, ensure_ascii=False))
+        messages = json.loads(
+            (self.run_dir / "conversations" / f"{self.spec.key}.json").read_text(
+                encoding="utf-8"
+            )
+        )["messages"]
+        self.assertEqual(messages[-1]["role"], "user")
+
+    async def test_http_failure_persists_only_safe_response_fields(self) -> None:
+        self.save_conversation(
+            [
+                {"role": "system", "content": self.spec.decision_system_prompt},
+                {"role": "assistant", "content": "初始 Agent 提示"},
+                {"role": "user", "content": "已完成的 Agent 回复"},
+            ]
+        )
+
+        async def failed_decision(*_args: object, **_kwargs: object) -> object:
+            raise ResponsesFailure(
+                "http", http_status=403, request_id="request-123"
+            )
+
+        with self.assertRaises(AIDecisionFailure) as raised:
+            await run_agent_decision_loop(
+                self.run_dir,
+                self.state,
+                self.workspace,
+                self.spec,
+                "初始 Agent 提示",
+                lambda: None,
+                agent_runner=FakeAgentRunner([]),
+                decision_runner=failed_decision,
+                config_loader=lambda: object(),
+            )
+
+        diagnostic = {
+            "kind": "http",
+            "http_status": 403,
+            "request_id": "request-123",
+        }
+        self.assertEqual(raised.exception.diagnostic, diagnostic)
+        self.assertEqual(
+            self.state[self.spec.state_key]["last_decision_failure"], diagnostic
+        )
+        messages = json.loads(
+            (self.run_dir / "conversations" / f"{self.spec.key}.json").read_text(
+                encoding="utf-8"
+            )
+        )["messages"]
+        self.assertEqual(messages[-1]["role"], "user")
+
+    async def test_successful_decision_clears_failure_without_recalling_agent(self) -> None:
+        self.state[self.spec.state_key] = {
+            "last_decision_failure": {"kind": "transport"}
+        }
+        self.save_conversation(
+            [
+                {"role": "system", "content": self.spec.decision_system_prompt},
+                {"role": "assistant", "content": "初始 Agent 提示"},
+                {"role": "user", "content": "已完成的 Agent 回复"},
+            ]
+        )
+        agent = FakeAgentRunner([])
+
+        outcome = await self.run_loop(
+            agent,
+            FakeDecisionRunner([decision("completed", reason="已核验")]),
+        )
+
+        self.assertEqual(outcome.verdict, "completed")
+        self.assertEqual(agent.calls, [])
+        self.assertNotIn(
+            "last_decision_failure", self.state[self.spec.state_key]
+        )
 
     async def test_empty_pending_agent_text_cannot_resume_to_decision(self) -> None:
         self.state[self.spec.state_key] = {"pending_agent_text": ""}

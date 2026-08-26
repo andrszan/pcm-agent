@@ -35,7 +35,7 @@ uv sync
 uv run python -m unittest discover -s . -t . -p 'test*.py' -v
 ```
 
-第 17 步现行精简实现本体 10 项与 CLI 3 项，共 13 项；第 18 步本体 10 项与 CLI 5 项，共 15 项。PCM Demo 全量 283 项 `unittest` 通过，`compileall common steps run_step.py` 与 `git diff --check` 通过。第 13 步直接消费当前需求注册表，不再按新版第 12 步 schema 复验历史 result/source；第 17 步直接调用 `run_claude()`，第 18 步只使用确定性 Python/Git。第 9～11 步现行新合同的真实 Agent 集成仍待后续单独验证，旧真实 run 继续只作为旧合同历史。
+PCM Demo 全量 288 项 `unittest`、`compileall common steps run_step.py` 与 `git diff --check` 通过。公共负责人裁决失败使用 `configuration / transport / http / response / internal` 五类安全诊断，只保留合法 HTTP status 和白名单 request ID；合法裁决写入 conversation 后清除诊断。第 13 步直接消费当前需求注册表；第 17 步直接调用 `run_claude()`；第 18 步只使用确定性 Python/Git。
 
 ## 最近真实验证
 
@@ -108,4 +108,4 @@ Git 忽略 run `prompt-role-replay-20260823` 保留旧四段 XML prompt 的历�
 
 scoped `18.json` 保存与第 17 步一致的 root-first base/tip 结果；BR-001 已更新为 `completed`、`completion: {"step": 18}`，`active_requirement` 与 `requirement_cycle` 均已清空，state 返回 `phase_1:select_requirement` / step 13。详细合同见[第 18 步 README](steps/step_18_merge/README.md)。
 
-第二轮首次执行第 13 步时，历史 `steps/12.json.source` 多出的 `root_main_sha` 被现行第 12 步 schema 复验拒绝。第 13 步改为直接消费 `state.requirement_registry` 后，30 项定向与全量 283 项测试通过；同一失败现场无迁移重跑成功，选择 BR-002 并在三仓建立 `req/br-002`。第 14 步 session `73b84b2c-2652-43a7-9a66-4692d05d8367` 正常 `success`（32 turns、约 `$15.230817`）并生成唯一活动 TRD，但公共循环的 AI-compatible 负责人裁决调用失败；conversation 保留在 `system → assistant → user`，流程停在第 14 步，未进入开发。
+第二轮第 13 步已从历史三字段 source 失败现场恢复并选择 BR-002。第 14 步 session `73b84b2c-2652-43a7-9a66-4692d05d8367` 正常生成活动 TRD，首次负责人裁决异常因旧实现未留下分类；结构化诊断实现后，同一 `system → assistant → user` conversation 零 Agent 重跑并取得合法 `completed`，步骤推进第 15 步。第 15 步首次调用保存 development session `d8f7861e-ed3e-40c8-8bd4-b259af67c196` 后返回 `is_error:true` / `terminal_reason:api_error`，conversation 没有 Agent 回复，产品三仓除 root 活动 TRD 外没有实现改动，流程停在第 15 步。

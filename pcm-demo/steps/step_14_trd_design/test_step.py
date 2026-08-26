@@ -13,6 +13,7 @@ DEMO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(DEMO_ROOT))
 
 from common.claude_agent import ClaudeRunResult
+from common.files import write_json
 from common.state import read_state, write_requirement_step_result, write_state
 from steps.step_14_trd_design.step import (
     CURRENT_NODE,
@@ -295,6 +296,67 @@ class TRDDesignTests(unittest.TestCase):
             )
             self.assertEqual(saved["trd_path"], first_path)
             self.assertIn("2026-08-25", saved["trd_path"])
+
+    def test_decision_failure_recovery_reuses_agent_reply_and_clears_diagnostic(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory))
+            trd_path = (
+                "docs/trd/2026-08-25-BR-001-身份、角色访问与站内消息入口.md"
+            )
+            key = "trd_design_BR-001"
+            state["status"] = "failed"
+            state["requirement_cycle"]["trd_path"] = trd_path
+            state["claude_sessions"] = {key: "trd-session-1"}
+            state["decision_conversations"] = {
+                key: {"path": f"conversations/{key}.json"}
+            }
+            state[key] = {
+                "last_agent_result": {
+                    "subtype": "success",
+                    "is_error": False,
+                    "has_errors": False,
+                    "api_error_status": None,
+                    "exception_type": None,
+                    "terminal_reason": "completed",
+                },
+                "last_decision_failure": {"kind": "transport"},
+            }
+            write_state(run_dir, state)
+            self.write_trd(workspace, state)
+            (run_dir / "conversations").mkdir()
+            write_json(
+                run_dir / f"conversations/{key}.json",
+                {
+                    "messages": [
+                        {"role": "system", "content": "历史 system prompt"},
+                        {"role": "assistant", "content": "初始 Agent 提示"},
+                        {"role": "user", "content": "已完成并写入活动 TRD。"},
+                    ]
+                },
+            )
+
+            async def forbidden_agent(*_: object, **__: object) -> ClaudeRunResult:
+                raise AssertionError("不应再次调用 Agent")
+
+            async def decide(*_: object, **__: object) -> tuple[dict, int, str]:
+                return decision("completed")
+
+            saved = self.run_step(
+                run_dir,
+                state,
+                agent_runner=forbidden_agent,
+                decision_runner=decide,
+                config_loader=lambda: object(),
+            )
+
+            self.assertEqual(saved["status"], "success")
+            completed = read_state(run_dir)
+            self.assertEqual(completed["current_node"], NEXT_NODE)
+            self.assertNotIn("last_decision_failure", completed[key])
+            messages = json.loads(
+                (run_dir / f"conversations/{key}.json").read_text(encoding="utf-8")
+            )["messages"]
+            self.assertEqual(messages[-1]["role"], "assistant")
 
     def test_success_result_recovers_state_and_advanced_rerun_skips_file_and_agent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

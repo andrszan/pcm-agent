@@ -60,8 +60,8 @@ JSON 结果通过同目录唯一临时文件和原子 replace 写入；固定旧
 
 ## 自动化与真实验证
 
-第 13 步本体 20 项、CLI 10 项，共 30 项定向测试通过；PCM Demo 全量 283 项 `unittest`、`compileall common steps run_step.py`、`git diff --check` 和相关 IDE diagnostics 通过。测试覆盖确定性选择、全仓预检、intent/partial recovery、scoped result/state 恢复、后续 cycle/注册表字段兼容、历史步骤误调不降级、旧三字段 `source` 不阻断下一需求，以及受控错误原因可见、意外异常继续脱敏。Git 命令测试约束安全边界和最终结果，不冻结安全等价的只读查询序列。
+第 13 步本体 20 项、CLI 10 项，共 30 项定向测试通过；当前 PCM Demo 全量 288 项 `unittest`、`compileall common steps run_step.py`、`git diff --check` 和相关 IDE diagnostics 通过。测试覆盖确定性选择、全仓预检、intent/partial recovery、scoped result/state 恢复、后续 cycle/注册表字段兼容、历史步骤误调不降级、旧三字段 `source` 不阻断下一需求，以及受控错误原因可见、意外异常继续脱敏。
 
 真实 run `step01-mendmark` 确定性选择 `BR-001`。初次执行记录 root base `0232d813...`；第 14 步前用户将新 TRD 命名规则提交到产品 root，使 root `main` 和旧需求分支前进。经用户明确选择后，先完整归档 run，确认三仓旧需求分支与各自 `main` 无独有提交并安全删除，只重置 BR-001 的第 13 步 cycle/result，再从最新 `main` 重跑。当前 scoped result 为 `steps/requirements/BR-001/13.json`，SHA-256 为 `bf202c6fc568f1b4e82efc7be86a094064fe22d8735eee8c7d6999061127cca1`；bases 为 root `a7d5509df6843a06315aa803d87285569b86e355`、frontend `dbab574dbe4d83a02323a750afd04de007565ac5`、backend `9682be837759c20f1a9ebbdf8fa2cfc09c2768d4`。BR-001 后续已完成第 14～18 步并返回选择节点。
 
-第二轮首次执行暴露历史 `steps/12.json.source` 多出的 `root_main_sha` 被现行第 13 步重复 schema 复验拒绝。删除该跨步依赖后，同一失败现场无迁移、无人工改 state 重跑成功，确定性选择 `BR-002`，以 root `62ac0aea0a69ea95d6382adfc276adce808be964`、frontend `65764dee0b2655f1c674ec36fee527861ea5043c`、backend `0e0bf9bb37e2abcf8c923c0fa4611c671da87640` 为 base 建立 clean `req/br-002` 并推进第 14 步。随后第 14 步 Agent 正常生成非空 TRD，但 AI-compatible 负责人裁决调用失败，流程保留 session、conversation、TRD 和需求分支并停在第 14 步。
+第二轮首次执行暴露历史 `steps/12.json.source` 多出的 `root_main_sha` 被现行第 13 步重复 schema 复验拒绝。删除该跨步依赖后，同一失败现场重跑成功并建立三仓 `req/br-002`。第 14 步随后从负责人裁决失败现场零 Agent 恢复成功；当前流程已进入第 15 步，并因首次 Claude Agent SDK `api_error` 停止。

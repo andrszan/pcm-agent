@@ -9,6 +9,7 @@ from pathlib import Path
 from secrets import token_hex
 from typing import Any
 
+from common.agent_decision_loop import AIDecisionFailure
 from common.files import sha256
 from common.state import (
     create_run_dir,
@@ -1035,6 +1036,10 @@ def main() -> int:
                 error={"type": type(error).__name__, "message": str(error)},
             )
             error_message = f"{type(error).__name__}: {error}"
+
+        if isinstance(error, AIDecisionFailure):
+            result["error"] = error.as_error()
+            error_message = str(error)
 
     if result["status"] != "success" and not error_message:
         detail = result.get("blocked") or result.get("error") or {}

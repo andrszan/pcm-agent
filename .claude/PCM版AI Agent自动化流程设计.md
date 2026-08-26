@@ -157,7 +157,7 @@ Demo 和默认 PCM 流程只进行本地文件修改、测试、构建、服务�
 
 ## 四、运行上下文与恢复
 
-第 17 步现行精简实现本体 10 项与 CLI 3 项，共 13 项；第 18 步本体 10 项与 CLI 5 项，共 15 项。PCM Demo 全量 283 项 `unittest`、`compileall common steps run_step.py` 与 `git diff --check` 通过，独立只读审查最终无第 14、16、17 或 18 步高、中置信发现。第 13 步直接消费当前需求注册表，不再按现行第 12 步 schema 复验历史 result/source；第 17 步直接调用 `run_claude()`，不使用工作树 fingerprint、Git 内容取证或 AI-compatible 负责人决策；第 18 步只使用确定性 Python/Git。`run_step.py` 支持第 0～18 步；真实 `step01-mendmark` 已完成 BR-001，并在第二轮成功选择 BR-002 后停留于第 14 步负责人裁决失败现场。
+第 17 步现行精简实现本体 10 项与 CLI 3 项，共 13 项；第 18 步本体 10 项与 CLI 5 项，共 15 项。PCM Demo 全量 288 项 `unittest`、`compileall common steps run_step.py` 与 `git diff --check` 通过。公共负责人裁决现保存五类安全结构化失败诊断，不持久化 provider message；第 13 步直接消费当前需求注册表；第 17 步直接调用 `run_claude()`；第 18 步只使用确定性 Python/Git。真实 `step01-mendmark` 已完成 BR-001，BR-002 第 14 步已从原裁决失败现场零 Agent 恢复成功；第 15 步随后因 Claude Agent SDK `api_error` 停止，尚未进入负责人裁决或产品实现。
 
 ```json
 {
@@ -479,7 +479,7 @@ Demo 和默认 PCM 流程只进行本地文件修改、测试、构建、服务�
 - **fresh 与 intent**：在任何 state/Git 写入前，全局核验全部适用仓为自身非符号链接 top-level、clean local `main`、HEAD/local `main` 相等、目标分支不存在且没有进行中的 merge、rebase、cherry-pick 或 revert。通过后先写 `active_requirement`（仅 ID）及 cycle：`branch: req/<lowercase-id>`、按仓名映射的 `base_sha`、`return_node_after_completion`，再以 `git switch -c <branch> <base>` 建立全部统一分支。第 13 步后续只校验自己拥有的活动需求、统一分支、仓库集合和每仓 `base_sha`；第 14、15、17 步可追加自身字段，但不得改变这些选择与基线证据。
 - **结果、恢复与 CLI**：success 仅写 `steps/requirements/<ID>/13.json`，仓库 path 为 `.` 或仓库名，随后推进 `requirement:14_trd_design`。partial 现场按记录 base 恢复；scoped success 已写但 state 未推进时先只读核验 target/base/clean 后补 state；已推进后续节点时不读 Git。CLI 只以当前 active/cycle 的第 13 步核心投影和完整 scoped success 保护当前需求，历史需求 result 不保护当前需求；只有 state 仍位于第 13 步自身锚点时，失败才可持久化，误调历史步骤不得覆盖已推进节点。
 - **真实验证**：初次 `step01-mendmark` 运行选择 `BR-001` 并建立三仓 `req/br-001`。第 14 步前用户将新 TRD 命名规则提交到产品 root，导致 root `main` 和旧需求分支从原记录 base 前进；经用户明确选择后，先完整归档 run，确认三仓旧需求分支均无独有提交并安全删除，只重置 BR-001 的第 13 步 cycle/result，再从最新 `main` 重跑。bases 为 root `a7d5509df6843a06315aa803d87285569b86e355`、frontend `dbab574dbe4d83a02323a750afd04de007565ac5`、backend `9682be837759c20f1a9ebbdf8fa2cfc09c2768d4`；第 14、15、17 步随后追加 TRD、development session 和提交证据而未改变这些基线。第 18 步已将三仓 local main ff-only 到记录 tip并删除 `req/br-001`，BR-001 已完成，state 返回 `phase_1:select_requirement` / step 13。
-- **自动化与第二轮真实验证**：第 13 步本体 20 项与 CLI 10 项，共 30 项；PCM Demo 全量 283 项 `unittest`、`compileall`、`git diff --check` 和相关 IDE diagnostics 通过。新增回归证明旧三字段 `source` 不阻断下一需求，受控需求选择错误可见且意外异常继续脱敏。真实 `step01-mendmark` 未迁移历史 result/state 即从第 13 步失败现场恢复，选择 BR-002 并建立三仓 clean `req/br-002`；第 14 步 Agent 随后正常生成 TRD，但负责人裁决调用失败，流程未进入第 15 步。
+- **自动化与第二轮真实验证**：第 13 步本体 20 项与 CLI 10 项，共 30 项；公共裁决诊断相关定向 59 项；PCM Demo 全量 288 项 `unittest`、`compileall`、`git diff --check` 和相关 IDE diagnostics 通过。真实 `step01-mendmark` 未迁移历史 result/state 即选择 BR-002；第 14 步 Agent 生成 TRD 后的裁决失败现场已零 Agent 恢复并推进第 15 步。第 15 步首次调用保存 development session 后以 Claude Agent SDK `api_error` 失败，conversation 仍只有 system 与初始 assistant 指令，三仓未产生实现改动。
 
 ### 第 14 步：形成活动 TRD
 

@@ -391,7 +391,7 @@ class RequirementBreakdownTests(unittest.TestCase):
                     decision_called = True
                     raise AssertionError("越界修改不得请求负责人决定")
 
-                with self.assertRaisesRegex(RuntimeError, "AI-compatible 决策失败"):
+                with self.assertRaisesRegex(RuntimeError, "AI-compatible 裁决本地处理失败"):
                     self.run_step(
                         run_dir,
                         state,
