@@ -278,6 +278,27 @@ class SelectRequirementCLITests(unittest.TestCase):
 
     def test_complete_current_requirement_success_protects_result_and_state(self) -> None:
         state = self.active_state(advanced=True)
+        state.update(
+            {
+                "step": 18,
+                "current_step": 18,
+                "current_node": "requirement:18_merge",
+            }
+        )
+        state["requirement_cycle"].update(
+            {
+                "trd_path": "docs/trd/BR-001.md",
+                "development_session_id": "development-session",
+                "retrospective": {"outcome": "no_change"},
+            }
+        )
+        for repository in state["requirement_cycle"]["repositories"].values():
+            repository.update(
+                {
+                    "tip_sha": repository["base_sha"],
+                    "merged": False,
+                }
+            )
         run_dir = self.make_run(state)
         success = self.scoped_success(state)
         write_requirement_step_result(run_dir, "BR-001", STEP, success)
@@ -289,6 +310,33 @@ class SelectRequirementCLITests(unittest.TestCase):
             self.assertEqual(self.cli.main(), 1)
         self.assertEqual(json.loads((run_dir / "steps/requirements/BR-001/13.json").read_text(encoding="utf-8")), success)
         self.assertEqual((run_dir / "state.json").read_bytes(), before_state)
+
+    def test_later_node_failure_cannot_downgrade_state_without_a_protected_success(self) -> None:
+        state = self.active_state(advanced=True)
+        state.update(
+            {
+                "step": 18,
+                "current_step": 18,
+                "current_node": "requirement:18_merge",
+            }
+        )
+        state["requirement_cycle"]["development_session_id"] = "development-session"
+        for repository in state["requirement_cycle"]["repositories"].values():
+            repository.update(
+                {
+                    "tip_sha": repository["base_sha"],
+                    "merged": False,
+                }
+            )
+        run_dir = self.make_run(state)
+        before_state = (run_dir / "state.json").read_bytes()
+        with (
+            patch.object(self.cli, "parse_args", return_value=self.args(run_dir.name)),
+            patch.object(self.cli, "run_step_thirteen", side_effect=OSError("simulated")),
+        ):
+            self.assertEqual(self.cli.main(), 1)
+        self.assertEqual((run_dir / "state.json").read_bytes(), before_state)
+        self.assertFalse((run_dir / "steps/requirements").exists())
 
     def test_incomplete_success_is_overwritten_and_historical_requirement_cannot_protect_current_one(self) -> None:
         state = self.active_state("BR-002")

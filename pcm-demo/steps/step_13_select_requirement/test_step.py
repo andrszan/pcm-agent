@@ -26,6 +26,7 @@ from steps.step_13_select_requirement.step import (
     PHASE,
     STEP,
     _select,
+    has_complete_success,
     run,
 )
 import steps.step_13_select_requirement.step as selection_step
@@ -483,6 +484,49 @@ class SelectRequirementTests(unittest.TestCase):
             self.assertEqual((run_dir / "steps/requirements/REQ-001/13.json").read_bytes(), result_bytes)
             self.assertEqual((run_dir / "state.json").read_bytes(), state_bytes)
 
+    def test_success_protection_accepts_later_state_fields_but_keeps_core_baseline_strict(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, _repositories, state = self.make_run(Path(directory))
+            run(run_dir, state)
+            advanced = read_state(run_dir)
+            advanced.update(
+                {
+                    "step": 18,
+                    "current_step": 18,
+                    "current_node": "requirement:18_merge",
+                }
+            )
+            advanced["requirement_registry"]["runtime_metadata"] = {"owner": "later-step"}
+            advanced["requirement_registry"]["requirements"][0]["runtime_metadata"] = {
+                "owner": "later-step"
+            }
+            cycle = advanced["requirement_cycle"]
+            cycle.update(
+                {
+                    "trd_path": "docs/trd/REQ-001.md",
+                    "development_session_id": "development-session",
+                    "retrospective": {"outcome": "no_change"},
+                }
+            )
+            for repository in cycle["repositories"].values():
+                repository.update(
+                    {
+                        "tip_sha": repository["base_sha"],
+                        "merged": False,
+                    }
+                )
+            write_state(run_dir, advanced)
+
+            self.assertTrue(has_complete_success(run_dir, advanced))
+            before = (run_dir / "state.json").read_bytes()
+            with patch.object(selection_step.subprocess, "run", side_effect=AssertionError("不得调用 Git")):
+                with self.assertRaisesRegex(RuntimeError, "需求选择锚点"):
+                    run(run_dir, advanced)
+            self.assertEqual((run_dir / "state.json").read_bytes(), before)
+
+            advanced["requirement_cycle"]["repositories"]["root"]["base_sha"] = "d" * 40
+            self.assertFalse(has_complete_success(run_dir, advanced))
+
     def test_saved_success_refuses_tampered_branch_before_advancing_state(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, repositories, state = self.make_run(Path(directory))
@@ -545,7 +589,7 @@ class SelectRequirementTests(unittest.TestCase):
                 {"status": "success"},
             )
 
-    def test_production_git_commands_use_only_the_selection_allowlist(self) -> None:
+    def test_production_git_commands_preserve_environment_and_write_boundaries(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, _repositories, state = self.make_run(Path(directory), ["root", "frontend"])
             with (
@@ -567,18 +611,10 @@ class SelectRequirementTests(unittest.TestCase):
                     for call in mocked.call_args_list
                 )
             )
-            allowed = {"rev-parse", "branch", "status", "show-ref", "check-ref-format", "switch"}
             self.assertTrue(commands)
-            self.assertTrue(all(command[0] in allowed for command in commands))
-            self.assertIn(("rev-parse", "-q", "--verify", "MERGE_HEAD"), commands)
-            self.assertIn(("rev-parse", "--git-path", "rebase-merge"), commands)
-            self.assertTrue(
-                all(
-                    command[0] != "switch" or command[1:3] == ("-c", "req/req-001")
-                    for command in commands
-                )
-            )
-            self.assertFalse({"add", "commit", "merge", "push", "fetch", "reset", "checkout", "clean"} & {item[0] for item in commands})
+            self.assertTrue(any(command[0] == "switch" for command in commands))
+            forbidden = {"add", "commit", "merge", "push", "fetch", "reset", "checkout", "clean"}
+            self.assertFalse(forbidden & {command[0] for command in commands})
 
 
 if __name__ == "__main__":

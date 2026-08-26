@@ -77,6 +77,7 @@ from steps.step_13_select_requirement import result as requirement_selection_res
 from steps.step_13_select_requirement import run as run_requirement_selection
 from steps.step_13_select_requirement.step import (
     CURRENT_NODE as SELECT_REQUIREMENT_NODE,
+    PHASE as SELECT_REQUIREMENT_PHASE,
     NoPendingRequirements,
     failure_scope as requirement_selection_failure_scope,
     has_complete_success as has_requirement_selection_success,
@@ -1172,7 +1173,17 @@ def main() -> int:
                 state = read_state(run_dir)
             except Exception:  # noqa: BLE001 - 状态损坏时不能构造 scoped 失败结果。
                 state = None
-            if state is not None and selection_scope is not None:
+            at_selection_anchor = (
+                state is not None
+                and state.get("phase") == SELECT_REQUIREMENT_PHASE
+                and (
+                    state.get("step"),
+                    state.get("current_step"),
+                    state.get("current_node"),
+                )
+                == (13, 13, SELECT_REQUIREMENT_NODE)
+            )
+            if state is not None and at_selection_anchor and selection_scope is not None:
                 state.update(
                     {
                         "status": "failed",
@@ -1185,7 +1196,7 @@ def main() -> int:
                 )
                 write_state(run_dir, state)
                 write_requirement_step_result(run_dir, selection_scope[0], 13, result)
-            elif state is not None and not no_pending:
+            elif state is not None and at_selection_anchor and not no_pending:
                 state.update(
                     {
                         "status": "failed",

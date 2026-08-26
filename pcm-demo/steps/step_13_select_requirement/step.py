@@ -172,9 +172,10 @@ def _registry_handoff(
     source = saved["source"]
     catalog = validate_catalog(saved["requirement_catalog"])
     registry = state.get("requirement_registry")
+    registry_keys = {"schema_version", "source", "requirements"}
     if (
         not isinstance(registry, dict)
-        or set(registry) != {"schema_version", "source", "requirements"}
+        or not registry_keys.issubset(registry)
         or type(registry.get("schema_version")) is not int
         or registry.get("schema_version") != 1
         or registry.get("source") != source
@@ -184,10 +185,11 @@ def _registry_handoff(
         raise RuntimeError("需求注册表与第 12 步不一致")
 
     requirements = registry["requirements"]
+    requirement_keys = {"id", "title", "order", "depends_on", "status", "completion"}
     for expected, requirement in zip(catalog, requirements, strict=True):
         if (
             not isinstance(requirement, dict)
-            or set(requirement) != {"id", "title", "order", "depends_on", "status", "completion"}
+            or not requirement_keys.issubset(requirement)
             or {key: requirement.get(key) for key in ("id", "title", "order", "depends_on")} != expected
             or requirement.get("status") not in {"pending", "active", "completed"}
             or (
@@ -216,19 +218,11 @@ def _cycle(
     }
     if (
         not isinstance(cycle, dict)
-        or frozenset(cycle)
-        not in {
-            frozenset(required_keys),
-            frozenset(required_keys | {"trd_path"}),
-        }
+        or not required_keys.issubset(cycle)
         or cycle.get("requirement_id") != requirement_id
         or cycle.get("branch") != expected_branch
         or cycle.get("return_node_after_completion") != CURRENT_NODE
         or not isinstance(cycle.get("repositories"), dict)
-        or (
-            "trd_path" in cycle
-            and (not isinstance(cycle["trd_path"], str) or not cycle["trd_path"])
-        )
     ):
         raise RuntimeError("活动需求 cycle 不符合约定")
     recorded = cycle["repositories"]
@@ -240,7 +234,7 @@ def _cycle(
         value = recorded[name]
         if (
             not isinstance(value, dict)
-            or set(value) != {"base_sha"}
+            or "base_sha" not in value
             or not isinstance(value.get("base_sha"), str)
             or not _HEX_SHA.fullmatch(value["base_sha"])
         ):

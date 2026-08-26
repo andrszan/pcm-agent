@@ -7,7 +7,7 @@
 > - [`PCM 自动化流程 Demo 项目设计`](./PCM自动化流程Demo项目设计.md)：定义 Demo 的目标、范围、黄金输入和最终完成标准；
 > - [`PCM 程序化调度的 AI Agent 产品开发流程`](../../.claude/PCM版AI%20Agent自动化流程设计.md)：定义第 0～18 步、阶段一、阶段二的流程语义、职责边界和停止条件。
 >
-> 第 17 步已完成代码、自动化和真实集成验证：本体 11 项、CLI 4 项，共 15 项；PCM Demo 全量 282 项 `unittest`、`compileall common steps run_step.py` 与 `git diff --check` 通过，独立只读审查最终无高、中置信发现。第 9～11 步现行新合同的真实 Agent 集成仍待后续单独验证，旧 conversation、exact commit prompt 和提交只作为旧合同历史。第 12～17 步已按当前合同完成真实验证；第 17 步在一个产品根 session 中以一次 `/commit-changes` 提交全部权威仓库并推进 `requirement:18_merge` / step 18。第 18 步及阶段二仍未实现。
+> 第 17 步已完成代码、自动化和真实集成验证；本轮第 13 步状态校验收敛后，本体 20 项、CLI 9 项，第 12～14 步定向 63 项通过。从干净 `HEAD` 仅叠加本轮改动的隔离工作区全量 284 项 `unittest` 通过；另一次混合工作树验证叠加本轮范围外的第 17 步重构，全量 280 项连续两次通过。`compileall common steps run_step.py` 与 `git diff --check` 通过，独立只读审查最终无第 13 步高、中置信问题。第 9～11 步现行新合同的真实 Agent 集成仍待后续单独验证，旧 conversation、exact commit prompt 和提交只作为旧合同历史。第 12～17 步已按当前合同完成真实验证；第 17 步在一个产品根 session 中以一次 `/commit-changes` 提交全部权威仓库并推进 `requirement:18_merge` / step 18。第 18 步及阶段二仍未实现。
 
 ## 一、目标、当前范围与状态
 
@@ -857,7 +857,7 @@ conversation 共 7 条：`system → assistant 初始 → user → assistant com
 
 | 步骤 | 名称 | 核心边界与成功锚点 |
 | --- | --- | --- |
-| 13 | 选择需求并建立统一需求分支（已实现） | Python 从 ready pending 中选 `order` 最小需求；fresh 全局预检全部适用仓后先持久化 `active_requirement`（仅 ID）和 cycle（`req/<lowercase-id>`、按仓名 `base_sha`、返回节点），再以 `git switch -c` 建立同名分支。Git 子进程过滤 `GIT_*`。success 只写 `steps/requirements/<ID>/13.json` 并推进 `requirement:14_trd_design`；无 pending 的阶段二转场当前延期，有 pending 无候选失败 |
+| 13 | 选择需求并建立统一需求分支（已实现） | Python 从 ready pending 中选 `order` 最小需求；fresh 全局预检全部适用仓后先持久化 `active_requirement`（仅 ID）和 cycle（`req/<lowercase-id>`、按仓名 `base_sha`、返回节点），再以 `git switch -c` 建立同名分支。Git 子进程过滤 `GIT_*`。success 只写 `steps/requirements/<ID>/13.json` 并推进 `requirement:14_trd_design`；后续保护只验证第 13 步拥有的核心投影，允许其它步骤追加 cycle 字段；无 pending 的阶段二转场当前延期，有 pending 无候选失败 |
 | 14 | 形成活动 TRD（已实现） | fresh 全局预检 requirement branch/base/clean 后先持久化 `docs/trd/<YYYY-MM-DD>-<ID>-<标题>.md`，再使用 requirement-scoped session 显式调用 `/trd-design`。沿用默认 Claude Code 工具和项目权限配置；success 写 `steps/requirements/<ID>/14.json` 并推进 `requirement:15_development`，TRD 保留未提交 |
 | 15 | 实现与验证（已实现） | 调用 `dev-workflow` 完成实现、测试、构建、运行、联调、真实浏览器与渲染验收和独立审查；稳定设计偏差同步活动 TRD；保存 `development_session_id`，不提交、不合并 |
 | 16 | 原开发 session 规则复盘（已实现） | 严格消费 active requirement/cycle/workspace、scoped 第 15 步 success 与同一 `development_session_id`；以独立 `rule_retrospective_<ID>` conversation 预注册 alias 后恢复原 session，原子保存 Git-visible baseline；只允许 root `.claude/rules/**/*.md` 的普通非 hard link 文件相对 baseline 新增或修改，`outputs: []`，不提交 |
@@ -991,7 +991,7 @@ success result 为 `steps/requirements/<ID>/16.json`，`outputs` 恒为 `[]`，�
 
 ### 1. 当前状态事实
 
-第 0～17 步同时使用 `current_step` 和必要的 `phase/current_node`。第 9～11 步 success 只以严格 result schema、固定文档和当前 Git 事实为准；`run_step.py` 对 schema 完整的第 8～12 步 success 保持固定保护，第 13～17 步分别只对当前 active/cycle 的完整 scoped success 保护 result/state，残缺、blocked 或 failed result 可恢复覆盖。
+第 0～17 步同时使用 `current_step` 和必要的 `phase/current_node`。第 9～11 步 success 只以严格 result schema、固定文档和当前 Git 事实为准；`run_step.py` 对 schema 完整的第 8～12 步 success 保持固定保护，第 13～17 步分别只对当前 active/cycle 的完整 scoped success 保护 result/state，残缺、blocked 或 failed result 可恢复覆盖。前序步骤只校验自己拥有的 cycle 核心投影，允许后续步骤追加自身字段；历史步骤的异常仅能在 state 仍位于该步骤锚点时持久化，不能改写已推进的后续节点。
 
 当前真实 state 位于 `phase_1_requirement_development` / `requirement:18_merge`、`step/current_step: 18`。注册表含 14 项 BR：`BR-001` 为 active、13 项 pending、0 项 completed；cycle 保存 `req/br-001`、exact `trd_path`、development session，以及 root/frontend/backend 的 `{base_sha, tip_sha, merged:false}`。第 17 步 session 为 `a00760f3-1760-4e2c-a985-477831a9277f`；三仓仍在需求分支，HEAD 分别为 `62ac0aea0a69ea95d6382adfc276adce808be964`、`65764dee0b2655f1c674ec36fee527861ea5043c`、`0e0bf9bb37e2abcf8c923c0fa4611c671da87640`，local main 保持各自 base，工作树/index clean，无 merge 或 push。不可用 LLM 配置幂等重跑后 state/result/conversation 字节不变。第 18 步和阶段二仍未实现。
 
@@ -1239,7 +1239,7 @@ success result 为 `steps/requirements/<ID>/16.json`，`outputs` 恒为 `[]`，�
 - 配置和敏感信息不泄露；
 - JSON、Markdown、状态和 SHA-256 读写；
 - 第 0～8、12～17 步状态转换；
-- 第 17 步本体 11 项与 CLI 4 项，共 15 项；PCM Demo 当前全量 282 项 `unittest`、`compileall common steps run_step.py` 通过；
+- 第 13 步本体 20 项与 CLI 9 项，共 29 项；第 12～14 步定向 63 项通过；从干净 `HEAD` 仅叠加本轮改动的隔离工作区全量 284 项 `unittest` 通过，另一次混合工作树验证叠加本轮范围外的第 17 步重构，全量 280 项连续两次通过；`compileall common steps run_step.py` 通过；
 - 第 17 步覆盖动态多仓白名单、单产品根 session、clean/dirty 与无空提交、同 session repair、partial multi-repository commit 恢复、首次内容 fingerprint、merge commit 拒绝、Git attributes clean filter、result→state 中断恢复、推进后幂等和 CLI success 保护；
 - 尚未按新合同重新执行真实 Claude Agent、负责人 LLM 或 `/commit-changes` 集成；旧真实 run 仍仅为旧合同历史。
 - 公共循环加第 9～11 步本体及第 10/11 步 CLI 定向回归的 84 项，覆盖完整 conversation 交由公共循环、执行产物 fresh 拒绝、当前 Git 现场核验、blocked 保持 blocked、按需 `/commit-changes`、无 exact prompt/相邻回复成功锚点、result→state 恢复与完整 success 重跑，以及第 10 步无 frontend 的零副作用路径；
@@ -1254,7 +1254,7 @@ success result 为 `steps/requirements/<ID>/16.json`，`outputs` 恒为 `[]`，�
 - 第 4 步严格占位保护、run-owned marker、唯一仓库浅 clone、来源 SHA、路径与符号链接边界、无可提交文件拒绝、payload 后发布、`null` 端、失败现场保留、安全重试、部分发布拒绝覆盖、成功幂等复用和普通 Git 错误脱敏；
 - 第 4 步专属 12 项与真实 GitLab SSH 组装、远端 `main` SHA 比对、无嵌套 `.git`、临时目录清理、零提交根仓库和黄金初稿哈希不变；
 - 第 12 步本体 10 项与 CLI 6 项：自由格式 Backlog prompt 与 Pydantic 字段限制、合法 ID/依赖 ID 及忽略大小写唯一、数组物理顺序对应连续 order、未知/重复/自依赖和环拒绝、非 Git 工作区成功、路径与父级符号链接保护、模型调用期间 SHA 漂移、result→state 中断恢复、两字段 source/catalog/注册表漂移拒绝、旧三字段 source 不受成功保护、失败重跑和失败脱敏；
-- 第 13 步本体 19 项与 CLI 9 项：确定性选择、workspace descriptor、fresh 全局预检、intent/partial recovery、scoped result/state 恢复、Git allowlist/`GIT_*` 过滤、进行中历史拒绝、scoped CLI success/failure 保护、原子 JSON 临时文件符号链接边界及真实 Git 仓库分支验证；
+- 第 13 步本体 20 项与 CLI 9 项：确定性选择、workspace descriptor、fresh 全局预检、intent/partial recovery、scoped result/state 恢复、`GIT_*` 隔离与危险 Git 写操作拒绝、进行中历史拒绝、后续 cycle/注册表字段兼容、advanced state 误调不降级、scoped CLI success/failure 保护、原子 JSON 临时文件符号链接边界及真实 Git 仓库分支验证；
 - Probe C 和旧四段 XML 回放只作为历史；第 9～11 步旧 fresh 真实运行的五段 prompt、conversation、exact commit 和提交事实也只作为旧合同下的历史路径，不作为新合同验证；
 - 第 9～11 步现行新合同尚未按新合同重新执行真实 Claude Agent、负责人 LLM 或 `/commit-changes` 集成；旧真实 run 不构成该集成验证。
 - 第 13 步真实 run 已覆盖 BR-001 的确定性选择、scoped result、intent 先写、三仓 clean `req/br-001`、HEAD/main/target 等于记录 base、零产品文件改动/commit/merge/push，以及幂等重跑的 result/state/ref 不变；
