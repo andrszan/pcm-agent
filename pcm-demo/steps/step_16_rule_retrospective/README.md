@@ -32,7 +32,7 @@ steps/requirements/<requirement-id>/16.json
 
 ## 自动化验证
 
-第 16 步本体 19 项与 CLI 4 项，共 23 项；从 `pcm-demo/` 根递归发现的全量 273 项 `unittest` 已通过，`compileall` 与 `git diff --check` 通过。Pyright langserver 未安装，未执行 IDE/LSP 诊断；Ruff 未安装，未执行 Ruff。独立只读审查在修复发现的问题后最终无高、中置信缺陷。
+第 16 步本体 19 项与 CLI 4 项，共 23 项；从 `pcm-demo/` 根递归发现的当前全量 283 项 `unittest` 已通过，`compileall` 与 `git diff --check` 通过。第 17 步本体 11 项与 CLI 4 项已纳入全量回归。Pyright langserver 未安装，未执行 IDE/LSP 诊断；Ruff 未安装，未执行 Ruff。独立只读审查在修复发现的问题后最终无高、中置信缺陷。
 
 ## 真实验证
 

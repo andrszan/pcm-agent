@@ -105,6 +105,14 @@ from steps.step_16_rule_retrospective.step import (
     failure_scope as rule_retrospective_failure_scope,
     has_complete_success as has_rule_retrospective_success,
 )
+from steps.step_17_commit import RequirementCommitBlocked
+from steps.step_17_commit import result as requirement_commit_result
+from steps.step_17_commit import run as run_requirement_commit
+from steps.step_17_commit.step import (
+    CURRENT_NODE as REQUIREMENT_COMMIT_NODE,
+    failure_scope as requirement_commit_failure_scope,
+    has_complete_success as has_requirement_commit_success,
+)
 
 DEMO_ROOT = Path(__file__).resolve().parent
 
@@ -595,6 +603,15 @@ async def run_step_sixteen(args: argparse.Namespace) -> tuple[Path, dict[str, An
     return run_dir, await run_rule_retrospective(run_dir, read_state(run_dir))
 
 
+async def run_step_seventeen(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
+    if not args.run_id:
+        raise ValueError("第 17 步需要 --run-id")
+    run_dir = run_dir_for(args.run_id)
+    if not run_dir.is_dir():
+        raise ValueError(f"运行记录不存在：{args.run_id}")
+    return run_dir, await run_requirement_commit(run_dir, read_state(run_dir))
+
+
 def sha256_bytes(data: bytes) -> str:
     import hashlib
 
@@ -631,7 +648,7 @@ def run_step_zero(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
 
 def main() -> int:
     args = parse_args()
-    if args.step not in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}:
+    if args.step not in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17}:
         print(f"步骤尚未实现：{args.step}", file=sys.stderr)
         return 2
 
@@ -684,8 +701,10 @@ def main() -> int:
                         run_dir, result = asyncio.run(run_step_fourteen(args))
                     elif args.step == 15:
                         run_dir, result = asyncio.run(run_step_fifteen(args))
-                    else:
+                    elif args.step == 16:
                         run_dir, result = asyncio.run(run_step_sixteen(args))
+                    else:
+                        run_dir, result = asyncio.run(run_step_seventeen(args))
     except ProjectIntakeBlocked as error:
         result = project_intake_result(
             "blocked",
@@ -797,6 +816,18 @@ def main() -> int:
             },
         )
         error_message = str(error)
+    except RequirementCommitBlocked as error:
+        result = requirement_commit_result(
+            "blocked",
+            str(error),
+            requirement_id=error.requirement_id,
+            branch=error.branch,
+            blocked={
+                "reason": str(error),
+                "required_inputs": error.required_inputs,
+            },
+        )
+        error_message = str(error)
     except RuleRetrospectiveBlocked as error:
         result = rule_retrospective_result(
             "blocked",
@@ -863,7 +894,25 @@ def main() -> int:
             result_factory = requirement_registry_result
         else:
             result_factory = workspace_result
-        if args.step == 16:
+        if args.step == 17:
+            scope = None
+            if run_dir is not None:
+                try:
+                    scope = requirement_commit_failure_scope(run_dir, read_state(run_dir))
+                except Exception:  # noqa: BLE001 - 失败结果只能使用可安全确认的活动需求。
+                    scope = None
+            result = requirement_commit_result(
+                "failed",
+                "需求变更统一提交失败。",
+                requirement_id=scope["requirement_id"] if scope else None,
+                branch=scope["branch"] if scope else None,
+                error={
+                    "type": type(error).__name__,
+                    "message": "需求变更统一提交未完成。",
+                },
+            )
+            error_message = "需求变更统一提交失败。"
+        elif args.step == 16:
             scope = None
             if run_dir is not None:
                 try:
@@ -965,7 +1014,19 @@ def main() -> int:
     trd_scope: dict[str, str | None] | None = None
     development_scope: dict[str, str | None] | None = None
     rule_retrospective_scope: dict[str, str] | None = None
-    if run_dir is not None and args.step == 16:
+    requirement_commit_scope: dict[str, str] | None = None
+    if run_dir is not None and args.step == 17:
+        try:
+            requirement_commit_state = read_state(run_dir)
+            requirement_commit_scope = requirement_commit_failure_scope(
+                run_dir, requirement_commit_state
+            )
+            protected_success = has_requirement_commit_success(
+                run_dir, requirement_commit_state
+            )
+        except Exception:  # noqa: BLE001 - 状态损坏时仍需返回脱敏失败信息。
+            protected_success = False
+    elif run_dir is not None and args.step == 16:
         try:
             rule_retrospective_state = read_state(run_dir)
             rule_retrospective_scope = rule_retrospective_failure_scope(
@@ -1004,7 +1065,36 @@ def main() -> int:
             and has_step_success(run_dir, args.step)
         )
 
-    if run_dir is not None and args.step == 16:
+    if run_dir is not None and args.step == 17:
+        if (
+            result["status"] != "success"
+            and not protected_success
+            and requirement_commit_scope is not None
+        ):
+            try:
+                state = read_state(run_dir)
+            except Exception:  # noqa: BLE001 - 状态损坏时不能构造 scoped 失败结果。
+                state = None
+            if state is not None:
+                state.update(
+                    {
+                        "status": result["status"],
+                        "phase": "phase_1_requirement_development",
+                        "step": 17,
+                        "current_step": 17,
+                        "current_node": REQUIREMENT_COMMIT_NODE,
+                        "blocked": result["blocked"],
+                        "error": result["error"],
+                    }
+                )
+                write_state(run_dir, state)
+                write_requirement_step_result(
+                    run_dir,
+                    requirement_commit_scope["requirement_id"],
+                    17,
+                    result,
+                )
+    elif run_dir is not None and args.step == 16:
         if (
             result["status"] != "success"
             and not protected_success
@@ -1139,7 +1229,7 @@ def main() -> int:
 
     if run_dir is not None:
         scoped_path: Path | None = None
-        if args.step in {13, 14, 15, 16}:
+        if args.step in {13, 14, 15, 16, 17}:
             requirement_id = result.get("requirement_id")
             if isinstance(requirement_id, str):
                 try:

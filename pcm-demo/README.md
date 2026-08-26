@@ -21,6 +21,7 @@
 - [第 14 步：形成活动 TRD](steps/step_14_trd_design/README.md)
 - [第 15 步：实现与验证](steps/step_15_development/README.md)
 - [第 16 步：规则复盘](steps/step_16_rule_retrospective/README.md)
+- [第 17 步：统一提交需求变更](steps/step_17_commit/README.md)
 
 每个步骤的业务代码、测试和详细运行说明都在对应步骤目录中。根 README 只提供导航。
 
@@ -33,7 +34,7 @@ uv sync
 uv run python -m unittest discover -s . -t . -p 'test*.py' -v
 ```
 
-第 9～11 步新合同代码与自动化已完成：第 9～11 步本体测试合计 49 项通过；公共循环加第 9～11 步本体及第 10/11 步 CLI 定向回归共 84 项通过；PCM Demo 全量 268 项 `unittest` 通过（86.068 秒）；`compileall common steps run_step.py` 与 `git diff --check` 通过；目标第 9～11 步生产/测试和相关文档 IDE diagnostics 无新增问题（既有 pydantic 解析 warning 和第 12 步 unused hint 不属于本次）。尚未按新合同重新执行真实 Claude Agent、负责人 LLM 或 `/commit-changes` 集成；旧真实 run 仍仅为旧合同历史。
+第 17 步本体 11 项与 CLI 4 项，共 15 项通过；PCM Demo 全量 283 项 `unittest` 通过（85.330 秒），`compileall common steps run_step.py` 与 `git diff --check` 通过。独立只读审查修复首次内容完整性、完成后 merge commit 和 Git attributes 规范化边界后，最终无高、中置信发现。第 9～11 步现行新合同的真实 Agent 集成仍待后续单独验证，旧真实 run 继续只作为旧合同历史。
 
 ## 最近真实验证
 
@@ -83,7 +84,7 @@ commit-changes 执行轮发现文档中的 frontend Git 事实矛盾，严格未
 
 第 15 步已在同一真实 run 完成。它只消费当前 active requirement/cycle/workspace、当前需求 scoped 第 14 步 success 和非空活动 TRD，不读取第 2/5/7/8/9/10/11/13 步文档，不执行 Git 或 Git verifier。`development_<ID>` 复用公共 Agent 决策循环；prompt 只给 `/dev-workflow`、需求 ID/标题和活动 TRD 路径，Agent 按需读取项目现场并可同步稳定 TRD 偏差，但不得修改 `.claude/rules/` 或执行 stage/commit/branch/merge/push。负责人最终 `completed` 即领域完成，success result 写入 `steps/requirements/BR-001/15.json`（`outputs: []`，保存需求、TRD 与 development session），并推进 `requirement:16_rule_retrospective` / step 16；BR-001 仍为 active/completion null。
 
-唯一 development session 为 `e6bd1b82-39f9-41b2-9cc9-a69b281015dc`，Fable 5、Claude Code 2.1.233、`bypassPermissions`，最终正常 success 为 23 turns、约 `$9.784016`。首次调用在 init/session 已保存后暴露 `claude-agent-sdk` 0.2.139 单条 CLI stdout JSON 默认 1 MiB 缓冲的 `JSON message exceeded maximum buffer size`；公共 `ClaudeAgentOptions` 固定增至 10 MiB 后从同一 session 恢复，保留已有产品改动且不影响 resume。自定义 dev/reviewer 子代理曾有未识别 model 警告和一个子进程退出，但主 Agent 继续完成，生产 prompt 未改。最终 conversation 9 条，负责人先要求补齐 Firefox/WebKit 验证后最终 completed。Agent 报告后端 Ruff/format/build、pytest 16 passed 1 skipped、真实 PostgreSQL 与 Alembic 往返迁移；前端 lint/type-check/build、Vitest 15 passed；Chromium/Firefox/WebKit Playwright 矩阵 3 passed，以及真实 FastAPI/PostgreSQL/Vite 浏览器联调、截图读取和独立审查。Windows NVDA 和 macOS VoiceOver 人工路径 deferred，负责人判为非阻断。root 保留活动 TRD和代表性截图未跟踪，frontend/backend 保留实现、测试、迁移与配置的未提交变更；三仓均为 `req/br-001`、index clean，无 commit、merge 或 push。不可用 LLM 配置幂等重跑仍 success，state/result/conversation 字节不变，SHA-256 分别为 `069b50dc583d8472683eded457bdb954265e37000b78c59860986bc8ea15bf72`、`033585fb8c7b2a43937dd67082aec8a179cc368ede869c460df4300a438487a2`、`431972a5bb43f90af90adf557bc1b92adab3599a5adb11a5696f57167a100e19`。第 16 步随后已完成实现和真实验证；第 17、18 步及阶段二仍未实现。
+唯一 development session 为 `e6bd1b82-39f9-41b2-9cc9-a69b281015dc`，Fable 5、Claude Code 2.1.233、`bypassPermissions`，最终正常 success 为 23 turns、约 `$9.784016`。首次调用在 init/session 已保存后暴露 `claude-agent-sdk` 0.2.139 单条 CLI stdout JSON 默认 1 MiB 缓冲的 `JSON message exceeded maximum buffer size`；公共 `ClaudeAgentOptions` 固定增至 10 MiB 后从同一 session 恢复，保留已有产品改动且不影响 resume。自定义 dev/reviewer 子代理曾有未识别 model 警告和一个子进程退出，但主 Agent 继续完成，生产 prompt 未改。最终 conversation 9 条，负责人先要求补齐 Firefox/WebKit 验证后最终 completed。Agent 报告后端 Ruff/format/build、pytest 16 passed 1 skipped、真实 PostgreSQL 与 Alembic 往返迁移；前端 lint/type-check/build、Vitest 15 passed；Chromium/Firefox/WebKit Playwright 矩阵 3 passed，以及真实 FastAPI/PostgreSQL/Vite 浏览器联调、截图读取和独立审查。Windows NVDA 和 macOS VoiceOver 人工路径 deferred，负责人判为非阻断。root 保留活动 TRD和代表性截图未跟踪，frontend/backend 保留实现、测试、迁移与配置的未提交变更；三仓均为 `req/br-001`、index clean，无 commit、merge 或 push。不可用 LLM 配置幂等重跑仍 success，state/result/conversation 字节不变，SHA-256 分别为 `069b50dc583d8472683eded457bdb954265e37000b78c59860986bc8ea15bf72`、`033585fb8c7b2a43937dd67082aec8a179cc368ede869c460df4300a438487a2`、`431972a5bb43f90af90adf557bc1b92adab3599a5adb11a5696f57167a100e19`。第 16 步随后已完成实现和真实验证；第 17 步也已完成代码、自动化、真实提交和幂等验证，当前仅第 18 步及阶段二未实现。
 Git 忽略 run `prompt-role-replay-20260823` 保留旧四段 XML prompt 的历史交接回放；它不是现行五段 prompt 的证据。现行 `role/project_context/responsibility/completion/output` 合同已由第 9 步 fresh 真实运行验证。
 
 ## 第 16 步真实验证
@@ -93,3 +94,11 @@ Git 忽略 run `prompt-role-replay-20260823` 保留旧四段 XML prompt 的历�
 用户明确选择按合同将三仓 `git reset --mixed <cycle base>`，保留完整工作树且 index clean，并独立核验工作树与旧 tip 文件树一致；这是 run-local 现场恢复，不是生产代码对提前提交的兼容。恢复后第 16 步复用 development session `e6bd1b82-39f9-41b2-9cc9-a69b281015dc`，以同 ID 预注册 retrospective alias，Agent normal success（8 turns、`$6.9324520000000005`、`terminal_reason=completed`），conversation 为 `system → assistant 初始 → user Agent 回复 → assistant completed`。唯一规则增量为 root `.claude/rules/frontend-playwright-container.md`：官方 Playwright 容器绑定 frontend 时使用临时 `node_modules` volume 和临时 `.pnpm-store`，结束后不留 `.pnpm-store` 或测试缓存。
 
 最终 `16.json` success、`outputs: []`，state 进入 `phase_1_requirement_development` / `requirement:17_commit` / step 17；BR-001 仍 active/completion null。root 保留 TRD、截图和规则未提交，frontend/backend 保留实现未提交，三仓均在 `req/br-001`、`HEAD`/`main`/target 等于 base、index clean。不可用 LLM 配置的幂等重跑仍 success，未调用模型或 Agent，关键 state、result、conversation 和规则文件字节不变；详细合同和 SHA-256 见[第 16 步 README](steps/step_16_rule_retrospective/README.md)。
+
+## 第 17 步真实验证
+
+第 17 步在产品根创建唯一 `requirement_commit_BR-001` session `a00760f3-1760-4e2c-a985-477831a9277f`，初始 `/commit-changes` 恰好一次；conversation 为 `system → assistant 初始 → user Agent 回复 → assistant completed`。Agent normal success，58 turns、`$4.334054`，一次处理 root/frontend/backend 权威白名单。
+
+root 从 `a7d5509df6843a06315aa803d87285569b86e355` 前进到 `62ac0aea0a69ea95d6382adfc276adce808be964`，创建 `docs: 新增 BR-001 技术设计与界面验证` 和 `chore(agent): 约束容器化 Playwright 测试隔离` 两个提交；frontend 从 `dbab574dbe4d83a02323a750afd04de007565ac5` 前进到 `65764dee0b2655f1c674ec36fee527861ea5043c`；backend 从 `9682be837759c20f1a9ebbdf8fa2cfc09c2768d4` 前进到 `0e0bf9bb37e2abcf8c923c0fa4611c671da87640`。三仓均仍在 `req/br-001`，local `main` 保持 base，工作树/index clean，`base..tip` 无 merge commit，未 merge 或 push。
+
+`17.json` 与 cycle 保存上述 base/tip，cycle 每仓 `merged: false`；BR-001 仍 active/completion null，state 进入 `requirement:18_merge` / step 18。不可用 LLM 配置幂等重跑未调用 Agent 或负责人服务，state/result/conversation SHA-256 分别保持 `aa591d02093ec29d9b4ec2b7d06dfd4e1aac22a2097a19d864fb07e47a15512e`、`2f76b43287404bc828e1dfbe9df52a90fd53b3a388eaf36f3e7c54cc82fb8439`、`93978ff7dcdfa3479d094f0085807bae2166b3dbaffdf1c69c3973d096fc9d87`。详细合同见[第 17 步 README](steps/step_17_commit/README.md)。
