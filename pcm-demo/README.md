@@ -35,7 +35,7 @@ uv sync
 uv run python -m unittest discover -s . -t . -p 'test*.py' -v
 ```
 
-第 17 步现行精简实现本体 10 项与 CLI 3 项，共 13 项；第 18 步本体 10 项与 CLI 5 项，共 15 项。PCM Demo 全量 282 项 `unittest` 通过，`compileall common steps run_step.py` 与 `git diff --check` 通过。第 17 步直接调用 `run_claude()`，不再使用工作树 fingerprint、Git 内容取证或 AI-compatible 负责人决策；第 18 步只使用确定性 Python/Git 完成 ff-only 合并、恢复、分支清理和需求状态更新。独立只读审查最终无第 14、16、17 或 18 步高、中置信发现。第 9～11 步现行新合同的真实 Agent 集成仍待后续单独验证，旧真实 run 继续只作为旧合同历史。
+第 17 步现行精简实现本体 10 项与 CLI 3 项，共 13 项；第 18 步本体 10 项与 CLI 5 项，共 15 项。PCM Demo 全量 283 项 `unittest` 通过，`compileall common steps run_step.py` 与 `git diff --check` 通过。第 13 步直接消费当前需求注册表，不再按新版第 12 步 schema 复验历史 result/source；第 17 步直接调用 `run_claude()`，第 18 步只使用确定性 Python/Git。第 9～11 步现行新合同的真实 Agent 集成仍待后续单独验证，旧真实 run 继续只作为旧合同历史。
 
 ## 最近真实验证
 
@@ -107,3 +107,5 @@ Git 忽略 run `prompt-role-replay-20260823` 保留旧四段 XML prompt 的历�
 `step01-mendmark` 以纯 Python/Git 执行非 root 在前、root 最后的 ff-only 合并。frontend、backend、root 的 local `main` 分别前进到 `65764dee0b2655f1c674ec36fee527861ea5043c`、`0e0bf9bb37e2abcf8c923c0fa4611c671da87640`、`62ac0aea0a69ea95d6382adfc276adce808be964`；三仓当前均在 `main`、工作树/index clean、`req/br-001` 已删除，`base..tip` 无 merge commit且未 push。
 
 scoped `18.json` 保存与第 17 步一致的 root-first base/tip 结果；BR-001 已更新为 `completed`、`completion: {"step": 18}`，`active_requirement` 与 `requirement_cycle` 均已清空，state 返回 `phase_1:select_requirement` / step 13。详细合同见[第 18 步 README](steps/step_18_merge/README.md)。
+
+第二轮首次执行第 13 步时，历史 `steps/12.json.source` 多出的 `root_main_sha` 被现行第 12 步 schema 复验拒绝。第 13 步改为直接消费 `state.requirement_registry` 后，30 项定向与全量 283 项测试通过；同一失败现场无迁移重跑成功，选择 BR-002 并在三仓建立 `req/br-002`。第 14 步 session `73b84b2c-2652-43a7-9a66-4692d05d8367` 正常 `success`（32 turns、约 `$15.230817`）并生成唯一活动 TRD，但公共循环的 AI-compatible 负责人裁决调用失败；conversation 保留在 `system → assistant → user`，流程停在第 14 步，未进入开发。

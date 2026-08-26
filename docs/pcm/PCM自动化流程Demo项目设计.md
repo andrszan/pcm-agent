@@ -2,7 +2,7 @@
 
 > 本文定义正式 PCM 开发前的轻量 Python 验证项目。Demo 的目的不是提前实现正式 PCM，而是用可独立运行、可串联的一组脚本，真实验证 [`PCM 程序化调度的 AI Agent 产品开发流程`](../../.claude/PCM版AI%20Agent自动化流程设计.md)。
 >
-> 第 17 步旧实现已完成真实提交；现行精简实现本体 10 项、CLI 3 项，共 13 项。第 18 步本体 10 项、CLI 5 项，共 15 项；PCM Demo 全量 282 项 `unittest` 通过。`compileall common steps run_step.py` 与 `git diff --check` 通过，独立只读审查最终无第 13、14、16、17 或 18 步高、中置信问题。第 17 步现行代码直接调用 `run_claude()`，不使用 fingerprint、Git 内容取证或负责人决策；第 18 步只使用确定性 Python/Git。历史真实 run 的第 17 步 state/result/旧 conversation 字节保持不变。
+> 第 17 步旧实现已完成真实提交；现行精简实现本体 10 项、CLI 3 项，共 13 项。第 18 步本体 10 项、CLI 5 项，共 15 项；PCM Demo 全量 283 项 `unittest` 通过。`compileall common steps run_step.py` 与 `git diff --check` 通过，独立只读审查最终无第 14、16、17 或 18 步高、中置信问题。第 13 步现行实现直接消费当前需求注册表，不按新版第 12 步 schema 复验历史 result/source；第 17 步直接调用 `run_claude()`，第 18 步只使用确定性 Python/Git。真实 `step01-mendmark` 已完成 BR-001，并在第二轮成功选择 BR-002 后停留于第 14 步负责人裁决失败现场。
 > 第 0～18 步均已完成代码、自动化和适用的真实验证。第 12 步现行合同已用自由格式 Backlog 真实提取 `BR-AI-001`～`BR-AI-003` 并完成零模型幂等重跑；历史 `step01-mendmark` 的 14 项 BR 注册表属于旧三字段 source 合同。第 13～17 步完成 BR-001 的统一分支、活动 TRD、实现验证、规则复盘和提交；第 18 步已将 root/frontend/backend ff-only 到记录 tip、删除需求分支并把 BR-001 标记为 completed。旧 403、非 JSON、非法 completed 和旧 prompt 设计只保留为已修复的根因历史；`step08-real-20260823-a/b` 的 prompt、API、`.coverage`、授权循环和提交事实继续仅属于旧“唯一初始提交证明”合同的历史运行。
 
 ## 一、验证目标
@@ -57,7 +57,7 @@ python run_all.py \
 - 第 10 步：仅以第 8 步严格交接的 `applicable_repositories` 是否含 `frontend` 作为 Demo v1 适用性；不适用时按执行产物存在性拒绝并保持零 Git、Agent、负责人决策、LLM 配置和文档副作用。适用时按与第 9 步相同的按需 repair/提交条件处理唯一固定文档；
 - 第 11 步：严格读取第 2/5/7/8/9/10 步交接，在单一 `requirement_breakdown` session 中以 `/requirement-breakdown` 生成唯一 `docs/backlog/backlog.md`；按需 repair 后只在固定文档造成唯一根仓未提交变化时调用 `/commit-changes`。成功由严格 result schema、tracked 固定文档和当前全仓 Git 事实决定；Backlog 不写需求开发状态，成功进入第 12 步注册表初始化入口；
 - 第 12 步：严格消费第 11 步完整 success，把自由格式 Backlog 交给 Responses/Pydantic 作为唯一语义提取路径，只输出 `id`、`title`、`order`、`depends_on`；Python 不解析 Markdown 排版，只校验非空 catalog、合法且忽略大小写唯一的 ID、数组物理顺序对应连续 `order`、依赖存在/不重复/不自依赖/无环，并以 Backlog 路径/SHA-256 初始化唯一需求注册表；不调用 Claude Agent、`AgentDecision` 或 Skill，不修改产品项目或执行 Git；
-- 第 13 步：零 AI/Agent/Skill 的确定性选择，strict 消费第 8/12 步不可变交接，fresh 全局预检后先写 active intent/cycle，再为全部适用仓建立 `req/<lowercase-id>`；success 只写 `steps/requirements/<ID>/13.json` 并推进 `requirement:14_trd_design`。后续节点保护只校验第 13 步拥有的活动需求、统一分支、仓库集合和每仓 `base_sha`，允许后续步骤在 cycle 追加自身证据；
+- 第 13 步：零 AI/Agent/Skill 的确定性选择，消费第 8 步仓库交接与当前 `state.requirement_registry`；不读取或按现行第 12 步 schema 复验历史 `steps/12.json` / `source`。fresh 全局预检后先写 active intent/cycle，再为全部适用仓建立 `req/<lowercase-id>`；success 只写 `steps/requirements/<ID>/13.json` 并推进 `requirement:14_trd_design`。后续节点保护只校验第 13 步拥有的活动需求、统一分支、仓库集合和每仓 `base_sha`，允许后续步骤在 cycle 追加自身证据；
 - 第 14 步：采用与第 15 步一致的薄编排，只消费当前活动需求、cycle 和 workspace，首次持久化 `trd_path`，再通过 requirement-scoped `trd_design_<ID>` 公共循环显式调用或恢复 `/trd-design`；Agent 按需读取项目事实，Python只核验指定 TRD 非空，不读取 Git或重复复验前序步骤，success 写 `steps/requirements/<ID>/14.json` 并推进 `requirement:15_development`；
 - 第 15 步：只消费当前 active requirement/cycle/workspace、当前 requirement 的第 14 步 scoped success 与非空活动 TRD，在 `development_<ID>` session 中调用 `/dev-workflow`；负责人 completed 即领域完成，success 写 `steps/requirements/<ID>/15.json`、同步 `development_session_id` 并推进第 16 步；
 - 第 16 步：采用薄编排，只消费当前 active requirement/cycle/workspace 与 `development_session_id`，以 `rule_retrospective_<ID>` 建独立负责人 conversation、预注册原 development session alias并调用 `/session-rule-retrospective`；允许规则变化或 no-change，success 写 `steps/requirements/<ID>/16.json`（`outputs: []`）并推进第 17 步，不读取 Git或建立 baseline；
@@ -65,7 +65,7 @@ python run_all.py \
 - 第 18 步：只读取当前 active requirement/cycle、权威仓库路径和 scoped 第 17 步 success 的必要字段；以确定性 Python/Git 按非 root 在前、root 最后的顺序执行或恢复 ff-only 合并，逐仓保存 `merged:true`，全仓到 tip 后统一安全删除需求分支，先写 scoped `18.json` 再完成注册表生命周期；
 - `run_step.py` 对第 0～18 步提供单步运行入口；第 13～18 步按当前 active/cycle 保护 scoped success，失败只有在 state 仍位于自身锚点时才能持久化，不得降级已推进状态。
 
-当前代码已实现并真实成功验证第 0～18 步。第 12 步现行合同已用无 Git、自由格式 Backlog 的隔离 run `step12-ai-only-20260826` 完成真实 Responses 提取与不可连接模型配置幂等重跑；历史 `step01-mendmark` 的 14 项 BR 注册表属于旧三字段 source 合同。第 13～16 步完成 BR-001 的统一需求分支、活动 TRD、实现验证、development session 复用和规则复盘。第 17 步旧实现的真实运行产生 root/frontend/backend tips `62ac0aea0a69ea95d6382adfc276adce808be964`、`65764dee0b2655f1c674ec36fee527861ea5043c`、`0e0bf9bb37e2abcf8c923c0fa4611c671da87640`；第 18 步已将三仓 local main ff-only 到这些 tip，三仓当前均在 main、clean、`req/br-001` 已删除、无 merge commit且未 push。scoped `18.json` 已写，BR-001 为 `completed`、`completion:{"step":18}`，active requirement/cycle 已清空，state 返回 `phase_1:select_requirement` / step 13。
+当前代码已实现并真实成功验证第 0～18 步。第 12 步现行合同已用无 Git、自由格式 Backlog 的隔离 run `step12-ai-only-20260826` 完成真实 Responses 提取与不可连接模型配置幂等重跑；历史 `step01-mendmark` 的 14 项 BR 注册表属于旧三字段 source 合同。BR-001 已完成第 13～18 步，root/frontend/backend 的 local main tips 分别为 `62ac0aea0a69ea95d6382adfc276adce808be964`、`65764dee0b2655f1c674ec36fee527861ea5043c`、`0e0bf9bb37e2abcf8c923c0fa4611c671da87640`。第二轮第 13 步已在不迁移旧注册表来源的情况下选择 BR-002，并从上述 main 建立三仓 `req/br-002`；第 14 步 Agent 已生成活动 TRD，但负责人裁决调用失败，当前 active requirement/cycle、session、conversation、TRD 和分支现场均已保留，尚未进入第 15 步。
 
 ### 2. 从第 3 步起的重大变化
 
@@ -223,7 +223,7 @@ pcm-demo/
 uv run python -m unittest discover -s . -t . -p 'test*.py' -v
 ```
 
-当前终版实际验证为第 13 步本体 20 项与 CLI 9 项，共 29 项，第 17 步本体 10 项与 CLI 3 项，共 13 项；第 12～14 步定向 63 项通过。从干净 `HEAD` 仅叠加第 13 步改动的隔离工作区全量 284 项 `unittest` 通过，当前混合工作树叠加第 17 步精简重构后全量 282 项通过。`compileall`、`git diff --check` 通过；独立只读审查最终无第 13 或第 17 步高、中置信问题。Ruff 未安装，未执行 Ruff。
+当前终版实际验证为第 13 步本体 20 项与 CLI 10 项，共 30 项，第 17 步本体 10 项与 CLI 3 项，共 13 项；PCM Demo 全量 283 项 `unittest`、`compileall`、`git diff --check` 和相关 IDE diagnostics 通过。第 13 步新增旧三字段 `source` 的第二轮回归及受控错误可见性验证；真实 `step01-mendmark` 已从原失败现场直接恢复并选择 BR-002。Ruff 未安装，未执行 Ruff。
 
 ## 七、执行架构与职责
 
@@ -513,7 +513,7 @@ Python 过滤 Git 子进程的 `GIT_*` 环境变量，按非 root 原顺序、ro
 
 最终所有仓库必须位于 main、`HEAD==main==tip`、clean、无进行中 Git 操作且需求分支不存在。步骤先写 root-first 的 scoped `18.json`，再把当前注册表项更新为 `completed` / `completion:{"step":18}`，清空 active requirement/cycle 并返回 cycle 记录节点。第 18 步本体 10 项、CLI 5 项，共 15 项；全量 282 项、`compileall`、`git diff --check` 通过，独立只读审查无高、中置信发现。
 
-真实 `step01-mendmark` 已将 frontend、backend、root 的 local main 分别 ff-only 到 `65764dee0b2655f1c674ec36fee527861ea5043c`、`0e0bf9bb37e2abcf8c923c0fa4611c671da87640`、`62ac0aea0a69ea95d6382adfc276adce808be964`。三仓当前均在 main、工作树/index clean、`req/br-001` 已删除、`base..tip` 无 merge commit且未 push；BR-001 已完成，state 返回 `phase_1:select_requirement` / step 13。
+真实 `step01-mendmark` 已将 frontend、backend、root 的 local main 分别 ff-only 到 `65764dee0b2655f1c674ec36fee527861ea5043c`、`0e0bf9bb37e2abcf8c923c0fa4611c671da87640`、`62ac0aea0a69ea95d6382adfc276adce808be964`，完成 BR-001 并删除 `req/br-001`。随后第二轮已从这些 main 建立 `req/br-002` 并推进第 14 步；当前 root 仅有 BR-002 活动 TRD 未跟踪，frontend/backend clean，三仓均在 `req/br-002`，尚未执行 BR-002 的开发、提交或合并。
 
 ### 阶段二：全项目级集成产品体验审计与迭代
 

@@ -1,6 +1,6 @@
 # 第 13 步：选择需求并建立统一需求分支
 
-本步骤是纯 Python 的确定性节点：不调用 AI、Claude Agent 或 Skill，不修改产品文件，不提交、合并或 push。它严格消费第 8 步的有序 `applicable_repositories` 与第 12 步的静态 catalog/注册表；需求 ID 必须符合 `[A-Za-z0-9][A-Za-z0-9_-]*`，且忽略大小写后唯一。
+本步骤是纯 Python 的确定性节点：不调用 AI、Claude Agent 或 Skill，不修改产品文件，不提交、合并或 push。它消费第 8 步的有序 `applicable_repositories` 和当前 `state.requirement_registry`；注册表是需求生命周期真源，第 13 步不读取或按现行 schema 复验历史 `steps/12.json` 与 `source`。需求 ID 必须符合 `[A-Za-z0-9][A-Za-z0-9_-]*`，且忽略大小写后唯一。
 
 ## 运行
 
@@ -60,6 +60,8 @@ JSON 结果通过同目录唯一临时文件和原子 replace 写入；固定旧
 
 ## 自动化与真实验证
 
-第 12 步 16 项、第 13 步 29 项（本体 20 项、CLI 9 项）、第 14 步 18 项，第 12～14 步定向 63 项通过。从干净 `HEAD` 仅叠加本轮第 13 步改动的隔离工作区全量 284 项 `unittest` 通过；另一次混合工作树验证叠加本轮范围外的第 17 步重构，全量 280 项连续两次通过。`compileall`、`git diff --check` 通过；本次相关生产代码、测试和文档 IDE diagnostics 无新增问题。测试继续覆盖原有确定性选择、全仓预检、intent/partial recovery 和 scoped result/state 恢复，并新增后续 cycle/注册表字段兼容、历史步骤误调不降级 advanced state；Git 命令测试约束安全边界和最终结果，不冻结安全等价的只读查询序列。独立只读审查最终无第 13 步高、中置信问题；Ruff 未安装，未执行。
+第 13 步本体 20 项、CLI 10 项，共 30 项定向测试通过；PCM Demo 全量 283 项 `unittest`、`compileall common steps run_step.py`、`git diff --check` 和相关 IDE diagnostics 通过。测试覆盖确定性选择、全仓预检、intent/partial recovery、scoped result/state 恢复、后续 cycle/注册表字段兼容、历史步骤误调不降级、旧三字段 `source` 不阻断下一需求，以及受控错误原因可见、意外异常继续脱敏。Git 命令测试约束安全边界和最终结果，不冻结安全等价的只读查询序列。
 
-真实 run `step01-mendmark` 确定性选择 `BR-001`。初次执行记录 root base `0232d813...`；第 14 步前用户将新 TRD 命名规则提交到产品 root，使 root `main` 和旧需求分支前进。经用户明确选择后，先完整归档 run，确认三仓旧需求分支与各自 `main` 无独有提交并安全删除，只重置 BR-001 的第 13 步 cycle/result，再从最新 `main` 重跑。当前 scoped result 为 `steps/requirements/BR-001/13.json`，SHA-256 为 `bf202c6fc568f1b4e82efc7be86a094064fe22d8735eee8c7d6999061127cca1`；bases 为 root `a7d5509df6843a06315aa803d87285569b86e355`、frontend `dbab574dbe4d83a02323a750afd04de007565ac5`、backend `9682be837759c20f1a9ebbdf8fa2cfc09c2768d4`。三仓重新进入 clean `req/br-001`，HEAD、local `main` 和 target 均等于 base；没有需求实现提交、merge 或 push。第 14、15、17 步随后分别在 cycle 追加经过自身校验的 `trd_path`、`development_session_id` 和每仓 `tip_sha` / `merged`，均未改变第 13 步的活动需求、统一分支和 base 证据；当前 state 已推进到 `requirement:18_merge` / step 18。
+真实 run `step01-mendmark` 确定性选择 `BR-001`。初次执行记录 root base `0232d813...`；第 14 步前用户将新 TRD 命名规则提交到产品 root，使 root `main` 和旧需求分支前进。经用户明确选择后，先完整归档 run，确认三仓旧需求分支与各自 `main` 无独有提交并安全删除，只重置 BR-001 的第 13 步 cycle/result，再从最新 `main` 重跑。当前 scoped result 为 `steps/requirements/BR-001/13.json`，SHA-256 为 `bf202c6fc568f1b4e82efc7be86a094064fe22d8735eee8c7d6999061127cca1`；bases 为 root `a7d5509df6843a06315aa803d87285569b86e355`、frontend `dbab574dbe4d83a02323a750afd04de007565ac5`、backend `9682be837759c20f1a9ebbdf8fa2cfc09c2768d4`。BR-001 后续已完成第 14～18 步并返回选择节点。
+
+第二轮首次执行暴露历史 `steps/12.json.source` 多出的 `root_main_sha` 被现行第 13 步重复 schema 复验拒绝。删除该跨步依赖后，同一失败现场无迁移、无人工改 state 重跑成功，确定性选择 `BR-002`，以 root `62ac0aea0a69ea95d6382adfc276adce808be964`、frontend `65764dee0b2655f1c674ec36fee527861ea5043c`、backend `0e0bf9bb37e2abcf8c923c0fa4611c671da87640` 为 base 建立 clean `req/br-002` 并推进第 14 步。随后第 14 步 Agent 正常生成非空 TRD，但 AI-compatible 负责人裁决调用失败，流程保留 session、conversation、TRD 和需求分支并停在第 14 步。

@@ -195,7 +195,30 @@ class SelectRequirementTests(unittest.TestCase):
                 self.assertEqual(git("branch", "--show-current", cwd=path).stdout.strip(), "req/req-002")
                 self.assertEqual(git("status", "--porcelain=v1", cwd=path).stdout, "")
 
-    def test_active_dependencies_are_not_treated_as_completed(self) -> None:
+    def test_legacy_registry_source_does_not_block_the_next_requirement(self) -> None:
+        requirements = [
+            {**self.catalog()[0], "status": "completed", "completion": {"step": 18}},
+            {**self.catalog()[1], "status": "pending", "completion": None},
+            {**self.catalog()[2], "status": "pending", "completion": None},
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, _repositories, state = self.make_run(
+                Path(directory), requirements=requirements
+            )
+            legacy_source = self.source() | {"root_main_sha": "b" * 40}
+            state["requirement_registry"]["source"] = legacy_source
+            write_state(run_dir, state)
+            step_twelve = json.loads(
+                (run_dir / "steps/12.json").read_text(encoding="utf-8")
+            )
+            step_twelve["source"] = legacy_source
+            write_json(run_dir / "steps/12.json", step_twelve)
+
+            saved = run(run_dir, state)
+
+            self.assertEqual(saved["requirement_id"], "REQ-002")
+            self.assertEqual(read_state(run_dir)["active_requirement"], "REQ-002")
+
         requirements = [
             {"id": "REQ-001", "order": 1, "depends_on": [], "status": "active"},
             {"id": "REQ-002", "order": 2, "depends_on": ["REQ-001"], "status": "pending"},
@@ -303,31 +326,14 @@ class SelectRequirementTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "不在 main 或记录的需求分支"):
                 run(run_dir, state)
 
-    def test_handoff_rejects_requirement_ids_that_cannot_form_scoped_paths(self) -> None:
+    def test_registry_rejects_requirement_ids_that_cannot_form_scoped_paths(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, _repositories, state = self.make_run(Path(directory))
-            invalid_catalog = [
-                {"id": "REQ.001", "title": "账户", "order": 1, "depends_on": []},
-                *self.catalog()[1:],
-            ]
-            write_json(
-                run_dir / "steps/12.json",
-                {
-                    "step": 12,
-                    "name": "解析 Backlog 并初始化需求注册表",
-                    "status": "success",
-                    "summary": "已初始化。",
-                    "applicable": True,
-                    "outputs": [],
-                    "blocked": None,
-                    "error": None,
-                    "source": self.source(),
-                    "requirement_catalog": invalid_catalog,
-                },
-            )
+            state["requirement_registry"]["requirements"][0]["id"] = "REQ.001"
+            write_state(run_dir, state)
             before = (run_dir / "state.json").read_bytes()
             with patch.object(selection_step.subprocess, "run", side_effect=AssertionError("不得调用 Git")):
-                with self.assertRaisesRegex(RuntimeError, "第 12 步"):
+                with self.assertRaisesRegex(RuntimeError, "静态字段"):
                     run(run_dir, state)
             self.assertEqual((run_dir / "state.json").read_bytes(), before)
 

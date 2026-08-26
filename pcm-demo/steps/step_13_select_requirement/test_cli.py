@@ -235,6 +235,23 @@ class SelectRequirementCLITests(unittest.TestCase):
         self.assertIn(str(run_dir / "state.json"), stderr.getvalue())
         self.assertNotIn("secret=hidden", stderr.getvalue())
 
+    def test_controlled_selection_error_is_reported(self) -> None:
+        run_dir = self.make_run()
+        stderr = io.StringIO()
+        message = "需求注册表静态字段不符合约定"
+        with (
+            patch.object(self.cli, "parse_args", return_value=self.args(run_dir.name)),
+            patch.object(
+                self.cli,
+                "run_step_thirteen",
+                side_effect=self.cli.RequirementSelectionError(message),
+            ),
+            contextlib.redirect_stderr(stderr),
+        ):
+            self.assertEqual(self.cli.main(), 1)
+        self.assertIn(message, stderr.getvalue())
+        self.assertEqual(read_state(run_dir)["error"]["message"], message)
+
     def test_failure_scope_requires_matching_active_registry_and_cycle(self) -> None:
         state = self.active_state()
         run_dir = self.make_run(state)

@@ -79,6 +79,7 @@ from steps.step_13_select_requirement.step import (
     CURRENT_NODE as SELECT_REQUIREMENT_NODE,
     PHASE as SELECT_REQUIREMENT_PHASE,
     NoPendingRequirements,
+    RequirementSelectionError,
     failure_scope as requirement_selection_failure_scope,
     has_complete_success as has_requirement_selection_success,
 )
@@ -1000,6 +1001,11 @@ def main() -> int:
                     scope = requirement_selection_failure_scope(run_dir, read_state(run_dir))
                 except Exception:  # noqa: BLE001 - 失败结果只能使用可安全确认的活动需求。
                     scope = None
+            safe_message = (
+                str(error)
+                if isinstance(error, (NoPendingRequirements, RequirementSelectionError))
+                else "需求选择未完成。"
+            )
             result = requirement_selection_result(
                 "failed",
                 "需求选择失败。",
@@ -1007,10 +1013,10 @@ def main() -> int:
                 branch=scope[1] if scope else None,
                 error={
                     "type": type(error).__name__,
-                    "message": "需求选择未完成。",
+                    "message": safe_message,
                 },
             )
-            error_message = "需求选择失败。"
+            error_message = safe_message
             no_pending = isinstance(error, NoPendingRequirements)
         elif args.step == 12:
             result = result_factory(

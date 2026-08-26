@@ -12,10 +12,7 @@ from common.state import (
     write_requirement_step_result,
     write_state,
 )
-from steps.step_12_initialize_requirement_registry.step import (
-    has_complete_success as has_registry_success,
-    validate_catalog,
-)
+from steps.step_12_initialize_requirement_registry.step import validate_catalog
 
 STEP = 13
 NAME = "选择需求并建立统一需求分支"
@@ -28,6 +25,10 @@ _HEX_SHA = re.compile(r"^[0-9a-f]{40,64}$")
 
 class NoPendingRequirements(RuntimeError):
     """需求注册表已无 pending 项，留待后续阶段处理。"""
+
+
+class RequirementSelectionError(RuntimeError):
+    """可安全返回给调用方的需求选择错误。"""
 
 
 def result(
@@ -164,13 +165,8 @@ def _repository_handoff(run_dir: Path, state: dict[str, Any]) -> list[dict[str, 
 
 
 def _registry_handoff(
-    run_dir: Path, state: dict[str, Any]
+    state: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    saved = _read_json(run_dir / "steps" / "12.json", "第 12 步成功结果不可读取")
-    if not has_registry_success(saved):
-        raise RuntimeError("第 12 步没有完整成功结果")
-    source = saved["source"]
-    catalog = validate_catalog(saved["requirement_catalog"])
     registry = state.get("requirement_registry")
     registry_keys = {"schema_version", "source", "requirements"}
     if (
@@ -178,20 +174,32 @@ def _registry_handoff(
         or not registry_keys.issubset(registry)
         or type(registry.get("schema_version")) is not int
         or registry.get("schema_version") != 1
-        or registry.get("source") != source
         or not isinstance(registry.get("requirements"), list)
-        or len(registry["requirements"]) != len(catalog)
     ):
-        raise RuntimeError("需求注册表与第 12 步不一致")
+        raise RuntimeError("需求注册表不符合约定")
 
     requirements = registry["requirements"]
     requirement_keys = {"id", "title", "order", "depends_on", "status", "completion"}
-    for expected, requirement in zip(catalog, requirements, strict=True):
+    if any(
+        not isinstance(requirement, dict)
+        or not requirement_keys.issubset(requirement)
+        for requirement in requirements
+    ):
+        raise RuntimeError("需求注册表动态字段不符合约定")
+    static_requirements = [
+        {key: requirement[key] for key in ("id", "title", "order", "depends_on")}
+        for requirement in requirements
+    ]
+    try:
+        catalog = validate_catalog(static_requirements)
+    except (ValueError, TypeError) as error:
+        raise RuntimeError("需求注册表静态字段不符合约定") from error
+    if catalog != static_requirements:
+        raise RuntimeError("需求注册表静态字段不符合约定")
+
+    for requirement in requirements:
         if (
-            not isinstance(requirement, dict)
-            or not requirement_keys.issubset(requirement)
-            or {key: requirement.get(key) for key in ("id", "title", "order", "depends_on")} != expected
-            or requirement.get("status") not in {"pending", "active", "completed"}
+            requirement.get("status") not in {"pending", "active", "completed"}
             or (
                 requirement.get("status") in {"pending", "active"}
                 and requirement.get("completion") is not None
@@ -245,7 +253,7 @@ def _cycle(
 
 def _context(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
     repositories = _repository_handoff(run_dir, state)
-    catalog, requirements = _registry_handoff(run_dir, state)
+    catalog, requirements = _registry_handoff(state)
     active = state.get("active_requirement")
     cycle = state.get("requirement_cycle")
     active_entries = [requirement for requirement in requirements if requirement["status"] == "active"]
@@ -537,7 +545,7 @@ def failure_scope(run_dir: Path, state: dict[str, Any]) -> tuple[str, str] | Non
     return context["requirement_id"], context["branch"]
 
 
-def run(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
+def _run(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
     if state.get("phase") != PHASE:
         raise RuntimeError("运行状态不位于需求选择锚点")
     context = _context(run_dir, state)
@@ -629,3 +637,12 @@ def run(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
     )
     write_requirement_step_result(run_dir, context["requirement_id"], STEP, saved)
     return _advance(run_dir, state, saved)
+
+
+def run(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return _run(run_dir, state)
+    except NoPendingRequirements:
+        raise
+    except RuntimeError as error:
+        raise RequirementSelectionError(str(error)) from error
