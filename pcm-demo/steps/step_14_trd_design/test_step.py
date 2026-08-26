@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -14,57 +12,32 @@ from unittest.mock import patch
 DEMO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(DEMO_ROOT))
 
-from common.claude_agent import ClaudeRunResult, run_claude
-from common.files import write_json
-from common.state import read_state, write_state
-from steps.step_13_select_requirement.step import run as select_requirement
+from common.claude_agent import ClaudeRunResult
+from common.state import read_state, write_requirement_step_result, write_state
 from steps.step_14_trd_design.step import (
-    BACKLOG_PATH,
     CURRENT_NODE,
     NEXT_NODE,
     PHASE,
     STEP,
     TRD_DESIGN_DECISION_RULES,
     TRDDesignBlocked,
-    _context,
-    _status_entries,
-    _verify_refs,
     failure_scope,
     has_complete_success,
+    result,
     run,
 )
-
-
-def git(*args: str, cwd: Path, check: bool = True) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", *args], cwd=cwd, text=True, capture_output=True, check=check
-    )
-
-
-def commit(repository: Path, *paths: str, message: str = "test commit") -> str:
-    git("add", "--", *paths, cwd=repository)
-    git(
-        "-c",
-        "user.name=PCM Test",
-        "-c",
-        "user.email=pcm@example.invalid",
-        "commit",
-        "-m",
-        message,
-        cwd=repository,
-    )
-    return git("rev-parse", "HEAD", cwd=repository).stdout.strip()
+import steps.step_14_trd_design.step as trd_step
 
 
 def agent_result(
-    cwd: Path,
+    workspace: Path,
     *,
     text: str = "已形成活动 TRD。",
     session: str = "trd-session-1",
 ) -> ClaudeRunResult:
     return ClaudeRunResult(
         init={
-            "cwd": str(cwd),
+            "cwd": str(workspace),
             "skills": ["trd-design"],
             "slash_commands": ["trd-design"],
         },
@@ -86,237 +59,75 @@ def decision(
     reason: str = "已核验",
     required_inputs: list[str] | None = None,
 ) -> tuple[dict, int, str]:
-    data = {
+    value = {
         "verdict": verdict,
         "answer": answer,
         "reason": reason,
         "required_inputs": required_inputs or [],
     }
-    return data, 1, json.dumps(data, ensure_ascii=False)
+    return value, 1, json.dumps(value, ensure_ascii=False)
 
 
 class TRDDesignTests(unittest.TestCase):
-    @staticmethod
-    def catalog() -> list[dict]:
-        return [
-            {
-                "id": "BR-001",
-                "title": "身份、角色访问与站内消息入口",
-                "order": 1,
-                "depends_on": [],
-            },
-            {
-                "id": "BR-002",
-                "title": "物品治理",
-                "order": 2,
-                "depends_on": ["BR-001"],
-            },
-        ]
-
-    @staticmethod
-    def source() -> dict:
-        return {
-            "path": BACKLOG_PATH.as_posix(),
-            "sha256": "a" * 64,
-        }
-
     def make_run(
         self,
         root: Path,
         *,
-        ui_ux_applicable: bool = True,
-        children: list[str] | None = None,
-        trd_parent_file: bool = False,
+        title: str = "身份、角色访问与站内消息入口",
     ) -> tuple[Path, Path, dict]:
-        children = children or ["frontend", "backend"]
         run_dir = root / "run"
-        (run_dir / "steps").mkdir(parents=True)
+        (run_dir / "steps/requirements/BR-001").mkdir(parents=True)
         workspace_root = root / "workspace-root"
         workspace = workspace_root / "project"
-        (workspace / "docs/requirements").mkdir(parents=True)
-        (workspace / "docs/design").mkdir(parents=True)
-        (workspace / "docs/backlog").mkdir(parents=True)
-
-        documents = {
-            "docs/requirements/项目需求说明.md": "# 项目需求\n\n产品目标。\n",
-            "docs/requirements/产品功能说明.md": "# 产品功能\n\n功能范围。\n",
-            "docs/requirements/项目准备清单.md": "# 项目准备清单\n\n准备完成。\n",
-            "docs/design/技术方案.md": "# 技术方案\n\n总体方案。\n",
-            "docs/design/工程架构设计.md": "# 工程架构\n\n实际架构。\n",
-            BACKLOG_PATH.as_posix(): (
-                "# Backlog\n\n当前正式范围包含两项需求，但不使用固定详情卡格式。\n\n"
-                "第一项 BR-001 的正式名称是“身份、角色访问与站内消息入口”，目标是完成身份与安全访问。\n\n"
-                "第二项 BR-002 的正式名称是“物品治理”，并明确依赖 BR-001。\n"
-            ),
-        }
-        if trd_parent_file:
-            documents["docs/trd"] = "路径冲突。\n"
-        if ui_ux_applicable:
-            documents["docs/ui-ux/framework.md"] = "# UI/UX 框架\n\n体验约束。\n"
-        for relative, content in documents.items():
-            path = workspace / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content, encoding="utf-8")
-
-        git("init", "-b", "main", cwd=workspace)
-        for name in children:
-            child = workspace / name
-            child.mkdir()
-            git("init", "-b", "main", cwd=child)
-            (child / "README.md").write_text(f"# {name}\n", encoding="utf-8")
-            commit(child, "README.md")
-            with (workspace / ".git/info/exclude").open("a", encoding="utf-8") as exclude:
-                exclude.write(f"{name}/\n")
-        commit(workspace, *documents)
-
-        product_outputs = [
-            "docs/requirements/项目需求说明.md",
-            "docs/requirements/产品功能说明.md",
-        ]
-        common = {
-            "status": "success",
-            "summary": "已完成。",
-            "applicable": True,
-            "blocked": None,
-            "error": None,
-        }
-        write_json(
-            run_dir / "steps/02.json",
-            {"step": 2, "name": "项目需求与产品定义", "outputs": product_outputs, **common},
-        )
-        write_json(
-            run_dir / "steps/05.json",
-            {
-                "step": 5,
-                "name": "核验项目准备状态",
-                "outputs": ["docs/requirements/项目准备清单.md"],
-                **common,
-            },
-        )
-        write_json(
-            run_dir / "steps/07.json",
-            {
-                "step": 7,
-                "name": "总体技术方案",
-                "outputs": ["docs/design/技术方案.md"],
-                **common,
-            },
-        )
-        names = ["root", *children]
-        result_repositories = [
-            {
-                "name": name,
-                "path": "." if name == "root" else name,
-                "branch": "main",
-                "worktree_clean": True,
-            }
-            for name in names
-        ]
-        write_json(
-            run_dir / "steps/08.json",
-            {
-                "step": 8,
-                "name": "首次提交适用仓库",
-                "outputs": [],
-                "applicable_repositories": names,
-                "repositories": result_repositories,
-                **common,
-            },
-        )
-        write_json(
-            run_dir / "steps/09.json",
-            {
-                "step": 9,
-                "name": "工程架构设计",
-                "outputs": ["docs/design/工程架构设计.md"],
-                **common,
-            },
-        )
-        write_json(
-            run_dir / "steps/10.json",
-            {
-                "step": 10,
-                "name": "产品级 UI/UX 框架",
-                "status": "success",
-                "summary": "已完成。",
-                "applicable": ui_ux_applicable,
-                "outputs": ["docs/ui-ux/framework.md"] if ui_ux_applicable else [],
-                "blocked": None,
-                "error": None,
-            },
-        )
-        write_json(
-            run_dir / "steps/11.json",
-            {"step": 11, "name": "拆分 Backlog", "outputs": [BACKLOG_PATH.as_posix()], **common},
-        )
-        write_json(
-            run_dir / "steps/12.json",
-            {
-                "step": 12,
-                "name": "解析 Backlog 并初始化需求注册表",
-                "status": "success",
-                "summary": "已初始化。",
-                "applicable": True,
-                "outputs": [],
-                "blocked": None,
-                "error": None,
-                "source": self.source(),
-                "requirement_catalog": self.catalog(),
-            },
-        )
-        state_repositories = [
-            {
-                "name": name,
-                "path": str((workspace if name == "root" else workspace / name).resolve()),
-                "branch": "main",
-                "worktree_clean": True,
-            }
-            for name in names
-        ]
+        workspace.mkdir(parents=True)
         state = {
-            "run_id": "test-run",
-            "status": "success",
+            "status": "running",
             "phase": PHASE,
-            "step": 13,
-            "current_step": 13,
-            "current_node": "phase_1:select_requirement",
+            "step": STEP,
+            "current_step": STEP,
+            "current_node": CURRENT_NODE,
             "workspace": {"root": str(workspace_root), "final_path": str(workspace)},
-            "applicable_repositories": names,
-            "repositories": state_repositories,
             "requirement_registry": {
                 "schema_version": 1,
-                "source": self.source(),
                 "requirements": [
-                    {**item, "status": "pending", "completion": None}
-                    for item in self.catalog()
+                    {
+                        "id": "BR-001",
+                        "title": title,
+                        "order": 1,
+                        "depends_on": [],
+                        "status": "active",
+                        "completion": None,
+                    }
                 ],
             },
-            "active_requirement": None,
-            "requirement_cycle": None,
+            "active_requirement": "BR-001",
+            "requirement_cycle": {
+                "requirement_id": "BR-001",
+                "branch": "req/br-001",
+                "return_node_after_completion": "phase_1:select_requirement",
+            },
             "blocked": None,
             "error": None,
         }
         write_state(run_dir, state)
-        select_requirement(run_dir, state)
-        return run_dir, workspace, read_state(run_dir)
+        return run_dir, workspace, state
 
     @staticmethod
     def run_step(run_dir: Path, state: dict, **kwargs: object) -> dict:
         return asyncio.run(run(run_dir, state, **kwargs))
 
     @staticmethod
-    def write_trd(workspace: Path, state: dict, content: str = "# 技术设计\n\n有效内容。\n") -> Path:
-        relative = state["requirement_cycle"]["trd_path"]
-        target = workspace / relative
+    def write_trd(workspace: Path, state: dict, content: str = "# 活动 TRD\n\n实现约束。\n") -> Path:
+        target = workspace / state["requirement_cycle"]["trd_path"]
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
         return target
 
-    def test_decision_rules_reject_implementation_blocking_open_decisions(self) -> None:
-        self.assertIn("实现前必须确认", TRD_DESIGN_DECISION_RULES)
-        self.assertIn("不能仅因这些事项已被列出就判定完成", TRD_DESIGN_DECISION_RULES)
+    def test_decision_rules_require_implementation_ready_design(self) -> None:
+        self.assertIn("没有阻碍实现的未决事项", TRD_DESIGN_DECISION_RULES)
+        self.assertIn("明确的下一步指令", TRD_DESIGN_DECISION_RULES)
 
-    def test_fresh_persists_exact_path_before_agent_and_places_it_in_prompt(self) -> None:
+    def test_fresh_persists_path_before_agent_and_uses_only_thin_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))
             prompts: list[str] = []
@@ -327,7 +138,6 @@ class TRDDesignTests(unittest.TestCase):
                     persisted["requirement_cycle"]["trd_path"],
                     "docs/trd/2026-08-25-BR-001-身份、角色访问与站内消息入口.md",
                 )
-                self.assertIn(persisted["requirement_cycle"]["trd_path"], prompt)
                 prompts.append(prompt)
                 self.write_trd(workspace, persisted)
                 return agent_result(workspace)
@@ -343,75 +153,42 @@ class TRDDesignTests(unittest.TestCase):
                 config_loader=lambda: object(),
                 today_provider=lambda: date(2026, 8, 25),
             )
+
             self.assertEqual(len(prompts), 1)
             self.assertTrue(prompts[0].startswith("/trd-design\n"))
-            self.assertNotIn("第 14 步", prompts[0])
-            self.assertNotIn("PCM", prompts[0])
-            self.assertEqual(saved["outputs"], [saved["trd_path"]])
+            self.assertIn(saved["trd_path"], prompts[0])
+            for forbidden in ("第 14 步", "PCM", "session", "@./docs/"):
+                self.assertNotIn(forbidden, prompts[0])
+            self.assertFalse((run_dir / "steps/02.json").exists())
+            self.assertFalse((run_dir / "steps/13.json").exists())
             self.assertEqual(saved["trd_session_id"], "trd-session-1")
-            self.assertEqual(_status_entries(workspace), [("??", saved["trd_path"])])
+            self.assertEqual(saved["outputs"], [saved["trd_path"]])
             completed = read_state(run_dir)
             self.assertEqual(
                 (completed["step"], completed["current_step"], completed["current_node"]),
                 (15, 15, NEXT_NODE),
             )
             self.assertTrue(has_complete_success(run_dir, completed))
-            self.assertFalse((run_dir / "steps/14.json").exists())
-            self.assertTrue((run_dir / "steps/requirements/BR-001/14.json").is_file())
 
-    def test_recovery_reuses_first_date_and_original_session(self) -> None:
+    def test_continue_reuses_public_loop_session(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))
+            calls: list[str | None] = []
+            decisions = iter(
+                [
+                    decision("continue", answer="请补全验证场景。"),
+                    decision("completed"),
+                ]
+            )
 
-            async def interrupted(*_: object, **__: object) -> ClaudeRunResult:
-                raise RuntimeError("simulated interruption")
-
-            with self.assertRaisesRegex(RuntimeError, "Agent SDK 执行异常"):
-                self.run_step(
-                    run_dir,
-                    state,
-                    agent_runner=interrupted,
-                    config_loader=lambda: object(),
-                    today_provider=lambda: date(2026, 8, 25),
-                )
-            interrupted_state = read_state(run_dir)
-            first_path = interrupted_state["requirement_cycle"]["trd_path"]
-            prompts: list[str] = []
-
-            async def agent(prompt: str, **_: object) -> ClaudeRunResult:
-                prompts.append(prompt)
-                self.write_trd(workspace, read_state(run_dir))
-                return agent_result(workspace, session="trd-session-2")
+            async def agent(_prompt: str, **kwargs: object) -> ClaudeRunResult:
+                calls.append(kwargs.get("resume_session_id"))
+                if len(calls) == 2:
+                    self.write_trd(workspace, read_state(run_dir))
+                return agent_result(workspace, text=f"第 {len(calls)} 轮结果。")
 
             async def decide(*_: object, **__: object) -> tuple[dict, int, str]:
-                return decision("completed")
-
-            saved = self.run_step(
-                run_dir,
-                interrupted_state,
-                agent_runner=agent,
-                decision_runner=decide,
-                config_loader=lambda: object(),
-                today_provider=lambda: date(2026, 8, 26),
-            )
-            self.assertEqual(saved["trd_path"], first_path)
-            self.assertIn("2026-08-25", saved["trd_path"])
-            self.assertEqual(prompts, [prompts[0]])
-
-    def test_inapplicable_ui_framework_is_not_read_or_referenced(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            run_dir, workspace, state = self.make_run(
-                Path(directory), ui_ux_applicable=False
-            )
-            prompts: list[str] = []
-
-            async def agent(prompt: str, **_: object) -> ClaudeRunResult:
-                prompts.append(prompt)
-                self.write_trd(workspace, read_state(run_dir))
-                return agent_result(workspace)
-
-            async def decide(*_: object, **__: object) -> tuple[dict, int, str]:
-                return decision("completed")
+                return next(decisions)
 
             self.run_step(
                 run_dir,
@@ -421,16 +198,17 @@ class TRDDesignTests(unittest.TestCase):
                 config_loader=lambda: object(),
                 today_provider=lambda: date(2026, 8, 25),
             )
-            self.assertIn("没有适用的产品级 UI/UX 框架", prompts[0])
-            self.assertNotIn("@./docs/ui-ux/framework.md", prompts[0])
+            self.assertEqual(calls, [None, "trd-session-1"])
 
-    def test_completed_missing_document_repairs_in_same_session_without_commit_prompt(self) -> None:
+    def test_completed_missing_document_repairs_in_same_session(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))
             prompts: list[str] = []
+            resumes: list[str | None] = []
 
-            async def agent(prompt: str, **_: object) -> ClaudeRunResult:
+            async def agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
                 prompts.append(prompt)
+                resumes.append(kwargs.get("resume_session_id"))
                 if len(prompts) == 2:
                     self.write_trd(workspace, read_state(run_dir))
                 return agent_result(workspace)
@@ -448,13 +226,10 @@ class TRDDesignTests(unittest.TestCase):
             )
             self.assertEqual(len(prompts), 2)
             self.assertIn("缺失或为空", prompts[1])
+            self.assertEqual(resumes, [None, "trd-session-1"])
             self.assertNotIn("/commit-changes", "\n".join(prompts))
-            conversation = json.loads(
-                (run_dir / "conversations/trd_design_BR-001.json").read_text(encoding="utf-8")
-            )
-            self.assertNotIn("/commit-changes", json.dumps(conversation, ensure_ascii=False))
 
-    def test_blocked_preserves_scoped_result_and_same_session(self) -> None:
+    def test_blocked_preserves_scoped_result_and_session(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))
 
@@ -482,31 +257,65 @@ class TRDDesignTests(unittest.TestCase):
             )
             self.assertEqual(saved["status"], "blocked")
             self.assertEqual(saved["trd_session_id"], "trd-session-1")
-            blocked_state = read_state(run_dir)
-            self.assertEqual(blocked_state["current_node"], CURRENT_NODE)
-            self.assertEqual(blocked_state["status"], "blocked")
+            blocked = read_state(run_dir)
+            self.assertEqual((blocked["status"], blocked["current_node"]), ("blocked", CURRENT_NODE))
 
-    def test_scope_staged_commit_and_ref_drift_are_rejected(self) -> None:
-        cases = ("outside", "staged", "commit")
-        for case in cases:
-            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
-                run_dir, workspace, state = self.make_run(Path(directory))
+    def test_recovery_reuses_first_path_date(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory))
 
-                async def agent(*_: object, **__: object) -> ClaudeRunResult:
-                    current = read_state(run_dir)
-                    target = self.write_trd(workspace, current)
-                    if case == "outside":
-                        (workspace / "outside.txt").write_text("outside\n", encoding="utf-8")
-                    elif case == "staged":
-                        git("add", "--", str(target.relative_to(workspace)), cwd=workspace)
-                    else:
-                        commit(workspace, str(target.relative_to(workspace)))
-                    return agent_result(workspace)
+            async def interrupted(*_: object, **__: object) -> ClaudeRunResult:
+                raise RuntimeError("simulated interruption")
 
-                async def decide(*_: object, **__: object) -> tuple[dict, int, str]:
-                    return decision("completed")
+            with self.assertRaises(RuntimeError):
+                self.run_step(
+                    run_dir,
+                    state,
+                    agent_runner=interrupted,
+                    config_loader=lambda: object(),
+                    today_provider=lambda: date(2026, 8, 25),
+                )
+            interrupted_state = read_state(run_dir)
+            first_path = interrupted_state["requirement_cycle"]["trd_path"]
 
-                with self.assertRaises(RuntimeError):
+            async def agent(*_: object, **__: object) -> ClaudeRunResult:
+                self.write_trd(workspace, read_state(run_dir))
+                return agent_result(workspace, session="trd-session-2")
+
+            async def decide(*_: object, **__: object) -> tuple[dict, int, str]:
+                return decision("completed")
+
+            saved = self.run_step(
+                run_dir,
+                interrupted_state,
+                agent_runner=agent,
+                decision_runner=decide,
+                config_loader=lambda: object(),
+                today_provider=lambda: date(2026, 8, 26),
+            )
+            self.assertEqual(saved["trd_path"], first_path)
+            self.assertIn("2026-08-25", saved["trd_path"])
+
+    def test_success_result_recovers_state_and_advanced_rerun_skips_file_and_agent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory))
+
+            async def agent(*_: object, **__: object) -> ClaudeRunResult:
+                self.write_trd(workspace, read_state(run_dir))
+                return agent_result(workspace)
+
+            async def decide(*_: object, **__: object) -> tuple[dict, int, str]:
+                return decision("completed")
+
+            original_write_state = trd_step.write_state
+
+            def interrupt_advance(path: Path, value: dict) -> None:
+                if value.get("current_node") == NEXT_NODE:
+                    raise OSError("simulated state interruption")
+                original_write_state(path, value)
+
+            with patch.object(trd_step, "write_state", side_effect=interrupt_advance):
+                with self.assertRaises(OSError):
                     self.run_step(
                         run_dir,
                         state,
@@ -516,135 +325,30 @@ class TRDDesignTests(unittest.TestCase):
                         today_provider=lambda: date(2026, 8, 25),
                     )
 
-    def test_trd_parent_file_conflict_is_rejected_before_intent(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            run_dir, _, state = self.make_run(
-                Path(directory), trd_parent_file=True
-            )
-            before = (run_dir / "state.json").read_bytes()
-            with self.assertRaisesRegex(RuntimeError, "父路径"):
-                self.run_step(
-                    run_dir,
-                    state,
-                    today_provider=lambda: date(2026, 8, 25),
-                )
-            self.assertEqual((run_dir / "state.json").read_bytes(), before)
-            self.assertNotIn("trd_path", read_state(run_dir)["requirement_cycle"])
-            self.assertFalse((run_dir / "steps/requirements/BR-001/14.json").exists())
-
-    def test_preflight_ref_drift_has_no_state_or_agent_side_effect(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            run_dir, workspace, state = self.make_run(Path(directory))
-            (workspace / "baseline.txt").write_text("changed\n", encoding="utf-8")
-            commit(workspace, "baseline.txt")
-            before = (run_dir / "state.json").read_bytes()
-            called = False
-
-            async def agent(*_: object, **__: object) -> ClaudeRunResult:
-                nonlocal called
-                called = True
-                return agent_result(workspace)
-
-            with self.assertRaisesRegex(RuntimeError, "基线"):
-                self.run_step(
-                    run_dir,
-                    state,
-                    agent_runner=agent,
-                    today_provider=lambda: date(2026, 8, 25),
-                )
-            self.assertFalse(called)
-            self.assertEqual((run_dir / "state.json").read_bytes(), before)
-            self.assertNotIn("trd_path", read_state(run_dir)["requirement_cycle"])
-
-    def test_success_result_recovers_state_and_advanced_rerun_does_not_read_git(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            run_dir, workspace, state = self.make_run(Path(directory))
-
-            async def agent(*_: object, **__: object) -> ClaudeRunResult:
-                self.write_trd(workspace, read_state(run_dir))
-                return agent_result(workspace)
-
-            async def decide(*_: object, **__: object) -> tuple[dict, int, str]:
-                return decision("completed")
-
-            saved = self.run_step(
-                run_dir,
-                state,
-                agent_runner=agent,
-                decision_runner=decide,
-                config_loader=lambda: object(),
-                today_provider=lambda: date(2026, 8, 25),
-            )
             interrupted = read_state(run_dir)
-            interrupted.update(
-                {
-                    "status": "running",
-                    "step": STEP,
-                    "current_step": STEP,
-                    "current_node": CURRENT_NODE,
-                }
+            saved = json.loads(
+                (run_dir / "steps/requirements/BR-001/14.json").read_text(encoding="utf-8")
             )
-            write_state(run_dir, interrupted)
 
             async def forbidden(*_: object, **__: object) -> ClaudeRunResult:
                 raise AssertionError("不应再次调用 Agent")
 
-            recovered = self.run_step(
-                run_dir,
-                interrupted,
-                agent_runner=forbidden,
-                config_loader=lambda: object(),
-            )
+            recovered = self.run_step(run_dir, interrupted, agent_runner=forbidden)
             self.assertEqual(recovered, saved)
             advanced = read_state(run_dir)
-            (workspace / "future-code.py").write_text("print('future')\n", encoding="utf-8")
-            with patch(
-                "steps.step_14_trd_design.step._git_run",
-                side_effect=AssertionError("推进后不应读取 Git"),
-            ):
-                self.assertEqual(self.run_step(run_dir, advanced), saved)
+            (workspace / saved["trd_path"]).unlink()
+            self.assertEqual(self.run_step(run_dir, advanced, agent_runner=forbidden), saved)
 
-    def test_bisect_state_is_rejected_before_trd_intent(self) -> None:
+    def test_invalid_title_fails_before_path_intent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            run_dir, workspace, state = self.make_run(Path(directory))
-            git("bisect", "start", cwd=workspace)
+            run_dir, _, state = self.make_run(Path(directory), title="登录/注册")
             before = (run_dir / "state.json").read_bytes()
-            with self.assertRaisesRegex(RuntimeError, "未完成"):
-                self.run_step(
-                    run_dir,
-                    state,
-                    today_provider=lambda: date(2026, 8, 25),
-                )
+            with self.assertRaisesRegex(RuntimeError, "文件名"):
+                self.run_step(run_dir, state, today_provider=lambda: date(2026, 8, 25))
             self.assertEqual((run_dir / "state.json").read_bytes(), before)
             self.assertNotIn("trd_path", read_state(run_dir)["requirement_cycle"])
 
-    def test_default_agent_runner_uses_common_runner_without_tool_overrides(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            run_dir, workspace, state = self.make_run(Path(directory))
-            captured: dict[str, object] = {}
-
-            async def default_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
-                captured.update(kwargs)
-                self.write_trd(workspace, read_state(run_dir))
-                return agent_result(workspace)
-
-            async def decide(*_: object, **__: object) -> tuple[dict, int, str]:
-                return decision("completed")
-
-            self.assertIs(run.__kwdefaults__["agent_runner"], run_claude)
-            self.run_step(
-                run_dir,
-                state,
-                agent_runner=default_agent,
-                decision_runner=decide,
-                config_loader=lambda: object(),
-                today_provider=lambda: date(2026, 8, 25),
-            )
-            self.assertEqual(Path(captured["cwd"]).resolve(), workspace.resolve())
-            self.assertNotIn("tools", captured)
-            self.assertNotIn("hooks", captured)
-
-    def test_failure_scope_and_git_environment_are_scoped(self) -> None:
+    def test_failure_scope_uses_persisted_path_and_step_never_imports_git_subprocess(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, _, state = self.make_run(Path(directory))
             self.assertIsNone(failure_scope(run_dir, state))
@@ -654,28 +358,10 @@ class TRDDesignTests(unittest.TestCase):
             write_state(run_dir, state)
             scope = failure_scope(run_dir, state)
             self.assertEqual(scope["requirement_id"], "BR-001")
-            self.assertEqual(
-                scope["trd_path"],
-                "docs/trd/2026-08-25-BR-001-身份、角色访问与站内消息入口.md",
-            )
-
-            captured: list[dict[str, str]] = []
-            original = subprocess.run
-
-            def recording_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess:
-                env = kwargs.get("env")
-                if isinstance(env, dict):
-                    captured.append(env)
-                return original(*args, **kwargs)
-
-            with patch.dict(os.environ, {"GIT_DIR": "/tmp/redirect", "GIT_INDEX_FILE": "/tmp/index"}):
-                with patch(
-                    "steps.step_14_trd_design.step.subprocess.run",
-                    side_effect=recording_run,
-                ):
-                    _verify_refs(_context(run_dir, state))
-            self.assertTrue(captured)
-            self.assertTrue(all(not any(key.startswith("GIT_") for key in env) for env in captured))
+            self.assertEqual(scope["branch"], "req/br-001")
+            self.assertEqual(scope["trd_path"], state["requirement_cycle"]["trd_path"])
+            self.assertNotIn("subprocess", vars(trd_step))
+            self.assertNotIn("os", vars(trd_step))
 
 
 if __name__ == "__main__":
