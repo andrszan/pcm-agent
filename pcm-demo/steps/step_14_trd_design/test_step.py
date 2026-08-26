@@ -118,7 +118,6 @@ class TRDDesignTests(unittest.TestCase):
         return {
             "path": BACKLOG_PATH.as_posix(),
             "sha256": "a" * 64,
-            "root_main_sha": "b" * 40,
         }
 
     def make_run(
@@ -145,10 +144,9 @@ class TRDDesignTests(unittest.TestCase):
             "docs/design/技术方案.md": "# 技术方案\n\n总体方案。\n",
             "docs/design/工程架构设计.md": "# 工程架构\n\n实际架构。\n",
             BACKLOG_PATH.as_posix(): (
-                "# Backlog\n\n## 需求详情\n\n"
-                "#### BR-001 身份、角色访问与站内消息入口\n\n"
-                "##### 目标\n\n完成身份与安全访问。\n\n"
-                "#### BR-002 物品治理\n\n##### 目标\n\n治理物品。\n"
+                "# Backlog\n\n当前正式范围包含两项需求，但不使用固定详情卡格式。\n\n"
+                "第一项 BR-001 的正式名称是“身份、角色访问与站内消息入口”，目标是完成身份与安全访问。\n\n"
+                "第二项 BR-002 的正式名称是“物品治理”，并明确依赖 BR-001。\n"
             ),
         }
         if trd_parent_file:

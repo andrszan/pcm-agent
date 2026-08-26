@@ -49,7 +49,6 @@ class TRDDesignCLITests(unittest.TestCase):
         return {
             "path": "docs/backlog/backlog.md",
             "sha256": "a" * 64,
-            "root_main_sha": "b" * 40,
         }
 
     @staticmethod

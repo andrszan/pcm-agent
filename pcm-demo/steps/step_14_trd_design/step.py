@@ -704,9 +704,6 @@ def _inputs(run_dir: Path, context: dict[str, Any]) -> dict[str, Any]:
     ui_path, ui_contents = _ui_ux_input(run_dir, workspace)
     _strict_output_result(run_dir, 11, "拆分 Backlog", BACKLOG_PATH)
     backlog = _document_contents(workspace, BACKLOG_PATH, "正式 Backlog")
-    source = context["requirement"].get("id")
-    if f"#### {source} {context['title']}" not in backlog:
-        raise RuntimeError("正式 Backlog 缺少当前活动需求详情卡")
     return {
         "product_outputs": product_outputs,
         "checklist": checklist,
@@ -737,8 +734,8 @@ def initial_prompt(context: dict[str, Any], inputs: dict[str, Any], trd_path: st
 `{trd_path}`
 
 权威需求：
-- 当前需求：`{context['requirement_id']} {context['title']}`
-- 完整需求详情：@./{BACKLOG_PATH.as_posix()} 中标题为 `#### {context['requirement_id']} {context['title']}` 的详情卡
+- 当前需求：`{context['requirement_id']} {context['title']}`，其 ID、标题、顺序和显式依赖已由需求注册表确认。
+- 完整 Backlog：@./{BACKLOG_PATH.as_posix()}。Backlog 可使用任意清楚的自然语言结构，请按当前需求 ID 和标题定位相关范围、规则、依赖与验收信息，不依赖固定标题层级或详情卡格式。
 
 权威产品与工程资料：
 {product_references}

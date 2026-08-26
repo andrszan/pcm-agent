@@ -34,7 +34,7 @@ uv sync
 uv run python -m unittest discover -s . -t . -p 'test*.py' -v
 ```
 
-第 17 步本体 11 项与 CLI 4 项，共 15 项通过；PCM Demo 全量 283 项 `unittest` 通过（85.330 秒），`compileall common steps run_step.py` 与 `git diff --check` 通过。独立只读审查修复首次内容完整性、完成后 merge commit 和 Git attributes 规范化边界后，最终无高、中置信发现。第 9～11 步现行新合同的真实 Agent 集成仍待后续单独验证，旧真实 run 继续只作为旧合同历史。
+第 17 步本体 11 项与 CLI 4 项，共 15 项通过；PCM Demo 全量 282 项 `unittest` 通过（82.099 秒），`compileall common steps run_step.py` 与 `git diff --check` 通过。独立只读审查修复首次内容完整性、完成后 merge commit 和 Git attributes 规范化边界后，最终无高、中置信发现。第 9～11 步现行新合同的真实 Agent 集成仍待后续单独验证，旧真实 run 继续只作为旧合同历史。
 
 ## 最近真实验证
 
@@ -72,11 +72,11 @@ commit-changes 执行轮发现文档中的 frontend Git 事实矛盾，严格未
 
 负责人 Responses 决策曾三次在正常 run 后瞬时写入 failed；两次独立同上下文只读诊断虽得到合法 `completed`，均未注入正式 conversation。依靠正常原节点重跑恢复，未添加自定义 HTTP 重试或修改生产 prompt。最终 conversation 为 7 条：`system → assistant 初始 → user 生成回复 → assistant completed → assistant exact commit prompt → user 提交回复 → assistant completed`，exact commit 恰好一次且使用同一 session。产品根未 push 提交 `2aaa743a97d96fe93deaaaaa13a94e4c414369a2`（`docs: 建立 MendMark 首版正式 Backlog`）仅新增 Backlog，frontend/backend SHA 不变；三仓均在 `main` 且 clean。该历史 `steps/11.json` success 当时进入旧 `phase_1:select_requirement` / step 12 占位入口。
 
-第 12 步真实运行前严格核验旧 state：第 11 步 strict success、`active_requirement` 与 `requirement_cycle` 均为 `null`、无 `requirement_registry`、无 `steps/12.json`，root/frontend/backend 均为自身 top-level、`main`、clean。仅在 run-local 将 `current_node` 从旧入口规范化为 `phase_1:initialize_requirement_registry`；state SHA-256 从 `c153ec8c9d39d82806009c7052988695fe10d3a384566f00f852c2c8b4b02ee8` 变为 `eecf476c3b6c401c9db6a41f9f3ca398056eb509de956c93b0f9fae55f0ec170`。生产代码未添加 legacy 兼容。
+第 12 步旧合同真实运行前曾严格核验旧 state：第 11 步 strict success、`active_requirement` 与 `requirement_cycle` 均为 `null`、无 `requirement_registry`、无 `steps/12.json`，root/frontend/backend 均为自身 top-level、`main`、clean。仅在 run-local 将 `current_node` 从旧入口规范化为 `phase_1:initialize_requirement_registry`；生产代码未添加 legacy 兼容。该现场、旧三字段 `source` 与 root `main` SHA 仅作为历史证据保留。
 
-真实 Responses 成功提取 BR-001～BR-014 共 14 条，标题、连续 `order` 1～14 和依赖均与 Backlog 总览和详情卡一致；注册表全部为 `pending`、`completion: null`。来源 Backlog SHA-256 为 `707c4b91924542e9cbd282fba53cc8857b8ea1fcbdfb7a820c208d0573d759bb`，root `main` SHA 为 `0232d8136c075cb61a6617a95e1504b67bd9acd1`。state 已进入第 13 步 `phase_1:select_requirement`，`active_requirement`、`requirement_cycle` 均为 `null`，未新增 `completed_requirements` 或 `phase_two`，也没有新 Claude session 或负责人决策 conversation。产品 root/frontend/backend 分别为 `0232d8136c075cb61a6617a95e1504b67bd9acd1`、`dbab574dbe4d83a02323a750afd04de007565ac5`、`9682be837759c20f1a9ebbdf8fa2cfc09c2768d4`，三仓仍为 `main`、clean。
+第 12 步现行合同不解析 Markdown 总览、表格、详情卡或标题层级，也不读取 Git。它将整份自由格式 Backlog 交给 Responses/Pydantic 作为唯一语义提取路径；Python 只校验非空 catalog、合法且忽略大小写唯一的 ID、数组物理顺序对应连续 `order`、依赖存在/不重复/不自依赖/无环，并以 Backlog `path + sha256` 作为来源。模型调用前后的 SHA 漂移、result→state 恢复和 pending 注册表保持确定性。
 
-幂等真实重跑使用不可用模型配置仍 success，证明未加载模型；`steps/12.json` 与 state 字节不变，最终 result SHA-256 为 `8f829cb3d4935a9dcd07bea2dd8f0df2a22369c433ba4320938e2a9461f41fb0`，state SHA-256 为 `73fd0cb99c39f64f9ef210a171799f79baaee87a417a18f5db74f5b5374470f7`。
+新合同真实隔离 run `step12-ai-only-20260826` 使用无 Git 工作区和没有总览表、详情卡或固定标题层级的自然语言 Backlog。真实 Responses 准确提取 `BR-AI-001`～`BR-AI-003`，标题、顺序和显式依赖均正确，并排除 `NOTE-001` 示例和在线支付未来设想；注册表全部为 `pending`、`completion: null`，source 仅含路径与 SHA-256。以不可连接的 LLM 配置幂等重跑仍 success，result/state 字节不变。第 12 步 16 项、第 12～14 步定向 61 项、全量 282 项 `unittest`、`compileall` 与目标 IDE diagnostics 均通过。
 
 第 13 步初次真实运行以零 AI、零 Agent、零 Skill 的确定性路径选择 `BR-001` 并建立三仓 `req/br-001`。第 14 步开始前，用户将新的 TRD 命名规则提交到产品 root，使 root `main` 和旧需求分支前进到 `a7d5509df6843a06315aa803d87285569b86e355`。经用户明确选择，先完整归档旧 run 现场，确认三仓旧需求分支均无独有提交后安全删除，只重置 BR-001 的第 13 步 cycle/result 并从最新 `main` 重跑。当前 cycle bases 为 root `a7d5509df6843a06315aa803d87285569b86e355`、frontend `dbab574dbe4d83a02323a750afd04de007565ac5`、backend `9682be837759c20f1a9ebbdf8fa2cfc09c2768d4`；三仓随后进入 clean `req/br-001`，没有需求实现提交、merge 或 push。
 

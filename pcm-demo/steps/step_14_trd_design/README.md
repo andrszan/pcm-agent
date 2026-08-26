@@ -11,7 +11,7 @@
 - 第 7 步总体技术方案；
 - 第 9 步工程架构设计；
 - 第 10 步适用时的产品级 UI/UX 框架；
-- 第 11 步正式 Backlog 和当前活动需求详情；
+- 第 11 步自由格式正式 Backlog，以及需求注册表中已确认的当前活动需求 ID、标题、顺序和显式依赖；
 - 第 8 步确认的全部适用仓库及其实际代码事实。
 
 全部适用仓库必须位于 cycle 记录的统一需求分支，且 `HEAD`、local `main`、需求分支 ref 均等于各仓记录的 `base_sha`。fresh 入口要求全仓 clean、index clean，并拒绝进行中的 merge、rebase、cherry-pick、revert 或 bisect。

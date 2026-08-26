@@ -60,6 +60,6 @@ JSON 结果通过同目录唯一临时文件和原子 replace 写入；固定旧
 
 ## 自动化与真实验证
 
-第 12 步 17 项、第 13 步 28 项、第 14 步 19 项，第 12～14 步定向 64 项、全量 241 项 `unittest` 通过。`compileall`、`git diff --check` 与全工作区 IDE diagnostics 通过；独立审查发现的确定性边界问题均已修复并补测试，步骤私有工具覆盖方案经用户复核后删除，最终复核无高、中置信发现。Ruff 未安装，未执行。
+第 12 步 16 项、第 13 步 27 项、第 14 步 18 项，第 12～14 步定向 61 项、全量 282 项 `unittest` 通过。`compileall` 通过；第 12 步目标 IDE diagnostics 为零。独立审查发现的既有确定性边界问题均已修复并补测试，步骤私有工具覆盖方案经用户复核后删除，最终复核无高、中置信发现。Ruff 未安装，未执行。
 
 真实 run `step01-mendmark` 确定性选择 `BR-001`。初次执行记录 root base `0232d813...`；第 14 步前用户将新 TRD 命名规则提交到产品 root，使 root `main` 和旧需求分支前进。经用户明确选择后，先完整归档 run，确认三仓旧需求分支与各自 `main` 无独有提交并安全删除，只重置 BR-001 的第 13 步 cycle/result，再从最新 `main` 重跑。当前 scoped result 为 `steps/requirements/BR-001/13.json`，SHA-256 为 `bf202c6fc568f1b4e82efc7be86a094064fe22d8735eee8c7d6999061127cca1`；bases 为 root `a7d5509df6843a06315aa803d87285569b86e355`、frontend `dbab574dbe4d83a02323a750afd04de007565ac5`、backend `9682be837759c20f1a9ebbdf8fa2cfc09c2768d4`。三仓重新进入 clean `req/br-001`，HEAD、local `main` 和 target 均等于 base；没有需求实现提交、merge 或 push。第 14 步随后只在 cycle 追加经过校验的 `trd_path`，不改变第 13 步分支证据，并已推进 `requirement:15_development` / step 15。

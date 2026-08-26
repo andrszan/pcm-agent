@@ -49,7 +49,6 @@ class StepTwelveCLITests(unittest.TestCase):
         return {
             "path": "docs/backlog/backlog.md",
             "sha256": "a" * 64,
-            "root_main_sha": "b" * 40,
         }
 
     @classmethod
@@ -131,6 +130,8 @@ class StepTwelveCLITests(unittest.TestCase):
             "missing": {"status": "success"},
             "extra": success | {"unexpected": "field"},
             "wrong-source": success | {"source": {"path": "docs/backlog/backlog.md"}},
+            "legacy-source": success
+            | {"source": self.source() | {"root_main_sha": "b" * 40}},
             "dynamic-field": success | {"requirement_catalog": [{**self.catalog()[0], "status": "pending"}]},
             "duplicate-order": success | {"requirement_catalog": [self.catalog()[0], {**self.catalog()[1], "order": 1}]},
             "cycle": success | {"requirement_catalog": [{**self.catalog()[0], "depends_on": ["REQ-002"]}, self.catalog()[1]]},
@@ -197,7 +198,7 @@ class StepTwelveCLITests(unittest.TestCase):
         self.assertEqual(json.loads((run_dir / "steps/12.json").read_text(encoding="utf-8")), success)
         self.assertEqual(read_state(run_dir), self.advanced_state())
 
-    def test_incomplete_success_is_overwritten(self) -> None:
+    def test_advanced_state_with_incomplete_success_stays_failed_without_rollback(self) -> None:
         run_dir = self.make_run(self.advanced_state())
         write_json(run_dir / "steps/12.json", {"status": "success"})
         with (
@@ -209,6 +210,14 @@ class StepTwelveCLITests(unittest.TestCase):
         state = read_state(run_dir)
         self.assertEqual((state["step"], state["current_step"], state["current_node"]), (13, 13, NEXT_NODE))
         self.assertEqual(state["status"], "failed")
+        with patch.object(self.cli, "parse_args", return_value=self.args(run_dir.name)):
+            self.assertEqual(self.cli.main(), 1)
+        repeated = read_state(run_dir)
+        self.assertEqual(
+            (repeated["step"], repeated["current_step"], repeated["current_node"]),
+            (13, 13, NEXT_NODE),
+        )
+        self.assertEqual(repeated["status"], "failed")
 
 
 if __name__ == "__main__":
