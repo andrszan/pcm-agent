@@ -24,6 +24,9 @@ target-*/
 # ignore files
 /docs/ignore/
 
+# 测试与 UI 浏览器验收截图
+/.test-screenshots/
+
 # playwright
 .playwright/
 .playwright-cli/

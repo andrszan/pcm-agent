@@ -2,7 +2,7 @@
 
 > 本文定义正式 PCM 开发前的轻量 Python 验证项目。Demo 的目的不是提前实现正式 PCM，而是用可独立运行、可串联的一组脚本，真实验证 [`PCM 程序化调度的 AI Agent 产品开发流程`](../../.claude/PCM版AI%20Agent自动化流程设计.md)。
 >
-> 第 17 步旧实现已完成真实提交；现行精简实现本体 10 项、CLI 3 项，共 13 项。第 18 步本体 10 项、CLI 5 项，共 15 项；PCM Demo 全量 294 项 `unittest` 通过。`compileall common steps run_step.py` 与 `git diff --check` 通过，独立只读审查最终无第 13、14、17 或 18 步高、中置信问题。第 17 步现行代码直接调用 `run_claude()`，不使用 fingerprint、Git 内容取证或负责人决策；第 18 步只使用确定性 Python/Git。历史真实 run 的第 17 步 state/result/旧 conversation 字节保持不变。
+> 第 17 步旧实现已完成真实提交；现行精简实现本体 10 项、CLI 3 项，共 13 项。第 18 步本体 10 项、CLI 5 项，共 15 项；PCM Demo 全量 282 项 `unittest` 通过。`compileall common steps run_step.py` 与 `git diff --check` 通过，独立只读审查最终无第 13、14、16、17 或 18 步高、中置信问题。第 17 步现行代码直接调用 `run_claude()`，不使用 fingerprint、Git 内容取证或负责人决策；第 18 步只使用确定性 Python/Git。历史真实 run 的第 17 步 state/result/旧 conversation 字节保持不变。
 > 第 0～18 步均已完成代码、自动化和适用的真实验证。第 12 步现行合同已用自由格式 Backlog 真实提取 `BR-AI-001`～`BR-AI-003` 并完成零模型幂等重跑；历史 `step01-mendmark` 的 14 项 BR 注册表属于旧三字段 source 合同。第 13～17 步完成 BR-001 的统一分支、活动 TRD、实现验证、规则复盘和提交；第 18 步已将 root/frontend/backend ff-only 到记录 tip、删除需求分支并把 BR-001 标记为 completed。旧 403、非 JSON、非法 completed 和旧 prompt 设计只保留为已修复的根因历史；`step08-real-20260823-a/b` 的 prompt、API、`.coverage`、授权循环和提交事实继续仅属于旧“唯一初始提交证明”合同的历史运行。
 
 ## 一、验证目标
@@ -60,7 +60,7 @@ python run_all.py \
 - 第 13 步：零 AI/Agent/Skill 的确定性选择，strict 消费第 8/12 步不可变交接，fresh 全局预检后先写 active intent/cycle，再为全部适用仓建立 `req/<lowercase-id>`；success 只写 `steps/requirements/<ID>/13.json` 并推进 `requirement:14_trd_design`。后续节点保护只校验第 13 步拥有的活动需求、统一分支、仓库集合和每仓 `base_sha`，允许后续步骤在 cycle 追加自身证据；
 - 第 14 步：采用与第 15 步一致的薄编排，只消费当前活动需求、cycle 和 workspace，首次持久化 `trd_path`，再通过 requirement-scoped `trd_design_<ID>` 公共循环显式调用或恢复 `/trd-design`；Agent 按需读取项目事实，Python只核验指定 TRD 非空，不读取 Git或重复复验前序步骤，success 写 `steps/requirements/<ID>/14.json` 并推进 `requirement:15_development`；
 - 第 15 步：只消费当前 active requirement/cycle/workspace、当前 requirement 的第 14 步 scoped success 与非空活动 TRD，在 `development_<ID>` session 中调用 `/dev-workflow`；负责人 completed 即领域完成，success 写 `steps/requirements/<ID>/15.json`、同步 `development_session_id` 并推进第 16 步；
-- 第 16 步：只消费当前 active requirement/cycle/workspace、scoped 第 15 步 success 与 `development_session_id`，以 `rule_retrospective_<ID>` 建独立负责人 conversation、预注册同一 session alias 并调用 `/session-rule-retrospective`；fresh 原子写 Git-visible baseline，success 写 `steps/requirements/<ID>/16.json`（`outputs: []`）并推进第 17 步；
+- 第 16 步：采用薄编排，只消费当前 active requirement/cycle/workspace 与 `development_session_id`，以 `rule_retrospective_<ID>` 建独立负责人 conversation、预注册原 development session alias并调用 `/session-rule-retrospective`；允许规则变化或 no-change，success 写 `steps/requirements/<ID>/16.json`（`outputs: []`）并推进第 17 步，不读取 Git或建立 baseline；
 - 第 17 步：只消费当前 active requirement/cycle/workspace、完整 scoped 第 16 步 success、统一需求分支和各仓 base，在产品根 direct `run_claude()` session 中调用 `/commit-changes`；Python 只核验白名单、分支、main/base、最终 clean 和 tips，写 scoped `17.json` 并推进第 18 步；
 - 第 18 步：只读取当前 active requirement/cycle、权威仓库路径和 scoped 第 17 步 success 的必要字段；以确定性 Python/Git 按非 root 在前、root 最后的顺序执行或恢复 ff-only 合并，逐仓保存 `merged:true`，全仓到 tip 后统一安全删除需求分支，先写 scoped `18.json` 再完成注册表生命周期；
 - `run_step.py` 对第 0～18 步提供单步运行入口；第 13～18 步按当前 active/cycle 保护 scoped success，失败只有在 state 仍位于自身锚点时才能持久化，不得降级已推进状态。
@@ -315,7 +315,7 @@ Python 负责确定性操作和最终状态裁决：
 | 13 | 选择需求并建立统一需求分支 | 确定性选择 ready pending 需求，fresh 全局预检后先写 active intent/cycle，再在全部适用仓建立 `req/<lowercase-id>` | scoped `steps/requirements/<ID>/13.json` success，state 推进 `requirement:14_trd_design` / step 14；零 AI/Agent/Skill、零产品文件改动、零提交/合并/push |
 | 14 | 形成活动 TRD | requirement-scoped `/trd-design` 形成活动 TRD并保留待提交变更 | scoped `steps/requirements/<ID>/14.json` success，state 推进 `requirement:15_development` / step 15 |
 | 15 | 实现与验证 | requirement-scoped `/dev-workflow` 完成实现、真实验证和独立审查 | scoped `steps/requirements/<ID>/15.json` success、`outputs: []`，cycle 保存 `development_session_id`，state 推进 `requirement:16_rule_retrospective` / step 16；不提交/合并/push |
-| 16 | 规则复盘 | 在原 development session 中以独立负责人 conversation 调用 `/session-rule-retrospective`，只允许 root `.claude/rules/**/*.md` 普通文件的本次增量 | scoped `steps/requirements/<ID>/16.json` success、`outputs: []`，session alias 和 Git-visible baseline 已持久化，state 推进 `requirement:17_commit` / step 17；不提交/合并/push |
+| 16 | 规则复盘 | 在原 development session 中以独立负责人 conversation 调用 `/session-rule-retrospective`，允许规则变化或 no-change，不读取 Git或限制规则文件结构 | scoped `steps/requirements/<ID>/16.json` success、`outputs: []`，session alias 已持久化，state 推进 `requirement:17_commit` / step 17；不提交/合并/push |
 | 17 | 统一提交需求变更 | 在产品根 direct `run_claude()` session 中调用 `/commit-changes` 处理有序权威仓库白名单；Python 只核验分支、main/base、最终 clean 和 tips | scoped `steps/requirements/<ID>/17.json` success、`outputs: []`，cycle 保存各仓 `base_sha/tip_sha/merged:false`，state 推进 `requirement:18_merge` / step 18；不合并/push/标记完成 |
 | 18 | 程序化合并并完成需求 | 纯 Python/Git 按非 root 在前、root 最后的顺序执行或恢复 `git merge --ff-only`，全部仓到 tip 后统一安全删除需求分支 | scoped `steps/requirements/<ID>/18.json` success，注册表项写为 `completed` / `completion:{"step":18}`，清空 active requirement/cycle 并返回记录节点；不调用 Agent、不 push |
 
@@ -451,7 +451,7 @@ Git 忽略 run `prompt-role-replay-20260823` 保留旧四段 XML prompt 的历�
 | 13 | 选择需求并建立统一需求分支 | Python 确定性选择依赖均完成且 `order` 最靠前的 pending 需求；为全部 `applicable_repositories`（包含 root）从各自 clean local `main` 建立同名分支并记录基线 |
 | 14 | 形成活动 TRD（已实现） | 只消费当前活动需求、cycle 和 workspace，首次持久化 `docs/trd/<YYYY-MM-DD>-<ID>-<标题>.md`，再通过 requirement-scoped 公共循环显式调用或恢复 `/trd-design`；Agent 按需读取项目事实，Python只核验指定 TRD 非空，不读取 Git或重复复验前序步骤 |
 | 15 | 实现与验证（已实现） | 调用 `dev-workflow` 完成实现、测试、构建、运行、联调、浏览器验收和独立审查，按稳定偏差同步活动 TRD并保存 `development_session_id`；不提交 |
-| 16 | 在原开发 session 复盘规则（已实现） | 建立独立 `rule_retrospective_<ID>` 负责人 conversation，首次调用前预注册同一 `development_session_id` alias 并恢复原 session；Git-visible baseline 只允许本次 root `.claude/rules/**/*.md` 普通非 hard link 文件增量，`outputs: []`，success 推进第 17 步，不提交 |
+| 16 | 在原开发 session 复盘规则（已实现） | 建立独立 `rule_retrospective_<ID>` 负责人 conversation，首次调用前预注册同一 `development_session_id` alias并恢复原 session；允许规则变化或 no-change，不读取 Git或限制规则文件结构，`outputs: []`，success 推进第 17 步，不提交 |
 | 17 | 统一提交需求变更（已实现） | 在产品根一个 requirement-scoped session 中调用一次 `commit-changes`，只处理 `applicable_repositories` 白名单；dirty 仓分别提交、clean 仓不造空提交，记录每仓需求分支 `tip_sha`，不合并、不标记完成 |
 | 18 | 程序化合并并完成需求 | Python 先合并非 root 代码仓、最后合并 root；只使用 `git merge --ff-only`，核验 `main`、SHA、clean 并清理分支，全部成功后才将需求标记 `completed` |
 
@@ -483,17 +483,17 @@ completion verifier 为空，负责人 `AgentDecision.completed` 即领域完成
 
 真实 run 为 `pcm-demo/runs/step01-mendmark`，产品工作区为 `/Users/zhou/resource/fireworks/ANDRSZAN/pcm-products/mendmark`。development session `e6bd1b82-39f9-41b2-9cc9-a69b281015dc` 的 init 确认 Fable 5、Claude Code 2.1.233、`bypassPermissions`，最终 normal success 为 23 turns、约 `$9.784016`。首次调用在 init/session 已保存后，`claude-agent-sdk` 0.2.139 默认单条 CLI stdout JSON 1 MiB 缓冲触发 `JSON message exceeded maximum buffer size`；仅在公共 `ClaudeAgentOptions` 增加 `max_buffer_size=10 * 1024 * 1024`，无新配置且不影响 resume，随后从同一 session 恢复并保留既有产品改动。自定义 dev/reviewer 子代理曾出现未识别 model 警告和一个子进程退出，但主 Agent 继续完成，生产 prompt 未改。
 
-最终 conversation 共 9 条：`system → assistant 初始 → user 首轮回复 → assistant completed → assistant 正常结束要求 → user 已实现但未完全验证 → assistant continue 补 Firefox/WebKit → user 三浏览器结果 → assistant 最终 completed`。Agent 报告后端 Ruff/format/build、pytest 16 passed 1 skipped、真实 PostgreSQL、Alembic upgrade-downgrade-upgrade；前端 lint/type-check/build、Vitest 15 passed；Chromium/Firefox/WebKit Playwright 矩阵 3 passed；并完成真实 FastAPI/PostgreSQL/Vite 浏览器联调、代表性截图读取和独立审查。Windows NVDA 与 macOS VoiceOver 人工路径 deferred，负责人判为非阻断。BR-001 仍 active/completion null；root 保留活动 TRD和代表性截图未跟踪，frontend/backend 保留实现、测试、迁移与配置未提交变更；三仓均为 `req/br-001`、index clean、无 commit/merge/push。不可用 LLM 配置幂等重跑仍 success，state/result/conversation 字节不变，SHA-256 分别为 `069b50dc583d8472683eded457bdb954265e37000b78c59860986bc8ea15bf72`、`033585fb8c7b2a43937dd67082aec8a179cc368ede869c460df4300a438487a2`、`431972a5bb43f90af90adf557bc1b92adab3599a5adb11a5696f57167a100e19`。第 15 步本体 6 项与 CLI 4 项的历史验证保持不变；第 16 步终版本体 19 项与 CLI 4 项、全量 273 项 `unittest`、`compileall`、`git diff --check` 均通过。Pyright langserver 未安装，未执行 IDE/LSP diagnostics；独立只读审查修复后最终无高、中置信缺陷；Ruff 未安装，未执行。第 16～18 步随后均已完成实现与适用真实验证。
+最终 conversation 共 9 条：`system → assistant 初始 → user 首轮回复 → assistant completed → assistant 正常结束要求 → user 已实现但未完全验证 → assistant continue 补 Firefox/WebKit → user 三浏览器结果 → assistant 最终 completed`。Agent 报告后端 Ruff/format/build、pytest 16 passed 1 skipped、真实 PostgreSQL、Alembic upgrade-downgrade-upgrade；前端 lint/type-check/build、Vitest 15 passed；Chromium/Firefox/WebKit Playwright 矩阵 3 passed；并完成真实 FastAPI/PostgreSQL/Vite 浏览器联调、代表性截图读取和独立审查。Windows NVDA 与 macOS VoiceOver 人工路径 deferred，负责人判为非阻断。BR-001 仍 active/completion null；root 保留活动 TRD和代表性截图未跟踪，frontend/backend 保留实现、测试、迁移与配置未提交变更；三仓均为 `req/br-001`、index clean、无 commit/merge/push。不可用 LLM 配置幂等重跑仍 success，state/result/conversation 字节不变，SHA-256 分别为 `069b50dc583d8472683eded457bdb954265e37000b78c59860986bc8ea15bf72`、`033585fb8c7b2a43937dd67082aec8a179cc368ede869c460df4300a438487a2`、`431972a5bb43f90af90adf557bc1b92adab3599a5adb11a5696f57167a100e19`。第 15 步本体 6 项与 CLI 4 项的历史验证保持不变；第 16 步旧实现本体 19 项与 CLI 4 项、全量 273 项 `unittest`、`compileall`、`git diff --check` 均通过。Pyright langserver 未安装，未执行 IDE/LSP diagnostics；独立只读审查修复后最终无高、中置信缺陷；Ruff 未安装，未执行。第 16～18 步随后均已完成实现与适用真实验证。
 
 ### 第 16 步已实现合同与真实验证
 
-第 16 步只消费当前 active requirement/cycle/workspace、current scoped 第 15 步 `success` 和 `development_session_id`。它以 `rule_retrospective_<ID>` 建立独立负责人 conversation，但首次 Agent 调用前在 `claude_sessions` 预注册同一 development session ID，初始 prompt 首行固定 `/session-rule-retrospective 本次开发会话`，正文只描述真实会话的复盘目标。公共 `AgentDecision` 循环接受 `rules_changed` 或 no-change 的 `completed`。
+第 16 步采用与第 15 步一致的薄编排，只消费当前 active requirement、cycle、workspace 和一致的 `development_session_id`；不重新读取或精确复验第 15 步 result、TRD、仓库、分支或工作树。
 
-fresh 逐仓核验权威仓库均为自身 top-level、cycle branch、`HEAD/main/target=base`、index clean、无进行中 Git 操作，允许已有 dirty。首次调用原子持久化 session alias 与 Git-visible baseline，恢复不重采样；baseline 比对 porcelain dirty 节点类型/mode/内容哈希、全部 refs/symref、常见 pseudo-ref、index 语义指纹、Git-visible 外部符号链接、rules symlink/hard link 与未知嵌套 Git 仓。已登记子仓由自身仓库 baseline 核验；非 root 完全不变，root 只允许 `.claude/rules/**/*.md` 的普通非 hard link 文件新增或修改，ignored 不在证明范围。
+步骤以 `rule_retrospective_<ID>` 建立独立负责人 conversation，首次 Agent 调用前将该 key 的 Claude session alias 绑定为同一 `development_session_id`，公共 `run_agent_decision_loop` 因而恢复原开发 session。初始 prompt 首行固定 `/session-rule-retrospective 本次开发会话`；`completed` 允许规则变化或 no-change，`continue`、`blocked` 沿用公共语义。
 
-success 写 `steps/requirements/<ID>/16.json`，`outputs: []`，只保存 requirement ID 和 development session ID，再推进 `requirement:17_commit` / step 17；BR 仍 active/completion null。blocked 保留 baseline、alias、独立 conversation 与原 development session，success 写入中断可恢复推进，推进后幂等重跑不调用模型、Agent 或 Git。
+success 先写 `steps/requirements/<ID>/16.json`，`outputs: []`，再推进 `requirement:17_commit` / step 17；blocked 保留当前节点、原 session alias 和独立 conversation。result→state 中断只补状态，推进后不需要工作区、Git、Agent 或模型。第 16 步不建立 Git baseline、不检查规则目录结构，也不限制 Skill 的输出文件；第 17 步负责读取实际未提交变更并提交。
 
-真实 `step01-mendmark` 首次发现三仓提前需求提交与 cycle bases 冲突，故在 baseline/alias/Agent 前 failed；每仓 `main..branch` 恰一 commit，无 retrospective conversation 或产品变化。用户选择三仓 `git reset --mixed <cycle base>` 保留工作树、清空 index，且独立核验工作树等于旧 tip 文件树；这是 run-local 现场恢复。恢复后同一 session `e6bd1b82-39f9-41b2-9cc9-a69b281015dc`（retrospective alias 同 ID）正常 success，8 turns、`$6.9324520000000005`、4 条 conversation，无 `continue`/`blocked`。唯一规则增量为 root `.claude/rules/frontend-playwright-container.md`，限定 frontend Playwright 容器使用临时 `node_modules` volume/`.pnpm-store` 并在结束时清理。不可用 LLM 配置幂等重跑仍 success，未调用模型/Agent；state/result/conversation/rule SHA-256 依次为 `5f088ca5b3119026046103dff3592a314383e5ff550bcdc6b76d64702bf365c4`、`591b7310eceafc7c526750ae7b06688acc6625ffcbc5ec5d2b66ca6d4b25f5f6`、`3786e7039e4b2d2ba4dfe1b0b68f409fb47504e66ac830f18147a59619d7a90b`、`8a5eebbdc2a47ff58c035c61874f784b2e12048ee26100127b69e48821a0ac64`。
+现行本体 7 项、CLI 4 项，共 11 项；相关定向 51 项和全量 282 项 `unittest`、`compileall`、`git diff --check` 通过。真实 `step01-mendmark` 曾复用 development session `e6bd1b82-39f9-41b2-9cc9-a69b281015dc` 完成规则复盘并新增 `.claude/rules/frontend-playwright-container.md`。旧实现的三仓提前提交失败、`git reset --mixed` 现场恢复和 Git-visible baseline 是历史事实，不再是现行 success 条件，也不会由现行代码重复核验；既有规则、result、state 和 conversation 不因本次精简而改写。
 
 ### 第 17 步已实现合同与真实验证
 
@@ -511,7 +511,7 @@ fresh 全仓 clean 时零 Agent，直接记录 `tip=base`。存在 dirty 仓时�
 
 Python 过滤 Git 子进程的 `GIT_*` 环境变量，按非 root 原顺序、root 最后的顺序处理仓库。`main==tip` 时确认已合并并补写 `merged:true`；`main==base` 且未合并时才执行必要的 `git switch main` 和 `git merge --ff-only <branch>`；`base==tip` 为 no-op。每仓到 tip 后原子保存 merged；全部仓到 tip 后才统一使用 `git branch -d` 清理需求分支。部分 merge、merge 后 state 中断、部分 cleanup 和 `18.json` 已写但 state 未完成均按 Git 事实恢复，不回滚已成功仓库。
 
-最终所有仓库必须位于 main、`HEAD==main==tip`、clean、无进行中 Git 操作且需求分支不存在。步骤先写 root-first 的 scoped `18.json`，再把当前注册表项更新为 `completed` / `completion:{"step":18}`，清空 active requirement/cycle 并返回 cycle 记录节点。第 18 步本体 10 项、CLI 5 项，共 15 项；全量 294 项、`compileall`、`git diff --check` 通过，独立只读审查无高、中置信发现。
+最终所有仓库必须位于 main、`HEAD==main==tip`、clean、无进行中 Git 操作且需求分支不存在。步骤先写 root-first 的 scoped `18.json`，再把当前注册表项更新为 `completed` / `completion:{"step":18}`，清空 active requirement/cycle 并返回 cycle 记录节点。第 18 步本体 10 项、CLI 5 项，共 15 项；全量 282 项、`compileall`、`git diff --check` 通过，独立只读审查无高、中置信发现。
 
 真实 `step01-mendmark` 已将 frontend、backend、root 的 local main 分别 ff-only 到 `65764dee0b2655f1c674ec36fee527861ea5043c`、`0e0bf9bb37e2abcf8c923c0fa4611c671da87640`、`62ac0aea0a69ea95d6382adfc276adce808be964`。三仓当前均在 main、工作树/index clean、`req/br-001` 已删除、`base..tip` 无 merge commit且未 push；BR-001 已完成，state 返回 `phase_1:select_requirement` / step 13。
 
@@ -638,7 +638,7 @@ phase_2:audit
 - 相同且工作树清楚的阶段二 `version_fingerprint` 不重复制造审计候选；
 - 阶段二修复期间临时复用需求循环，完成后必须返回原阶段二节点；
 - 第 12 步恢复锚点是完整 success result、Backlog 路径/SHA-256、静态 catalog 和一致的 pending 注册表；模型调用期间重新读取 SHA 并拒绝内容漂移，旧三字段 source 不兼容或迁移。result 已写但 state 未推进时从 result 恢复，任一来源、catalog 或注册表漂移均失败。第 13 步是活动需求、统一分支计划和各仓 `main` 基线；第 15、16 步必须保存并恢复同一 `development_session_id`；第 17 步记录每个 dirty 仓的分支 tip；第 18 步按逐仓 `main == tip` 或 `main == base` 恢复 ff-only 合并；
-- 第 14～16 步允许合法未提交变更，第 16 步只比较复盘调用产生的增量范围；第 18 步全部仓库核验和分支清理成功前不得写 `completed`；
+- 第 14～16 步允许合法未提交变更；第 16 步只恢复原 development session并完成复盘，不比较工作树增量，实际变更由第 17 步统一读取并提交；第 18 步全部仓库核验和分支清理成功前不得写 `completed`；
 - 任何归属、分支、提交、合并、需求注册表、候选或入池证据冲突均保留现场并返回 `failed`。
 
 ## 十、配置与敏感信息
@@ -710,7 +710,7 @@ python run_all.py --run-id <run-id> --from-node phase_2:audit
 ## 十二、后续实现顺序
 
 1. 保持第 0～18 步已确认并真实验证的业务边界不变；
-2. 第 18 步本体 10 项、CLI 5 项、全量 294 项自动化测试均已通过；真实 `step01-mendmark` 已完成 BR-001 三仓 ff-only 合并、分支清理、scoped `18.json` 和 completed 生命周期更新；
+2. 第 18 步本体 10 项、CLI 5 项、全量 282 项自动化测试均已通过；真实 `step01-mendmark` 已完成 BR-001 三仓 ff-only 合并、分支清理、scoped `18.json` 和 completed 生命周期更新；
 3. 下一项验证继续复用第 13～18 步处理第二个真实需求；
 4. 每个步骤只根据真实运行发现补充最小公共能力；
 5. 不提前实现阶段二空壳；

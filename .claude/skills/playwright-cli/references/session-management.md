@@ -89,8 +89,9 @@ playwright-cli -s=variant-a open "https://app.com?variant=a"
 playwright-cli -s=variant-b open "https://app.com?variant=b"
 
 # Compare
-playwright-cli -s=variant-a screenshot
-playwright-cli -s=variant-b screenshot
+mkdir -p .test-screenshots/ab-testing
+playwright-cli -s=variant-a screenshot --filename=.test-screenshots/ab-testing/variant-a.png
+playwright-cli -s=variant-b screenshot --filename=.test-screenshots/ab-testing/variant-b.png
 ```
 
 ### Persistent Profile
