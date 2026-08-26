@@ -113,6 +113,13 @@ from steps.step_17_commit.step import (
     failure_scope as requirement_commit_failure_scope,
     has_complete_success as has_requirement_commit_success,
 )
+from steps.step_18_merge import result as requirement_merge_result
+from steps.step_18_merge import run as run_requirement_merge
+from steps.step_18_merge.step import (
+    CURRENT_NODE as REQUIREMENT_MERGE_NODE,
+    failure_scope as requirement_merge_failure_scope,
+    has_complete_success as has_requirement_merge_success,
+)
 
 DEMO_ROOT = Path(__file__).resolve().parent
 
@@ -612,6 +619,15 @@ async def run_step_seventeen(args: argparse.Namespace) -> tuple[Path, dict[str, 
     return run_dir, await run_requirement_commit(run_dir, read_state(run_dir))
 
 
+def run_step_eighteen(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
+    if not args.run_id:
+        raise ValueError("第 18 步需要 --run-id")
+    run_dir = run_dir_for(args.run_id)
+    if not run_dir.is_dir():
+        raise ValueError(f"运行记录不存在：{args.run_id}")
+    return run_dir, run_requirement_merge(run_dir, read_state(run_dir))
+
+
 def sha256_bytes(data: bytes) -> str:
     import hashlib
 
@@ -648,7 +664,7 @@ def run_step_zero(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
 
 def main() -> int:
     args = parse_args()
-    if args.step not in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17}:
+    if args.step not in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18}:
         print(f"步骤尚未实现：{args.step}", file=sys.stderr)
         return 2
 
@@ -703,8 +719,10 @@ def main() -> int:
                         run_dir, result = asyncio.run(run_step_fifteen(args))
                     elif args.step == 16:
                         run_dir, result = asyncio.run(run_step_sixteen(args))
-                    else:
+                    elif args.step == 17:
                         run_dir, result = asyncio.run(run_step_seventeen(args))
+                    else:
+                        run_dir, result = run_step_eighteen(args)
     except ProjectIntakeBlocked as error:
         result = project_intake_result(
             "blocked",
@@ -882,7 +900,25 @@ def main() -> int:
             result_factory = requirement_registry_result
         else:
             result_factory = workspace_result
-        if args.step == 17:
+        if args.step == 18:
+            scope = None
+            if run_dir is not None:
+                try:
+                    scope = requirement_merge_failure_scope(run_dir, read_state(run_dir))
+                except Exception:  # noqa: BLE001 - 失败结果只能使用可安全确认的活动需求。
+                    scope = None
+            result = requirement_merge_result(
+                "failed",
+                "需求分支程序化合并失败。",
+                requirement_id=scope["requirement_id"] if scope else None,
+                branch=scope["branch"] if scope else None,
+                error={
+                    "type": type(error).__name__,
+                    "message": "需求分支程序化合并未完成。",
+                },
+            )
+            error_message = "需求分支程序化合并失败。"
+        elif args.step == 17:
             scope = None
             if run_dir is not None:
                 try:
@@ -1003,7 +1039,19 @@ def main() -> int:
     development_scope: dict[str, str | None] | None = None
     rule_retrospective_scope: dict[str, str] | None = None
     requirement_commit_scope: dict[str, str] | None = None
-    if run_dir is not None and args.step == 17:
+    requirement_merge_scope: dict[str, str] | None = None
+    if run_dir is not None and args.step == 18:
+        try:
+            requirement_merge_state = read_state(run_dir)
+            requirement_merge_scope = requirement_merge_failure_scope(
+                run_dir, requirement_merge_state
+            )
+            protected_success = has_requirement_merge_success(
+                run_dir, requirement_merge_state
+            )
+        except Exception:  # noqa: BLE001 - 状态损坏时仍需返回脱敏失败信息。
+            protected_success = False
+    elif run_dir is not None and args.step == 17:
         try:
             requirement_commit_state = read_state(run_dir)
             requirement_commit_scope = requirement_commit_failure_scope(
@@ -1053,7 +1101,36 @@ def main() -> int:
             and has_step_success(run_dir, args.step)
         )
 
-    if run_dir is not None and args.step == 17:
+    if run_dir is not None and args.step == 18:
+        if (
+            result["status"] != "success"
+            and not protected_success
+            and requirement_merge_scope is not None
+        ):
+            try:
+                state = read_state(run_dir)
+            except Exception:  # noqa: BLE001 - 状态损坏时不能构造 scoped 失败结果。
+                state = None
+            if state is not None:
+                state.update(
+                    {
+                        "status": result["status"],
+                        "phase": "phase_1_requirement_development",
+                        "step": 18,
+                        "current_step": 18,
+                        "current_node": REQUIREMENT_MERGE_NODE,
+                        "blocked": result["blocked"],
+                        "error": result["error"],
+                    }
+                )
+                write_state(run_dir, state)
+                write_requirement_step_result(
+                    run_dir,
+                    requirement_merge_scope["requirement_id"],
+                    18,
+                    result,
+                )
+    elif run_dir is not None and args.step == 17:
         if (
             result["status"] != "success"
             and not protected_success
@@ -1227,7 +1304,7 @@ def main() -> int:
 
     if run_dir is not None:
         scoped_path: Path | None = None
-        if args.step in {13, 14, 15, 16, 17}:
+        if args.step in {13, 14, 15, 16, 17, 18}:
             requirement_id = result.get("requirement_id")
             if isinstance(requirement_id, str):
                 try:
