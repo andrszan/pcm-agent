@@ -56,16 +56,7 @@ class RuleRetrospectiveCLITests(unittest.TestCase):
         workspace_root = self.demo_root / "workspace-root"
         workspace = workspace_root / "project"
         workspace.mkdir(parents=True)
-        (run_dir / "steps").mkdir(parents=True)
-        base_sha = "a" * 40
-        key = "rule_retrospective_BR-001"
-        cycle = {
-            "requirement_id": "BR-001",
-            "branch": "req/br-001",
-            "repositories": {"root": {"base_sha": base_sha}},
-            "trd_path": "docs/trd/BR-001.md",
-            "development_session_id": "development-session-1",
-        }
+        (run_dir / "steps/requirements/BR-001").mkdir(parents=True)
         state = {
             "status": "success" if advanced else "running",
             "phase": PHASE,
@@ -73,18 +64,9 @@ class RuleRetrospectiveCLITests(unittest.TestCase):
             "current_step": STEP + 1 if advanced else STEP,
             "current_node": NEXT_NODE if advanced else CURRENT_NODE,
             "workspace": {
-                "root": str(workspace_root.resolve()),
-                "final_path": str(workspace.resolve()),
+                "root": str(workspace_root),
+                "final_path": str(workspace),
             },
-            "applicable_repositories": ["root"],
-            "repositories": [
-                {
-                    "name": "root",
-                    "path": str(workspace.resolve()),
-                    "branch": "main",
-                    "worktree_clean": True,
-                }
-            ],
             "requirement_registry": {
                 "schema_version": 1,
                 "requirements": [
@@ -99,78 +81,18 @@ class RuleRetrospectiveCLITests(unittest.TestCase):
                 ],
             },
             "active_requirement": "BR-001",
-            "requirement_cycle": cycle,
-            "claude_sessions": {"development_BR-001": "development-session-1"},
+            "requirement_cycle": {
+                "requirement_id": "BR-001",
+                "development_session_id": "development-session-1",
+            },
+            "claude_sessions": {
+                "development_BR-001": "development-session-1",
+            },
             "blocked": None,
             "error": None,
         }
         if advanced or complete_success:
-            state["claude_sessions"][key] = "development-session-1"
-            state[key] = {
-                "baseline": {
-                    "version": 1,
-                    "repositories": [
-                        {
-                            "name": "root",
-                            "branch": "req/br-001",
-                            "head": base_sha,
-                            "main": base_sha,
-                            "target": base_sha,
-                            "refs": [
-                                {
-                                    "name": "refs/heads/main",
-                                    "sha": base_sha,
-                                    "symref": None,
-                                },
-                                {
-                                    "name": "refs/heads/req/br-001",
-                                    "sha": base_sha,
-                                    "symref": None,
-                                },
-                            ],
-                            "pseudo_refs": [
-                                {
-                                    "name": name,
-                                    "exists": False,
-                                    "content_sha256": None,
-                                }
-                                for name in (
-                                    "ORIG_HEAD",
-                                    "FETCH_HEAD",
-                                    "MERGE_HEAD",
-                                    "AUTO_MERGE",
-                                    "CHERRY_PICK_HEAD",
-                                    "REVERT_HEAD",
-                                    "REBASE_HEAD",
-                                    "BISECT_HEAD",
-                                )
-                            ],
-                            "index_clean": True,
-                            "index_sha256": "b" * 64,
-                            "entries": [],
-                        }
-                    ],
-                }
-            }
-        write_requirement_step_result(
-            run_dir,
-            "BR-001",
-            15,
-            {
-                "step": 15,
-                "name": "实现与验证",
-                "status": "success",
-                "summary": "已完成。",
-                "applicable": True,
-                "outputs": [],
-                "blocked": None,
-                "error": None,
-                "requirement_id": "BR-001",
-                "trd_path": "docs/trd/BR-001.md",
-                "development_session_id": "development-session-1",
-            },
-        )
-        if complete_success:
+            state["claude_sessions"]["rule_retrospective_BR-001"] = "development-session-1"
             write_requirement_step_result(run_dir, "BR-001", STEP, self.success_result())
         write_state(run_dir, state)
         return run_dir, state
