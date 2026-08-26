@@ -259,6 +259,9 @@ class FoundationSelectionTests(unittest.TestCase):
             self.assertEqual(result["status"], "failed")
             serialized = json.dumps(result, ensure_ascii=False)
             self.assertNotIn("super-secret", serialized)
+            self.assertEqual(result["error"]["message"], "api_key=[REDACTED]")
+            self.assertEqual(result["error"]["diagnostic_path"], "logs/step-03-error.json")
+            self.assertTrue((run_dir / "logs/step-03-error.json").is_file())
             self.assertEqual(read_state(run_dir)["current_step"], 3)
 
 

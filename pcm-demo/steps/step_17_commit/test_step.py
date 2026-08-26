@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import subprocess
 import sys
 import tempfile
@@ -173,6 +174,8 @@ class RequirementCommitTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "Claude Agent 执行异常"):
             self.execute(run_dir, state, agent_runner=interrupted)
+        diagnostic = json.loads((run_dir / "logs/requirement_commit_BR-001-agent.json").read_text(encoding="utf-8"))
+        self.assertEqual(diagnostic["exception"]["message"], "disconnect")
 
         calls: list[dict[str, Any]] = []
         async def resumed(prompt: str, **kwargs: Any) -> ClaudeRunResult:

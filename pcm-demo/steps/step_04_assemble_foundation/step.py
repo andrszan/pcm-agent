@@ -6,6 +6,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from common.error_diagnostics import exception_projection, write_diagnostic
 from common.files import write_json
 from common.state import write_state, write_step_result
 from steps.step_01_create_workspace.workspace import (
@@ -366,11 +367,19 @@ def save_failure(
             "blocked", "基础工程组装被模板仓库访问权限阻塞。", applicable=applicable, blocked=blocked
         )
     else:
+        diagnostic_path = write_diagnostic(
+            run_dir,
+            "step-04-error.json",
+            source="assemble_foundation",
+            kind="generic",
+            context={"step": STEP, "node": CURRENT_NODE, "component": "assemble_foundation"},
+            error=error,
+        )
         saved = result(
             "failed",
             "基础工程组装失败。",
             applicable=applicable,
-            error={"type": type(error).__name__, "message": str(error)},
+            error=exception_projection(error, diagnostic_path=diagnostic_path),
         )
     write_step_result(run_dir, STEP, saved)
     state.update(

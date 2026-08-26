@@ -160,8 +160,11 @@ class RuleRetrospectiveCLITests(unittest.TestCase):
         )
         self.assertEqual(saved["status"], "failed")
         self.assertEqual(saved["development_session_id"], "development-session-1")
+        self.assertEqual(saved["error"]["message"], "secret=[REDACTED]")
+        self.assertEqual(saved["error"]["diagnostic_path"], "logs/step-16-error.json")
         self.assertNotIn("secret=hidden", json.dumps(saved, ensure_ascii=False))
-        self.assertNotIn("secret=hidden", stderr.getvalue())
+        self.assertIn("secret=[REDACTED]", stderr.getvalue())
+        self.assertIn("logs/step-16-error.json", stderr.getvalue())
 
     def test_complete_scoped_success_protects_state_and_result(self) -> None:
         run_dir, _ = self.make_run(advanced=True, complete_success=True)

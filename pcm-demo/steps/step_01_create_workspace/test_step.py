@@ -15,8 +15,9 @@ from pydantic import BaseModel, SecretStr
 DEMO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(DEMO_ROOT))
 
+from common.error_diagnostics import write_diagnostic
 from common.files import resolve_workspace_output, write_json
-from common.openai_responses import ResponsesAccessError, parse_response
+from common.openai_responses import ResponsesAccessError, ResponsesFailure, parse_response
 from config import (
     CAPABILITY_REPOSITORY_ROOT,
     LLMConfig,
@@ -285,6 +286,7 @@ class WorkspaceStepTests(unittest.TestCase):
                         "request_id": "body-request-id",
                         "error": {
                             "code": "PERMISSION_DENIED",
+                            "type": "permission_error",
                             "message": '{"authorization":"Bearer leak","api_key":"should-not-appear"}',
                         },
                     },
@@ -314,12 +316,154 @@ class WorkspaceStepTests(unittest.TestCase):
                 "kind": "http",
                 "http_status": 403,
                 "request_id": "body-request-id",
+                "provider_code": "PERMISSION_DENIED",
+                "provider_type": "permission_error",
+                "provider_message": '{"authorization":"[REDACTED]","api_key":"[REDACTED]"}',
             },
         )
         self.assertIn("HTTP 403", message)
-        self.assertNotIn("PERMISSION_DENIED", message)
-        self.assertNotIn("authorization", message)
+        self.assertIn("PERMISSION_DENIED", message)
+        self.assertNotIn("Bearer leak", message)
         self.assertNotIn("should-not-appear", message)
+        self.assertIn("[REDACTED]", message)
+
+    def test_response_failure_logs_do_not_traverse_raw_provider_causes(self) -> None:
+        import httpx
+        import openai
+
+        class InputModel(BaseModel):
+            text: str
+
+        class OutputModel(BaseModel):
+            value: str
+
+        secret = "known-llm-api-key"
+        request = httpx.Request("POST", "https://example.invalid/responses")
+        response = httpx.Response(500, request=request)
+        cases = {
+            "status": lambda: openai.APIStatusError("server error", response=response, body={}),
+            "connection": lambda: openai.APIConnectionError(request=request),
+            "timeout": lambda: openai.APITimeoutError(request),
+            "validation": lambda: openai.APIResponseValidationError(response=response, body={}),
+            "internal": lambda: RuntimeError("local parser error"),
+        }
+
+        for label, factory in cases.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
+                source_error = factory()
+
+                class Responses:
+                    async def parse(self, **_kwargs: object) -> object:
+                        raise source_error from RuntimeError(f"upstream echo {secret}")
+
+                class Client:
+                    responses = Responses()
+
+                    async def close(self) -> None:
+                        return None
+
+                config = LLMConfig("https://example.invalid", SecretStr(secret), "test-model")
+                with patch("common.openai_responses.AsyncOpenAI", return_value=Client()):
+                    with self.assertRaises(ResponsesFailure) as raised:
+                        asyncio.run(
+                            parse_response(
+                                config,
+                                system_prompt="Extract the value.",
+                                input_model=InputModel(text="input"),
+                                output_model=OutputModel,
+                            )
+                        )
+                run_dir = Path(directory) / "run"
+                run_dir.mkdir()
+                path = write_diagnostic(
+                    run_dir,
+                    f"responses-{label}.json",
+                    source="test",
+                    error=raised.exception,
+                )
+                serialized = (run_dir / path).read_text(encoding="utf-8")
+                self.assertNotIn(secret, serialized)
+                self.assertNotIn(f"upstream echo {secret}", serialized)
+
+    def test_response_close_failure_is_redacted_internal_diagnostic(self) -> None:
+        class InputModel(BaseModel):
+            text: str
+
+        class OutputModel(BaseModel):
+            value: str
+
+        secret = "known-llm-api-key"
+
+        class Responses:
+            async def parse(self, **_kwargs: object) -> object:
+                return SimpleNamespace(status="completed", output_parsed=OutputModel(value="ok"))
+
+        class Client:
+            responses = Responses()
+
+            async def close(self) -> None:
+                try:
+                    raise RuntimeError(f"close echoed {secret}")
+                except RuntimeError as cause:
+                    raise OSError(f"close failed {secret}") from cause
+
+        config = LLMConfig("https://example.invalid", SecretStr(secret), "test-model")
+        with patch("common.openai_responses.AsyncOpenAI", return_value=Client()):
+            with self.assertRaises(ResponsesFailure) as raised:
+                asyncio.run(
+                    parse_response(
+                        config,
+                        system_prompt="Extract the value.",
+                        input_model=InputModel(text="input"),
+                        output_model=OutputModel,
+                    )
+                )
+        self.assertEqual(raised.exception.diagnostic["kind"], "internal")
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = Path(directory) / "run"
+            run_dir.mkdir()
+            path = write_diagnostic(
+                run_dir, "responses-close.json", source="test", error=raised.exception
+            )
+            serialized = (run_dir / path).read_text(encoding="utf-8")
+        self.assertNotIn(secret, serialized)
+        self.assertIn("[REDACTED]", serialized)
+
+    def test_request_failure_is_not_overwritten_by_close_failure(self) -> None:
+        import httpx
+        import openai
+
+        class InputModel(BaseModel):
+            text: str
+
+        class OutputModel(BaseModel):
+            value: str
+
+        request = httpx.Request("POST", "https://example.invalid/responses")
+
+        class Responses:
+            async def parse(self, **_kwargs: object) -> object:
+                raise openai.APIConnectionError(request=request)
+
+        class Client:
+            responses = Responses()
+
+            async def close(self) -> None:
+                raise OSError("close failed")
+
+        config = LLMConfig("https://example.invalid", SecretStr("secret"), "test-model")
+        with patch("common.openai_responses.AsyncOpenAI", return_value=Client()):
+            with self.assertRaises(ResponsesFailure) as raised:
+                asyncio.run(
+                    parse_response(
+                        config,
+                        system_prompt="Extract the value.",
+                        input_model=InputModel(text="input"),
+                        output_model=OutputModel,
+                    )
+                )
+        self.assertEqual(raised.exception.diagnostic["kind"], "transport")
+        self.assertNotIn("close failed", str(raised.exception))
 
     def test_default_branch_parser(self) -> None:
         output = "ref: refs/heads/main\tHEAD\nabc\tHEAD"

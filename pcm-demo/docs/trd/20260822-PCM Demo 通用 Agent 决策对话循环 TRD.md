@@ -347,17 +347,22 @@ Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重�
 
 ### 7.3 AI-compatible 裁决失败诊断
 
-负责人裁决失败时，公共循环不写伪 assistant 消息，也不改变 `user` 尾部恢复锚点。它只在 `<state_key>.last_decision_failure` 覆盖保存最后一次安全诊断，并通过专用 `AIDecisionFailure` 将同一对象交给步骤结果：
+负责人裁决失败时，公共循环不写伪 assistant 消息，也不改变 `user` 尾部恢复锚点。它在 `<state_key>.last_decision_failure` 覆盖保存可恢复的安全摘要，通过专用 `AIDecisionFailure` 将同一摘要交给步骤结果，并将完整有界诊断覆盖写入 Git 忽略的 `logs/<领域键>-decision.json`：
 
 ```json
 {
   "kind": "configuration | transport | http | response | internal",
   "http_status": 403,
-  "request_id": "request-id"
+  "request_id": "request-id",
+  "provider_code": "PERMISSION_DENIED",
+  "provider_type": "permission_error",
+  "provider_message": "quota exhausted; api_key=[REDACTED]",
+  "message": "quota exhausted; api_key=[REDACTED]",
+  "diagnostic_path": "logs/trd_design_BR-002-decision.json"
 }
 ```
 
-`kind` 是固定枚举；HTTP status 必须是合法整数，request ID 只接受长度不超过 128 的 `[A-Za-z0-9._:-]`。禁止持久化 provider message、异常原文、headers、URL、请求或响应 body、prompt、API Key、traceback、异常链和其它未列入白名单的字段。合法 assistant decision 成功写入 conversation 后清除该诊断；既有诊断不进入裁决上下文，不新增历史数组、时间戳、重试计数、日志或自动重试。
+`kind` 是稳定分类；HTTP status 必须是合法整数，request ID 只接受长度不超过 128 的 `[A-Za-z0-9._:-]`。provider code/type/message、异常类型、异常链和 traceback 位置在写入前统一限长，并只遮盖调用方已知真实 secret、Authorization/Cookie、明确敏感键值、URL/DSN 密码及敏感 query；普通错误文字和 token 语义不删除。日志不保存完整 headers、请求/响应 body、prompt、环境字典或 `.env`。合法 assistant decision 成功写入 conversation 后清除 state 中当前失败引用，但保留 Git 忽略的诊断快照；不新增历史数组、时间戳、重试计数或自动重试。
 
 ## 8. Agent SDK 结果分类
 
@@ -372,7 +377,7 @@ Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重�
 | `aborted_streaming` / `aborted_tools` | `failed` |
 | `success` 携带未知 terminal reason | `failed` |
 
-已取得 max-turn/max-budget ResultMessage 后的尾随进程异常，不覆盖已经取得的可恢复结构化事实；其它异常不进入决策循环。
+已取得 max-turn/max-budget ResultMessage 后的尾随进程异常，不覆盖已经取得的可恢复结构化事实；其它异常不进入决策循环。`ClaudeRunResult` 同时保留 `ResultMessage.errors`、`api_error_status`、`terminal_reason` 和捕获异常的安全正文、异常链与 traceback 位置。公共循环在 Agent 失败时覆盖写入 `logs/<领域键>-agent.json`，`last_agent_result`、步骤结果和 stderr 只保存具体安全原因及 `diagnostic_path`；第 17 步 direct `run_claude()` 复用同一诊断能力。
 
 ## 9. `blocked` 与 `failed`
 
@@ -427,7 +432,7 @@ Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重�
 
 不进行后处理摘要或脱敏替换。run 目录是受控、Git 忽略的本地恢复状态，不建设防篡改日志。
 
-资源清单正文和 `.env` 因输入来源边界不进入决策项目上下文。Claude Agent SDK 异常继续只保存安全终止分类；AI-compatible Responses/裁决异常只保存 `configuration / transport / http / response / internal`、合法 HTTP status 和白名单 request ID，不保存 provider message 或原始异常。
+资源清单正文和 `.env` 因输入来源边界不进入决策项目上下文。Claude Agent SDK 与 AI-compatible Responses/裁决异常保留经精确凭据遮盖和限长的具体原因；SDK `errors`、provider code/type/message/request ID/HTTP status、异常链和 traceback 位置进入 Git 忽略诊断快照，state/result/stderr 只保存安全摘要和引用。诊断不进入裁决上下文，也不读取或输出 `.env` 具体值。
 
 ## 12. 步骤适配
 
@@ -467,7 +472,7 @@ Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重�
 
 自动化验证：
 
-- 公共裁决失败诊断、Responses 安全异常、第 14 步零 Agent 恢复及 CLI 映射已完成；定向 59 项、PCM Demo 全量 288 项 `unittest`、`compileall common steps run_step.py`、`git diff --check` 和相关 IDE diagnostics 通过。诊断覆盖配置、传输、HTTP、响应合同与本地处理五类，provider message 即使包含 JSON 形式凭据也不会进入异常、state、result 或 stderr。
+- 公共精确脱敏、Claude Agent SDK/Responses/负责人裁决诊断、BR-002 `api_error` 形态回归、第 14 步零 Agent 恢复及 CLI 映射已完成；PCM Demo 全量 298 项 `unittest`、`compileall common steps run_step.py` 与 `git diff --check` 通过。自动化覆盖五类负责人失败、provider code/type/message/request ID/HTTP status、SDK `errors`、异常链、traceback 位置、长领域键稳定日志名、步骤 scoped/protected-success 以及明确凭据值不进入日志、state、result 或 stderr；未为了制造错误调用真实外部服务。
 
 兼容验证：
 

@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import re
+import sys
 from collections.abc import Mapping
-from typing import Literal, TypeVar
+from typing import Any, Literal, TypeVar
 
 import openai
 from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 from pydantic import BaseModel, ValidationError
 
+from common.error_diagnostics import exception_diagnostics, redact_text, truncate_text
 from config import LLMConfig
 
 ParsedModel = TypeVar("ParsedModel", bound=BaseModel)
@@ -35,16 +37,35 @@ class ResponsesFailure(RuntimeError):
         *,
         http_status: int | None = None,
         request_id: str | None = None,
+        provider_code: str | None = None,
+        provider_type: str | None = None,
+        provider_message: str | None = None,
+        exception_details: dict[str, Any] | None = None,
     ) -> None:
         diagnostic: dict[str, str | int] = {"kind": kind}
         if type(http_status) is int and 100 <= http_status <= 599:
             diagnostic["http_status"] = http_status
         if isinstance(request_id, str) and _REQUEST_ID.fullmatch(request_id):
             diagnostic["request_id"] = request_id
+        for name, value in (
+            ("provider_code", provider_code),
+            ("provider_type", provider_type),
+            ("provider_message", provider_message),
+        ):
+            if isinstance(value, str) and value:
+                diagnostic[name] = truncate_text(value)
         self.diagnostic = diagnostic
+        self.exception_details = exception_details
         message = _FAILURE_MESSAGES[kind]
         if "http_status" in diagnostic:
             message = f"{message}（HTTP {diagnostic['http_status']}）"
+        details = [
+            diagnostic[name]
+            for name in ("provider_code", "provider_type", "provider_message")
+            if isinstance(diagnostic.get(name), str) and diagnostic[name]
+        ]
+        if details:
+            message = f"{message}：{'；'.join(details)}"
         super().__init__(message)
 
 
@@ -60,10 +81,53 @@ class ResponsesAccessError(ResponsesFailure):
     pass
 
 
-def _status_diagnostic(error: openai.APIStatusError) -> tuple[int, str | None]:
+def _provider_text(value: Any, known_secrets: list[str]) -> str | None:
+    if isinstance(value, (str, int)) and not isinstance(value, bool):
+        return redact_text(str(value), known_secrets=known_secrets)
+    return None
+
+
+def _status_diagnostic(
+    error: openai.APIStatusError, known_secrets: list[str]
+) -> dict[str, str | int]:
     body = error.body if isinstance(error.body, Mapping) else {}
-    request_id = body.get("request_id") or error.response.headers.get("x-request-id")
-    return error.status_code, request_id if isinstance(request_id, str) else None
+    body_error = body.get("error") if isinstance(body.get("error"), Mapping) else body
+    response = error.response
+    headers = getattr(response, "headers", {})
+    header_request_id = headers.get("x-request-id") if isinstance(headers, Mapping) else None
+    request_id = (
+        body.get("request_id")
+        or getattr(error, "request_id", None)
+        or getattr(response, "request_id", None)
+        or header_request_id
+    )
+    result: dict[str, str | int] = {"http_status": error.status_code}
+    if isinstance(request_id, str) and _REQUEST_ID.fullmatch(request_id):
+        result["request_id"] = request_id
+    for field in ("code", "type", "message"):
+        value = body_error.get(field) if isinstance(body_error, Mapping) else None
+        if value is None:
+            value = getattr(error, field, None)
+        text = _provider_text(value, known_secrets)
+        if text:
+            result[f"provider_{field}"] = text
+    if "provider_message" not in result:
+        fallback = _provider_text(str(error), known_secrets)
+        if fallback:
+            result["provider_message"] = fallback
+    return result
+
+
+def _failure_from_error(
+    kind: ResponsesFailureKind,
+    error: BaseException,
+    known_secrets: list[str],
+) -> ResponsesFailure:
+    return ResponsesFailure(
+        kind,
+        provider_message=redact_text(str(error), known_secrets=known_secrets),
+        exception_details=exception_diagnostics(error, known_secrets=known_secrets),
+    )
 
 
 async def parse_response(
@@ -75,16 +139,17 @@ async def parse_response(
     max_output_tokens: int = 512,
     max_retries: int = 1,
 ) -> ParsedModel:
+    known_secrets = [config.api_key.get_secret_value()]
     try:
         client = AsyncOpenAI(
-            api_key=config.api_key.get_secret_value(),
+            api_key=known_secrets[0],
             base_url=config.base_url,
             timeout=120.0,
             max_retries=max_retries,
             http_client=DefaultAsyncHttpxClient(trust_env=False),
         )
     except Exception as error:
-        raise ResponsesFailure("internal") from error
+        raise _failure_from_error("internal", error, known_secrets) from error
 
     try:
         response = await client.responses.parse(
@@ -97,32 +162,41 @@ async def parse_response(
             max_output_tokens=max_output_tokens,
         )
     except openai.APIStatusError as error:
-        http_status, request_id = _status_diagnostic(error)
-        message = str(error).lower()
-        if http_status in {401, 403}:
+        diagnostic = _status_diagnostic(error, known_secrets)
+        exception_details = exception_diagnostics(error, known_secrets=known_secrets)
+        message = str(diagnostic.get("provider_message") or "").lower()
+        if diagnostic["http_status"] in {401, 403}:
             raise ResponsesAccessError(
-                "http", http_status=http_status, request_id=request_id
+                "http", **diagnostic, exception_details=exception_details
             ) from error
-        if http_status in {404, 405, 501}:
+        if diagnostic["http_status"] in {404, 405, 501}:
             raise ResponsesAPIUnsupportedError(
-                "http", http_status=http_status, request_id=request_id
+                "http", **diagnostic, exception_details=exception_details
             ) from error
         if "text.format" in message or "json_schema" in message:
             raise ResponsesStructuredOutputUnsupportedError(
-                "response", http_status=http_status, request_id=request_id
+                "response", **diagnostic, exception_details=exception_details
             ) from error
         raise ResponsesFailure(
-            "http", http_status=http_status, request_id=request_id
+            "http", **diagnostic, exception_details=exception_details
         ) from error
     except (openai.APIResponseValidationError, ValidationError) as error:
-        raise ResponsesFailure("response") from error
+        raise _failure_from_error("response", error, known_secrets) from error
     except (openai.APIConnectionError, openai.APITimeoutError) as error:
-        raise ResponsesFailure("transport") from error
+        raise _failure_from_error("transport", error, known_secrets) from error
     except Exception as error:
-        raise ResponsesFailure("internal") from error
+        raise _failure_from_error("internal", error, known_secrets) from error
     finally:
-        await client.close()
+        active_error = sys.exc_info()[1]
+        try:
+            await client.close()
+        except Exception as error:
+            if active_error is None:
+                raise _failure_from_error("internal", error, known_secrets) from error
 
     if response.status != "completed" or response.output_parsed is None:
-        raise ResponsesFailure("response")
+        raise ResponsesFailure(
+            "response",
+            provider_message=f"Responses API 返回状态：{redact_text(str(response.status), known_secrets=known_secrets)}",
+        )
     return response.output_parsed

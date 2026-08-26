@@ -9,7 +9,8 @@ from pathlib import Path
 from secrets import token_hex
 from typing import Any
 
-from common.agent_decision_loop import AIDecisionFailure
+from common.agent_decision_loop import AIDecisionFailure, AgentExecutionFailure
+from common.error_diagnostics import exception_projection, write_diagnostic
 from common.files import sha256
 from common.state import (
     create_run_dir,
@@ -155,6 +156,38 @@ def run_dir_for(run_id: str) -> Path:
     if run_dir.parent != (DEMO_ROOT / "runs").resolve():
         raise ValueError(f"无效运行 ID：{run_id}")
     return run_dir
+
+
+def safe_error_projection(error: BaseException) -> dict[str, Any]:
+    if isinstance(error, (AIDecisionFailure, AgentExecutionFailure)):
+        return error.as_error()
+    return exception_projection(error)
+
+
+def attach_failure_diagnostic(
+    run_dir: Path,
+    step: int,
+    error: BaseException,
+    result: dict[str, Any],
+    *,
+    context: dict[str, Any] | None = None,
+) -> None:
+    existing = result.get("error")
+    if isinstance(existing, dict) and isinstance(existing.get("diagnostic_path"), str):
+        return
+    path = write_diagnostic(
+        run_dir,
+        f"step-{step:02d}-error.json",
+        source="run_step",
+        kind="generic",
+        context={"step": step, "component": "run_step", **(context or {})},
+        error=error,
+    )
+    if isinstance(error, (AIDecisionFailure, AgentExecutionFailure)):
+        error.diagnostic_path = path
+    projection = safe_error_projection(error)
+    projection["diagnostic_path"] = path
+    result["error"] = projection
 
 
 def has_step_success(run_dir: Path, step: int) -> bool:
@@ -673,6 +706,7 @@ def main() -> int:
     run_dir: Path | None = None
     error_message = ""
     no_pending = False
+    caught_error: Exception | None = None
     try:
         if args.step == 0:
             run_dir, result = run_step_zero(args)
@@ -880,6 +914,8 @@ def main() -> int:
         )
         error_message = str(error)
     except Exception as error:  # noqa: BLE001 - 顶层入口必须将所有步骤异常转换为结果。
+        caught_error = error
+        error_projection = safe_error_projection(error)
         if args.step == 2:
             result_factory = project_intake_result
         elif args.step == 4:
@@ -914,12 +950,9 @@ def main() -> int:
                 "需求分支程序化合并失败。",
                 requirement_id=scope["requirement_id"] if scope else None,
                 branch=scope["branch"] if scope else None,
-                error={
-                    "type": type(error).__name__,
-                    "message": "需求分支程序化合并未完成。",
-                },
+                error=error_projection,
             )
-            error_message = "需求分支程序化合并失败。"
+            error_message = error_projection["message"]
         elif args.step == 17:
             scope = None
             if run_dir is not None:
@@ -932,12 +965,9 @@ def main() -> int:
                 "需求变更统一提交失败。",
                 requirement_id=scope["requirement_id"] if scope else None,
                 branch=scope["branch"] if scope else None,
-                error={
-                    "type": type(error).__name__,
-                    "message": "需求变更统一提交未完成。",
-                },
+                error=error_projection,
             )
-            error_message = "需求变更统一提交失败。"
+            error_message = error_projection["message"]
         elif args.step == 16:
             scope = None
             if run_dir is not None:
@@ -950,12 +980,9 @@ def main() -> int:
                 "规则复盘失败。",
                 requirement_id=scope["requirement_id"] if scope else None,
                 development_session_id=scope["development_session_id"] if scope else None,
-                error={
-                    "type": type(error).__name__,
-                    "message": "规则复盘未完成。",
-                },
+                error=error_projection,
             )
-            error_message = "规则复盘失败。"
+            error_message = error_projection["message"]
         elif args.step == 15:
             scope = None
             if run_dir is not None:
@@ -969,12 +996,9 @@ def main() -> int:
                 requirement_id=scope["requirement_id"] if scope else None,
                 trd_path=scope["trd_path"] if scope else None,
                 development_session_id=scope["development_session_id"] if scope else None,
-                error={
-                    "type": type(error).__name__,
-                    "message": "需求实现与验证未完成。",
-                },
+                error=error_projection,
             )
-            error_message = "需求实现与验证失败。"
+            error_message = error_projection["message"]
         elif args.step == 14:
             scope = None
             if run_dir is not None:
@@ -989,12 +1013,9 @@ def main() -> int:
                 branch=scope["branch"] if scope else None,
                 trd_path=scope["trd_path"] if scope else None,
                 trd_session_id=scope["trd_session_id"] if scope else None,
-                error={
-                    "type": type(error).__name__,
-                    "message": "活动 TRD 设计未完成。",
-                },
+                error=error_projection,
             )
-            error_message = "活动 TRD 设计失败。"
+            error_message = error_projection["message"]
         elif args.step == 13:
             scope = None
             if run_dir is not None:
@@ -1002,20 +1023,13 @@ def main() -> int:
                     scope = requirement_selection_failure_scope(run_dir, read_state(run_dir))
                 except Exception:  # noqa: BLE001 - 失败结果只能使用可安全确认的活动需求。
                     scope = None
-            safe_message = (
-                str(error)
-                if isinstance(error, (NoPendingRequirements, RequirementSelectionError))
-                else "需求选择未完成。"
-            )
+            safe_message = error_projection["message"]
             result = requirement_selection_result(
                 "failed",
                 "需求选择失败。",
                 requirement_id=scope[0] if scope else None,
                 branch=scope[1] if scope else None,
-                error={
-                    "type": type(error).__name__,
-                    "message": safe_message,
-                },
+                error=error_projection,
             )
             error_message = safe_message
             no_pending = isinstance(error, NoPendingRequirements)
@@ -1023,21 +1037,18 @@ def main() -> int:
             result = result_factory(
                 "failed",
                 "需求注册表初始化失败。",
-                error={
-                    "type": type(error).__name__,
-                    "message": "需求注册表初始化未完成。",
-                },
+                error=error_projection,
             )
-            error_message = "需求注册表初始化失败。"
+            error_message = error_projection["message"]
         else:
             result = result_factory(
                 "failed",
                 f"第 {args.step} 步执行失败。",
-                error={"type": type(error).__name__, "message": str(error)},
+                error=error_projection,
             )
-            error_message = f"{type(error).__name__}: {error}"
+            error_message = error_projection["message"]
 
-        if isinstance(error, AIDecisionFailure):
+        if isinstance(error, (AIDecisionFailure, AgentExecutionFailure)):
             result["error"] = error.as_error()
             error_message = str(error)
 
@@ -1123,6 +1134,12 @@ def main() -> int:
             except Exception:  # noqa: BLE001 - 状态损坏时不能构造 scoped 失败结果。
                 state = None
             if state is not None:
+                if caught_error is not None:
+                    attach_failure_diagnostic(
+                        run_dir, 18, caught_error, result,
+                        context={"requirement": requirement_merge_scope["requirement_id"], "node": REQUIREMENT_MERGE_NODE},
+                    )
+                    error_message = result["error"]["message"]
                 state.update(
                     {
                         "status": result["status"],
@@ -1152,6 +1169,12 @@ def main() -> int:
             except Exception:  # noqa: BLE001 - 状态损坏时不能构造 scoped 失败结果。
                 state = None
             if state is not None:
+                if caught_error is not None:
+                    attach_failure_diagnostic(
+                        run_dir, 17, caught_error, result,
+                        context={"requirement": requirement_commit_scope["requirement_id"], "node": REQUIREMENT_COMMIT_NODE},
+                    )
+                    error_message = result["error"]["message"]
                 state.update(
                     {
                         "status": result["status"],
@@ -1181,6 +1204,12 @@ def main() -> int:
             except Exception:  # noqa: BLE001 - 状态损坏时不能构造 scoped 失败结果。
                 state = None
             if state is not None:
+                if caught_error is not None:
+                    attach_failure_diagnostic(
+                        run_dir, 16, caught_error, result,
+                        context={"requirement": rule_retrospective_scope["requirement_id"], "node": RULE_RETROSPECTIVE_NODE},
+                    )
+                    error_message = result["error"]["message"]
                 state.update(
                     {
                         "status": result["status"],
@@ -1206,6 +1235,12 @@ def main() -> int:
             except Exception:  # noqa: BLE001 - 状态损坏时不能构造 scoped 失败结果。
                 state = None
             if state is not None:
+                if caught_error is not None:
+                    attach_failure_diagnostic(
+                        run_dir, 15, caught_error, result,
+                        context={"requirement": development_scope["requirement_id"], "node": DEVELOPMENT_NODE},
+                    )
+                    error_message = result["error"]["message"]
                 state.update(
                     {
                         "status": result["status"],
@@ -1228,6 +1263,12 @@ def main() -> int:
             except Exception:  # noqa: BLE001 - 状态损坏时不能构造 scoped 失败结果。
                 state = None
             if state is not None:
+                if caught_error is not None:
+                    attach_failure_diagnostic(
+                        run_dir, 14, caught_error, result,
+                        context={"requirement": trd_scope["requirement_id"], "node": TRD_DESIGN_NODE},
+                    )
+                    error_message = result["error"]["message"]
                 state.update(
                     {
                         "status": result["status"],
@@ -1259,6 +1300,12 @@ def main() -> int:
                 == (13, 13, SELECT_REQUIREMENT_NODE)
             )
             if state is not None and at_selection_anchor and selection_scope is not None:
+                if caught_error is not None:
+                    attach_failure_diagnostic(
+                        run_dir, 13, caught_error, result,
+                        context={"requirement": selection_scope[0], "node": SELECT_REQUIREMENT_NODE},
+                    )
+                    error_message = result["error"]["message"]
                 state.update(
                     {
                         "status": "failed",
@@ -1286,6 +1333,9 @@ def main() -> int:
                 state = read_state(run_dir)
             except Exception:  # noqa: BLE001 - 状态损坏时仍需保存步骤失败结果。
                 state = None
+            if caught_error is not None:
+                attach_failure_diagnostic(run_dir, args.step, caught_error, result)
+                error_message = result["error"]["message"]
             if state is not None:
                 update = {
                     "status": result["status"],
@@ -1326,8 +1376,10 @@ def main() -> int:
                     scoped_path = None
         if result["status"] != "success":
             detail_path = scoped_path if scoped_path is not None else run_dir / "state.json"
+            diagnostic_path = result.get("error", {}).get("diagnostic_path") if isinstance(result.get("error"), dict) else None
+            diagnostic_line = f"\n诊断：{diagnostic_path}" if isinstance(diagnostic_path, str) else ""
             print(
-                f"步骤 {args.step} {result['status']}：{error_message}\n"
+                f"步骤 {args.step} {result['status']}：{error_message}{diagnostic_line}\n"
                 f"详细结果：{detail_path}",
                 file=sys.stderr,
             )

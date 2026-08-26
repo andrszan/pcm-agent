@@ -35,7 +35,7 @@ uv sync
 uv run python -m unittest discover -s . -t . -p 'test*.py' -v
 ```
 
-PCM Demo 全量 288 项 `unittest`、`compileall common steps run_step.py` 与 `git diff --check` 通过。公共负责人裁决失败使用 `configuration / transport / http / response / internal` 五类安全诊断，只保留合法 HTTP status 和白名单 request ID；合法裁决写入 conversation 后清除诊断。第 13 步直接消费当前需求注册表；第 17 步直接调用 `run_claude()`；第 18 步只使用确定性 Python/Git。
+PCM Demo 全量 298 项 `unittest`、`compileall common steps run_step.py` 与 `git diff --check` 通过。公共错误诊断保留 Claude Agent SDK `errors`、异常链、traceback 位置及 AI-compatible provider 的 code/type/message/request ID/HTTP status；只对明确凭据值和认证字段做精确遮盖。完整有界快照写入 Git 忽略的 `runs/<run-id>/logs/`，state、步骤结果和 stderr 保存具体安全原因与 `diagnostic_path`；合法裁决写入 conversation 后清除当前失败引用。第 13 步直接消费当前需求注册表；第 17 步直接调用 `run_claude()`；第 18 步只使用确定性 Python/Git。
 
 ## 最近真实验证
 

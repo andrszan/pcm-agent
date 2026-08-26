@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from common.claude_agent import ClaudeRunResult, run_claude
 from common.decision import AgentDecision, count_decisions, parse_agent_decision, request_decision
+from common.error_diagnostics import exception_diagnostics, redact_text, write_diagnostic
 from common.files import write_json
 from common.openai_responses import ResponsesFailure
 from common.state import write_state
@@ -37,19 +38,43 @@ _DECISION_FAILURE_MESSAGES = {
 
 
 class AIDecisionFailure(RuntimeError):
-    def __init__(self, diagnostic: dict[str, str | int]) -> None:
+    def __init__(
+        self,
+        diagnostic: dict[str, str | int],
+        *,
+        message: str | None = None,
+        diagnostic_path: str | None = None,
+    ) -> None:
         self.diagnostic = dict(diagnostic)
+        self.diagnostic_path = diagnostic_path
         kind = self.diagnostic["kind"]
-        message = _DECISION_FAILURE_MESSAGES[str(kind)]
+        base = _DECISION_FAILURE_MESSAGES[str(kind)]
         if "http_status" in self.diagnostic:
-            message = f"{message}（HTTP {self.diagnostic['http_status']}）"
-        super().__init__(message)
+            base = f"{base}（HTTP {self.diagnostic['http_status']}）"
+        detail = message or self.diagnostic.get("provider_message")
+        super().__init__(f"{base}：{detail}" if isinstance(detail, str) and detail else base)
 
     def as_error(self) -> dict[str, Any]:
-        return {
+        error = {
             "type": type(self).__name__,
             "message": str(self),
             "decision_failure": dict(self.diagnostic),
+        }
+        if self.diagnostic_path:
+            error["diagnostic_path"] = self.diagnostic_path
+        return error
+
+
+class AgentExecutionFailure(RuntimeError):
+    def __init__(self, message: str, diagnostic_path: str) -> None:
+        self.diagnostic_path = diagnostic_path
+        super().__init__(message)
+
+    def as_error(self) -> dict[str, str]:
+        return {
+            "type": type(self).__name__,
+            "message": str(self),
+            "diagnostic_path": self.diagnostic_path,
         }
 
 
@@ -173,8 +198,8 @@ def _load_conversation(
         return [{"role": "system", "content": spec.decision_system_prompt}]
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        raise RuntimeError("决策历史不可读取") from None
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise RuntimeError("决策历史不可读取") from error
     if not isinstance(data, dict) or set(data) != {"messages"}:
         raise RuntimeError("决策历史内容不符合约定")
     messages = _validate_messages(data["messages"], spec)
@@ -212,8 +237,31 @@ def _safe_exception_type(value: ClaudeRunResult) -> str | None:
     return "AgentSDKError"
 
 
-def _safe_agent_result(value: ClaudeRunResult) -> dict[str, Any]:
-    return {
+def _agent_reason(value: ClaudeRunResult | None, error: BaseException | None = None) -> str:
+    if value is not None:
+        if value.sdk_errors:
+            return redact_text(value.sdk_errors[0])
+        if isinstance(value.exception_details, dict):
+            message = value.exception_details.get("message")
+            if isinstance(message, str) and message:
+                return redact_text(message)
+        if value.exception:
+            return redact_text(value.exception)
+        if value.api_error_status is not None:
+            return f"Agent SDK API 请求失败（HTTP {value.api_error_status}）"
+        if value.terminal_reason:
+            return f"Agent SDK 终止原因：{redact_text(value.terminal_reason)}"
+        if value.is_error or value.has_errors:
+            return "Agent SDK 返回失败结果"
+    if error is not None:
+        return redact_text(f"{type(error).__name__}: {error}")
+    return "Agent SDK 执行失败"
+
+
+def _safe_agent_result(
+    value: ClaudeRunResult, *, failure: AgentExecutionFailure | None = None
+) -> dict[str, Any]:
+    result = {
         "subtype": value.result_subtype,
         "is_error": value.is_error,
         "stop_reason": value.stop_reason,
@@ -225,6 +273,93 @@ def _safe_agent_result(value: ClaudeRunResult) -> dict[str, Any]:
         "has_errors": value.has_errors,
         "exception_type": _safe_exception_type(value),
     }
+    if failure is not None:
+        result.update({"message": str(failure), "diagnostic_path": failure.diagnostic_path})
+    return result
+
+
+def _agent_diagnostic_context(
+    state: dict[str, Any], key: str, context: dict[str, Any] | None
+) -> dict[str, Any]:
+    fields = {
+        name: state.get(name)
+        for name in ("step", "current_step", "phase", "current_node", "active_requirement")
+        if state.get(name) is not None
+    }
+    fields.update(
+        {
+            "component": "claude_agent",
+            "operation": "run_agent",
+            "conversation_path": (Path("conversations") / f"{key}.json").as_posix(),
+        }
+    )
+    if context:
+        fields.update(context)
+    return fields
+
+
+def persist_agent_failure(
+    run_dir: Path,
+    state: dict[str, Any],
+    *,
+    key: str,
+    state_key: str | None,
+    value: ClaudeRunResult | None = None,
+    error: BaseException | None = None,
+    context: dict[str, Any] | None = None,
+) -> AgentExecutionFailure:
+    """保存公共和直连 Claude 调用共用的当前故障快照。"""
+    message = _agent_reason(value, error)
+    exception = (
+        value.exception_details
+        if value is not None and isinstance(value.exception_details, dict)
+        else exception_diagnostics(error) if error is not None else {
+            "type": value.exception_type or "AgentExecutionFailure" if value else "AgentExecutionFailure",
+            "message": message,
+            "chain": [],
+            "traceback": [],
+        }
+    )
+    details: dict[str, Any] = {}
+    if value is not None:
+        details = {
+            "result_subtype": value.result_subtype,
+            "is_error": value.is_error,
+            "stop_reason": value.stop_reason,
+            "session_id": value.session_id,
+            "num_turns": value.num_turns,
+            "total_cost_usd": value.total_cost_usd,
+            "api_error_status": value.api_error_status,
+            "terminal_reason": value.terminal_reason,
+            "sdk_errors": value.sdk_errors,
+        }
+    path = write_diagnostic(
+        run_dir,
+        f"{key}-agent.json",
+        source="agent",
+        kind="agent",
+        context=_agent_diagnostic_context(state, key, context),
+        details=details,
+        exception=exception,
+        error=error,
+    )
+    failure = AgentExecutionFailure(message, path)
+    if state_key is not None:
+        section = state.setdefault(state_key, {})
+        if not isinstance(section, dict):
+            raise RuntimeError("Agent 决策运行状态不符合约定")
+        if value is not None or not isinstance(section.get("last_agent_result"), dict):
+            section["last_agent_result"] = (
+                _safe_agent_result(value, failure=failure)
+                if value is not None
+                else {
+                    "exception_type": type(error).__name__ if error else "AgentExecutionFailure",
+                    "message": str(failure),
+                    "diagnostic_path": path,
+                }
+            )
+        write_state(run_dir, state)
+    return failure
 
 
 def _last_agent_finished_normally(state: dict[str, Any], spec: AgentDecisionLoopSpec) -> bool:
@@ -298,10 +433,27 @@ def _raise_decision_failure(
     state: dict[str, Any],
     spec: AgentDecisionLoopSpec,
     diagnostic: dict[str, str | int],
+    error: BaseException | None = None,
 ) -> None:
-    _state_section(state, spec)["last_decision_failure"] = dict(diagnostic)
+    detail = diagnostic.get("provider_message")
+    if not isinstance(detail, str) or not detail:
+        detail = redact_text(f"{type(error).__name__}: {error}") if error else _DECISION_FAILURE_MESSAGES[str(diagnostic["kind"])]
+    path = write_diagnostic(
+        run_dir,
+        f"{spec.key}-decision.json",
+        source="decision",
+        kind=str(diagnostic["kind"]),
+        context=_agent_diagnostic_context(state, spec.key, {"component": "decision", "operation": "request_decision"}),
+        details=diagnostic,
+        error=error,
+    )
+    state_diagnostic = {**diagnostic, "message": detail, "diagnostic_path": path}
+    _state_section(state, spec)["last_decision_failure"] = state_diagnostic
     write_state(run_dir, state)
-    raise AIDecisionFailure(diagnostic)
+    failure = AIDecisionFailure(diagnostic, message=detail, diagnostic_path=path)
+    if error is not None:
+        raise failure from error
+    raise failure
 
 
 def _clear_decision_failure(
@@ -385,7 +537,15 @@ def _validate_agent_result(
 ) -> None:
     def fail(message: str) -> None:
         _clear_pending_agent_text(run_dir, state, spec)
-        raise RuntimeError(message)
+        failure = persist_agent_failure(
+            run_dir,
+            state,
+            key=spec.key,
+            state_key=spec.state_key,
+            value=value,
+            context={"operation": "validate_agent_result", "validation_message": message},
+        )
+        raise failure
 
     if value.result_subtype is None:
         fail("Agent SDK 未返回 ResultMessage")
@@ -438,13 +598,33 @@ async def _run_agent(
             max_budget_usd=spec.max_budget_usd,
             on_update=lambda update: _save_agent_update(run_dir, state, spec, update),
         )
-    except asyncio.CancelledError:
-        raise RuntimeError("Agent SDK 执行已取消") from None
-    except Exception:
-        raise RuntimeError("Agent SDK 执行异常") from None
+    except asyncio.CancelledError as error:
+        failure = persist_agent_failure(
+            run_dir, state, key=spec.key, state_key=spec.state_key, error=error
+        )
+        raise AgentExecutionFailure(
+            f"Agent SDK 执行异常：{failure}", failure.diagnostic_path
+        ) from error
+    except Exception as error:
+        failure = persist_agent_failure(
+            run_dir, state, key=spec.key, state_key=spec.state_key, error=error
+        )
+        raise AgentExecutionFailure(
+            f"Agent SDK 执行异常：{failure}", failure.diagnostic_path
+        ) from error
     if not isinstance(value, ClaudeRunResult):
-        raise RuntimeError("Agent SDK 返回结果不符合约定")
-    _save_agent_update(run_dir, state, spec, value)
+        invalid = TypeError("Agent SDK 返回结果不符合约定")
+        failure = persist_agent_failure(
+            run_dir, state, key=spec.key, state_key=spec.state_key, error=invalid
+        )
+        raise failure from invalid
+    try:
+        _save_agent_update(run_dir, state, spec, value)
+    except Exception as error:
+        failure = persist_agent_failure(
+            run_dir, state, key=spec.key, state_key=spec.state_key, value=value, error=error
+        )
+        raise failure from error
     _validate_agent_result(run_dir, state, workspace, spec, value)
     messages = _load_conversation(run_dir, state, spec)
     return _append_pending_agent_text(run_dir, state, spec, messages)
@@ -461,11 +641,11 @@ async def _request_next_decision(
     _require_decision_capacity(messages, spec)
     try:
         config = config_loader()
-    except asyncio.CancelledError:
-        raise RuntimeError("AI-compatible 决策已取消") from None
-    except Exception:
+    except asyncio.CancelledError as error:
+        raise RuntimeError("AI-compatible 决策已取消") from error
+    except Exception as error:
         _raise_decision_failure(
-            run_dir, state, spec, {"kind": "configuration"}
+            run_dir, state, spec, {"kind": "configuration"}, error
         )
 
     try:
@@ -474,28 +654,28 @@ async def _request_next_decision(
             config,
             system_prompt=messages[0]["content"],
         )
-    except asyncio.CancelledError:
-        raise RuntimeError("AI-compatible 决策已取消") from None
+    except asyncio.CancelledError as error:
+        raise RuntimeError("AI-compatible 决策已取消") from error
     except ResponsesFailure as error:
-        _raise_decision_failure(run_dir, state, spec, error.diagnostic)
-    except ValidationError:
-        _raise_decision_failure(run_dir, state, spec, {"kind": "response"})
-    except Exception:
-        _raise_decision_failure(run_dir, state, spec, {"kind": "internal"})
+        _raise_decision_failure(run_dir, state, spec, error.diagnostic, error)
+    except ValidationError as error:
+        _raise_decision_failure(run_dir, state, spec, {"kind": "response"}, error)
+    except Exception as error:
+        _raise_decision_failure(run_dir, state, spec, {"kind": "internal"}, error)
 
     try:
         decision = parse_agent_decision(data)
         raw_decision = parse_agent_decision(raw)
-    except (TypeError, ValidationError):
-        _raise_decision_failure(run_dir, state, spec, {"kind": "response"})
+    except (TypeError, ValidationError) as error:
+        _raise_decision_failure(run_dir, state, spec, {"kind": "response"}, error)
     if not isinstance(raw, str) or decision != raw_decision:
         _raise_decision_failure(run_dir, state, spec, {"kind": "response"})
 
     messages.append({"role": "assistant", "content": raw})
     try:
         _save_conversation(run_dir, state, spec, messages)
-    except Exception:
-        _raise_decision_failure(run_dir, state, spec, {"kind": "internal"})
+    except Exception as error:
+        _raise_decision_failure(run_dir, state, spec, {"kind": "internal"}, error)
     _clear_decision_failure(run_dir, state, spec)
     return decision
 
@@ -507,10 +687,10 @@ async def _verify_completed(
         repair = completion_verifier()
         if inspect.isawaitable(repair):
             repair = await repair
-    except asyncio.CancelledError:
-        raise RuntimeError("完成核验已取消") from None
-    except Exception:
-        raise RuntimeError("完成核验失败") from None
+    except asyncio.CancelledError as error:
+        raise RuntimeError("完成核验已取消") from error
+    except Exception as error:
+        raise RuntimeError(f"完成核验失败：{redact_text(str(error))}") from error
     if repair is None:
         return None
     if not isinstance(repair, str) or not repair.strip():

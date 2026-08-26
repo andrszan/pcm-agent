@@ -17,6 +17,8 @@ from claude_agent_sdk import (
     query,
 )
 
+from common.error_diagnostics import exception_diagnostics, redact_text
+
 
 @dataclass
 class ClaudeRunResult:
@@ -33,6 +35,8 @@ class ClaudeRunResult:
     terminal_reason: str | None = None
     has_errors: bool = False
     exception_type: str | None = None
+    sdk_errors: list[str] | None = None
+    exception_details: dict[str, Any] | None = None
 
 
 def filtered_env() -> dict[str, str]:
@@ -90,6 +94,20 @@ def _api_error_status(value: Any) -> int | None:
     return None
 
 
+def _anthropic_secrets() -> list[str]:
+    return [
+        value
+        for key in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+        if isinstance((value := os.environ.get(key)), str) and value
+    ]
+
+
+def _sdk_errors(value: Any, known_secrets: list[str]) -> list[str] | None:
+    if not isinstance(value, list):
+        return None
+    return [redact_text(item, known_secrets=known_secrets) for item in value if isinstance(item, str)] or None
+
+
 async def run_claude(
     prompt: str,
     *,
@@ -104,7 +122,9 @@ async def run_claude(
     texts: list[str] = []
     exception: str | None = None
     exception_type: str | None = None
+    exception_details: dict[str, Any] | None = None
     api_error_status: int | None = None
+    known_secrets = _anthropic_secrets()
     options = ClaudeAgentOptions(
         cwd=cwd,
         system_prompt={"type": "preset", "preset": "claude_code"},
@@ -170,13 +190,16 @@ async def run_claude(
                             api_error_status=_api_error_status(result),
                             terminal_reason=result.terminal_reason,
                             has_errors=bool(result.errors) or result.is_error,
+                            sdk_errors=_sdk_errors(result.errors, known_secrets),
                         )
                     )
-    except asyncio.CancelledError:
+    except asyncio.CancelledError as error:
         exception = "CancelledError"
         exception_type = "CancelledError"
+        exception_details = exception_diagnostics(error, known_secrets=known_secrets)
     except Exception as error:  # SDK may raise after yielding a ResultMessage.
-        exception = f"{type(error).__name__}: {error}"
+        exception_details = exception_diagnostics(error, known_secrets=known_secrets)
+        exception = f"{type(error).__name__}: {exception_details['message']}"
         exception_type = type(error).__name__
         api_error_status = _api_error_status(error)
 
@@ -210,4 +233,6 @@ async def run_claude(
         has_errors=bool(exception)
         or (bool(result.errors) or result.is_error if result else True),
         exception_type=exception_type,
+        sdk_errors=_sdk_errors(result.errors if result else None, known_secrets),
+        exception_details=exception_details,
     )

@@ -2,7 +2,7 @@
 
 > 本文定义正式 PCM 开发前的轻量 Python 验证项目。Demo 的目的不是提前实现正式 PCM，而是用可独立运行、可串联的一组脚本，真实验证 [`PCM 程序化调度的 AI Agent 产品开发流程`](../../.claude/PCM版AI%20Agent自动化流程设计.md)。
 >
-> 第 17 步现行精简实现本体 10 项、CLI 3 项；第 18 步本体 10 项、CLI 5 项。PCM Demo 全量 288 项 `unittest`、`compileall common steps run_step.py` 与 `git diff --check` 通过。公共负责人裁决失败已结构化为 `configuration / transport / http / response / internal`，只允许合法 HTTP status 和白名单 request ID，不保存 provider message。真实 `step01-mendmark` 已完成 BR-001；BR-002 第 14 步已从原裁决失败现场零 Agent 恢复成功，第 15 步随后因 Claude Agent SDK `api_error` 停止。
+> 第 17 步现行精简实现本体 10 项、CLI 3 项；第 18 步本体 10 项、CLI 5 项。PCM Demo 全量 298 项 `unittest`、`compileall common steps run_step.py` 与 `git diff --check` 通过。公共错误诊断保留经精确凭据遮盖的 Claude Agent SDK `errors`、异常链和 traceback 位置，以及 AI-compatible provider 的 code/type/message/request ID/HTTP status；完整有界快照写入 Git 忽略的 `logs/`，state/result/stderr 保存具体安全原因和引用。真实 `step01-mendmark` 已完成 BR-001；BR-002 第 14 步已从原裁决失败现场零 Agent 恢复成功，第 15 步随后因 Claude Agent SDK `api_error` 停止。
 > 第 0～18 步均已完成代码、自动化和适用的真实验证。第 12 步现行合同已用自由格式 Backlog 真实提取 `BR-AI-001`～`BR-AI-003` 并完成零模型幂等重跑；历史 `step01-mendmark` 的 14 项 BR 注册表属于旧三字段 source 合同。第 13～17 步完成 BR-001 的统一分支、活动 TRD、实现验证、规则复盘和提交；第 18 步已将 root/frontend/backend ff-only 到记录 tip、删除需求分支并把 BR-001 标记为 completed。旧 403、非 JSON、非法 completed 和旧 prompt 设计只保留为已修复的根因历史；`step08-real-20260823-a/b` 的 prompt、API、`.coverage`、授权循环和提交事实继续仅属于旧“唯一初始提交证明”合同的历史运行。
 
 ## 一、验证目标
@@ -223,14 +223,14 @@ pcm-demo/
 uv run python -m unittest discover -s . -t . -p 'test*.py' -v
 ```
 
-当前终版实际验证包含第 13 步 30 项、公共裁决诊断相关定向 59 项和 PCM Demo 全量 288 项 `unittest`；`compileall`、`git diff --check` 和相关 IDE diagnostics 通过。真实 BR-002 已验证旧注册表 source 的第 13 步恢复，以及第 14 步裁决失败后的零 Agent 恢复。Ruff 未安装，未执行 Ruff。
+当前终版实际验证包含第 13 步 30 项和 PCM Demo 全量 298 项 `unittest`；`compileall` 与 `git diff --check` 通过。公共诊断自动化已覆盖负责人五类失败、Responses provider 原因、Claude Agent SDK `errors`、异常链、traceback 位置、精确凭据遮盖及 scoped/protected-success 边界。真实 BR-002 已验证旧注册表 source 的第 13 步恢复，以及第 14 步裁决失败后的零 Agent 恢复；第 15 步既有 `api_error` 历史未回填或重跑。Ruff 未安装，未执行 Ruff。
 
 ## 七、执行架构与职责
 
 ```text
 命令行入口
   ├── 步骤或节点调度
-  ├── 状态、结果和脱敏日志
+  ├── 状态、结果和精确脱敏诊断
   ├── 确定性文件、命令和 Git 操作
   ├── AI-compatible 决策调用
   └── Claude Agent SDK 调用
@@ -264,10 +264,13 @@ session_id
 stop_reason
 num_turns
 total_cost_usd
+api_error_status
+terminal_reason
+errors
 exception
 ```
 
-不能把 SDK 结果压缩为一个 `success: bool`。`ResultMessage.subtype == "success"` 只说明 Agent loop 正常结束，步骤是否成功仍由文件、Git、命令、测试、服务、浏览器和未决事项共同判断。
+不能把 SDK 结果压缩为一个 `success: bool`。`ResultMessage.subtype == "success"` 只说明 Agent loop 正常结束，步骤是否成功仍由文件、Git、命令、测试、服务、浏览器和未决事项共同判断。SDK `errors`、异常链和 traceback 位置在精确凭据遮盖后进入 Git 忽略的当前诊断快照；state、步骤结果和 stderr 只保存具体安全原因与 `diagnostic_path`。AI-compatible Responses 同样保留 provider code/type/message/request ID/HTTP status，但不保存完整 headers、请求/响应 body、prompt、环境字典或 `.env` 具体值。
 
 正式步骤继续遵循：
 

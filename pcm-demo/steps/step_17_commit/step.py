@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from common.agent_decision_loop import AgentExecutionFailure, persist_agent_failure
 from common.claude_agent import ClaudeRunResult, run_claude
 from common.state import (
     is_valid_requirement_id,
@@ -346,13 +347,39 @@ async def run(run_dir: Path, state: dict[str, Any], *, agent_runner=run_claude) 
             on_update=on_update,
         )
     except Exception as error:
-        raise RuntimeError("Claude Agent 执行异常") from error
+        failure = persist_agent_failure(
+            run_dir,
+            state,
+            key=context["key"],
+            state_key=None,
+            error=error,
+            context={
+                "operation": "requirement_commit",
+                "requirement": context["requirement_id"],
+                "node": CURRENT_NODE,
+            },
+        )
+        raise AgentExecutionFailure(f"Claude Agent 执行异常：{failure}", failure.diagnostic_path) from error
     if isinstance(agent, ClaudeRunResult):
         _save_session(run_dir, state, context["key"], agent.session_id)
     _require(_session(state, context["key"]) is not None, "Claude Agent 未保存 session")
     facts = _facts(context)
     _verify_boundary(context, facts, fresh=False)
-    _require(_agent_succeeded(agent) and not any(fact["dirty"] for fact in facts), "需求提交未完成")
+    if not _agent_succeeded(agent):
+        failure = persist_agent_failure(
+            run_dir,
+            state,
+            key=context["key"],
+            state_key=None,
+            value=agent if isinstance(agent, ClaudeRunResult) else None,
+            context={
+                "operation": "requirement_commit",
+                "requirement": context["requirement_id"],
+                "node": CURRENT_NODE,
+            },
+        )
+        raise AgentExecutionFailure(f"需求提交未完成：{failure}", failure.diagnostic_path)
+    _require(not any(fact["dirty"] for fact in facts), "需求提交未完成")
     success = result("success", "已在权威仓库完成当前需求变更的本地提交并核验 Git 事实。", requirement_id=context["requirement_id"], branch=context["branch"], repositories=_repository_results(context, facts))
     write_requirement_step_result(run_dir, context["requirement_id"], STEP, success)
     return _advance(run_dir, state, context, success)

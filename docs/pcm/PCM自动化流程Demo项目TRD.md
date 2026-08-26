@@ -7,7 +7,7 @@
 > - [`PCM 自动化流程 Demo 项目设计`](./PCM自动化流程Demo项目设计.md)：定义 Demo 的目标、范围、黄金输入和最终完成标准；
 > - [`PCM 程序化调度的 AI Agent 产品开发流程`](../../.claude/PCM版AI%20Agent自动化流程设计.md)：定义第 0～18 步、阶段一、阶段二的流程语义、职责边界和停止条件。
 >
-> PCM Demo 全量 288 项 `unittest`、`compileall common steps run_step.py` 与 `git diff --check` 通过。公共负责人裁决失败已实现五类安全结构化诊断及成功清除，不保存 provider message。真实 `step01-mendmark` 已完成 BR-001；BR-002 第 14 步从原裁决失败现场零 Agent 恢复成功，第 15 步随后因 Claude Agent SDK `api_error` 停止，尚未进入负责人裁决或产品实现。
+> PCM Demo 全量 298 项 `unittest`、`compileall common steps run_step.py` 与 `git diff --check` 通过。公共错误诊断保留经精确凭据遮盖的 Claude Agent SDK `errors`、异常链和 traceback 位置，以及 AI-compatible provider 的 code/type/message/request ID/HTTP status；完整有界快照写入 Git 忽略的 `logs/`，state/result/stderr 保存具体安全原因和引用。真实 `step01-mendmark` 已完成 BR-001；BR-002 第 14 步从原裁决失败现场零 Agent 恢复成功，第 15 步随后因 Claude Agent SDK `api_error` 停止，尚未进入负责人裁决或产品实现。
 
 ## 一、目标、当前范围与状态
 
@@ -219,7 +219,7 @@ pcm-demo/
 - `state.json` 只保存支持恢复所必需的当前状态；
 - `steps/<step>.json` 保存业务步骤最近一次详细结果；
 - 阶段二节点结果保存于明确的节点结果或状态引用中，具体目录在阶段二实现前确认；
-- `logs/` 保存脱敏运行日志；
+- `logs/` 覆盖保存当前失败的完整有界诊断快照：经精确凭据遮盖的 SDK/provider 错误、异常链和 traceback 位置；不建设追加式日志平台；
 - `conversations/` 保存完整、可恢复的编排历史；新 run 原文位于 Git 忽略目录，Agent 仍不得主动披露秘密；
 - 工作区文件和 Git 仓库保存实际交付事实；
 - Claude session 保存 Agent 对话上下文；
@@ -267,7 +267,7 @@ pcm-demo/
 
 业务步骤继续保留 `current_step` 兼容信息；第 3 步成功时同时在状态中写入 `phase: project_initialization`、`current_node: project:04_assemble_foundation` 和 `step: 4`。阶段二恢复不能只依赖数字步骤。
 
-`error` 至少包含稳定错误类型和脱敏消息，不保存密钥、完整环境变量或不必要的模型原始响应。
+`error` 至少包含稳定错误类型、经精确凭据遮盖的具体原因和适用时的 `diagnostic_path`。state 与步骤结果不复制完整 traceback；完整有界诊断写入 Git 忽略的 `logs/`。不得保存 API Key、完整认证字段、环境字典、请求/响应 body、prompt 或 `.env` 具体值。
 
 ### 2. 输出路径与交接
 
@@ -364,6 +364,9 @@ session_id
 stop_reason
 num_turns
 total_cost_usd
+api_error_status
+terminal_reason
+errors
 exception
 ```
 
@@ -372,7 +375,8 @@ exception
 - `success` 的完整回复进入结构化裁决，不能直接代表步骤成功；
 - `error_max_turns` 与 `error_max_budget_usd` 只有保存了 session 且回复非空时才可进入裁决；即使裁决为 `completed`，也必须在同一 session 后续取得正常 `success`，才能最终完成；
 - API 400/429/500、连接、Claude CLI 或子进程错误、无 `ResultMessage`、缺少完整回复、session/cwd/Skill/slash command 不一致、`terminal_reason` 为 `aborted_streaming` 或 `aborted_tools`，以及 `success` 下未知终止原因都在请求决策前返回 `failed`；
-- 单次 `query()` 在出现 ResultMessage 后仍可能抛异常，封装保留已观测的安全终止分类，但不写入异常正文、密钥或环境变量；
+- 单次 `query()` 在出现 ResultMessage 后仍可能抛异常；公共封装保留 `ResultMessage.errors`、HTTP status、terminal reason、经精确凭据遮盖的异常正文、异常链与 traceback 位置，并由公共循环写入 Git 忽略诊断快照；
+- state、步骤结果和 stderr 只保存具体安全原因与 `diagnostic_path`，不复制完整 traceback；
 - 收到 ResultMessage 后继续消费消息流至结束，避免漏掉尾随系统事件；
 - SDK 正常结束后仍必须执行统一裁决和步骤自己的完成条件核验；
 - 不在公共循环外增加自定义 HTTP 重试。
@@ -640,7 +644,7 @@ PCM 在请求前读取该领域完整编排历史。首次保存动态 `system` 
 - 程序直接保存 `output_parsed.model_dump()`，不维护手写 JSON Schema、不调用 `json.loads()` 解析模型输出，也不做第二套字段校验；
 - `frontend` 和 `backend` 分别是完整的 `TemplateSelection` 或 `null`，每个选择包含 `id`、`git_url`、`default_branch`、`path` 和 `reason`；
 - 成功结果写入 `steps/03.json.template_selection`，状态推进到 `project:04_assemble_foundation`；已有成功结果可直接复用；
-- 失败时保存异常类型和固定脱敏消息，不记录 API Key 或原始异常内容；
+- 失败时保存异常类型、经精确凭据遮盖的具体原因和 `diagnostic_path`；provider code/type/message/request ID/HTTP status 与异常链写入 Git 忽略诊断快照，不记录 API Key、请求/响应 body 或完整环境；
 - 本步骤不获取、复制或组装模板，不初始化前后端仓库。
 
 当前状态：32 项第 0～3 步单元测试与 Python 编译检查通过；真实 Pydantic 基础工程选型 run `step03-pydantic-mendmark` 成功，真实 Pydantic 决策探针 `probe-c-pydantic-20260821-c` 通过。
@@ -739,7 +743,7 @@ PCM 在请求前读取该领域完整编排历史。首次保存动态 `system` 
 - `runs/<run-id>/conversations/solution_design.json`；
 - `steps/07.json`。
 
-**重构前真实运行事实。** 第 7 步旧协议的自动化记录为 11 项专属及当时第 0～7 步全量测试；其后当前全量已更新为本轮实际 222 项。`compileall`、`git diff --check` 和独立只读复审通过。修迹真实运行使用 session `dd29666c-22d7-4a9f-b51b-3f6e1cf10938`；Agent 读取两份产品定义、项目准备清单、前后端工程和脱敏组装 commit 事实，生成 `docs/design/技术方案.md`，专属裁决为 `completed`，状态推进到 `project:08_initialize_repositories`。真实 run 重跑确认成功幂等复用，不再次调用 Agent 或决策模型；根仓仍为零提交 `main`，未执行 Git 写操作。
+**重构前真实运行事实。** 第 7 步旧协议的自动化记录为 11 项专属及当时第 0～7 步全量测试；其后当前全量已更新为本轮实际 222 项。`compileall`、`git diff --check` 和独立只读复审通过。修迹真实运行使用 session `dd29866c-22d7-4a9f-b51b-3f6e1cf10938`；Agent 读取两份产品定义、项目准备清单、前后端工程和脱敏组装 commit 事实，生成 `docs/design/技术方案.md`，专属裁决为 `completed`，状态推进到 `project:08_initialize_repositories`。真实 run 重跑确认成功幂等复用，不再次调用 Agent 或决策模型；根仓仍为零提交 `main`，未执行 Git 写操作。
 
 **重构后第 7 步隔离真实验证。** run `agent-loop-step7-20260822T190149Z` 在外部复制工作区执行，未修改 `step01-mendmark`；session `e8000375-2698-4ccf-9927-ccb9ca627ca2` 的 init 确认 cwd、`solution-design` Skill、slash command 与 Fable 模型。首次 Agent 在尝试内置 Explore 子代理时遇到环境内部未识别模型并超时，无 ResultMessage；循环保留 session 与初始 conversation、未推进成功。仅在隔离验证历史中追加普通 assistant 的“不使用子代理、直接工具完成”提示后，从同一 session 恢复；该提示不在生产 prompt 中，环境问题不归因于公共循环。
 
@@ -1245,7 +1249,8 @@ Git 子进程统一过滤 `GIT_*`。仓库按非 root 原顺序、root 最后的
 - 配置和敏感信息不泄露；
 - JSON、Markdown、状态和 SHA-256 读写；
 - 第 0～8、12～18 步状态转换；
-- 第 13 步本体 20 项与 CLI 10 项，共 30 项；公共裁决诊断相关定向 59 项；当前全量 288 项 `unittest` 通过，`compileall common steps run_step.py` 与 `git diff --check` 通过；
+- 第 13 步本体 20 项与 CLI 10 项，共 30 项；当前全量 298 项 `unittest` 通过，`compileall common steps run_step.py` 与 `git diff --check` 通过；
+- 公共错误诊断覆盖精确凭据遮盖、普通 token 语义保留、异常链与 traceback 位置、稳定有界日志名、OpenAI-compatible provider code/type/message/request ID/HTTP status、Claude Agent SDK `ResultMessage.errors`、BR-002 `api_error` 结果形态，以及第 12～18 步 scoped/protected-success 失败持久化边界；
 - 第 18 步覆盖动态仓库白名单、非 root 在前/root 最后、base/tip no-op、部分 merge、逐仓 merged state、全局 cleanup 前置、partial cleanup、result→state、上游增量字段兼容、真实 CLI、失败脱敏、完成状态防降级和 `GIT_*` 过滤；
 - 第 17 步现行精简实现覆盖动态多仓白名单、direct 产品根 session、全 clean 零 Agent、init 后 session 保存、异常/dirty/非正常结果的单次 resume、symlink 路径、未跟踪文件、result→state、advanced 旧字段兼容和 CLI success 保护；
 - 第 17 步现行 direct-run fresh 路径尚未重新执行真实 Claude Agent；旧真实 run 的提交、session 和 conversation 只作为历史执行事实，现行代码已完成 advanced 字节不变兼容验证。

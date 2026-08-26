@@ -153,6 +153,7 @@ class DevelopmentCLITests(unittest.TestCase):
             self.assertEqual(self.cli.main(), 1)
         self.assertEqual(result_path.read_bytes(), json.dumps(success, ensure_ascii=False, indent=2).encode() + b"\n")
         self.assertEqual((run_dir / "state.json").read_bytes(), before_state)
+        self.assertFalse((run_dir / "logs").exists())
 
     def test_incomplete_or_failed_scoped_result_is_not_protected(self) -> None:
         for saved in ({"status": "success"}, {"status": "failed"}):
@@ -169,6 +170,24 @@ class DevelopmentCLITests(unittest.TestCase):
                 )
                 self.assertEqual(replaced["status"], "failed")
                 self.assertEqual(read_state(run_dir)["current_node"], CURRENT_NODE)
+
+    def test_failed_exception_writes_specific_redacted_diagnostic(self) -> None:
+        run_dir, _ = self.make_run()
+        stderr = io.StringIO()
+        with (
+            patch.object(self.cli, "parse_args", return_value=self.args(run_dir.name)),
+            patch.object(self.cli, "run_step_fifteen", side_effect=RuntimeError("secret=hidden")),
+            contextlib.redirect_stderr(stderr),
+        ):
+            self.assertEqual(self.cli.main(), 1)
+        saved = json.loads(
+            (run_dir / "steps/requirements/BR-001/15.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(saved["error"]["message"], "secret=[REDACTED]")
+        self.assertEqual(saved["error"]["diagnostic_path"], "logs/step-15-error.json")
+        self.assertNotIn("secret=hidden", json.dumps(saved, ensure_ascii=False))
+        self.assertIn("secret=[REDACTED]", stderr.getvalue())
+        self.assertIn("logs/step-15-error.json", stderr.getvalue())
 
     def test_blocked_exception_writes_a_scoped_blocked_result(self) -> None:
         run_dir, _ = self.make_run(session=True)

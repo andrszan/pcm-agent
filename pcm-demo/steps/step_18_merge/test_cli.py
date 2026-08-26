@@ -221,8 +221,11 @@ class RequirementMergeCLITests(unittest.TestCase):
             (run_dir / "steps/requirements/BR-001/18.json").read_text(encoding="utf-8")
         )
         self.assertEqual(saved["status"], "failed")
+        self.assertEqual(saved["error"]["message"], "secret=[REDACTED]")
+        self.assertEqual(saved["error"]["diagnostic_path"], "logs/step-18-error.json")
         self.assertNotIn("secret=hidden", json.dumps(saved, ensure_ascii=False))
-        self.assertNotIn("secret=hidden", stderr.getvalue())
+        self.assertIn("secret=[REDACTED]", stderr.getvalue())
+        self.assertIn("logs/step-18-error.json", stderr.getvalue())
         state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
         self.assertEqual((state["step"], state["current_step"], state["current_node"]), (18, 18, CURRENT_NODE))
 

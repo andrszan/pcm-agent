@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from common.error_diagnostics import exception_projection, write_diagnostic
 from common.files import resolve_workspace_output
 from common.openai_responses import parse_response
 from common.state import write_state, write_step_result
@@ -307,6 +308,14 @@ async def run(
         write_state(run_dir, state)
         return result
     except Exception as error:  # noqa: BLE001 - 步骤入口统一保存脱敏失败结果。
+        diagnostic_path = write_diagnostic(
+            run_dir,
+            "step-03-error.json",
+            source="foundation_selection",
+            kind="response",
+            context={"step": STEP, "component": "foundation_selection", "operation": "select_foundations"},
+            error=error,
+        )
         result = {
             "step": STEP,
             "name": NAME,
@@ -315,10 +324,7 @@ async def run(
             "applicable": True,
             "outputs": [],
             "blocked": None,
-            "error": {
-                "type": type(error).__name__,
-                "message": "基础工程模板选择未完成。",
-            },
+            "error": exception_projection(error, diagnostic_path=diagnostic_path),
             "template_selection": None,
         }
         write_step_result(run_dir, STEP, result)

@@ -78,8 +78,11 @@ class RequirementCommitCLITests(unittest.TestCase):
             self.assertEqual(self.cli.main(), 1)
         saved = json.loads((run_dir / "steps/requirements/BR-001/17.json").read_text(encoding="utf-8"))
         self.assertEqual(saved["status"], "failed")
+        self.assertEqual(saved["error"]["message"], "secret=[REDACTED]")
+        self.assertEqual(saved["error"]["diagnostic_path"], "logs/step-17-error.json")
         self.assertNotIn("secret=hidden", json.dumps(saved, ensure_ascii=False))
-        self.assertNotIn("secret=hidden", stderr.getvalue())
+        self.assertIn("secret=[REDACTED]", stderr.getvalue())
+        self.assertIn("logs/step-17-error.json", stderr.getvalue())
 
     def test_complete_scoped_success_protects_state_and_result(self) -> None:
         run_dir = self.make_run(advanced=True, complete_success=True)

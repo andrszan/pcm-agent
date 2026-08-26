@@ -17,7 +17,9 @@ from common.agent_decision_loop import (  # noqa: E402
     BLOCKED_RESUME_PROMPT,
     RECOVERABLE_RESULT_PROMPT,
     AIDecisionFailure,
+    AgentExecutionFailure,
     AgentDecisionLoopSpec,
+    persist_agent_failure,
     run_agent_decision_loop,
 )
 from common.claude_agent import ClaudeRunResult, run_claude  # noqa: E402
@@ -253,10 +255,11 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(raised.exception.diagnostic, {"kind": "configuration"})
-        self.assertEqual(
-            self.state[self.spec.state_key]["last_decision_failure"],
-            {"kind": "configuration"},
-        )
+        failure = self.state[self.spec.state_key]["last_decision_failure"]
+        self.assertEqual(failure["kind"], "configuration")
+        self.assertIn("LLM_API_KEY=[REDACTED]", failure["message"])
+        self.assertEqual(failure["diagnostic_path"], "logs/test_conversation-decision.json")
+        self.assertTrue((self.run_dir / failure["diagnostic_path"]).is_file())
         self.assertNotIn("secret", json.dumps(self.state, ensure_ascii=False))
         messages = json.loads(
             (self.run_dir / "conversations" / f"{self.spec.key}.json").read_text(
@@ -298,9 +301,10 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
             "request_id": "request-123",
         }
         self.assertEqual(raised.exception.diagnostic, diagnostic)
-        self.assertEqual(
-            self.state[self.spec.state_key]["last_decision_failure"], diagnostic
-        )
+        failure = self.state[self.spec.state_key]["last_decision_failure"]
+        self.assertEqual({key: failure[key] for key in diagnostic}, diagnostic)
+        self.assertIn("ResponsesFailure", failure["message"])
+        self.assertEqual(failure["diagnostic_path"], "logs/test_conversation-decision.json")
         messages = json.loads(
             (self.run_dir / "conversations" / f"{self.spec.key}.json").read_text(
                 encoding="utf-8"
@@ -786,6 +790,66 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
                         config_loader=lambda: object(),
                     )
 
+    async def test_api_error_result_writes_sdk_error_projection_and_log(self) -> None:
+        value = self.result(
+            "",
+            is_error=True,
+            api_error_status=429,
+            terminal_reason="api_error",
+        )
+        value.sdk_errors = ["provider api_error: secret=hidden"]
+        with self.assertRaises(AgentExecutionFailure) as raised:
+            await self.run_loop(FakeAgentRunner([value]), FakeDecisionRunner([]))
+
+        saved = json.loads((self.run_dir / raised.exception.diagnostic_path).read_text(encoding="utf-8"))
+        self.assertEqual(saved["details"]["sdk_errors"], ["provider api_error: secret=[REDACTED]"])
+        result = self.state[self.spec.state_key]["last_agent_result"]
+        self.assertIn("provider api_error", result["message"])
+        self.assertEqual(result["diagnostic_path"], raised.exception.diagnostic_path)
+
+    async def test_agent_runner_exception_preserves_safe_cause_and_traceback_in_log(self) -> None:
+        async def failed_runner(*_args: object, **_kwargs: object) -> ClaudeRunResult:
+            try:
+                raise ValueError("access_token=inner-secret")
+            except ValueError as cause:
+                raise RuntimeError("api_key=outer-secret") from cause
+
+        with self.assertRaises(AgentExecutionFailure) as raised:
+            await self.run_loop(failed_runner, FakeDecisionRunner([]))
+
+        self.assertEqual(raised.exception.diagnostic_path, "logs/test_conversation-agent.json")
+        saved = json.loads((self.run_dir / raised.exception.diagnostic_path).read_text(encoding="utf-8"))
+        serialized = json.dumps(saved, ensure_ascii=False)
+        self.assertNotIn("outer-secret", serialized)
+        self.assertNotIn("inner-secret", serialized)
+        self.assertEqual(saved["exception"]["chain"][0]["type"], "ValueError")
+        self.assertTrue(saved["exception"]["traceback"])
+        state_result = self.state[self.spec.state_key]["last_agent_result"]
+        self.assertEqual(state_result["diagnostic_path"], raised.exception.diagnostic_path)
+        self.assertIn("api_key=[REDACTED]", state_result["message"])
+
+    async def test_long_agent_key_uses_stable_bounded_diagnostic_filename(self) -> None:
+        key = "requirement_commit_BR-" + "x" * 200
+        first = persist_agent_failure(
+            self.run_dir,
+            self.state,
+            key=key,
+            state_key=None,
+            error=RuntimeError("agent failed"),
+        )
+        second = persist_agent_failure(
+            self.run_dir,
+            self.state,
+            key=key,
+            state_key=None,
+            error=RuntimeError("agent failed again"),
+        )
+
+        self.assertEqual(first.diagnostic_path, second.diagnostic_path)
+        self.assertLessEqual(len(Path(first.diagnostic_path).name), 128)
+        self.assertRegex(Path(first.diagnostic_path).name, r"^[A-Za-z0-9][A-Za-z0-9_.-]*\.json$")
+        self.assertTrue((self.run_dir / first.diagnostic_path).is_file())
+
     async def test_decision_limit_has_no_extra_agent_or_decision_call(self) -> None:
         limited_spec = AgentDecisionLoopSpec(
             **{**self.spec.__dict__, "max_decision_rounds": 1}
@@ -829,7 +893,7 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
                     subtype="success",
                     duration_ms=1,
                     duration_api_ms=1,
-                    is_error=False,
+                    is_error=True,
                     num_turns=1,
                     session_id="session-1",
                     result="Agent 的完整结果",
@@ -851,9 +915,12 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.terminal_reason, "api_error")
         self.assertEqual(result.api_error_status, 429)
         self.assertTrue(result.has_errors)
+        self.assertEqual(result.sdk_errors, ["tool warning"])
+        self.assertTrue(updates[-1].is_error)
         self.assertEqual(updates[-1].terminal_reason, "api_error")
         self.assertEqual(updates[-1].api_error_status, 429)
         self.assertTrue(updates[-1].has_errors)
+        self.assertEqual(updates[-1].sdk_errors, ["tool warning"])
 
 
 class AgentDecisionTest(unittest.IsolatedAsyncioTestCase):

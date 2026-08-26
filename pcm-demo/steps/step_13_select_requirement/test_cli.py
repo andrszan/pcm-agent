@@ -233,7 +233,9 @@ class SelectRequirementCLITests(unittest.TestCase):
             self.assertEqual(self.cli.main(), 1)
         self.assertFalse((run_dir / "steps/requirements").exists())
         self.assertIn(str(run_dir / "state.json"), stderr.getvalue())
+        self.assertIn("secret=[REDACTED]", stderr.getvalue())
         self.assertNotIn("secret=hidden", stderr.getvalue())
+        self.assertFalse((run_dir / "logs").exists())
 
     def test_controlled_selection_error_is_reported(self) -> None:
         run_dir = self.make_run()
@@ -285,7 +287,8 @@ class SelectRequirementCLITests(unittest.TestCase):
             self.assertEqual(self.cli.main(), 1)
         saved = json.loads((run_dir / "steps/requirements/BR-001/13.json").read_text(encoding="utf-8"))
         self.assertEqual(saved["status"], "failed")
-        self.assertEqual(saved["error"]["message"], "需求选择未完成。")
+        self.assertEqual(saved["error"]["message"], "secret=[REDACTED]")
+        self.assertEqual(saved["error"]["diagnostic_path"], "logs/step-13-error.json")
         self.assertNotIn("secret=hidden", json.dumps(saved, ensure_ascii=False))
         failed = read_state(run_dir)
         self.assertEqual(failed["active_requirement"], "BR-001")

@@ -464,7 +464,9 @@ class AssembleFoundationTests(unittest.TestCase):
 
             saved = run(run_dir, state, git_runner=failing_clone)
             self.assertEqual(saved["error"]["message"], "模板仓库 clone 失败")
+            self.assertEqual(saved["error"]["diagnostic_path"], "logs/step-04-error.json")
             self.assertNotIn("secret", json.dumps(saved, ensure_ascii=False))
+            self.assertNotIn("secret", (run_dir / "logs/step-04-error.json").read_text(encoding="utf-8"))
 
     def test_verify_tree_rejects_nested_git(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

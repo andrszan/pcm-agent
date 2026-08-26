@@ -177,8 +177,11 @@ class TRDDesignCLITests(unittest.TestCase):
             saved["trd_path"],
             "docs/trd/2026-08-25-BR-001-身份、角色访问与站内消息入口.md",
         )
+        self.assertEqual(saved["error"]["message"], "secret=[REDACTED]")
+        self.assertEqual(saved["error"]["diagnostic_path"], "logs/step-14-error.json")
         self.assertNotIn("secret=hidden", json.dumps(saved, ensure_ascii=False))
-        self.assertNotIn("secret=hidden", stderr.getvalue())
+        self.assertIn("secret=[REDACTED]", stderr.getvalue())
+        self.assertIn("logs/step-14-error.json", stderr.getvalue())
 
     def test_decision_failure_writes_safe_structured_diagnostic(self) -> None:
         run_dir, _ = self.make_run()
