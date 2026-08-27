@@ -2,13 +2,6 @@
   "version": 1,
   "plugins": [
     {
-      "id": "codex@openai-codex",
-      "name": "codex",
-      "version": "1.0.6",
-      "provider": "openai-codex",
-      "path": ".agents/plugins/codex"
-    },
-    {
       "id": "context7@claude-plugins-official",
       "name": "context7",
       "version": "2dc97c0d12ab",

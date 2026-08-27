@@ -12,9 +12,6 @@
 .vscode/*
 .idea/*
 
-# target directories(codex)
-target-*/
-
 # local git worktrees
 .worktrees/
 

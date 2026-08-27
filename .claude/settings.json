@@ -36,7 +36,6 @@
     "defaultMode": "bypassPermissions"
   },
   "enabledPlugins": {
-    "codex@openai-codex": true,
     "context7@claude-plugins-official": true,
     "playwright@claude-plugins-official": true,
     "ponytail@ponytail": true,

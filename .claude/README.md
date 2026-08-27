@@ -52,19 +52,6 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 
 环境检查的深度应与当前任务相称。纯文档修改不机械启动全部服务；实现、联调和交付验收不能因环境准备复杂而跳过适用条件。
 
-### 可选独立审查环境
-
-`reviewer` Subagent 不要求额外外部工具。`codex-review` 是可选的外部独立审查适配，只有当前环境已经具备可用的 Codex CLI、登录状态、companion 或项目所需插件配置时才使用。
-
-使用 `codex-review` 前应确认：
-
-- Codex CLI 可以正常启动并完成必要认证；
-- 当前项目的 companion 或插件已经安装、启用且权限可用；
-- 审查者能够读取权威工作区中的完整代码、Git diff、活动 TRD 和验证证据；
-- 审查过程保持只读，不执行会修改项目状态的命令。
-
-环境不可用时，不由 Skill 自动安装 CLI、插件或全局依赖，也不伪造 Codex 审查结果。根据任务风险使用 `reviewer` 或其它真正独立、只读且可获得完整材料的审查路径。
-
 ### UI 浏览器验收环境
 
 只要任务包含 UI、用户交互或浏览器可见结果，就应使用真实浏览器验证动态行为，并实际读取代表性渲染结果；不能只依赖代码阅读、组件测试、Mock、DOM 结构或未查看的截图。验证不仅确认“可以操作”，还要按任务风险检查流程复杂度、内容理解、信息与操作层级、目标视口和基本可访问性。
@@ -91,7 +78,7 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 | `session-rule-retrospective` | 只编辑 `.claude/rules/`，不提交 |
 | `commit-changes` | 唯一负责精确 stage/commit；按仓库分别显式调用，默认不 push |
 | `dev` Subagent | 不 stage、不 commit、不改 Git 历史 |
-| `reviewer` Subagent / `codex-review` | 只读，不改变文件或 Git 状态 |
+| `reviewer` Subagent | 只读，不改变文件或 Git 状态 |
 
 建分支、切换分支和合并回 `main` 是人工流程中的显式 Git 操作，不属于 `commit-changes`。
 
@@ -120,7 +107,6 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 
 | Skill | 依赖与边界 |
 |---|---|
-| `codex-review` | 依赖当前环境已具备的 Codex CLI/companion；只读审查，不可用不代表审查通过，也不阻塞普通开发 |
 | `playwright-cli` | 依赖当前环境已具备的对应浏览器运行工具；用于真实浏览器操作与验证，核心 Skills 不得把它作为隐藏必需 Skill |
 
 可选工具不可用时，应记录真实验证缺口；本仓库不为此自动安装新的 CLI、插件或项目依赖。
@@ -144,7 +130,7 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 | `dev` | 在 Leader 给定的目标与边界内实现内聚修改，完成局部真实验证；用户可见范围同时提供可理解性、关键状态和实际渲染证据或明确缺口 | 实质扩大范围或重大迁移时返回 `needs-decision`；不提交、不维护 Backlog 或最终状态 |
 | `reviewer` | 独立、只读、基于证据检查正确性、安全、数据、回归和验证缺口；有 UI 证据时同时检查任务理解、关键状态和明显视觉退化 | 不修改文件，不运行会写状态的测试，不作最终裁决 |
 
-`reviewer` 与 `codex-review` 不重复：前者是本地通用只读 Subagent，后者是可选的外部独立审查工具适配。
+`reviewer` 是本仓库内建的独立只读审查路径。调用方如因高风险变更另行引入外部审查结果，仍须确保审查者获得权威工作区中的完整变更、验收条件和验证证据，并由 Leader 结合项目事实作最终判断。
 
 ## 7. 目录结构
 
@@ -156,7 +142,6 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 │   ├── dev.md
 │   └── reviewer.md
 ├── skills/
-│   ├── codex-review/SKILL.md
 │   ├── commit-changes/SKILL.md
 │   ├── dev-workflow/
 │   │   ├── SKILL.md
@@ -219,10 +204,6 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 完整的新项目人工调度顺序以 [`AI Agent开发流程设计.md`](./AI%20Agent开发流程设计.md) 为准；已有项目、小改动、Bug 修复或重构不需要机械执行所有初始化步骤。
 
 ## 10. 常见问题
-
-### 没有 Codex 也能开发吗？
-
-能。核心领域 Skills 不依赖 Codex。需要独立审查时可以使用 `reviewer` 或其它真正独立、只读且获得完整材料的路径；某个可选工具不可用不代表审查已经通过，也不应阻止其它可执行开发和验证。
 
 ### 前端、后端或前后端分离项目怎么使用？
 
