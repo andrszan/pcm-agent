@@ -175,7 +175,9 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 │   │   └── evals/evals.json
 │   ├── project-bootstrap/SKILL.md
 │   ├── project-intake/SKILL.md
-│   ├── project-readiness/SKILL.md
+│   ├── project-readiness/
+│   │   ├── SKILL.md
+│   │   └── evals/evals.json
 │   ├── requirement-breakdown/SKILL.md
 │   ├── session-rule-retrospective/SKILL.md
 │   ├── solution-design/SKILL.md
@@ -228,7 +230,7 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 
 ### 空白项目怎么开始？
 
-先使用 `project-intake` 收敛目标用户、产品范围、核心流程和外部约束，再按项目是否需要模板选型调用 `foundation-selection`，随后组装并项目化基础工程，最后基于真实工程事实调用 `solution-design` 形成总体技术方案。默认完整顺序见人工流程文档，但每个 Skill 仍可独立调用。
+先使用 `project-intake` 收敛目标用户、产品范围、核心流程和外部约束，再按项目是否需要模板选型调用 `foundation-selection` 并组装适用基础工程。随后使用 `project-readiness` 建立覆盖整个已确认项目周期的唯一准备基线，实际准备并核验必要资源、权限和开发配置；基线完成后执行 `project-bootstrap` 项目化工程，再基于真实工程事实调用 `solution-design` 形成总体技术方案。默认完整顺序见人工流程文档，但每个 Skill 仍可独立调用。
 
 ### 小改动或 Bug 修复也要走完整流程吗？
 
