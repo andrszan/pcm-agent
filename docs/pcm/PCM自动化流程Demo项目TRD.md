@@ -7,7 +7,8 @@
 > - [`PCM 自动化流程 Demo 项目设计`](./PCM自动化流程Demo项目设计.md)：定义 Demo 的目标、范围、黄金输入和最终完成标准；
 > - [`PCM 程序化调度的 AI Agent 产品开发流程`](../../.claude/PCM版AI%20Agent自动化流程设计.md)：定义第 0～18 步、阶段一、阶段二的流程语义、职责边界和停止条件。
 >
-> PCM Demo 全量 298 项 `unittest`、`compileall common steps run_step.py` 与 `git diff --check` 通过。公共错误诊断保留经精确凭据遮盖的 Claude Agent SDK `errors`、异常链和 traceback 位置，以及 AI-compatible provider 的 code/type/message/request ID/HTTP status；完整有界快照写入 Git 忽略的 `logs/`，state/result/stderr 保存具体安全原因和引用。真实 `step01-mendmark` 已完成 BR-001；BR-002 第 14 步从原裁决失败现场零 Agent 恢复成功，第 15 步随后因 Claude Agent SDK `api_error` 停止，尚未进入负责人裁决或产品实现。
+> PCM Demo 全量 303 项 `unittest`、`compileall common steps run_step.py test_run_step_retry.py` 与 `git diff --check` 通过。`run_step.py` 对任何真实步骤的非 `success` 结果统一有界重跑当前步骤两次，间隔 10 秒和 30 秒；不依赖错误分类或消息匹配，18 个步骤不增加重试分支。
+公共错误诊断保留经精确凭据遮盖的 Claude Agent SDK `errors`、异常链和 traceback 位置，以及 AI-compatible provider 的 code/type/message/request ID/HTTP status；完整有界快照写入 Git 忽略的 `logs/`，state/result/stderr 保存具体安全原因和引用。真实 `step01-mendmark` 已连续完成 BR-001 与 BR-002；BR-002 统一重试前两次因负责人代码围栏 JSON 失败，第三次成功，第 16～18 步随后完成。
 
 ## 一、目标、当前范围与状态
 
@@ -27,7 +28,7 @@ Demo 继续采用增量实施，不一次创建完整流程空壳：
 
 当前代码已经实现：
 
-- `run_step.py` 的第 0～18 步单步入口；第 8～12 步保留固定 result success 保护，第 13～18 步以 current `active_requirement`/cycle 定位并保护 scoped success；
+- `run_step.py` 的第 0～18 步单步入口；真实步骤返回非 `success` 时，CLI 以相同参数按 10 秒、30 秒间隔重新执行当前步骤，最多三次总执行。每次由步骤重新读取最新 state/session/result；未实现步骤、参数解析失败和主动取消不重试。第 8～12 步保留固定 result success 保护，第 13～18 步以 current `active_requirement`/cycle 定位并保护 scoped success；
 - 第 0 步完整产品初稿无副作用跳过；
 - 第 1 步项目身份提取、固定模板浅克隆、清理、原子发布和零提交根仓库初始化；
 - 第 2 步 `project-intake`、第 5 步 `project-readiness`、第 6 步 `project-bootstrap` 与第 7 步 `solution-design` 的领域输入、产物、三态结果及幂等边界；
@@ -1003,11 +1004,10 @@ Git 子进程统一过滤 `GIT_*`。仓库按非 root 原顺序、root 最后的
 
 第 0～18 步同时使用 `current_step` 和必要的 `phase/current_node`。第 9～11 步 success 只以必要文档和当前 Git 事实为准；`run_step.py` 对第 8～12 步 success 保持固定保护，第 13～18 步按当前 active/cycle 保护 scoped result/state。前序步骤只校验自己拥有的核心投影，允许后续步骤追加自身字段；历史步骤的异常仅能在 state 仍位于该步骤锚点时持久化，不能改写已推进节点。
 
-当前真实 state 位于 `phase_1_requirement_development` / `requirement:15_development`、`step/current_step: 15`。`BR-001` completed、`BR-002` active、其余 12 项 pending；cycle 保存 `req/br-002`、三仓 base、活动 TRD 和 development session `d8f7861e-ed3e-40c8-8bd4-b259af67c196`。第 15 步首次 Claude Agent 调用返回 `subtype:success` 但 `is_error:true`、`terminal_reason:api_error`、`has_errors:true`，conversation 仍只有 system 与初始 assistant 指令，没有 Agent 回复或负责人裁决。root 仅有活动 TRD 未跟踪，frontend/backend clean，三仓均在 `req/br-002`。
+当前真实 state 位于 `phase_1_requirement_development` / `phase_1:select_requirement`、`step/current_step: 13`。`BR-001` 与 `BR-002` completed，其余 12 项 pending；`active_requirement` 与 `requirement_cycle` 均为 null。BR-002 root/frontend/backend main tips 分别为 `2f39fbe7e26d6e4905142925ae149ba83d9e70fe`、`f290ff85ed779a1f100eeded7eedfcfb0376b826`、`204a7a6b48c43a80f573dc9e70acedddb59bbe4f`；三仓 clean、`req/br-002` 已删除且未 push。
 
 已确认但尚未实现的流程是：
 
-- 第 18 步 ff-only 合并、分支清理和需求完成，以及后续需求循环；
 - 不带数字步骤的阶段二审计、分流、入池、回归和复审节点。
 
 因此只使用 `current_step` 已不足以表达完整恢复位置；需求生命周期由注册表管理，具体执行进度由 `phase/current_node` 和活动 `requirement_cycle` 管理。
@@ -1249,7 +1249,7 @@ Git 子进程统一过滤 `GIT_*`。仓库按非 root 原顺序、root 最后的
 - 配置和敏感信息不泄露；
 - JSON、Markdown、状态和 SHA-256 读写；
 - 第 0～8、12～18 步状态转换；
-- 第 13 步本体 20 项与 CLI 10 项，共 30 项；当前全量 298 项 `unittest` 通过，`compileall common steps run_step.py` 与 `git diff --check` 通过；
+- 第 13 步本体 20 项与 CLI 10 项，共 30 项；统一步骤重试 5 项；当前全量 303 项 `unittest` 通过，`compileall common steps run_step.py test_run_step_retry.py` 与 `git diff --check` 通过；
 - 公共错误诊断覆盖精确凭据遮盖、普通 token 语义保留、异常链与 traceback 位置、稳定有界日志名、OpenAI-compatible provider code/type/message/request ID/HTTP status、Claude Agent SDK `ResultMessage.errors`、BR-002 `api_error` 结果形态，以及第 12～18 步 scoped/protected-success 失败持久化边界；
 - 第 18 步覆盖动态仓库白名单、非 root 在前/root 最后、base/tip no-op、部分 merge、逐仓 merged state、全局 cleanup 前置、partial cleanup、result→state、上游增量字段兼容、真实 CLI、失败脱敏、完成状态防降级和 `GIT_*` 过滤；
 - 第 17 步现行精简实现覆盖动态多仓白名单、direct 产品根 session、全 clean 零 Agent、init 后 session 保存、异常/dirty/非正常结果的单次 resume、symlink 路径、未跟踪文件、result→state、advanced 旧字段兼容和 CLI success 保护；

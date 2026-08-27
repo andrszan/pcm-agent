@@ -2,7 +2,7 @@
 
 > 本文定义正式 PCM 开发前的轻量 Python 验证项目。Demo 的目的不是提前实现正式 PCM，而是用可独立运行、可串联的一组脚本，真实验证 [`PCM 程序化调度的 AI Agent 产品开发流程`](../../.claude/PCM版AI%20Agent自动化流程设计.md)。
 >
-> 第 17 步现行精简实现本体 10 项、CLI 3 项；第 18 步本体 10 项、CLI 5 项。PCM Demo 全量 298 项 `unittest`、`compileall common steps run_step.py` 与 `git diff --check` 通过。公共错误诊断保留经精确凭据遮盖的 Claude Agent SDK `errors`、异常链和 traceback 位置，以及 AI-compatible provider 的 code/type/message/request ID/HTTP status；完整有界快照写入 Git 忽略的 `logs/`，state/result/stderr 保存具体安全原因和引用。真实 `step01-mendmark` 已完成 BR-001；BR-002 第 14 步已从原裁决失败现场零 Agent 恢复成功，第 15 步随后因 Claude Agent SDK `api_error` 停止。
+> 第 17 步现行精简实现本体 10 项、CLI 3 项；第 18 步本体 10 项、CLI 5 项。PCM Demo 全量 303 项 `unittest`、`compileall common steps run_step.py test_run_step_retry.py` 与 `git diff --check` 通过。`run_step.py` 对任何真实步骤的非 `success` 结果统一按 10 秒、30 秒间隔重跑当前步骤两次；重试只重新进入已有步骤恢复逻辑，不依赖错误分类或消息匹配。公共错误诊断保留经精确凭据遮盖的 Claude Agent SDK `errors`、异常链和 traceback 位置，以及 AI-compatible provider 的 code/type/message/request ID/HTTP status；完整有界快照写入 Git 忽略的 `logs/`，state/result/stderr 保存具体安全原因和引用。真实 `step01-mendmark` 已连续完成 BR-001 与 BR-002；BR-002 的统一重试前两次因负责人代码围栏 JSON 失败，第三次成功，第 16～18 步随后完成。
 > 第 0～18 步均已完成代码、自动化和适用的真实验证。第 12 步现行合同已用自由格式 Backlog 真实提取 `BR-AI-001`～`BR-AI-003` 并完成零模型幂等重跑；历史 `step01-mendmark` 的 14 项 BR 注册表属于旧三字段 source 合同。第 13～17 步完成 BR-001 的统一分支、活动 TRD、实现验证、规则复盘和提交；第 18 步已将 root/frontend/backend ff-only 到记录 tip、删除需求分支并把 BR-001 标记为 completed。旧 403、非 JSON、非法 completed 和旧 prompt 设计只保留为已修复的根因历史；`step08-real-20260823-a/b` 的 prompt、API、`.coverage`、授权循环和提交事实继续仅属于旧“唯一初始提交证明”合同的历史运行。
 
 ## 一、验证目标
@@ -63,9 +63,9 @@ python run_all.py \
 - 第 16 步：采用薄编排，只消费当前 active requirement/cycle/workspace 与 `development_session_id`，以 `rule_retrospective_<ID>` 建独立负责人 conversation、预注册原 development session alias并调用 `/session-rule-retrospective`；允许规则变化或 no-change，success 写 `steps/requirements/<ID>/16.json`（`outputs: []`）并推进第 17 步，不读取 Git或建立 baseline；
 - 第 17 步：只消费当前 active requirement/cycle/workspace、完整 scoped 第 16 步 success、统一需求分支和各仓 base，在产品根 direct `run_claude()` session 中调用 `/commit-changes`；Python 只核验白名单、分支、main/base、最终 clean 和 tips，写 scoped `17.json` 并推进第 18 步；
 - 第 18 步：只读取当前 active requirement/cycle、权威仓库路径和 scoped 第 17 步 success 的必要字段；以确定性 Python/Git 按非 root 在前、root 最后的顺序执行或恢复 ff-only 合并，逐仓保存 `merged:true`，全仓到 tip 后统一安全删除需求分支，先写 scoped `18.json` 再完成注册表生命周期；
-- `run_step.py` 对第 0～18 步提供单步运行入口；第 13～18 步按当前 active/cycle 保护 scoped success，失败只有在 state 仍位于自身锚点时才能持久化，不得降级已推进状态。
+- `run_step.py` 对第 0～18 步提供单步运行入口；任何真实步骤非 `success` 时，以相同 CLI 参数重新运行当前步骤，分别等待 10 秒和 30 秒，最多三次总执行。每次由步骤重新读取最新 state/session/result；第 13～18 步仍按当前 active/cycle 保护 scoped success，失败只有在 state 位于自身锚点时才能持久化，不得降级已推进状态。未实现步骤、参数解析失败和主动取消不重试。
 
-当前代码已实现并真实成功验证第 0～18 步。BR-001 已完成第 13～18 步。第二轮第 13 步已在不迁移旧注册表来源的情况下选择 BR-002；第 14 步 Agent 生成活动 TRD 后首次负责人裁决失败，公共诊断改进完成后从同一 `system → assistant → user` conversation 零 Agent 恢复并推进第 15 步。第 15 步首次调用保存 development session `d8f7861e-ed3e-40c8-8bd4-b259af67c196` 后返回 `is_error:true` / `terminal_reason:api_error`，没有 Agent 回复、负责人裁决或产品实现改动，当前现场保留在第 15 步。
+当前代码已实现并真实成功验证第 0～18 步。BR-001 与 BR-002 均已完成第 13～18 步。BR-002 第 15 步先后暴露流断开、HTTP 500 和两次代码围栏 JSON；统一步骤重试不读取错误分类，以相同 CLI 参数重新进入当前步骤，第三次取得合法负责人 `completed`。第 16 步复用 development session 完成规则复盘，第 17 步提交 root/frontend/backend，第 18 步 ff-only 合并并清理 `req/br-002`，state 返回 `phase_1:select_requirement` / step 13。
 
 ### 2. 从第 3 步起的重大变化
 
@@ -223,7 +223,7 @@ pcm-demo/
 uv run python -m unittest discover -s . -t . -p 'test*.py' -v
 ```
 
-当前终版实际验证包含第 13 步 30 项和 PCM Demo 全量 298 项 `unittest`；`compileall` 与 `git diff --check` 通过。公共诊断自动化已覆盖负责人五类失败、Responses provider 原因、Claude Agent SDK `errors`、异常链、traceback 位置、精确凭据遮盖及 scoped/protected-success 边界。真实 BR-002 已验证旧注册表 source 的第 13 步恢复，以及第 14 步裁决失败后的零 Agent 恢复；第 15 步既有 `api_error` 历史未回填或重跑。Ruff 未安装，未执行 Ruff。
+当前终版实际验证包含第 13 步 30 项、统一步骤重试 5 项和 PCM Demo 全量 303 项 `unittest`；`compileall` 与 `git diff --check` 通过。真实 BR-002 已验证旧注册表 source 恢复、负责人裁决失败恢复、无分类有界步骤重试、development session 续接和第二次完整三仓需求循环。Ruff 未安装，未执行 Ruff。
 
 ## 七、执行架构与职责
 
@@ -516,7 +516,7 @@ Python 过滤 Git 子进程的 `GIT_*` 环境变量，按非 root 原顺序、ro
 
 最终所有仓库必须位于 main、`HEAD==main==tip`、clean、无进行中 Git 操作且需求分支不存在。步骤先写 root-first 的 scoped `18.json`，再把当前注册表项更新为 `completed` / `completion:{"step":18}`，清空 active requirement/cycle 并返回 cycle 记录节点。第 18 步本体 10 项、CLI 5 项，共 15 项；全量 282 项、`compileall`、`git diff --check` 通过，独立只读审查无高、中置信发现。
 
-真实 `step01-mendmark` 已完成 BR-001，随后从各仓最新 main 建立 `req/br-002`。当前 root 仅有 BR-002 活动 TRD 未跟踪，frontend/backend clean，三仓均在 `req/br-002`。第 14 步已成功；第 15 步保存 development session 后因 Claude Agent SDK `api_error` 失败，尚未产生业务实现、提交或合并。
+真实 `step01-mendmark` 已完成 BR-001 与 BR-002。BR-002 root/frontend/backend 的 local main 分别为 `2f39fbe7e26d6e4905142925ae149ba83d9e70fe`、`f290ff85ed779a1f100eeded7eedfcfb0376b826`、`204a7a6b48c43a80f573dc9e70acedddb59bbe4f`；三仓 clean、`req/br-002` 已删除且未 push。BR-002 scoped `15.json`～`18.json` 均为 success，注册表项为 completed，活动 requirement/cycle 已清空。
 
 ### 阶段二：全项目级集成产品体验审计与迭代
 
@@ -634,7 +634,7 @@ phase_2:audit
 ### 3. 恢复原则
 
 - 每个节点开始前保存当前 `phase/current_node` 和已核验输入；成功后原子保存输出、证据和下一节点；
-- `blocked` 或 `failed` 时立即停止，不继续后续节点；
+- `blocked` 或 `failed` 时先保留当前现场并由单步入口有界重跑当前节点两次；第三次仍非 `success` 才停止，不继续后续节点；
 - `--resume <run-id>` 只恢复当前节点，先重新核验文件、分支、提交、工作树、服务和外部条件；
 - 原 Claude session 可用时优先恢复，session 缺失或不一致时不得静默新建会话冒充恢复；
 - 已存在产物先核验再继续，不自动删除、覆盖或重复入池；

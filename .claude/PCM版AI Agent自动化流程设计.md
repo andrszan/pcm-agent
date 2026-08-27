@@ -67,7 +67,7 @@ PCM 步骤可以顺序调用多个 Skill，但不改变 Skill 自身职责。例
 | `blocked` | 缺少模型和当前环境无法取得的不可替代外部资源 | 保存进度并停止，等待外部资源补齐 |
 | `failed` | 程序、SDK、命令或执行发生错误 | 保存错误并停止，修复后重试当前步骤 |
 
-不单独建设复杂的回退、补偿或状态转移模型。步骤内部可以循环调用、修正和重新验证，但对外只暴露上述结果。审计 Skill 回复中的“已完成”“部分完成且有覆盖缺口”或“不适用”是审计内容，不会成为外层第四种 `status`。
+不单独建设复杂的回退、补偿或状态转移模型。步骤内部可以循环调用、修正和重新验证，但对外只暴露上述结果。`run_step.py` 对任何真实步骤的非 `success` 结果统一按 10 秒、30 秒间隔重新运行当前步骤两次；每次重新读取最新 state、result、session 和工作区事实，第三次仍非 `success` 才最终停止。该有界重放不依赖错误分类或消息匹配；未实现步骤、CLI 参数解析失败和主动取消不进入重试。审计 Skill 回复中的“已完成”“部分完成且有覆盖缺口”或“不适用”是审计内容，不会成为外层第四种 `status`。
 
 ### 4. AI 负责全部可完成的语义决策，程序负责确定性操作
 
@@ -157,7 +157,7 @@ Demo 和默认 PCM 流程只进行本地文件修改、测试、构建、服务�
 
 ## 四、运行上下文与恢复
 
-第 17 步现行精简实现本体 10 项与 CLI 3 项，共 13 项；第 18 步本体 10 项与 CLI 5 项，共 15 项。PCM Demo 全量 298 项 `unittest`、`compileall common steps run_step.py` 与 `git diff --check` 通过。公共错误诊断保留经精确凭据遮盖的 Claude Agent SDK `errors`、异常链和 traceback 位置，以及 AI-compatible provider 的 code/type/message/request ID/HTTP status；完整有界快照写入 Git 忽略的 `logs/`，state/result/stderr 保存具体安全原因和引用。第 13 步直接消费当前需求注册表；第 17 步直接调用 `run_claude()`；第 18 步只使用确定性 Python/Git。真实 `step01-mendmark` 已完成 BR-001，BR-002 第 14 步已从原裁决失败现场零 Agent 恢复成功；第 15 步随后因 Claude Agent SDK `api_error` 停止，尚未进入负责人裁决或产品实现。
+第 17 步现行精简实现本体 10 项与 CLI 3 项，共 13 项；第 18 步本体 10 项与 CLI 5 项，共 15 项。PCM Demo 全量 303 项 `unittest`、`compileall common steps run_step.py test_run_step_retry.py` 与 `git diff --check` 通过。`run_step.py` 对所有真实步骤的非 `success` 结果统一有界重跑两次，不依赖错误分类。公共错误诊断保留经精确凭据遮盖的 Claude Agent SDK `errors`、异常链和 traceback 位置，以及 AI-compatible provider 的 code/type/message/request ID/HTTP status；完整有界快照写入 Git 忽略的 `logs/`，state/result/stderr 保存具体安全原因和引用。第 13 步直接消费当前需求注册表；第 17 步直接调用 `run_claude()`；第 18 步只使用确定性 Python/Git。真实 `step01-mendmark` 已连续完成 BR-001 与 BR-002 两个需求循环。BR-002 第 15 步真实验证中，统一重试前两次均因负责人返回代码围栏 JSON 而失败，CLI 无需识别错误类别，在 10 秒、30 秒后重放当前步骤，第三次取得合法 `completed` 并推进；第 16～18 步随后一次成功。root/frontend/backend 的 local main tips 分别为 `2f39fbe7e26d6e4905142925ae149ba83d9e70fe`、`f290ff85ed779a1f100eeded7eedfcfb0376b826`、`204a7a6b48c43a80f573dc9e70acedddb59bbe4f`，三仓 clean、`req/br-002` 已删除且未 push。
 
 ```json
 {
@@ -479,7 +479,7 @@ Demo 和默认 PCM 流程只进行本地文件修改、测试、构建、服务�
 - **fresh 与 intent**：在任何 state/Git 写入前，全局核验全部适用仓为自身非符号链接 top-level、clean local `main`、HEAD/local `main` 相等、目标分支不存在且没有进行中的 merge、rebase、cherry-pick 或 revert。通过后先写 `active_requirement`（仅 ID）及 cycle：`branch: req/<lowercase-id>`、按仓名映射的 `base_sha`、`return_node_after_completion`，再以 `git switch -c <branch> <base>` 建立全部统一分支。第 13 步后续只校验自己拥有的活动需求、统一分支、仓库集合和每仓 `base_sha`；第 14、15、17 步可追加自身字段，但不得改变这些选择与基线证据。
 - **结果、恢复与 CLI**：success 仅写 `steps/requirements/<ID>/13.json`，仓库 path 为 `.` 或仓库名，随后推进 `requirement:14_trd_design`。partial 现场按记录 base 恢复；scoped success 已写但 state 未推进时先只读核验 target/base/clean 后补 state；已推进后续节点时不读 Git。CLI 只以当前 active/cycle 的第 13 步核心投影和完整 scoped success 保护当前需求，历史需求 result 不保护当前需求；只有 state 仍位于第 13 步自身锚点时，失败才可持久化，误调历史步骤不得覆盖已推进节点。
 - **真实验证**：初次 `step01-mendmark` 运行选择 `BR-001` 并建立三仓 `req/br-001`。第 14 步前用户将新 TRD 命名规则提交到产品 root，导致 root `main` 和旧需求分支从原记录 base 前进；经用户明确选择后，先完整归档 run，确认三仓旧需求分支均无独有提交并安全删除，只重置 BR-001 的第 13 步 cycle/result，再从最新 `main` 重跑。bases 为 root `a7d5509df6843a06315aa803d87285569b86e355`、frontend `dbab574dbe4d83a02323a750afd04de007565ac5`、backend `9682be837759c20f1a9ebbdf8fa2cfc09c2768d4`；第 14、15、17 步随后追加 TRD、development session 和提交证据而未改变这些基线。第 18 步已将三仓 local main ff-only 到记录 tip并删除 `req/br-001`，BR-001 已完成，state 返回 `phase_1:select_requirement` / step 13。
-- **自动化与第二轮真实验证**：第 13 步本体 20 项与 CLI 10 项，共 30 项；PCM Demo 全量 298 项 `unittest`、`compileall` 与 `git diff --check` 通过。公共诊断自动化覆盖负责人五类失败、Responses provider 原因、Claude Agent SDK `errors`、异常链、traceback 位置、精确凭据遮盖及 scoped/protected-success 边界。真实 `step01-mendmark` 未迁移历史 result/state 即选择 BR-002；第 14 步 Agent 生成 TRD 后的裁决失败现场已零 Agent 恢复并推进第 15 步。第 15 步首次调用保存 development session 后以 Claude Agent SDK `api_error` 失败，conversation 仍只有 system 与初始 assistant 指令，三仓未产生实现改动；该历史未回填或重跑。
+- **自动化与第二轮真实验证**：第 13 步本体 20 项与 CLI 10 项，共 30 项；统一步骤重试 5 项；PCM Demo 全量 303 项 `unittest`、`compileall` 与 `git diff --check` 通过。真实 `step01-mendmark` 未迁移历史 result/state 即选择 BR-002；第 14 步裁决失败现场零 Agent 恢复成功；第 15 步曾先后暴露 stream disconnect、HTTP 500 和代码围栏 JSON，最终由统一步骤重试在第三次执行成功收敛。第 16～18 步完成规则复盘、三仓提交、ff-only 合并、分支清理和 `completion:{"step":18}` 生命周期更新。
 
 ### 第 14 步：形成活动 TRD
 
@@ -627,7 +627,7 @@ def run_all():
         return stopped.result
 ```
 
-所有节点统一返回 `success`、`blocked` 或 `failed`。`require_success()` 先原子持久化当前结果；任何非 `success` 立即停止外层运行，不继续候选分流、Backlog 入池、需求开发或回归，也不以循环重试掩盖阻塞和失败。
+所有节点统一返回 `success`、`blocked` 或 `failed`。单步入口对非 `success` 有界重跑当前步骤两次；完整编排复用同一策略，只有第三次仍非 `success` 时，`require_success()` 才原子保留最终结果并停止，不继续候选分流、Backlog 入池、需求开发或回归。重试不改变三态结果，也不依据错误分类跳过或放宽完成条件。
 
 项目最终结束的最低条件是阶段一和阶段二均完成：不存在仍应开发的正式需求；所有纳入范围的需求状态与代码事实一致；`applicable_repositories` 中各仓库均在预期 `main` 且工作树清楚；适用的最终安装、构建、测试、启动和真实联调通过；关键用户流程浏览器验收及阶段二最终完整审计通过；最终结果和未解决限制已汇总。项目最终检查属于总流程收口，不新增复杂业务步骤编号。
 

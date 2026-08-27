@@ -35,7 +35,8 @@ uv sync
 uv run python -m unittest discover -s . -t . -p 'test*.py' -v
 ```
 
-PCM Demo 全量 298 项 `unittest`、`compileall common steps run_step.py` 与 `git diff --check` 通过。公共错误诊断保留 Claude Agent SDK `errors`、异常链、traceback 位置及 AI-compatible provider 的 code/type/message/request ID/HTTP status；只对明确凭据值和认证字段做精确遮盖。完整有界快照写入 Git 忽略的 `runs/<run-id>/logs/`，state、步骤结果和 stderr 保存具体安全原因与 `diagnostic_path`；合法裁决写入 conversation 后清除当前失败引用。第 13 步直接消费当前需求注册表；第 17 步直接调用 `run_claude()`；第 18 步只使用确定性 Python/Git。
+PCM Demo 全量 303 项 `unittest`、`compileall common steps run_step.py test_run_step_retry.py` 与 `git diff --check` 通过。直接执行 `run_step.py` 时，任何真实步骤非 `success` 都会在 10 秒、30 秒后重新运行当前步骤，最多三次总执行；每次复用相同参数并由步骤重新读取最新 state/session/result，不依据错误分类或错误文字决定是否重试。未实现步骤、CLI 参数解析失败和主动取消不重试。
+公共错误诊断保留 Claude Agent SDK `errors`、异常链、traceback 位置及 AI-compatible provider 的 code/type/message/request ID/HTTP status；只对明确凭据值和认证字段做精确遮盖。完整有界快照写入 Git 忽略的 `runs/<run-id>/logs/`，state、步骤结果和 stderr 保存具体安全原因与 `diagnostic_path`；合法裁决写入 conversation 后清除当前失败引用。第 13 步直接消费当前需求注册表；第 17 步直接调用 `run_claude()`；第 18 步只使用确定性 Python/Git。
 
 ## 最近真实验证
 
@@ -108,4 +109,4 @@ Git 忽略 run `prompt-role-replay-20260823` 保留旧四段 XML prompt 的历�
 
 scoped `18.json` 保存与第 17 步一致的 root-first base/tip 结果；BR-001 已更新为 `completed`、`completion: {"step": 18}`，`active_requirement` 与 `requirement_cycle` 均已清空，state 返回 `phase_1:select_requirement` / step 13。详细合同见[第 18 步 README](steps/step_18_merge/README.md)。
 
-第二轮第 13 步已从历史三字段 source 失败现场恢复并选择 BR-002。第 14 步 session `73b84b2c-2652-43a7-9a66-4692d05d8367` 正常生成活动 TRD，首次负责人裁决异常因旧实现未留下分类；结构化诊断实现后，同一 `system → assistant → user` conversation 零 Agent 重跑并取得合法 `completed`，步骤推进第 15 步。第 15 步首次调用保存 development session `d8f7861e-ed3e-40c8-8bd4-b259af67c196` 后返回 `is_error:true` / `terminal_reason:api_error`，conversation 没有 Agent 回复，产品三仓除 root 活动 TRD 外没有实现改动，流程停在第 15 步。
+第二轮第 13 步已从历史三字段 source 失败现场恢复并选择 BR-002。第 14 步从原负责人裁决失败现场零 Agent 恢复成功。第 15 步先后经历流断开、HTTP 500 和负责人代码围栏 JSON；引入统一步骤重试后，第一次和第二次执行因相同严格 JSON 错误失败，CLI 分别等待 10 秒、30 秒重放当前步骤，第三次取得合法 `completed`。第 16～18 步随后一次成功；BR-002 已完成，三仓 main tips 为 root `2f39fbe7e26d6e4905142925ae149ba83d9e70fe`、frontend `f290ff85ed779a1f100eeded7eedfcfb0376b826`、backend `204a7a6b48c43a80f573dc9e70acedddb59bbe4f`，均 clean、需求分支已删除且未 push。

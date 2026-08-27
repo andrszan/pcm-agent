@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from secrets import token_hex
@@ -125,6 +126,7 @@ from steps.step_18_merge.step import (
 )
 
 DEMO_ROOT = Path(__file__).resolve().parent
+STEP_RETRY_DELAYS = (10, 30)
 
 
 def parse_args() -> argparse.Namespace:
@@ -1390,5 +1392,16 @@ def main() -> int:
     return 0 if result["status"] == "success" else 1
 
 
+def retrying_main() -> int:
+    exit_code = main()
+    for delay in STEP_RETRY_DELAYS:
+        if exit_code != 1:
+            return exit_code
+        print(f"当前步骤未成功，{delay} 秒后重试。", file=sys.stderr)
+        time.sleep(delay)
+        exit_code = main()
+    return exit_code
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(retrying_main())

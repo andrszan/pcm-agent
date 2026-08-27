@@ -45,7 +45,7 @@ Claude Agent 执行领域任务
 - Git、测试、浏览器和文件验证 DSL；
 - 多模型路由、凭据路由或成本策略；
 - Agent 指令 exactly-once 投递；
-- 外层无限重试、YAML 兼容解析或宽松 JSON 修复器。
+- 外层无限重试、YAML 兼容解析或宽松 JSON 修复器。单步 CLI 只在固定边界内对任何非 `success` 有界重放当前步骤两次，不属于无限重试，也不改变公共循环协议。
 
 PCM Demo 只采用文件、固定写入顺序和幂等重放完成恢复。
 
@@ -362,7 +362,7 @@ Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重�
 }
 ```
 
-`kind` 是稳定分类；HTTP status 必须是合法整数，request ID 只接受长度不超过 128 的 `[A-Za-z0-9._:-]`。provider code/type/message、异常类型、异常链和 traceback 位置在写入前统一限长，并只遮盖调用方已知真实 secret、Authorization/Cookie、明确敏感键值、URL/DSN 密码及敏感 query；普通错误文字和 token 语义不删除。日志不保存完整 headers、请求/响应 body、prompt、环境字典或 `.env`。合法 assistant decision 成功写入 conversation 后清除 state 中当前失败引用，但保留 Git 忽略的诊断快照；不新增历史数组、时间戳、重试计数或自动重试。
+`kind` 是稳定诊断分类，不参与是否重试的控制判断；HTTP status 必须是合法整数，request ID 只接受长度不超过 128 的 `[A-Za-z0-9._:-]`。provider code/type/message、异常类型、异常链和 traceback 位置在写入前统一限长，并只遮盖调用方已知真实 secret、Authorization/Cookie、明确敏感键值、URL/DSN 密码及敏感 query；普通错误文字和 token 语义不删除。日志不保存完整 headers、请求/响应 body、prompt、环境字典或 `.env`。合法 assistant decision 成功写入 conversation 后清除 state 中当前失败引用，但保留 Git 忽略的诊断快照；不新增历史数组、时间戳或重试计数。任何非 `success` 是否重放仅由 `run_step.py` 的固定三次总执行边界决定。
 
 ## 8. Agent SDK 结果分类
 
@@ -398,7 +398,7 @@ Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重�
 - Git、文件或完成验证冲突；
 - 无法形成合法结构化决定。
 
-`blocked` 和 `failed` 都终止本次程序运行。`continue` 只存在于公共循环内部，不成为第四种步骤结果。
+`blocked` 和 `failed` 都结束当前单次步骤执行，`continue` 只存在于公共循环内部，不成为第四种步骤结果。CLI 随后不区分状态或错误原因，对当前步骤有界重放两次；第三次仍非 `success` 才最终退出。
 
 ## 10. Prompt 合同
 
@@ -472,7 +472,7 @@ Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重�
 
 自动化验证：
 
-- 公共精确脱敏、Claude Agent SDK/Responses/负责人裁决诊断、BR-002 `api_error` 形态回归、第 14 步零 Agent 恢复及 CLI 映射已完成；PCM Demo 全量 298 项 `unittest`、`compileall common steps run_step.py` 与 `git diff --check` 通过。自动化覆盖五类负责人失败、provider code/type/message/request ID/HTTP status、SDK `errors`、异常链、traceback 位置、长领域键稳定日志名、步骤 scoped/protected-success 以及明确凭据值不进入日志、state、result 或 stderr；未为了制造错误调用真实外部服务。
+- 公共精确脱敏、Claude Agent SDK/Responses/负责人裁决诊断、统一步骤重试、第 14 步零 Agent 恢复及 CLI 映射已完成；PCM Demo 全量 303 项 `unittest`、`compileall common steps run_step.py test_run_step_retry.py` 与 `git diff --check` 通过。统一重试 5 项覆盖首次成功、任意非 success 后恢复、三次耗尽、CLI 错误和主动取消；未为了制造错误调用真实外部服务。
 
 兼容验证：
 
@@ -483,7 +483,7 @@ Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重�
 真实集成验证：
 
 - BR-002 第 14 步首次 Agent 正常 `success` 并生成活动 TRD，随后负责人裁决异常因旧实现被压缩而失败；实现结构化诊断后，同一 `system → assistant → user` conversation 零 Agent 重跑，负责人返回合法 `completed`，既有 TRD 通过 verifier，步骤推进第 15 步。原始失败已无法追溯具体类别。
-- BR-002 第 15 步随后在 Agent 阶段返回 `is_error:true`、`terminal_reason:api_error`，没有 Agent 回复、负责人裁决或产品实现改动；该失败属于 Claude Agent SDK 结果分类，不产生 `last_decision_failure`，流程保留 development session 并停在第 15 步。
+- BR-002 第 15 步曾先后返回流断开和 HTTP 500；后续负责人又连续两次返回带 Markdown 代码围栏的 JSON。统一步骤重试不检查这些错误类型，前两次非 `success` 后按 10 秒、30 秒重放当前步骤，第三次负责人返回合法 `completed`，证明错误分类只用于诊断而不控制重试。第 16～18 步随后完成，BR-002 生命周期回到 completed。
 
 - Git 忽略 run `prompt-role-replay-20260823` 保留旧四段 XML system snapshot 的历史回放，不再作为现行五段 prompt 证据；现行 prompt 已由第 9 步 fresh 真实运行验证。
 - 首次尝试复用旧隔离第 7 步工作区时，在请求 API 前因不满足现行第 4 步 Git 元数据合同停止；最终改用现行交接事实回放，不将该前置停止记录为失败 run。
