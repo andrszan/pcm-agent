@@ -373,7 +373,6 @@ async def extract_requirements(
         system_prompt=SYSTEM_PROMPT,
         input_model=BacklogExtractionInput(backlog_markdown=backlog_markdown),
         output_model=RequirementCatalog,
-        max_output_tokens=4096,
         max_retries=0,
     )
 

@@ -145,7 +145,7 @@ class RequirementRegistryTests(unittest.TestCase):
             extract_requirements(BACKLOG, object(), model_runner=fake_model)
         )
         self.assertEqual(extracted, self.catalog())
-        self.assertEqual(calls[0]["max_output_tokens"], 4096)
+        self.assertNotIn("max_output_tokens", calls[0])
         self.assertEqual(calls[0]["max_retries"], 0)
         self.assertEqual(calls[0]["input_model"].backlog_markdown, BACKLOG)
         self.assertIs(calls[0]["output_model"], RequirementCatalog)

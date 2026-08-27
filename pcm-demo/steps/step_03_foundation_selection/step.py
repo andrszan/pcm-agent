@@ -239,7 +239,6 @@ async def select_foundations(
         system_prompt=SYSTEM_PROMPT,
         input_model=selection_input,
         output_model=FoundationSelectionDecision,
-        max_output_tokens=1024,
         max_retries=0,
     )
     return FoundationSelectionResult(
