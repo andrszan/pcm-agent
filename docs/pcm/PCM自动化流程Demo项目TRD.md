@@ -44,7 +44,7 @@ Demo 继续采用增量实施，不一次创建完整流程空壳：
 - 第 14 步采用与第 15 步一致的薄编排，只消费 current active/cycle/workspace，首次持久化 exact `trd_path`，再通过 requirement-scoped 公共循环显式调用或恢复 `/trd-design`；Agent 按需读取项目事实，Python只核验指定 TRD 非空，不读取 Git或重复复验前序步骤，success 推进第 15 步；
 - 第 15 步只消费当前 active requirement/cycle/workspace、当前 requirement 的第 14 步 scoped success 与非空活动 TRD，在 `development_<ID>` session 中调用 `/dev-workflow`；负责人 completed 即领域完成，success 写 scoped result、同步 `development_session_id` 并推进第 16 步；
 - 第 16 步采用薄编排，只消费当前 active requirement/cycle/workspace 与 `development_session_id`，建立 `rule_retrospective_<ID>` 独立负责人 conversation、预注册原 development session alias并调用 `/session-rule-retrospective`；允许规则变化或 no-change，success 写 scoped result、`outputs: []` 并推进第 17 步，不读取 Git或建立 baseline；
-- 第 17 步只消费当前 active requirement/cycle/workspace、完整 scoped 第 16 步 success、统一需求分支与各仓 base，在产品根 direct `run_claude()` session 中调用 `/commit-changes`；Python 只核验白名单、分支、main/base、最终 clean 和 tips并推进第 18 步；
+- 第 17 步只消费当前 active requirement/cycle/workspace、完整 scoped 第 16 步 success、统一需求分支与各仓 base，在产品根通过公共 Agent 决策循环调用 `/commit-changes`；保存完整 conversation，负责人处理 `continue/blocked/completed`，Python只核验白名单、分支、main/base、最终 clean 和 tips并推进第 18 步；
 - 第 18 步只读取当前 active requirement/cycle、权威仓库路径和 scoped 第 17 步 success 的必要字段；以确定性 Python/Git 按非 root 在前、root 最后的顺序执行或恢复 ff-only，逐仓持久化 merged，全仓到 tip 后统一安全删除需求分支，写 scoped `18.json` 并完成注册表生命周期；
 - `common/agent_decision_loop.py`：多个 Agent 领域步骤共用的 session、完整对话、`AgentDecision`、尾部恢复、SDK 终止分类和完成核验循环；
 - 第 7 步固定方案文档、完整原文的 Git 忽略 run 历史和无全仓扫描要求；
@@ -901,13 +901,13 @@ success 先写 `steps/requirements/<ID>/16.json`，`outputs: []`，再推进 `re
 
 #### 第 17 步已实现合同与真实验证
 
-第 17 步只消费 active requirement/cycle/workspace、完整 scoped `16.json` success、统一需求分支、`applicable_repositories` 有序白名单和每仓 `base_sha`。Python 只核验非符号链接仓库路径、自身 Git top-level、当前统一分支、`main==base`、`HEAD==target`，以及显式包含未跟踪文件的最终 `status --porcelain` clean。
+第 17 步只消费 active requirement/cycle/workspace、完整 scoped `16.json` success、统一需求分支、`applicable_repositories` 有序白名单和每仓 `base_sha`。Python只核验非符号链接仓库路径、自身 Git top-level、统一分支、`main==base`、`HEAD==target` 和包含未跟踪文件的最终 clean。
 
-fresh 全仓 clean 时零 Agent，直接记录 `tip=base`。存在 dirty 仓时在产品根直接调用一次 `run_claude()`；init 后立即持久化 `requirement_commit_<ID>` session。异常、非正常结果或最终仍 dirty 时 failed，后续每次只恢复同一 session 一次；不调用负责人模型、不创建 decision conversation，也不在同次执行中自动 repair。
+fresh 全仓 clean 时零 Agent、零负责人决策和零 conversation。存在 dirty 仓或合法恢复现场时，在产品根使用 `requirement_commit_<ID>` 公共 Agent 决策循环：初始 `/commit-changes` 一次，保存完整 conversation；负责人可返回 `continue/blocked/completed`，continue、blocked resume和completed后repair均恢复同一 Claude session。首次 Agent 在取得session前失败时，仅允许严格的 `system → 初始 assistant` conversation 以无session重投原prompt；其它残缺锚点拒绝恢复。
 
-完整 diff、提交分组、精确暂存、空提交和提交历史由 `commit-changes` 负责。Python 不再制作 fingerprint、读取 blob/tree、判断 merge commit 或验证首次内容等价。success 只写 scoped `17.json` 的 `name/path/base_sha/tip_sha`，cycle 写 `{base_sha,tip_sha,merged:false}` 并推进 step 18；result→state 和 advanced 幂等保留，旧 fingerprint/conversation 字段不迁移、不清理。
+完整 diff、提交分组、精确暂存、空提交和提交历史由 `commit-changes` 负责。Python不制作 fingerprint、不读取 blob/tree、不判断 merge commit或验证首次内容等价。success只写 scoped `17.json` 的 `name/path/base_sha/tip_sha`，cycle写 `{base_sha,tip_sha,merged:false}` 并推进step18；result→state和advanced幂等保留。
 
-现行实现本体 10 项、CLI 3 项，共 13 项；PCM Demo 全量 282 项、`compileall`、`git diff --check` 通过，独立只读审查无高、中置信发现。历史 `step01-mendmark` 的 session、四条 decision conversation、4 个提交和 fingerprint 是旧实现执行事实，不再是现行合同条件；现行代码已验证 step18 advanced 幂等时 state/result/旧 conversation SHA-256 保持不变，没有回退真实 run 重跑 fresh Agent。
+现行实现本体9项、CLI4项；公共循环与第17步定向43项、PCM Demo全量303项、`compileall`、`git diff --check`通过，独立只读审查无高、中置信发现。BR-001旧运行有完整四段conversation；BR-002在direct-run版本期间只有Claude session、没有decision reference或conversation文件，该历史缺口不补造，未来需求按现行合同保存完整历史。
 
 #### 第 18 步已实现合同与真实验证
 
@@ -1252,8 +1252,8 @@ Git 子进程统一过滤 `GIT_*`。仓库按非 root 原顺序、root 最后的
 - 第 13 步本体 20 项与 CLI 10 项，共 30 项；统一步骤重试 5 项；当前全量 303 项 `unittest` 通过，`compileall common steps run_step.py test_run_step_retry.py` 与 `git diff --check` 通过；
 - 公共错误诊断覆盖精确凭据遮盖、普通 token 语义保留、异常链与 traceback 位置、稳定有界日志名、OpenAI-compatible provider code/type/message/request ID/HTTP status、Claude Agent SDK `ResultMessage.errors`、BR-002 `api_error` 结果形态，以及第 12～18 步 scoped/protected-success 失败持久化边界；
 - 第 18 步覆盖动态仓库白名单、非 root 在前/root 最后、base/tip no-op、部分 merge、逐仓 merged state、全局 cleanup 前置、partial cleanup、result→state、上游增量字段兼容、真实 CLI、失败脱敏、完成状态防降级和 `GIT_*` 过滤；
-- 第 17 步现行精简实现覆盖动态多仓白名单、direct 产品根 session、全 clean 零 Agent、init 后 session 保存、异常/dirty/非正常结果的单次 resume、symlink 路径、未跟踪文件、result→state、advanced 旧字段兼容和 CLI success 保护；
-- 第 17 步现行 direct-run fresh 路径尚未重新执行真实 Claude Agent；旧真实 run 的提交、session 和 conversation 只作为历史执行事实，现行代码已完成 advanced 字节不变兼容验证。
+- 第 17 步现行实现覆盖动态多仓白名单、公共 Agent 决策conversation、`continue/blocked/completed`、同session repair与blocked resume、首次无session失败重投、残缺锚点拒绝、symlink、未跟踪文件、result→state、advanced兼容和CLI blocked/success保护；
+- BR-002在旧direct-run路径中缺少decision conversation，该历史不补造；未来第17步运行按现行合同保存完整历史。
 - 公共循环加第 9～11 步本体及第 10/11 步 CLI 定向回归的 84 项，覆盖完整 conversation 交由公共循环、执行产物 fresh 拒绝、当前 Git 现场核验、blocked 保持 blocked、按需 `/commit-changes`、无 exact prompt/相邻回复成功锚点、result→state 恢复与完整 success 重跑，以及第 10 步无 frontend 的零副作用路径；
 - Agent SDK 初始化消息与 ResultMessage 解析；
 - 探针权限拒绝；
@@ -1276,7 +1276,7 @@ Git 子进程统一过滤 `GIT_*`。仓库按非 root 原顺序、root 最后的
 
 进入对应步骤后再增加最小真实验证：
 
-- 第 18 步及后续需求循环复用：代码仓先于 root 的 ff-only 合并、拒绝非 fast-forward、部分合并恢复、分支清理和 completed 时序；第 17 步 direct session、白名单、base/tip、最终 clean 与幂等边界已完成自动化和旧真实 run 兼容验证；
+- 第 18 步及后续需求循环复用：代码仓先于 root 的 ff-only 合并、拒绝非 fast-forward、部分合并恢复、分支清理和 completed 时序；第 17 步公共决策conversation、白名单、base/tip、最终clean与恢复边界已完成自动化验证；
 - 阶段二：真实完整运行、主要任务覆盖、独立审计 session、版本指纹、候选去重、入池幂等、原发现回归和完整复审。
 
 SDK 和模型调用使用真实服务完成至少一次集成验证。纯解析和状态逻辑可以使用固定本地样例做单元测试，但不得用 Mock 的模型成功响应替代阶段验收。

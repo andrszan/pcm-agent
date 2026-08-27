@@ -6,24 +6,48 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from common.agent_decision_loop import AgentExecutionFailure, persist_agent_failure
-from common.claude_agent import ClaudeRunResult, run_claude
+from common.agent_decision_loop import AgentDecisionLoopSpec, run_agent_decision_loop
+from common.claude_agent import run_claude
+from common.decision import render_decision_system_prompt, request_decision
 from common.state import (
     is_valid_requirement_id,
     requirement_step_result_path,
     write_requirement_step_result,
     write_state,
 )
+from config import LLMConfig
 
 STEP = 17
 NAME = "统一提交需求变更"
 CURRENT_NODE = "requirement:17_commit"
 NEXT_NODE = "requirement:18_merge"
 PHASE = "phase_1_requirement_development"
+SKILL_NAME = "commit-changes"
+MAX_DECISION_ROUNDS = 8
 MAX_TURNS = 48
 MAX_BUDGET_USD = 16.0
+REPOSITORY_REPAIR_PROMPT = (
+    "请只处理权威仓库清单中的未提交变更；不得修改或丢弃文件内容来让检查通过。"
+    "完成后重新核验每个仓库的工作区和暂存区均干净。"
+)
+REQUIREMENT_COMMIT_DECISION_RULES = """- completed：白名单内已有需求变更均已完成必要的本地提交；每个仓库仍位于统一需求分支，且工作区和暂存区干净。
+- continue：当前环境仍可处理白名单内的提交、核验或确认时，在 answer 中给出明确的下一步指令。
+- blocked：仅可用于缺少当前环境无法取得的合法 Git 作者身份、强制签名凭据或外部授权。
+
+不得授权扩大白名单、切换或创建分支、merge、rebase、reset、amend、改写历史、绕过检查或 push。"""
 _HEX = set("0123456789abcdef")
 _RESULT_FIELDS = {"step", "name", "status", "summary", "applicable", "outputs", "blocked", "error", "requirement_id", "branch", "repositories"}
+
+
+class RequirementCommitBlocked(RuntimeError):
+    def __init__(
+        self, reason: str, required_inputs: list[str], *, requirement_id: str, branch: str
+    ) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.required_inputs = required_inputs
+        self.requirement_id = requirement_id
+        self.branch = branch
 
 
 def result(
@@ -57,6 +81,8 @@ def _is_sha(value: Any) -> bool:
 
 
 def _read_json(path: Path, message: str) -> dict[str, Any]:
+    if path.is_symlink():
+        raise RuntimeError(message)
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
@@ -137,14 +163,7 @@ def _context(run_dir: Path, state: dict[str, Any], *, advanced: bool) -> dict[st
         root, workspace = Path(state["workspace"]["root"]), Path(state["workspace"]["final_path"])
     except (KeyError, TypeError) as error:
         raise RuntimeError("工作区状态记录不完整") from error
-    _require(
-        root.is_absolute()
-        and workspace.is_absolute()
-        and not workspace.is_symlink()
-        and workspace.resolve().parent == root.resolve()
-        and workspace.is_dir(),
-        "产品工作区路径与状态根目录不一致",
-    )
+    _require(root.is_absolute() and workspace.is_absolute() and not workspace.is_symlink() and workspace.resolve().parent == root.resolve() and workspace.is_dir(), "产品工作区路径与状态根目录不一致")
     workspace = workspace.resolve()
     descriptors = state.get("repositories")
     _require(isinstance(descriptors, list) and len(descriptors) == len(names), "活动需求仓库状态不符合约定")
@@ -153,14 +172,9 @@ def _context(run_dir: Path, state: dict[str, Any], *, advanced: bool) -> dict[st
         path = workspace if name == "root" else workspace / name
         descriptor_path = descriptor.get("path") if isinstance(descriptor, dict) else None
         _require(
-            not path.is_symlink()
-            and path.is_dir()
-            and (name == "root" or path.resolve().parent == workspace)
-            and isinstance(descriptor, dict)
-            and descriptor.get("name") == name
-            and isinstance(descriptor_path, str)
-            and Path(descriptor_path).is_absolute()
-            and Path(descriptor_path).resolve() == path.resolve(),
+            not path.is_symlink() and path.is_dir() and (name == "root" or path.resolve().parent == workspace)
+            and isinstance(descriptor, dict) and descriptor.get("name") == name and isinstance(descriptor_path, str)
+            and Path(descriptor_path).is_absolute() and Path(descriptor_path).resolve() == path.resolve(),
             "适用仓库描述不符合约定",
         )
         repositories.append({"name": name, "path": path.resolve()})
@@ -213,6 +227,12 @@ def _repository_results(context: dict[str, Any], facts: list[dict[str, Any]]) ->
     return [{"name": fact["name"], "path": "." if fact["name"] == "root" else fact["name"], "base_sha": context["bases"][fact["name"]], "tip_sha": fact["head"]} for fact in facts]
 
 
+def _completion_repair(context: dict[str, Any]) -> str | None:
+    facts = _facts(context)
+    _verify_boundary(context, facts, fresh=False)
+    return REPOSITORY_REPAIR_PROMPT if any(fact["dirty"] for fact in facts) else None
+
+
 def initial_prompt(context: dict[str, Any]) -> str:
     repositories = "\n".join(f"- {item['name']}: `{'.' if item['name'] == 'root' else item['name']}`" for item in context["repositories"])
     return f"""/commit-changes
@@ -225,10 +245,18 @@ def initial_prompt(context: dict[str, Any]) -> str:
 只在白名单内的独立仓库处理已有 dirty 变更；clean 仓库不提交且不制造空提交。不得修改或丢弃文件内容来让检查通过，不得处理白名单外仓库，不得创建或切换分支、merge、rebase、reset、amend、改写历史或 push。完成后确保每个白名单仓库仍在统一需求分支，且 `git status --porcelain` 为空。"""
 
 
-def resume_prompt(context: dict[str, Any]) -> str:
-    return f"""请继续完成当前需求 `{context['requirement_id']}` 的本地提交。
-
-统一需求分支：`{context['branch']}`；适用仓库白名单：{'、'.join(context['names'])}。只提交白名单内已有 dirty 变更；clean 仓库不制造空提交。不得修改或丢弃文件内容来让检查通过，不得扩大范围，不得创建或切换分支、merge、rebase、reset、amend、改写历史或 push。完成后确保每个白名单仓库的 `git status --porcelain` 为空。"""
+def _fresh_success(
+    run_dir: Path, state: dict[str, Any], context: dict[str, Any], facts: list[dict[str, Any]]
+) -> dict[str, Any]:
+    success = result(
+        "success",
+        "权威仓库没有待提交变更，未制造空提交。",
+        requirement_id=context["requirement_id"],
+        branch=context["branch"],
+        repositories=_repository_results(context, facts),
+    )
+    write_requirement_step_result(run_dir, context["requirement_id"], STEP, success)
+    return _advance(run_dir, state, context, success)
 
 
 def _saved_result(run_dir: Path, requirement_id: str) -> dict[str, Any] | None:
@@ -239,12 +267,7 @@ def _saved_result(run_dir: Path, requirement_id: str) -> dict[str, Any] | None:
 def _validate_success(saved: Any, context: dict[str, Any], *, advanced: bool) -> dict[str, Any]:
     _require(_valid_result(saved, step=STEP, name=NAME, requirement_id=context["requirement_id"], fields=_RESULT_FIELDS) and saved.get("branch") == context["branch"] and isinstance(saved.get("repositories"), list) and len(saved["repositories"]) == len(context["names"]), "需求提交完整成功结果不符合约定")
     for name, repository in zip(context["names"], saved["repositories"], strict=True):
-        _require(
-            isinstance(repository, dict) and set(repository) == {"name", "path", "base_sha", "tip_sha"} and repository.get("name") == name
-            and repository.get("path") == ("." if name == "root" else name) and repository.get("base_sha") == context["bases"][name]
-            and _is_sha(repository.get("tip_sha")) and (not advanced or repository["tip_sha"] == context["tips"][name]),
-            "需求提交仓库结果不符合约定",
-        )
+        _require(isinstance(repository, dict) and set(repository) == {"name", "path", "base_sha", "tip_sha"} and repository.get("name") == name and repository.get("path") == ("." if name == "root" else name) and repository.get("base_sha") == context["bases"][name] and _is_sha(repository.get("tip_sha")) and (not advanced or repository["tip_sha"] == context["tips"][name]), "需求提交仓库结果不符合约定")
     return saved
 
 
@@ -256,36 +279,137 @@ def _complete_facts(context: dict[str, Any], saved: dict[str, Any] | None = None
     return facts
 
 
-def _session(state: dict[str, Any], key: str) -> str | None:
-    sessions = state.get("claude_sessions")
+def _execution_scene(run_dir: Path, state: dict[str, Any], context: dict[str, Any]) -> bool:
+    key, expected = context["key"], f"conversations/{context['key']}.json"
+    sessions, references = state.get("claude_sessions"), state.get("decision_conversations")
     _require(sessions is None or isinstance(sessions, dict), "Claude session 状态不符合约定")
-    value = sessions.get(key) if sessions else None
-    _require(value is None or isinstance(value, str) and bool(value), "Claude session ID 不符合约定")
-    return value
+    _require(references is None or isinstance(references, dict), "决策历史引用不符合约定")
+    conversation = run_dir / expected
+    session_present = isinstance(sessions, dict) and key in sessions
+    reference_present = isinstance(references, dict) and key in references
+    started = key in state or session_present or reference_present or conversation.exists() or conversation.is_symlink() or state.get("status") == "blocked"
+    if not started:
+        return False
+    session = sessions.get(key) if isinstance(sessions, dict) else None
+    reference = references.get(key) if isinstance(references, dict) else None
+    _require(isinstance(reference, dict) and reference.get("path") == expected, "需求提交恢复缺少原决策历史引用")
+    _require(not conversation.is_symlink() and conversation.is_file(), "需求提交恢复缺少原决策历史")
+    if session is None:
+        _require(state.get("status") != "blocked", "需求提交恢复缺少原 Claude session")
+        saved = _read_json(conversation, "需求提交恢复缺少原决策历史")
+        messages = saved.get("messages")
+        section = state.get(key)
+        _require(
+            isinstance(messages, list)
+            and messages == [
+                {"role": "system", "content": _decision_spec(context).decision_system_prompt},
+                {"role": "assistant", "content": initial_prompt(context)},
+            ]
+            and (
+                section is None
+                or isinstance(section, dict)
+                and "pending_agent_text" not in section
+                and (
+                    "last_agent_result" not in section
+                    or isinstance(section["last_agent_result"], dict)
+                    and not section["last_agent_result"].get("session_id")
+                )
+            ),
+            "需求提交恢复缺少原 Claude session",
+        )
+        return True
+    _require(isinstance(session, str) and bool(session), "需求提交恢复缺少原 Claude session")
+    return True
 
 
-def _save_session(run_dir: Path, state: dict[str, Any], key: str, session_id: str | None) -> None:
-    if session_id is None:
-        return
-    _require(isinstance(session_id, str) and bool(session_id), "Claude session ID 不符合约定")
-    sessions = state.setdefault("claude_sessions", {})
-    _require(isinstance(sessions, dict), "Claude session 状态不符合约定")
-    recorded = sessions.get(key)
-    _require(recorded is None or isinstance(recorded, str) and bool(recorded), "Claude session ID 不符合约定")
-    _require(recorded in {None, session_id}, "Claude session ID 不一致")
-    if key not in sessions:
-        sessions[key] = session_id
-        write_state(run_dir, state)
+def _decision_spec(context: dict[str, Any]) -> AgentDecisionLoopSpec:
+    repositories = [
+        {
+            "name": repository["name"],
+            "path": "." if repository["name"] == "root" else repository["name"],
+        }
+        for repository in context["repositories"]
+    ]
+    return AgentDecisionLoopSpec(
+        key=context["key"],
+        state_key=context["key"],
+        skill_name=SKILL_NAME,
+        max_decision_rounds=MAX_DECISION_ROUNDS,
+        max_turns=MAX_TURNS,
+        max_budget_usd=MAX_BUDGET_USD,
+        decision_system_prompt=render_decision_system_prompt(
+            REQUIREMENT_COMMIT_DECISION_RULES,
+            {
+                "当前需求": {
+                    "id": context["requirement_id"],
+                    "title": context["title"],
+                    "branch": context["branch"],
+                },
+                "有序权威仓库": repositories,
+            },
+        ),
+    )
+
+
+def _record_blocked(
+    run_dir: Path, state: dict[str, Any], context: dict[str, Any], reason: str, required_inputs: list[str]
+) -> None:
+    blocked = {"reason": reason, "required_inputs": required_inputs}
+    write_requirement_step_result(
+        run_dir,
+        context["requirement_id"],
+        STEP,
+        result("blocked", reason, requirement_id=context["requirement_id"], branch=context["branch"], blocked=blocked),
+    )
+    state.update(
+        {
+            "status": "blocked",
+            "phase": PHASE,
+            "step": STEP,
+            "current_step": STEP,
+            "current_node": CURRENT_NODE,
+            "blocked": blocked,
+            "error": None,
+        }
+    )
+    write_state(run_dir, state)
 
 
 def _running(run_dir: Path, state: dict[str, Any]) -> None:
-    state.update({"status": "running", "phase": PHASE, "step": STEP, "current_step": STEP, "current_node": CURRENT_NODE, "blocked": None, "error": None})
+    state.update(
+        {
+            "status": "running",
+            "phase": PHASE,
+            "step": STEP,
+            "current_step": STEP,
+            "current_node": CURRENT_NODE,
+            "blocked": None,
+            "error": None,
+        }
+    )
     write_state(run_dir, state)
 
 
 def _advance(run_dir: Path, state: dict[str, Any], context: dict[str, Any], saved: dict[str, Any]) -> dict[str, Any]:
-    context["cycle"]["repositories"] = {item["name"]: {"base_sha": item["base_sha"], "tip_sha": item["tip_sha"], "merged": False} for item in saved["repositories"]}
-    state.update({"status": "success", "phase": PHASE, "step": STEP + 1, "current_step": STEP + 1, "current_node": NEXT_NODE, "blocked": None, "error": None})
+    context["cycle"]["repositories"] = {
+        item["name"]: {
+            "base_sha": item["base_sha"],
+            "tip_sha": item["tip_sha"],
+            "merged": False,
+        }
+        for item in saved["repositories"]
+    }
+    state.update(
+        {
+            "status": "success",
+            "phase": PHASE,
+            "step": STEP + 1,
+            "current_step": STEP + 1,
+            "current_node": NEXT_NODE,
+            "blocked": None,
+            "error": None,
+        }
+    )
     write_state(run_dir, state)
     return saved
 
@@ -302,7 +426,7 @@ def has_complete_success(run_dir: Path, state: dict[str, Any]) -> bool:
     return True
 
 
-def failure_scope(run_dir: Path, state: dict[str, Any]) -> dict[str, str] | None:
+def failure_scope(_run_dir: Path, state: dict[str, Any]) -> dict[str, str] | None:
     if state.get("phase") != PHASE or _position(state) != (STEP, STEP, CURRENT_NODE):
         return None
     try:
@@ -312,11 +436,14 @@ def failure_scope(run_dir: Path, state: dict[str, Any]) -> dict[str, str] | None
     return {"requirement_id": requirement_id, "branch": cycle["branch"]}
 
 
-def _agent_succeeded(value: Any) -> bool:
-    return isinstance(value, ClaudeRunResult) and value.result_subtype == "success" and value.is_error is False and value.has_errors is False and value.exception is None and value.exception_type is None and value.api_error_status is None and value.terminal_reason in {None, "completed"}
-
-
-async def run(run_dir: Path, state: dict[str, Any], *, agent_runner=run_claude) -> dict[str, Any]:
+async def run(
+    run_dir: Path,
+    state: dict[str, Any],
+    *,
+    agent_runner=run_claude,
+    decision_runner=request_decision,
+    config_loader=LLMConfig.load,
+) -> dict[str, Any]:
     advanced = _position(state) == (STEP + 1, STEP + 1, NEXT_NODE)
     context = _context(run_dir, state, advanced=advanced)
     saved = _saved_result(run_dir, context["requirement_id"])
@@ -327,59 +454,26 @@ async def run(run_dir: Path, state: dict[str, Any], *, agent_runner=run_claude) 
         complete = _validate_success(saved, context, advanced=False)
         _complete_facts(context, complete)
         return _advance(run_dir, state, context, complete)
-    session_id = _session(state, context["key"])
+
+    scene = _execution_scene(run_dir, state, context)
     facts = _facts(context)
-    _verify_boundary(context, facts, fresh=session_id is None)
-    if session_id is None and not any(fact["dirty"] for fact in facts):
-        success = result("success", "权威仓库没有待提交变更，未制造空提交。", requirement_id=context["requirement_id"], branch=context["branch"], repositories=_repository_results(context, facts))
-        write_requirement_step_result(run_dir, context["requirement_id"], STEP, success)
-        return _advance(run_dir, state, context, success)
-    _running(run_dir, state)
-    def on_update(update: ClaudeRunResult) -> None:
-        _save_session(run_dir, state, context["key"], update.session_id)
-    try:
-        agent = await agent_runner(
-            initial_prompt(context) if session_id is None else resume_prompt(context),
-            cwd=context["workspace"],
-            resume_session_id=session_id,
-            max_turns=MAX_TURNS,
-            max_budget_usd=MAX_BUDGET_USD,
-            on_update=on_update,
-        )
-    except Exception as error:
-        failure = persist_agent_failure(
-            run_dir,
-            state,
-            key=context["key"],
-            state_key=None,
-            error=error,
-            context={
-                "operation": "requirement_commit",
-                "requirement": context["requirement_id"],
-                "node": CURRENT_NODE,
-            },
-        )
-        raise AgentExecutionFailure(f"Claude Agent 执行异常：{failure}", failure.diagnostic_path) from error
-    if isinstance(agent, ClaudeRunResult):
-        _save_session(run_dir, state, context["key"], agent.session_id)
-    _require(_session(state, context["key"]) is not None, "Claude Agent 未保存 session")
-    facts = _facts(context)
-    _verify_boundary(context, facts, fresh=False)
-    if not _agent_succeeded(agent):
-        failure = persist_agent_failure(
-            run_dir,
-            state,
-            key=context["key"],
-            state_key=None,
-            value=agent if isinstance(agent, ClaudeRunResult) else None,
-            context={
-                "operation": "requirement_commit",
-                "requirement": context["requirement_id"],
-                "node": CURRENT_NODE,
-            },
-        )
-        raise AgentExecutionFailure(f"需求提交未完成：{failure}", failure.diagnostic_path)
-    _require(not any(fact["dirty"] for fact in facts), "需求提交未完成")
+    _verify_boundary(context, facts, fresh=not scene)
+    if not scene and not any(fact["dirty"] for fact in facts):
+        return _fresh_success(run_dir, state, context, facts)
+    if state.get("status") != "blocked":
+        _running(run_dir, state)
+
+    spec = _decision_spec(context)
+    decision = await run_agent_decision_loop(
+        run_dir, state, context["workspace"], spec, initial_prompt(context),
+        lambda: _completion_repair(context), agent_runner=agent_runner,
+        decision_runner=decision_runner, config_loader=config_loader,
+    )
+    if decision.verdict == "blocked":
+        _record_blocked(run_dir, state, context, decision.reason, decision.required_inputs)
+        raise RequirementCommitBlocked(decision.reason, decision.required_inputs, requirement_id=context["requirement_id"], branch=context["branch"])
+    _require(decision.verdict == "completed", "需求提交决策不符合约定")
+    facts = _complete_facts(context)
     success = result("success", "已在权威仓库完成当前需求变更的本地提交并核验 Git 事实。", requirement_id=context["requirement_id"], branch=context["branch"], repositories=_repository_results(context, facts))
     write_requirement_step_result(run_dir, context["requirement_id"], STEP, success)
     return _advance(run_dir, state, context, success)

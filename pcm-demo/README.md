@@ -36,7 +36,7 @@ uv run python -m unittest discover -s . -t . -p 'test*.py' -v
 ```
 
 PCM Demo 全量 303 项 `unittest`、`compileall common steps run_step.py test_run_step_retry.py` 与 `git diff --check` 通过。直接执行 `run_step.py` 时，任何真实步骤非 `success` 都会在 10 秒、30 秒后重新运行当前步骤，最多三次总执行；每次复用相同参数并由步骤重新读取最新 state/session/result，不依据错误分类或错误文字决定是否重试。未实现步骤、CLI 参数解析失败和主动取消不重试。
-公共错误诊断保留 Claude Agent SDK `errors`、异常链、traceback 位置及 AI-compatible provider 的 code/type/message/request ID/HTTP status；只对明确凭据值和认证字段做精确遮盖。完整有界快照写入 Git 忽略的 `runs/<run-id>/logs/`，state、步骤结果和 stderr 保存具体安全原因与 `diagnostic_path`；合法裁决写入 conversation 后清除当前失败引用。第 13 步直接消费当前需求注册表；第 17 步直接调用 `run_claude()`；第 18 步只使用确定性 Python/Git。
+公共错误诊断保留 Claude Agent SDK `errors`、异常链、traceback 位置及 AI-compatible provider 的 code/type/message/request ID/HTTP status；只对明确凭据值和认证字段做精确遮盖。完整有界快照写入 Git 忽略的 `runs/<run-id>/logs/`，state、步骤结果和 stderr 保存具体安全原因与 `diagnostic_path`；合法裁决写入 conversation 后清除当前失败引用。第 13 步直接消费当前需求注册表；第 17 步通过公共 Agent 决策循环运行 `commit-changes`；第 18 步只使用确定性 Python/Git。
 
 ## 最近真实验证
 
@@ -97,11 +97,13 @@ Git 忽略 run `prompt-role-replay-20260823` 保留旧四段 XML prompt 的历�
 
 真实 `step01-mendmark` 曾复用 development session `e6bd1b82-39f9-41b2-9cc9-a69b281015dc` 完成规则复盘，conversation 为 `system → assistant 初始 → user Agent 回复 → assistant completed`，唯一规则增量为 root `.claude/rules/frontend-playwright-container.md`。旧实现的三仓提前提交失败、`git reset --mixed` 现场恢复、Git-visible baseline 和当时的 refs/index 事实仅作为历史记录，不再是现行 success 条件；既有规则、result、state 和 conversation 保持不变。现行本体 7 项、CLI 4 项，共 11 项；相关定向 51 项和全量 282 项通过。
 
-## 第 17 步历史真实验证与现行兼容
+## 第 17 步决策历史与历史缺口
 
-历史真实 run 曾使用 session `a00760f3-1760-4e2c-a985-477831a9277f` 创建 root 2 个、frontend 1 个、backend 1 个本地提交，并推进到 `requirement:18_merge` / step 18。提交 SHA、session、四条 decision conversation 和当时的 fingerprint 字段是旧实现的历史执行事实，不再是现行精简合同的完成条件。
+现行第 17 步使用公共 Agent 决策循环运行 `commit-changes`：一个产品根 Claude session、完整 `conversations/requirement_commit_<ID>.json`、负责人 `completed/continue/blocked`、同 session continue、blocked resume和 completed 后 repair。Python只保留仓库白名单、统一需求分支、local main/base、最终 clean 和 base/tip 持久化，不恢复 fingerprint、blob/tree、merge 或空提交内容取证。
 
-现行实现只保留仓库白名单、统一需求分支、local main/base、最终 clean、单一 direct session 和 base/tip 持久化；每次运行最多调用一次 Agent，不调用负责人模型或自动 repair。当前真实 run 没有回退重跑 fresh 提交，只执行 advanced 幂等兼容验证：使用不可用 LLM 配置运行第 17 步时不调用 Agent，state、`17.json` 和旧 conversation SHA-256 分别保持 `aa591d02093ec29d9b4ec2b7d06dfd4e1aac22a2097a19d864fb07e47a15512e`、`2f76b43287404bc828e1dfbe9df52a90fd53b3a388eaf36f3e7c54cc82fb8439`、`93978ff7dcdfa3479d094f0085807bae2166b3dbaffdf1c69c3973d096fc9d87`。详细合同见[第 17 步 README](steps/step_17_commit/README.md)。
+BR-001 的旧真实运行保存了完整四段 conversation。BR-002 在 direct-run 版本期间已经完成第 17/18 步，state 中只有 session `06edb430-9677-45e2-945f-ecff2a488ba6`，没有 decision reference 或 `conversations/requirement_commit_BR-002.json`。该历史缺口不能补造、推断或迁移；现行合同只保证未来需求保存完整决策历史，不回退或修改已完成的 BR-002。
+
+第 17 步本体 9 项、CLI 4 项；公共循环与第 17 步定向共 43 项通过。全量 303 项通过，详细合同见[第 17 步 README](steps/step_17_commit/README.md)。
 
 ## 第 18 步真实验证
 

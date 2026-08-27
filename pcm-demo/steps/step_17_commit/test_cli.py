@@ -14,7 +14,14 @@ DEMO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(DEMO_ROOT))
 
 from common.state import write_requirement_step_result, write_state
-from steps.step_17_commit.step import CURRENT_NODE, NEXT_NODE, PHASE, STEP, result
+from steps.step_17_commit.step import (
+    CURRENT_NODE,
+    NEXT_NODE,
+    PHASE,
+    STEP,
+    RequirementCommitBlocked,
+    result,
+)
 
 
 class RequirementCommitCLITests(unittest.TestCase):
@@ -70,6 +77,29 @@ class RequirementCommitCLITests(unittest.TestCase):
             self.assertEqual(self.cli.main(), 0)
         runner.assert_awaited_once()
         self.assertEqual(stdout.getvalue().strip(), str(run_dir / "steps/requirements/BR-001/17.json"))
+
+    def test_blocked_exception_is_scoped(self) -> None:
+        run_dir = self.make_run()
+        blocked = RequirementCommitBlocked(
+            "缺少签名凭据",
+            ["Git 签名凭据"],
+            requirement_id="BR-001",
+            branch="req/br-001",
+        )
+        stderr = io.StringIO()
+        with (
+            patch.object(self.cli, "parse_args", return_value=self.args(run_dir.name)),
+            patch.object(self.cli, "run_step_seventeen", side_effect=blocked),
+            contextlib.redirect_stderr(stderr),
+        ):
+            self.assertEqual(self.cli.main(), 1)
+        saved = json.loads(
+            (run_dir / "steps/requirements/BR-001/17.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(saved["status"], "blocked")
+        self.assertEqual(saved["requirement_id"], "BR-001")
+        self.assertEqual(saved["branch"], "req/br-001")
+        self.assertEqual(saved["blocked"]["required_inputs"], ["Git 签名凭据"])
 
     def test_failed_exception_is_sanitized_and_scoped(self) -> None:
         run_dir = self.make_run()

@@ -12,6 +12,7 @@ from typing import Any
 DEMO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(DEMO_ROOT))
 
+from common.agent_decision_loop import BLOCKED_RESUME_PROMPT
 from common.claude_agent import ClaudeRunResult
 from common.state import read_state, write_requirement_step_result, write_state
 from steps.step_17_commit.step import (
@@ -20,54 +21,91 @@ from steps.step_17_commit.step import (
     MAX_TURNS,
     NEXT_NODE,
     PHASE,
+    REPOSITORY_REPAIR_PROMPT,
     STEP,
+    RequirementCommitBlocked,
     result,
     run,
 )
 
 
 def command(*args: str, cwd: Path) -> str:
-    return subprocess.run(["git", *args], cwd=cwd, text=True, capture_output=True, check=True).stdout.strip()
+    return subprocess.run(
+        ["git", *args], cwd=cwd, text=True, capture_output=True, check=True
+    ).stdout.strip()
 
 
 def commit_all(repository: Path, message: str = "test commit") -> str:
     command("add", "-A", cwd=repository)
-    command("-c", "user.name=PCM Test", "-c", "user.email=pcm@example.invalid", "commit", "-m", message, cwd=repository)
+    command(
+        "-c", "user.name=PCM Test", "-c", "user.email=pcm@example.invalid",
+        "commit", "-m", message, cwd=repository,
+    )
     return command("rev-parse", "HEAD", cwd=repository)
 
 
-def claude_result(session: str | None, *, subtype: str | None = "success", is_error: bool = False, has_errors: bool = False) -> ClaudeRunResult:
+def agent_result(
+    cwd: Path,
+    session: str = "commit-session-1",
+    text: str = "已处理当前提交任务。",
+) -> ClaudeRunResult:
     return ClaudeRunResult(
-        init=None,
-        text="",
-        result_subtype=subtype,
-        is_error=is_error,
+        init={
+            "cwd": str(cwd),
+            "skills": ["commit-changes"],
+            "slash_commands": ["commit-changes"],
+        },
+        text=text,
+        result_subtype="success",
+        is_error=False,
         session_id=session,
-        stop_reason=None,
-        num_turns=None,
-        total_cost_usd=None,
+        stop_reason="end_turn",
+        num_turns=1,
+        total_cost_usd=0.1,
         exception=None,
-        has_errors=has_errors,
     )
+
+
+def decision(
+    verdict: str,
+    *,
+    answer: str = "",
+    reason: str = "已核验",
+    required_inputs: list[str] | None = None,
+) -> tuple[dict[str, Any], int, str]:
+    data = {
+        "verdict": verdict,
+        "answer": answer,
+        "reason": reason,
+        "required_inputs": required_inputs or [],
+    }
+    return data, 1, json.dumps(data, ensure_ascii=False)
 
 
 class RequirementCommitTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
+        self.case_number = 0
 
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
 
-    def make_run(self, children: list[str] = []) -> tuple[Path, Path, dict[str, Any], dict[str, str]]:
-        run_dir = self.root / "run"
+    def make_run(
+        self, children: list[str] | None = None
+    ) -> tuple[Path, Path, dict[str, Any], dict[str, str]]:
+        children = children or []
+        self.case_number += 1
+        case_root = self.root / f"case-{self.case_number}"
+        run_dir = case_root / "run"
         (run_dir / "steps/requirements/BR-001").mkdir(parents=True)
-        workspace_root, workspace = self.root / "workspace-root", self.root / "workspace-root/project"
+        workspace_root = case_root / "workspace-root"
+        workspace = workspace_root / "project"
         workspace.mkdir(parents=True)
         repositories = [("root", workspace), *[(name, workspace / name) for name in children]]
         for _name, repository in repositories[1:]:
             repository.mkdir()
-        bases = {}
+        bases: dict[str, str] = {}
         for name, repository in repositories:
             command("init", "-b", "main", cwd=repository)
             (repository / "base.txt").write_text(f"{name} base\n", encoding="utf-8")
@@ -86,8 +124,16 @@ class RequirementCommitTests(unittest.TestCase):
             "current_node": CURRENT_NODE,
             "workspace": {"root": str(workspace_root), "final_path": str(workspace)},
             "applicable_repositories": names,
-            "repositories": [{"name": name, "path": str(repository)} for name, repository in repositories],
-            "requirement_registry": {"schema_version": 1, "requirements": [{"id": "BR-001", "title": "账户访问", "order": 1, "depends_on": [], "status": "active", "completion": None}]},
+            "repositories": [
+                {"name": name, "path": str(repository)} for name, repository in repositories
+            ],
+            "requirement_registry": {
+                "schema_version": 1,
+                "requirements": [{
+                    "id": "BR-001", "title": "账户访问", "order": 1,
+                    "depends_on": [], "status": "active", "completion": None,
+                }],
+            },
             "active_requirement": "BR-001",
             "requirement_cycle": {
                 "requirement_id": "BR-001",
@@ -101,8 +147,9 @@ class RequirementCommitTests(unittest.TestCase):
             "error": None,
         }
         write_requirement_step_result(run_dir, "BR-001", 16, {
-            "step": 16, "name": "规则复盘", "status": "success", "summary": "已完成。", "applicable": True,
-            "outputs": [], "blocked": None, "error": None, "requirement_id": "BR-001", "development_session_id": "development-session-1",
+            "step": 16, "name": "规则复盘", "status": "success", "summary": "已完成。",
+            "applicable": True, "outputs": [], "blocked": None, "error": None,
+            "requirement_id": "BR-001", "development_session_id": "development-session-1",
         })
         write_state(run_dir, state)
         return run_dir, workspace, state, bases
@@ -116,127 +163,250 @@ class RequirementCommitTests(unittest.TestCase):
     @staticmethod
     def commit_names(workspace: Path, names: list[str]) -> None:
         for name in names:
-            commit_all(workspace if name == "root" else workspace / name, f"feat: {name}")
-
-    @staticmethod
-    def success(requirement_id: str, branch: str, bases: dict[str, str], tips: dict[str, str]) -> dict[str, Any]:
-        return result("success", "已完成。", requirement_id=requirement_id, branch=branch, repositories=[
-            {"name": name, "path": "." if name == "root" else name, "base_sha": bases[name], "tip_sha": tips[name]}
-            for name in bases
-        ])
+            repository = workspace if name == "root" else workspace / name
+            commit_all(repository, f"feat: {name}")
 
     @staticmethod
     def execute(run_dir: Path, state: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
         return asyncio.run(run(run_dir, state, **kwargs))
 
-    def test_all_clean_skips_agent(self) -> None:
+    @staticmethod
+    def success(bases: dict[str, str], tips: dict[str, str]) -> dict[str, Any]:
+        return result(
+            "success", "已完成。", requirement_id="BR-001", branch="req/br-001",
+            repositories=[{
+                "name": name, "path": "." if name == "root" else name,
+                "base_sha": bases[name], "tip_sha": tips[name],
+            } for name in bases],
+        )
+
+    def test_all_clean_skips_agent_decision_and_conversation(self) -> None:
         run_dir, _workspace, state, bases = self.make_run(["web"])
-        calls: list[object] = []
 
-        async def unexpected(*args: Any, **kwargs: Any) -> ClaudeRunResult:
-            calls.append((args, kwargs))
-            raise AssertionError("全 clean 不应调用 Agent")
+        async def unexpected(*args: Any, **kwargs: Any) -> Any:
+            raise AssertionError("全 clean 不应调用 Agent 或负责人")
 
-        saved = self.execute(run_dir, state, agent_runner=unexpected)
-        self.assertEqual(calls, [])
-        self.assertEqual([item["tip_sha"] for item in saved["repositories"]], [bases["root"], bases["web"]])
-        self.assertEqual(read_state(run_dir)["current_node"], NEXT_NODE)
+        saved = self.execute(
+            run_dir, state, agent_runner=unexpected, decision_runner=unexpected,
+            config_loader=lambda: object(),
+        )
+        self.assertEqual([item["tip_sha"] for item in saved["repositories"]], list(bases.values()))
+        completed = read_state(run_dir)
+        self.assertEqual(completed["current_node"], NEXT_NODE)
+        self.assertNotIn("claude_sessions", completed)
+        self.assertFalse((run_dir / "conversations/requirement_commit_BR-001.json").exists())
 
-    def test_dirty_repositories_use_one_product_root_call_and_save_session(self) -> None:
+    def test_dirty_completed_creates_full_conversation(self) -> None:
         run_dir, workspace, state, _bases = self.make_run(["web", "api"])
-        self.dirty(workspace, ["root", "web", "api"])
+        names = ["root", "web", "api"]
+        self.dirty(workspace, names)
         calls: list[dict[str, Any]] = []
 
         async def agent(prompt: str, **kwargs: Any) -> ClaudeRunResult:
             calls.append({"prompt": prompt, **kwargs})
-            kwargs["on_update"](claude_result("commit-session-1", subtype=None))
-            self.commit_names(workspace, ["root", "web", "api"])
-            return claude_result("commit-session-1")
+            self.commit_names(workspace, names)
+            value = agent_result(kwargs["cwd"])
+            kwargs["on_update"](value)
+            return value
 
-        self.execute(run_dir, state, agent_runner=agent)
+        async def completed(messages, config, *, system_prompt):
+            return decision("completed")
+
+        self.execute(
+            run_dir, state, agent_runner=agent, decision_runner=completed,
+            config_loader=lambda: object(),
+        )
         self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0]["cwd"].resolve(), workspace.resolve())
-        self.assertIsNone(calls[0]["resume_session_id"])
         self.assertEqual(calls[0]["max_turns"], MAX_TURNS)
         self.assertEqual(calls[0]["max_budget_usd"], MAX_BUDGET_USD)
-        self.assertTrue(calls[0]["prompt"].startswith("/commit-changes\n"))
         self.assertEqual(calls[0]["prompt"].count("/commit-changes"), 1)
-        self.assertEqual(read_state(run_dir)["claude_sessions"]["requirement_commit_BR-001"], "commit-session-1")
+        saved_state = read_state(run_dir)
+        key = "requirement_commit_BR-001"
+        self.assertEqual(saved_state["claude_sessions"][key], "commit-session-1")
+        self.assertEqual(
+            saved_state["decision_conversations"][key]["path"],
+            "conversations/requirement_commit_BR-001.json",
+        )
+        conversation = json.loads(
+            (run_dir / "conversations/requirement_commit_BR-001.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual([message["role"] for message in conversation["messages"]], [
+            "system", "assistant", "user", "assistant",
+        ])
 
-    def test_exception_after_init_resumes_same_session_once_without_slash(self) -> None:
-        run_dir, workspace, state, _bases = self.make_run(["web"])
-        self.dirty(workspace, ["root", "web"])
+    def test_failure_before_session_retries_original_prompt(self) -> None:
+        run_dir, workspace, state, _bases = self.make_run()
+        self.dirty(workspace, ["root"])
 
         async def interrupted(prompt: str, **kwargs: Any) -> ClaudeRunResult:
-            kwargs["on_update"](claude_result("commit-session-1", subtype=None))
-            self.commit_names(workspace, ["root"])
-            raise OSError("disconnect")
+            raise ConnectionError("temporary disconnect")
 
-        with self.assertRaisesRegex(RuntimeError, "Claude Agent 执行异常"):
-            self.execute(run_dir, state, agent_runner=interrupted)
-        diagnostic = json.loads((run_dir / "logs/requirement_commit_BR-001-agent.json").read_text(encoding="utf-8"))
-        self.assertEqual(diagnostic["exception"]["message"], "disconnect")
-
+        with self.assertRaisesRegex(RuntimeError, "Agent SDK 执行异常"):
+            self.execute(
+                run_dir, state, agent_runner=interrupted,
+                decision_runner=lambda *args, **kwargs: None,
+                config_loader=lambda: object(),
+            )
+        failed_state = read_state(run_dir)
+        key = "requirement_commit_BR-001"
+        self.assertNotIn(key, failed_state.get("claude_sessions", {}))
+        self.assertEqual(
+            failed_state["decision_conversations"][key]["path"],
+            "conversations/requirement_commit_BR-001.json",
+        )
         calls: list[dict[str, Any]] = []
-        async def resumed(prompt: str, **kwargs: Any) -> ClaudeRunResult:
-            calls.append({"prompt": prompt, **kwargs})
-            self.commit_names(workspace, ["web"])
-            return claude_result("commit-session-1")
 
-        self.execute(run_dir, read_state(run_dir), agent_runner=resumed)
+        async def recovered(prompt: str, **kwargs: Any) -> ClaudeRunResult:
+            calls.append({"prompt": prompt, **kwargs})
+            self.commit_names(workspace, ["root"])
+            value = agent_result(kwargs["cwd"])
+            kwargs["on_update"](value)
+            return value
+
+        async def completed(messages, config, *, system_prompt):
+            return decision("completed")
+
+        self.execute(
+            run_dir, failed_state, agent_runner=recovered,
+            decision_runner=completed, config_loader=lambda: object(),
+        )
         self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0]["resume_session_id"], "commit-session-1")
-        self.assertNotIn("/commit-changes", calls[0]["prompt"])
+        self.assertIsNone(calls[0]["resume_session_id"])
+        self.assertTrue(calls[0]["prompt"].startswith("/commit-changes\n"))
 
-    def test_dirty_normal_return_fails_then_resumes_successfully(self) -> None:
+    def test_continue_then_completed_reuses_session(self) -> None:
         run_dir, workspace, state, _bases = self.make_run()
         self.dirty(workspace, ["root"])
+        calls: list[dict[str, Any]] = []
+        decisions = [
+            decision("continue", answer="继续完成提交。"),
+            decision("completed"),
+        ]
+        decision_calls = 0
 
-        async def incomplete(prompt: str, **kwargs: Any) -> ClaudeRunResult:
-            kwargs["on_update"](claude_result("commit-session-1", subtype=None))
-            return claude_result("commit-session-1")
+        async def agent(prompt: str, **kwargs: Any) -> ClaudeRunResult:
+            calls.append({"prompt": prompt, **kwargs})
+            if len(calls) > 2:
+                raise AssertionError("continue 场景不应调用第三轮 Agent")
+            if len(calls) == 2:
+                self.commit_names(workspace, ["root"])
+            value = agent_result(kwargs["cwd"], text=f"continue 第 {len(calls)} 轮")
+            kwargs["on_update"](value)
+            return value
 
-        with self.assertRaisesRegex(RuntimeError, "需求提交未完成"):
-            self.execute(run_dir, state, agent_runner=incomplete)
-        write_requirement_step_result(run_dir, "BR-001", STEP, result("failed", "未完成。", requirement_id="BR-001", branch="req/br-001", error={"type": "RuntimeError", "message": "未完成"}))
+        async def decide(messages, config, *, system_prompt):
+            nonlocal decision_calls
+            decision_calls += 1
+            if decision_calls > len(decisions):
+                raise AssertionError("continue 场景不应请求第三次决策")
+            return decisions[decision_calls - 1]
+
+        self.execute(
+            run_dir, state, agent_runner=agent, decision_runner=decide,
+            config_loader=lambda: object(),
+        )
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[1]["resume_session_id"], "commit-session-1")
+        self.assertEqual(calls[1]["prompt"], "继续完成提交。")
+        self.assertEqual(sum(call["prompt"].count("/commit-changes") for call in calls), 1)
+
+    def test_completed_dirty_repairs_same_session(self) -> None:
+        run_dir, workspace, state, _bases = self.make_run()
+        self.dirty(workspace, ["root"])
         calls: list[dict[str, Any]] = []
 
-        async def resumed(prompt: str, **kwargs: Any) -> ClaudeRunResult:
+        async def agent(prompt: str, **kwargs: Any) -> ClaudeRunResult:
             calls.append({"prompt": prompt, **kwargs})
-            self.commit_names(workspace, ["root"])
-            return claude_result("commit-session-1")
+            if len(calls) == 2:
+                self.commit_names(workspace, ["root"])
+            value = agent_result(kwargs["cwd"], text=f"repair 第 {len(calls)} 轮")
+            kwargs["on_update"](value)
+            return value
 
-        self.execute(run_dir, read_state(run_dir), agent_runner=resumed)
-        self.assertEqual(calls[0]["resume_session_id"], "commit-session-1")
-        self.assertNotIn("/commit-changes", calls[0]["prompt"])
+        async def completed(messages, config, *, system_prompt):
+            return decision("completed")
 
-    def test_non_normal_clean_result_must_resume_before_success(self) -> None:
+        self.execute(
+            run_dir, state, agent_runner=agent, decision_runner=completed,
+            config_loader=lambda: object(),
+        )
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[1]["prompt"], REPOSITORY_REPAIR_PROMPT)
+        self.assertEqual(calls[1]["resume_session_id"], "commit-session-1")
+
+    def test_blocked_then_resume_same_conversation(self) -> None:
         run_dir, workspace, state, _bases = self.make_run()
         self.dirty(workspace, ["root"])
 
-        async def failed(prompt: str, **kwargs: Any) -> ClaudeRunResult:
-            kwargs["on_update"](claude_result("commit-session-1", subtype=None))
-            self.commit_names(workspace, ["root"])
-            return claude_result(
-                "commit-session-1", subtype="error", is_error=True, has_errors=True
+        async def first_agent(prompt: str, **kwargs: Any) -> ClaudeRunResult:
+            value = agent_result(kwargs["cwd"], text="blocked 第一轮")
+            kwargs["on_update"](value)
+            return value
+
+        async def blocked(messages, config, *, system_prompt):
+            return decision(
+                "blocked", reason="缺少签名凭据", required_inputs=["Git 签名凭据"]
             )
 
-        with self.assertRaisesRegex(RuntimeError, "需求提交未完成"):
-            self.execute(run_dir, state, agent_runner=failed)
-
+        with self.assertRaises(RequirementCommitBlocked):
+            self.execute(
+                run_dir, state, agent_runner=first_agent, decision_runner=blocked,
+                config_loader=lambda: object(),
+            )
+        blocked_state = read_state(run_dir)
+        self.assertEqual(blocked_state["status"], "blocked")
+        self.assertEqual(
+            json.loads((run_dir / "steps/requirements/BR-001/17.json").read_text())["status"],
+            "blocked",
+        )
         calls: list[dict[str, Any]] = []
 
-        async def resumed(prompt: str, **kwargs: Any) -> ClaudeRunResult:
+        async def resumed_agent(prompt: str, **kwargs: Any) -> ClaudeRunResult:
             calls.append({"prompt": prompt, **kwargs})
-            return claude_result("commit-session-1")
+            self.commit_names(workspace, ["root"])
+            value = agent_result(kwargs["cwd"], text="blocked 恢复轮")
+            kwargs["on_update"](value)
+            return value
 
-        saved = self.execute(run_dir, read_state(run_dir), agent_runner=resumed)
-        self.assertEqual(saved["status"], "success")
-        self.assertEqual(len(calls), 1)
+        async def completed(messages, config, *, system_prompt):
+            return decision("completed")
+
+        self.execute(
+            run_dir, blocked_state, agent_runner=resumed_agent,
+            decision_runner=completed, config_loader=lambda: object(),
+        )
+        self.assertEqual(calls[0]["prompt"], BLOCKED_RESUME_PROMPT)
         self.assertEqual(calls[0]["resume_session_id"], "commit-session-1")
-        self.assertNotIn("/commit-changes", calls[0]["prompt"])
 
-    def test_untracked_files_are_dirty_even_when_repository_config_hides_them(self) -> None:
+    def test_incomplete_resume_anchors_are_rejected(self) -> None:
+        variants = ("session", "reference", "conversation")
+        for variant in variants:
+            with self.subTest(variant=variant):
+                run_dir, workspace, state, _bases = self.make_run()
+                self.dirty(workspace, ["root"])
+                key = "requirement_commit_BR-001"
+                if variant == "session":
+                    state["claude_sessions"] = {key: "commit-session-1"}
+                elif variant == "reference":
+                    state["decision_conversations"] = {
+                        key: {"path": f"conversations/{key}.json"}
+                    }
+                else:
+                    path = run_dir / f"conversations/{key}.json"
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text("{}", encoding="utf-8")
+                write_state(run_dir, state)
+
+                async def unexpected(*args: Any, **kwargs: Any) -> Any:
+                    raise AssertionError("残缺锚点不应调用 Agent 或负责人")
+
+                with self.assertRaisesRegex(RuntimeError, "恢复缺少"):
+                    self.execute(
+                        run_dir, state, agent_runner=unexpected,
+                        decision_runner=unexpected, config_loader=lambda: object(),
+                    )
+
+    def test_untracked_and_symlink_boundaries(self) -> None:
         run_dir, workspace, state, _bases = self.make_run()
         command("config", "status.showUntrackedFiles", "no", cwd=workspace)
         self.dirty(workspace, ["root"])
@@ -245,69 +415,58 @@ class RequirementCommitTests(unittest.TestCase):
         async def agent(prompt: str, **kwargs: Any) -> ClaudeRunResult:
             nonlocal calls
             calls += 1
-            kwargs["on_update"](claude_result("commit-session-1", subtype=None))
             self.commit_names(workspace, ["root"])
-            return claude_result("commit-session-1")
+            value = agent_result(kwargs["cwd"])
+            kwargs["on_update"](value)
+            return value
 
-        self.execute(run_dir, state, agent_runner=agent)
+        async def completed(messages, config, *, system_prompt):
+            return decision("completed")
+
+        self.execute(
+            run_dir, state, agent_runner=agent, decision_runner=completed,
+            config_loader=lambda: object(),
+        )
         self.assertEqual(calls, 1)
 
-    def test_symlinked_repository_path_is_rejected(self) -> None:
         run_dir, workspace, state, _bases = self.make_run(["web"])
         external = self.root / "outside-web"
         (workspace / "web").rename(external)
         (workspace / "web").symlink_to(external, target_is_directory=True)
-
-        async def unexpected(*args: Any, **kwargs: Any) -> ClaudeRunResult:
-            raise AssertionError("符号链接仓库不应调用 Agent")
-
         with self.assertRaisesRegex(RuntimeError, "适用仓库描述"):
-            self.execute(run_dir, state, agent_runner=unexpected)
+            self.execute(
+                run_dir, state, agent_runner=agent, decision_runner=completed,
+                config_loader=lambda: object(),
+            )
 
-    def test_boundary_conflict_rejects_before_agent(self) -> None:
-        run_dir, _workspace, state, _bases = self.make_run()
-        state["requirement_cycle"]["repositories"]["root"]["base_sha"] = "0" * 40
-
-        async def unexpected(*args: Any, **kwargs: Any) -> ClaudeRunResult:
-            raise AssertionError("边界冲突不应调用 Agent")
-
-        with self.assertRaisesRegex(RuntimeError, "Git 边界"):
-            self.execute(run_dir, state, agent_runner=unexpected)
-
-    def test_success_result_recovers_state_without_agent(self) -> None:
+    def test_result_recovery_and_advanced_compatibility(self) -> None:
         run_dir, workspace, state, bases = self.make_run()
         self.dirty(workspace, ["root"])
         tip = commit_all(workspace, "feat: account access")
-        saved = self.success("BR-001", "req/br-001", bases, {"root": tip})
+        saved = self.success(bases, {"root": tip})
         write_requirement_step_result(run_dir, "BR-001", STEP, saved)
         write_state(run_dir, state)
 
-        async def unexpected(*args: Any, **kwargs: Any) -> ClaudeRunResult:
-            raise AssertionError("result→state 恢复不应调用 Agent")
+        async def unexpected(*args: Any, **kwargs: Any) -> Any:
+            raise AssertionError("恢复路径不应调用 Agent 或负责人")
 
-        self.assertEqual(self.execute(run_dir, read_state(run_dir), agent_runner=unexpected), saved)
-        self.assertEqual(read_state(run_dir)["current_node"], NEXT_NODE)
-
-    def test_advanced_success_preserves_legacy_artifacts_without_workspace(self) -> None:
-        run_dir, workspace, state, bases = self.make_run()
-        saved = self.success("BR-001", "req/br-001", bases, bases)
-        state.update({"status": "success", "step": STEP + 1, "current_step": STEP + 1, "current_node": NEXT_NODE})
-        state["requirement_cycle"]["repositories"] = {"root": {"base_sha": bases["root"], "tip_sha": bases["root"], "merged": False}}
-        state["requirement_commit_BR-001"] = {"repositories": [{"tree_sha256": "a" * 64}]}
-        state["decision_conversations"] = {"requirement_commit_BR-001": {"path": "conversations/old.json"}}
-        state["claude_sessions"] = {"requirement_commit_BR-001": "commit-session-1"}
-        write_requirement_step_result(run_dir, "BR-001", STEP, saved)
-        write_state(run_dir, state)
-        before_state = (run_dir / "state.json").read_bytes()
-        before_result = (run_dir / "steps/requirements/BR-001/17.json").read_bytes()
+        self.assertEqual(self.execute(
+            run_dir, read_state(run_dir), agent_runner=unexpected,
+            decision_runner=unexpected, config_loader=lambda: object(),
+        ), saved)
+        advanced = read_state(run_dir)
+        advanced["requirement_commit_BR-001"] = {"repositories": [{"tree_sha256": "a" * 64}]}
+        advanced["decision_conversations"] = {
+            "requirement_commit_BR-001": {"path": "conversations/old.json"}
+        }
+        write_state(run_dir, advanced)
+        before = (run_dir / "state.json").read_bytes()
         workspace.rename(workspace.with_name("workspace-moved"))
-
-        async def unexpected(*args: Any, **kwargs: Any) -> ClaudeRunResult:
-            raise AssertionError("推进后幂等不应调用 Agent")
-
-        self.assertEqual(self.execute(run_dir, read_state(run_dir), agent_runner=unexpected), saved)
-        self.assertEqual((run_dir / "state.json").read_bytes(), before_state)
-        self.assertEqual((run_dir / "steps/requirements/BR-001/17.json").read_bytes(), before_result)
+        self.assertEqual(self.execute(
+            run_dir, read_state(run_dir), agent_runner=unexpected,
+            decision_runner=unexpected, config_loader=lambda: object(),
+        ), saved)
+        self.assertEqual((run_dir / "state.json").read_bytes(), before)
 
 
 if __name__ == "__main__":

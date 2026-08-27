@@ -377,7 +377,7 @@ Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重�
 | `aborted_streaming` / `aborted_tools` | `failed` |
 | `success` 携带未知 terminal reason | `failed` |
 
-已取得 max-turn/max-budget ResultMessage 后的尾随进程异常，不覆盖已经取得的可恢复结构化事实；其它异常不进入决策循环。`ClaudeRunResult` 同时保留 `ResultMessage.errors`、`api_error_status`、`terminal_reason` 和捕获异常的安全正文、异常链与 traceback 位置。公共循环在 Agent 失败时覆盖写入 `logs/<领域键>-agent.json`，`last_agent_result`、步骤结果和 stderr 只保存具体安全原因及 `diagnostic_path`；第 17 步 direct `run_claude()` 复用同一诊断能力。
+已取得 max-turn/max-budget ResultMessage 后的尾随进程异常，不覆盖已经取得的可恢复结构化事实；其它异常不进入决策循环。`ClaudeRunResult` 同时保留 `ResultMessage.errors`、`api_error_status`、`terminal_reason` 和捕获异常的安全正文、异常链与 traceback 位置。公共循环在 Agent 失败时覆盖写入 `logs/<领域键>-agent.json`，`last_agent_result`、步骤结果和 stderr 只保存具体安全原因及 `diagnostic_path`；第 17 步同样通过公共循环复用这些诊断与恢复能力。
 
 ## 9. `blocked` 与 `failed`
 
@@ -446,6 +446,7 @@ Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重�
 | 9 `engineering-architecture` | 必须基于固定权威输入形成工程架构文档；文档 repair 后，仅在根仓存在且仅存在固定文档未提交变化时才在原 session 调用 `commit-changes` | 固定文档非空、非符号链接、tracked；全体权威仓库当前为自身 top-level / `main` / clean |
 | 10 `ui-ux-framework` | 仅第 8 步严格交接含 `frontend` 时适用；不适用路径按执行产物存在性拒绝并零副作用 | 适用时固定文档非空、非符号链接、tracked；全体权威仓库当前 clean；不适用时 `applicable:false`、空 outputs |
 | 11 `requirement-breakdown` | 基于严格第 2/5/7/8/9/10 交接形成固定 Backlog；只在唯一根仓文档未提交变化时调用 `commit-changes` | 固定 Backlog 非空、非符号链接、tracked；全体权威仓库当前为自身 top-level / `main` / clean |
+| 17 `commit-changes` | 在一个产品根 session 中提交当前需求的有序权威仓库白名单；负责人处理确认、意外、blocked和继续 | 各仓仍在统一需求分支，`main==base`、`HEAD==target`，工作树与暂存区 clean；记录 `tip_sha` |
 
 第 6 步没有适用基础工程时，继续 `applicable: false` 无副作用跳过，不调用 Agent 或决策模型。第 9 步始终 `applicable: true`，不存在简单项目跳过或不适用结果；第 10 步仍按第 8 步严格交接是否含 `frontend` 确定，未含时按执行产物存在性拒绝且零 Git、Agent、负责人决策、LLM 配置和文档副作用。第 11 步与第 9 步同样仅在固定 Backlog 造成唯一根仓未提交变化时调用 `commit-changes`。
 
