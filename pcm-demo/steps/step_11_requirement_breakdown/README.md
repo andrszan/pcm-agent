@@ -65,7 +65,7 @@ result 已 success 而 state 推进中断，或完整 success 重跑时，只按
 
 ## 自动化与旧合同下的历史运行事实（非当前成功条件）
 
-第 9～11 步新合同代码与自动化已完成：第 9～11 步本体测试合计 49 项通过；公共循环加第 9～11 步本体及第 10/11 步 CLI 定向回归共 84 项通过；PCM Demo 全量 268 项 `unittest` 通过（86.068 秒）；`compileall common steps run_step.py` 与 `git diff --check` 通过；目标第 9～11 步生产/测试和相关文档 IDE diagnostics 无新增问题（既有 pydantic 解析 warning 和第 12 步 unused hint 不属于本次）。尚未按新合同重新执行真实 Claude Agent、负责人 LLM 或 `/commit-changes` 集成；旧真实 run 仍仅为旧合同历史。 以下真实 run 的 exact commit prompt、7 条 conversation、提交及当时恢复路径均是旧合同下的历史运行事实，不构成当前成功条件。
+共享自动化统计已同步为本轮当前工作树验证：第 9～11 步本体合计 51 项（18+18+15）通过；公共循环加第 9～11 步本体及第 10/11 步 CLI 的相关回归 97 项通过（20.631 秒）；全量 319 项 `unittest` 通过（54.766 秒）。其中第 9 步定向 18 项通过（6.305 秒）；`compileall common steps run_step.py test_run_step_retry.py` 与本次目标 `git diff --check` 通过。当前工作树还包含其它公共循环/CLI 的未提交修改，以上全量结果不能全部归因于第 9 步；这只更新共享统计，不改变本步骤业务合同。第 9 步新版 prompt 合同尚未执行安全的 fresh 真实 Claude Agent、AI-compatible 负责人或 `/commit-changes` 集成，旧真实 run 仍仅为旧合同历史。 以下真实 run 的 exact commit prompt、7 条 conversation、提交及当时恢复路径均是旧合同下的历史运行事实，不构成当前成功条件。
 
 真实 run 为 `pcm-demo/runs/step01-mendmark`，产品工作区为 `/Users/zhou/resource/fireworks/ANDRSZAN/pcm-products/mendmark`，权威仓库为 `root/frontend/backend`。运行前，旧 Skill 已精确同步并由真实 `/commit-changes` 单独提交 `9263d28`；该提交只修改 Skill、未 push，且三仓 clean，是使用新 Backlog 合同的测试前置，不是第 11 步输出。
 
