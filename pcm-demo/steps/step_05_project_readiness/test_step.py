@@ -28,6 +28,7 @@ from steps.step_05_project_readiness.step import (
     checklist_contents,
     checklist_present,
     initial_prompt,
+    readiness_baseline,
     run,
 )
 
@@ -160,6 +161,27 @@ class ProjectReadinessTests(unittest.TestCase):
             backend=None,
         )
 
+    def product_outputs(self) -> list[str]:
+        return [
+            "docs/requirements/项目需求说明.md",
+            "docs/requirements/产品功能说明.md",
+        ]
+
+    def success_result(self, workspace: Path) -> dict[str, object]:
+        return {
+            "step": 5,
+            "name": "核验项目准备状态",
+            "status": "success",
+            "summary": "project-readiness 已建立并验证当前项目周期的完整准备基线。",
+            "applicable": True,
+            "outputs": [CHECKLIST.as_posix()],
+            "blocked": None,
+            "error": None,
+            "readiness_baseline": readiness_baseline(
+                workspace, self.product_outputs()
+            ),
+        }
+
     def test_initial_prompt_uses_authoritative_inputs_and_minimal_selection_projection(self) -> None:
         prompt = initial_prompt(
             ["docs/requirements/项目需求说明.md", "docs/requirements/产品功能说明.md"],
@@ -169,11 +191,17 @@ class ProjectReadinessTests(unittest.TestCase):
         )
 
         self.assertEqual(prompt.splitlines()[0], "/project-readiness")
-        self.assertIn("产品定义是当前产品范围的权威输入", prompt)
+        self.assertIn("产品定义是当前最终产品范围的权威输入", prompt)
         self.assertIn("实际工程", prompt)
         self.assertIn("可信开发资源清单：@/resource-list", prompt)
-        self.assertIn("开发和测试资源", prompt)
-        self.assertIn("当前只核验进入基础工程项目化前条件", prompt)
+        self.assertIn("任意格式的动态候选池", prompt)
+        self.assertIn("当前项目周期唯一的完整准备基线", prompt)
+        self.assertIn("实际 `.env`", prompt)
+        self.assertIn("`.env.example`", prompt)
+        self.assertIn("最终写入项目配置的运行凭据", prompt)
+        self.assertIn("任何最终范围必要条件", prompt)
+        self.assertIn("完整依赖安装、构建、测试、应用启动", prompt)
+        self.assertNotIn("当前只核验进入基础工程项目化前条件", prompt)
         self.assertIn('"applicable": true', prompt)
         self.assertIn('"id": "frontend-template"', prompt)
         self.assertIn('"default_branch": "main"', prompt)
@@ -210,7 +238,10 @@ class ProjectReadinessTests(unittest.TestCase):
                     "最高项目负责人、工程负责人、专业开发者和 Agent 专家",
                     "assistant 是你此前发给 Agent 的指令或结构化回复",
                     "user 是 Agent 返回给你的完整执行结果",
-                    "项目准备清单已经生成",
+                    "当前项目周期唯一、完整的准备基线",
+                    "不存在必要的 missing、pending 或未验证条件",
+                    "最终项目运行凭据",
+                    "清单文字或 Agent 自述不能单独证明 ready",
                     "# 定义",
                     "适用工程",
                     "基础工程选择",
@@ -237,7 +268,12 @@ class ProjectReadinessTests(unittest.TestCase):
             self.assertEqual(decision_inputs[0][-1], {"role": "user", "content": "完整 Agent 原文"})
             saved = read_state(run_dir)
             self.assertEqual((saved["current_step"], saved["current_node"]), (6, NEXT_NODE))
-            self.assertEqual(json.loads((run_dir / "steps/05.json").read_text())["status"], "success")
+            saved_result = json.loads((run_dir / "steps/05.json").read_text())
+            self.assertEqual(saved_result["status"], "success")
+            self.assertEqual(
+                saved_result["readiness_baseline"],
+                readiness_baseline(workspace, self.product_outputs()),
+            )
             self.assertNotIn("pending_agent_prompt", saved["project_readiness"])
             history = json.loads(
                 (run_dir / "conversations/project_readiness.json").read_text(encoding="utf-8")
@@ -283,7 +319,8 @@ class ProjectReadinessTests(unittest.TestCase):
             self.assertEqual(len(calls), 2)
             self.assertTrue(str(calls[0]["prompt"]).startswith("/project-readiness"))
             self.assertEqual(calls[1]["resume_session_id"], "session-1")
-            self.assertIn("请生成或补全非空项目准备清单", str(calls[1]["prompt"]))
+            self.assertIn("不要只补文档后宣称完成", str(calls[1]["prompt"]))
+            self.assertIn("最终运行凭据最小权限验证", str(calls[1]["prompt"]))
             self.assertEqual(decision_inputs[0][-1], {"role": "user", "content": "Agent 原文 1"})
             self.assertNotIn("pending_agent_prompt", read_state(run_dir)["project_readiness"])
 
@@ -377,10 +414,7 @@ class ProjectReadinessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))
             (workspace / CHECKLIST).write_text("# 准备\n", encoding="utf-8")
-            write_json(
-                run_dir / "steps/05.json",
-                {"step": 5, "status": "success", "outputs": [CHECKLIST.as_posix()]},
-            )
+            write_json(run_dir / "steps/05.json", self.success_result(workspace))
             state.update(
                 {
                     "status": "success",
@@ -398,6 +432,77 @@ class ProjectReadinessTests(unittest.TestCase):
 
         self.assertEqual(outcome["status"], "success")
         self.assertIn("确认既有成功", outcome["summary"])
+
+    def test_existing_success_rejects_changed_checklist(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory))
+            (workspace / CHECKLIST).write_text("# 已验证准备基线\n", encoding="utf-8")
+            write_json(run_dir / "steps/05.json", self.success_result(workspace))
+            state.update(
+                {
+                    "status": "success",
+                    "step": 6,
+                    "current_step": 6,
+                    "current_node": NEXT_NODE,
+                }
+            )
+            write_state(run_dir, state)
+            (workspace / CHECKLIST).write_text("# 被替换的清单\n", encoding="utf-8")
+
+            async def unexpected_agent(*args: object, **kwargs: object) -> ClaudeRunResult:
+                raise AssertionError("准备基线漂移不应调用 Agent")
+
+            with self.assertRaisesRegex(RuntimeError, "准备基线不可复用"):
+                self.run_step(run_dir, state, agent_runner=unexpected_agent)
+
+    def test_existing_success_rejects_changed_product_definition(self) -> None:
+        for output in self.product_outputs():
+            with self.subTest(output=output), tempfile.TemporaryDirectory() as directory:
+                run_dir, workspace, state = self.make_run(Path(directory))
+                (workspace / CHECKLIST).write_text("# 已验证准备基线\n", encoding="utf-8")
+                write_json(run_dir / "steps/05.json", self.success_result(workspace))
+                state.update(
+                    {
+                        "status": "success",
+                        "step": 6,
+                        "current_step": 6,
+                        "current_node": NEXT_NODE,
+                    }
+                )
+                write_state(run_dir, state)
+                (workspace / output).write_text("# 变化后的产品范围\n", encoding="utf-8")
+
+                async def unexpected_agent(
+                    *args: object, **kwargs: object
+                ) -> ClaudeRunResult:
+                    raise AssertionError("产品范围漂移不应调用 Agent")
+
+                with self.assertRaisesRegex(RuntimeError, "准备基线不可复用"):
+                    self.run_step(run_dir, state, agent_runner=unexpected_agent)
+
+    def test_existing_success_without_baseline_is_not_reused(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory))
+            (workspace / CHECKLIST).write_text("# 旧准备清单\n", encoding="utf-8")
+            write_json(
+                run_dir / "steps/05.json",
+                {"step": 5, "status": "success", "outputs": [CHECKLIST.as_posix()]},
+            )
+            state.update(
+                {
+                    "status": "success",
+                    "step": 6,
+                    "current_step": 6,
+                    "current_node": NEXT_NODE,
+                }
+            )
+            write_state(run_dir, state)
+
+            async def unexpected_agent(*args: object, **kwargs: object) -> ClaudeRunResult:
+                raise AssertionError("旧成功结果不应调用 Agent 或自动升级")
+
+            with self.assertRaisesRegex(RuntimeError, "准备基线不可复用"):
+                self.run_step(run_dir, state, agent_runner=unexpected_agent)
 
     def test_completed_verifier_rejects_handoff_conflict_and_nonregular_checklist(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

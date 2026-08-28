@@ -35,7 +35,7 @@ uv sync
 uv run python -m unittest discover -s . -t . -p 'test*.py' -v
 ```
 
-PCM Demo 全量 303 项 `unittest`、`compileall common steps run_step.py test_run_step_retry.py` 与 `git diff --check` 通过。直接执行 `run_step.py` 时，任何真实步骤非 `success` 都会在 10 秒、30 秒后重新运行当前步骤，最多三次总执行；每次复用相同参数并由步骤重新读取最新 state/session/result，不依据错误分类或错误文字决定是否重试。未实现步骤、CLI 参数解析失败和主动取消不重试。
+PCM Demo 全量 311 项 `unittest`、`compileall common steps run_step.py test_run_step_retry.py` 与 `git diff --check` 通过。直接执行 `run_step.py` 时，任何真实步骤非 `success` 都会在 10 秒、30 秒后重新运行当前步骤，最多三次总执行；每次复用相同参数并由步骤重新读取最新 state/session/result，不依据错误分类或错误文字决定是否重试。未实现步骤、CLI 参数解析失败和主动取消不重试。
 公共错误诊断保留 Claude Agent SDK `errors`、异常链、traceback 位置及 AI-compatible provider 的 code/type/message/request ID/HTTP status；只对明确凭据值和认证字段做精确遮盖。完整有界快照写入 Git 忽略的 `runs/<run-id>/logs/`，state、步骤结果和 stderr 保存具体安全原因与 `diagnostic_path`；合法裁决写入 conversation 后清除当前失败引用。第 13 步直接消费当前需求注册表；第 17 步通过公共 Agent 决策循环运行 `commit-changes`；第 18 步只使用确定性 Python/Git。
 
 ## 最近真实验证
@@ -103,7 +103,7 @@ Git 忽略 run `prompt-role-replay-20260823` 保留旧四段 XML prompt 的历�
 
 BR-001 的旧真实运行保存了完整四段 conversation。BR-002 在 direct-run 版本期间已经完成第 17/18 步，state 中只有 session `06edb430-9677-45e2-945f-ecff2a488ba6`，没有 decision reference 或 `conversations/requirement_commit_BR-002.json`。该历史缺口不能补造、推断或迁移；现行合同只保证未来需求保存完整决策历史，不回退或修改已完成的 BR-002。
 
-第 17 步本体 9 项、CLI 4 项；公共循环与第 17 步定向共 43 项通过。全量 303 项通过，详细合同见[第 17 步 README](steps/step_17_commit/README.md)。
+第 17 步本体 9 项、CLI 4 项；公共循环与第 17 步定向共 43 项通过。全量 311 项通过，详细合同见[第 17 步 README](steps/step_17_commit/README.md)。
 
 ## 第 18 步真实验证
 

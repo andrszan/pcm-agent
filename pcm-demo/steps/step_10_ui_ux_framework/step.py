@@ -211,7 +211,7 @@ def _validate_applicable_inputs(
     if "frontend" not in names:
         raise RuntimeError("当前产品没有权威 frontend 仓库，产品级 UI/UX 框架不适用")
     product_outputs = load_product_outputs(run_dir, workspace)
-    verify_existing_readiness_success(run_dir)
+    verify_existing_readiness_success(run_dir, workspace, product_outputs)
     checklist = checklist_contents(workspace)
     if checklist is None:
         raise RuntimeError("第 5 步项目准备清单不存在或不可读取")
@@ -545,6 +545,8 @@ async def run(
 
     workspace, names = _step_eight_handoff(run_dir, state)
     if "frontend" not in names:
+        product_outputs = load_product_outputs(run_dir, workspace)
+        verify_existing_readiness_success(run_dir, workspace, product_outputs)
         _architecture_output(run_dir)
         existing_step_status = step_result_status(run_dir, STEP)
         if _execution_artifacts_present(run_dir, state):

@@ -17,6 +17,10 @@ from common.files import write_json
 from common.state import read_state, write_state
 from steps.step_01_create_workspace import initialize_root_repository
 from steps.step_03_foundation_selection.step import TemplateSelection
+from steps.step_05_project_readiness.step import (
+    readiness_baseline,
+    result as readiness_result,
+)
 from steps.step_06_project_bootstrap.step import (
     COVERAGE_ARTIFACT_REPAIR_PROMPT,
     CURRENT_NODE,
@@ -133,7 +137,14 @@ class ProjectBootstrapTests(unittest.TestCase):
         )
         write_json(
             run_dir / "steps/05.json",
-            {"step": 5, "status": "success", "outputs": [checklist]},
+            readiness_result(
+                "success",
+                "准备基线已完成。",
+                outputs=[checklist],
+                readiness_baseline=readiness_baseline(
+                    workspace, [requirements, features]
+                ),
+            ),
         )
         root_repository = initialize_root_repository(workspace)
         state = {
@@ -193,6 +204,14 @@ class ProjectBootstrapTests(unittest.TestCase):
             self.assertIn("@./frontend", prompt)
             self.assertIn("产品根 README", prompt)
             self.assertIn("真实浏览器", prompt)
+            self.assertIn("实际 `.env`", prompt)
+            self.assertIn("环境变量改名", prompt)
+            self.assertIn("配置结构迁移", prompt)
+            self.assertIn("同一既有资源绑定和真实值", prompt)
+            self.assertIn("资源身份、endpoint 与权限范围", prompt)
+            self.assertIn("不得重新选择、创建、派生、轮换或替换", prompt)
+            self.assertIn("工程接线无法继续修复", prompt)
+            self.assertIn("不得修改权威产品定义或项目准备清单", prompt)
             self.assertIn("不得初始化、暂存、提交", prompt)
             for forbidden in ("git_url", "origin", "第 6 步", "PCM", "节点", "阶段", "调用Skill"):
                 self.assertNotIn(forbidden, prompt)
@@ -208,6 +227,12 @@ class ProjectBootstrapTests(unittest.TestCase):
                     "assistant 是你此前发给 Agent 的指令或结构化回复",
                     "user 是 Agent 返回给你的完整执行结果",
                     "产品根 README 和各适用工程的项目身份",
+                    "允许为匹配工程实际加载合同维护受保护的实际 `.env`",
+                    "配置读取或迁移、工程接线",
+                    "已经使用既有配置排除工程接线问题",
+                    "不得通过重新选择、创建、派生、轮换或替换资源或凭据消除阻塞",
+                    "已完成的项目准备基线",
+                    "配置迁移与既有资源边界",
                     "# 项目需求说明",
                     "# 产品功能说明",
                     "# 项目准备清单",
@@ -291,8 +316,8 @@ class ProjectBootstrapTests(unittest.TestCase):
             async def blocked(messages, config, *, system_prompt):
                 return decision(
                     "blocked",
-                    reason="缺少不可替代授权",
-                    required_inputs=["外部授权"],
+                    reason="使用既有配置执行健康检查时，外部授权已失效",
+                    required_inputs=["恢复既有外部授权后重新验证健康检查"],
                 )
 
             with self.assertRaises(ProjectBootstrapBlocked) as raised:
@@ -303,7 +328,10 @@ class ProjectBootstrapTests(unittest.TestCase):
                     decision_runner=blocked,
                     config_loader=lambda: object(),
                 )
-            self.assertEqual(raised.exception.required_inputs, ["外部授权"])
+            self.assertEqual(
+                raised.exception.required_inputs,
+                ["恢复既有外部授权后重新验证健康检查"],
+            )
             self.assertEqual(raised.exception.outputs, ["frontend"])
             self.assertTrue(workspace.is_dir())
 
@@ -326,8 +354,8 @@ class ProjectBootstrapTests(unittest.TestCase):
             async def blocked(messages, config, *, system_prompt):
                 return decision(
                     "blocked",
-                    reason="缺少不可替代授权",
-                    required_inputs=["外部授权"],
+                    reason="使用既有配置执行健康检查时，外部授权已失效",
+                    required_inputs=["恢复既有外部授权后重新验证健康检查"],
                 )
 
             with self.assertRaisesRegex(RuntimeError, "不得暂存文件"):
@@ -352,8 +380,8 @@ class ProjectBootstrapTests(unittest.TestCase):
             async def blocked(messages, config, *, system_prompt):
                 return decision(
                     "blocked",
-                    reason="缺少不可替代授权",
-                    required_inputs=["外部授权"],
+                    reason="使用既有配置执行健康检查时，外部授权已失效",
+                    required_inputs=["恢复既有外部授权后重新验证健康检查"],
                 )
 
             with self.assertRaisesRegex(RuntimeError, "覆盖率数据库"):

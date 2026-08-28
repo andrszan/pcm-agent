@@ -17,6 +17,10 @@ from common.claude_agent import ClaudeRunResult
 from common.files import write_json
 from common.state import read_state, write_state
 from steps.step_01_create_workspace import initialize_root_repository
+from steps.step_05_project_readiness.step import (
+    readiness_baseline,
+    result as readiness_result,
+)
 from steps.step_10_ui_ux_framework.step import (
     ARCHITECTURE_OUTPUT_PATH,
     CONVERSATION_KEY,
@@ -83,7 +87,15 @@ class UIUXFrameworkTests(unittest.TestCase):
             root_paths.append(FRAMEWORK_PATH.as_posix())
         commit_paths(workspace, *root_paths)
         write_json(run_dir / "steps/02.json", {"step": 2, "status": "success", "outputs": outputs})
-        write_json(run_dir / "steps/05.json", {"step": 5, "status": "success", "outputs": [checklist]})
+        write_json(
+            run_dir / "steps/05.json",
+            readiness_result(
+                "success",
+                "准备基线已完成。",
+                outputs=[checklist],
+                readiness_baseline=readiness_baseline(workspace, outputs),
+            ),
+        )
         write_json(run_dir / "steps/07.json", {"step": 7, "status": "success", "applicable": True, "outputs": [design]})
         write_json(run_dir / "steps/09.json", {"step": 9, "name": "工程架构设计", "status": "success", "summary": "完成", "applicable": True, "outputs": [ARCHITECTURE_OUTPUT_PATH.as_posix()], "blocked": None, "error": None})
         names = ["root", *children]
@@ -134,6 +146,32 @@ class UIUXFrameworkTests(unittest.TestCase):
             self.assertFalse(saved["applicable"])
             self.assertEqual(git_run.call_count, 0)
             self.assertFalse((workspace / "docs/ui-ux").exists())
+
+    def test_inapplicable_rejects_readiness_baseline_drift(self) -> None:
+        for relative in (
+            "docs/requirements/项目准备清单.md",
+            "docs/requirements/项目需求说明.md",
+            "docs/requirements/产品功能说明.md",
+        ):
+            with self.subTest(relative=relative), tempfile.TemporaryDirectory() as directory:
+                run_dir, workspace, state = self.make_run(Path(directory), ["backend"])
+                (workspace / relative).write_text("# 漂移内容\n", encoding="utf-8")
+
+                async def unexpected(*_args: object, **_kwargs: object) -> ClaudeRunResult:
+                    raise AssertionError("准备基线漂移不得执行 Agent 或决策")
+
+                with patch.object(ui_ux_step.subprocess, "run", wraps=subprocess.run) as git_run:
+                    with self.assertRaisesRegex(RuntimeError, "准备基线不可复用"):
+                        self.run_step(
+                            run_dir,
+                            state,
+                            agent_runner=unexpected,
+                            decision_runner=unexpected,
+                            config_loader=lambda: (_ for _ in ()).throw(
+                                AssertionError("不得加载配置")
+                            ),
+                        )
+                self.assertEqual(git_run.call_count, 0)
 
     def test_inapplicable_rejects_execution_artifact_by_presence_only(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

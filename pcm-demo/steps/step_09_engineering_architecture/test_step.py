@@ -17,6 +17,10 @@ from common.claude_agent import ClaudeRunResult
 from common.files import write_json
 from common.state import read_state, write_state
 from steps.step_01_create_workspace import initialize_root_repository
+from steps.step_05_project_readiness.step import (
+    readiness_baseline,
+    result as readiness_result,
+)
 from steps.step_09_engineering_architecture.step import (
     ARCHITECTURE_PATH,
     CONVERSATION_KEY,
@@ -117,7 +121,15 @@ class EngineeringArchitectureTests(unittest.TestCase):
             root_paths.append(ARCHITECTURE_PATH.as_posix())
         commit_paths(workspace, *root_paths)
         write_json(run_dir / "steps/02.json", {"step": 2, "status": "success", "outputs": product_outputs})
-        write_json(run_dir / "steps/05.json", {"step": 5, "status": "success", "outputs": [checklist]})
+        write_json(
+            run_dir / "steps/05.json",
+            readiness_result(
+                "success",
+                "准备基线已完成。",
+                outputs=[checklist],
+                readiness_baseline=readiness_baseline(workspace, product_outputs),
+            ),
+        )
         write_json(run_dir / "steps/07.json", {"step": 7, "status": "success", "applicable": True, "outputs": [design]})
         names = ["root", *children]
         write_json(

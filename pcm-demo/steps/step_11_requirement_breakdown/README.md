@@ -25,7 +25,7 @@ fresh 入口的状态必须是 `project:11_requirement_breakdown`，产品工作
 固定交接依次为：
 
 - 第 2 步结果引用的两份非空产品定义；
-- 第 5 步固定项目准备清单；
+- 第 5 步严格成功结果和固定项目准备清单，当前清单及两份产品定义与 `readiness_baseline` 指纹一致；
 - 第 7 步固定总体技术方案；
 - 第 8 步严格 success 的空 `outputs`、result/state 一致的有序 `applicable_repositories`；
 - 第 9 步严格 success 的唯一工程架构文档 `docs/design/工程架构设计.md`；

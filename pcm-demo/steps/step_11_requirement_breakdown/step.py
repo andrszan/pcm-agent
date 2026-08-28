@@ -250,7 +250,7 @@ def validate_inputs(
     product_outputs = load_product_outputs(run_dir, workspace)
     if product_outputs != [path.as_posix() for path in PRODUCT_OUTPUT_PATHS]:
         raise RuntimeError("第 2 步产品定义输出不符合约定")
-    verify_existing_readiness_success(run_dir)
+    verify_existing_readiness_success(run_dir, workspace, product_outputs)
     checklist = checklist_contents(workspace)
     if checklist is None:
         raise RuntimeError("第 5 步项目准备清单不存在或不可读取")

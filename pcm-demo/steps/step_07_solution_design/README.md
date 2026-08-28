@@ -5,7 +5,7 @@
 - 运行状态位于 `project:07_solution_design`，产品根仍是第 1 步初始化的零提交、空 index 独立 Git `main` 仓库；每个适用基础工程已在第 4 步建立自身 top-level 为目录本身、unborn HEAD、空 index 的 `main` Git 边界，不适用端不存在。
 - `steps/02.json` 引用两份工作区内非空、非符号链接的产品定义文档。
 - `steps/04.json` 提供实际适用工程、模板 ID、路径、分支、commit SHA 和组装证据；用于提示的白名单投影不含 `git_url` 或 `origin`。
-- `steps/05.json` 成功，且 `docs/requirements/项目准备清单.md` 存在并可读取。
+- `steps/05.json` 是严格成功结果，当前项目准备清单和两份产品定义与其无秘密 `readiness_baseline` 指纹一致。
 - `steps/06.json` 成功，且其 `outputs` 与第 4 步实际适用工程一致。
 
 适用工程内部的 README、manifest、锁文件、配置、代码和测试由 Agent 为支撑方案主张按需读取；本步骤不要求或假定全仓扫描。
@@ -20,7 +20,7 @@ Agent 创建或更新唯一固定产物 `docs/design/技术方案.md`，并区�
 
 ## 统一决策与恢复
 
-本步骤只维护 solution-design 的 `DECISION_RULES`。新 conversation 的完整 XML system snapshot 由 `common/decision.py` 渲染，严格包含 `<role>`、`<project_context>`、`<responsibility>`、`<require>` 四段：AI-compatible 角色是实际使用 Claude Code Agent 的项目负责人、工程负责人、专业开发者和 Agent 专家；`assistant` 是其此前发给 Agent 的指令或结构化回复，`user` 是 Agent 返回的完整执行结果。项目上下文仅包括两份产品定义原文、项目准备清单原文、适用工程和组装白名单投影。恢复严格使用历史 `messages[0]`，不重渲染或覆盖。
+本步骤只维护 solution-design 的 `DECISION_RULES`。新 conversation 的完整 XML system snapshot 由 `common/decision.py` 渲染，严格包含 `<role>`、`<project_context>`、`<responsibility>`、`<completion>`、`<output>` 五段：AI-compatible 角色是实际使用 Claude Code Agent 的项目负责人、工程负责人、专业开发者和 Agent 专家；`assistant` 是其此前发给 Agent 的指令或结构化回复，`user` 是 Agent 返回的完整执行结果。项目上下文仅包括两份产品定义原文、项目准备清单原文、适用工程和组装白名单投影。恢复严格使用历史 `messages[0]`，不重渲染或覆盖。
 
 项目上下文只做标准 XML 转义。
 

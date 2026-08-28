@@ -16,6 +16,10 @@ from common.files import write_json
 from common.state import read_state, write_state
 from steps.step_01_create_workspace import initialize_root_repository
 from steps.step_03_foundation_selection.step import TemplateSelection
+from steps.step_05_project_readiness.step import (
+    readiness_baseline,
+    result as readiness_result,
+)
 from steps.step_07_solution_design.step import (
     CURRENT_NODE,
     DECISION_LOOP_SPEC,
@@ -132,7 +136,14 @@ class SolutionDesignTests(unittest.TestCase):
         )
         write_json(
             run_dir / "steps/05.json",
-            {"step": 5, "status": "success", "outputs": [checklist]},
+            readiness_result(
+                "success",
+                "准备基线已完成。",
+                outputs=[checklist],
+                readiness_baseline=readiness_baseline(
+                    workspace, [requirements, features]
+                ),
+            ),
         )
         write_json(
             run_dir / "steps/06.json",

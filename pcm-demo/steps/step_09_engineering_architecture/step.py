@@ -176,7 +176,7 @@ def validate_inputs(
         raise RuntimeError("运行状态不位于工程架构设计锚点")
     workspace = _workspace_from_state(state)
     product_outputs = load_product_outputs(run_dir, workspace)
-    verify_existing_readiness_success(run_dir)
+    verify_existing_readiness_success(run_dir, workspace, product_outputs)
     checklist = checklist_contents(workspace)
     if checklist is None:
         raise RuntimeError("第 5 步项目准备清单不存在或不可读取")

@@ -91,8 +91,8 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 | `project-intake` | 通过对话收敛最终产品范围、核心任务、用户语言、复杂度取舍和需要尽早验证的高风险假设 |
 | `foundation-selection` | 读取可读选型参考资料，选择基础项目组合并返回固定选型结果 |
 | `solution-design` | 基于已组装的工程事实确定项目级技术方向、系统边界和跨模块技术方案 |
-| `project-readiness` | 核验仓库、依赖、服务、账号、素材、配置和真实验证条件，维护准备清单 |
-| `project-bootstrap` | 将已有基础工程项目化，并完成适用安装、构建、启动和基础验证 |
+| `project-readiness` | 建立并核验整个已确认项目周期的唯一准备基线，实际准备资源、运行配置和真实验证条件，并维护脱敏清单 |
+| `project-bootstrap` | 将已有基础工程项目化，按既有资源绑定迁移配置接线，并完成适用安装、构建、启动和基础验证 |
 | `product-experience-audit` | 对当前完整集成产品执行跨需求、跨模块、跨页面的全项目级体验审计，输出经核验候选、重复项和覆盖缺口，不修改正式 Backlog |
 | `product-feedback-triage` | 核验、拆解、去重和分级人工产品反馈，并按项目约定形成候选变更项 |
 | `engineering-architecture` | 设计分层、模块、目录职责、依赖方向和架构演进条件；默认不修改 `AGENTS.md` |

@@ -151,7 +151,7 @@ def validate_inputs(
         assembly,
         temporary_root(workspace, str(state.get("run_id", ""))),
     )
-    verify_existing_readiness_success(run_dir)
+    verify_existing_readiness_success(run_dir, workspace, product_outputs)
     if not checklist_present(workspace):
         raise RuntimeError("第 5 步项目准备清单不存在或不可读取")
     outputs = assembly.get("outputs")

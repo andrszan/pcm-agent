@@ -9,7 +9,7 @@ from typing import Any
 from common.agent_decision_loop import AgentDecisionLoopSpec, run_agent_decision_loop
 from common.claude_agent import run_claude
 from common.decision import render_decision_system_prompt, request_decision
-from common.files import resolve_workspace_output
+from common.files import resolve_workspace_output, sha256
 from common.state import step_result_status, write_state, write_step_result
 from config import LLMConfig, load_dev_resource_list
 from steps.step_03_foundation_selection.step import FoundationSelectionResult
@@ -30,9 +30,9 @@ MAX_DECISION_ROUNDS = 6
 PROJECT_READINESS_MAX_TURNS = 24
 PROJECT_READINESS_MAX_BUDGET_USD = 8.0
 
-PROJECT_READINESS_DECISION_RULES = """completed 表示项目准备清单已经生成，且当前产品定义、实际工程和可用开发资源足以确认进入基础工程项目化前的条件。
-continue 表示还需给出明确指令以核验、补全或修复项目准备清单。
-blocked 仅表示缺少当前环境无法取得的真实外部账号、凭据、私有数据、客户授权、专用设备、素材、付费服务或线下动作。"""
+PROJECT_READINESS_DECISION_RULES = """completed 表示已经依据已确认最终产品范围建立当前项目周期唯一、完整的准备基线：开发、联调、真实体验验收和交付所需的每个必要条件均已通过实际工具结果或明确确认成为 ready，或有事实依据地判为 not-applicable；不存在必要的 missing、pending 或未验证条件。适用的外部资源已经按既定合同匹配和准备，受保护的实际运行配置、无秘密公开配置示例及说明已经同步，并使用最终项目运行凭据完成所需最小权限验证；管理凭据、资源说明、Mock、截图、清单文字或 Agent 自述不能单独证明 ready。没有提前实施业务功能、完整最终验收、发布或 Git 写操作。
+continue 表示仍有可使用现有资料和工具安全完成的资源匹配、准备、配置、公开说明、最小权限验证或证据补全工作，或者当前回复不足以证明上述完成条件。
+blocked 仅表示最终范围的必要条件仍为 missing 或 pending，且只能由当前环境无法取得的真实外部账号、运行凭据、私有数据、客户授权、专用设备、素材、付费服务、外部决定或线下动作解除；required_inputs 必须说明具体缺口和复验条件。"""
 
 DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     key=CONVERSATION_KEY,
@@ -67,6 +67,7 @@ def result(
     blocked: dict[str, Any] | None = None,
     error: dict[str, Any] | None = None,
     outputs: list[str] | None = None,
+    readiness_baseline: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "step": STEP,
@@ -77,6 +78,7 @@ def result(
         "outputs": outputs or [],
         "blocked": blocked,
         "error": error,
+        "readiness_baseline": readiness_baseline,
     }
 
 
@@ -114,17 +116,58 @@ def checklist_present(workspace: Path) -> bool:
         return False
 
 
-def verify_existing_readiness_success(run_dir: Path) -> dict[str, Any]:
+def readiness_baseline(
+    workspace: Path, product_outputs: list[str]
+) -> dict[str, Any]:
+    if checklist_contents(workspace) is None:
+        raise RuntimeError("项目准备清单不存在或为空")
+    try:
+        checklist = resolve_workspace_output(workspace, CHECKLIST.as_posix())
+        product_hashes = {
+            output: sha256(resolve_workspace_output(workspace, output))
+            for output in product_outputs
+        }
+        return {
+            "checklist_sha256": sha256(checklist),
+            "product_outputs_sha256": product_hashes,
+        }
+    except (OSError, ValueError) as error:
+        raise RuntimeError("项目准备基线证据无法生成") from error
+
+
+def verify_existing_readiness_success(
+    run_dir: Path, workspace: Path, product_outputs: list[str]
+) -> dict[str, Any]:
     try:
         existing = json.loads((run_dir / "steps" / "05.json").read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise RuntimeError("第 5 步成功结果不可读取") from error
+    expected_keys = {
+        "step",
+        "name",
+        "status",
+        "summary",
+        "applicable",
+        "outputs",
+        "blocked",
+        "error",
+        "readiness_baseline",
+    }
     if (
-        existing.get("step") != STEP
+        set(existing) != expected_keys
+        or existing.get("step") != STEP
+        or existing.get("name") != NAME
         or existing.get("status") != "success"
+        or not isinstance(existing.get("summary"), str)
+        or not existing["summary"].strip()
+        or existing.get("applicable") is not True
         or existing.get("outputs") != [CHECKLIST.as_posix()]
+        or existing.get("blocked") is not None
+        or existing.get("error") is not None
+        or existing.get("readiness_baseline")
+        != readiness_baseline(workspace, product_outputs)
     ):
-        raise RuntimeError("第 5 步成功结果不可复用")
+        raise RuntimeError("第 5 步成功结果或准备基线不可复用")
     return existing
 
 
@@ -261,9 +304,9 @@ def initial_prompt(
         readiness_selection_projection(selection), ensure_ascii=False, indent=2
     )
     return f"""/project-readiness
-请创建或更新 `docs/requirements/项目准备清单.md`。
+请建立当前项目周期唯一的完整准备基线，并创建 `docs/requirements/项目准备清单.md` 作为实际准备结果的脱敏记录；清单文字不能为 ready 状态自证。
 
-以下产品定义是当前产品范围的权威输入：
+以下产品定义是当前最终产品范围的权威输入：
 {product_references}
 
 实际工程：
@@ -275,16 +318,30 @@ def initial_prompt(
 ```
 
 可信开发资源清单：@{resource_list}
-可读取该清单，并可使用其中已有的开发和测试资源设置当前项目的本机 `.env`、创建项目专用开发库或可丢弃测试库并进行核验；不得创建生产资源或在清单、回复和日志中披露秘密。
+该清单是任意格式的动态候选池，不预设其中的资源类型、字段、服务名称或环境变量。请先从最终产品范围和当前工程事实推导开发、联调、真实体验验收和交付所需的全部不可替代条件，再按既定能力、兼容、安全、成本和运行边界匹配候选；改变产品或技术合同的替代不能静默采用。
 
-当前只核验进入基础工程项目化前条件。后续的依赖安装、构建、测试、启动、独立 Git 初始化、业务实现和完整验收不属于本次核验，不得作为当前准备阻塞。"""
+在调用方授权、项目配置合同和安全边界允许时，实际准备项目专用且环境隔离的开发/测试资源与最小权限运行凭据；按工程真实加载方式写入被所属仓库 Git 忽略的实际 `.env` 或等价配置，同步不含秘密的 `.env.example` 或既有公开配置示例，并参考资源资料中的公开说明补充必要的注意事项和用法。必须使用最终写入项目配置的运行凭据验证身份、权限和所需最小读写能力，不能用管理凭据、资源说明、Mock、截图或文档自述替代。
+
+任何最终范围必要条件仍为 missing、pending 或没有真实核验证据时，都必须明确报告阻塞、实际影响、所需外部输入和复验方式，不得以“以后再准备”为由宣称完成。完整依赖安装、构建、测试、应用启动、基础联调、业务实现、最终体验验收和发布执行由后续工作完成，本次不提前实施；但它们所需的资源、身份、数据、浏览器、视口、回调、权限和其它前置条件必须纳入当前准备基线。
+
+不得创建生产资源、未授权付费或不可逆资源，不得泄露秘密、改变既有 Git 边界，或执行 Git 暂存、提交、分支、合并、push。"""
 
 
 def completion_repair_prompt() -> str:
-    return "请生成或补全非空项目准备清单：docs/requirements/项目准备清单.md。"
+    return (
+        "项目准备清单缺失或为空。请重新核对最终产品范围、当前工程配置合同和可信资源资料，"
+        "继续完成所有可安全执行的资源准备、受保护实际配置与无秘密公开示例同步、最终运行凭据最小权限验证，"
+        "再将脱敏证据写入 docs/requirements/项目准备清单.md。不要只补文档后宣称完成；"
+        "任何必要条件仍缺失、待确认或未验证时，必须明确报告阻塞和复验条件。"
+    )
 
 
-def advance_success(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
+def advance_success(
+    run_dir: Path,
+    state: dict[str, Any],
+    workspace: Path,
+    product_outputs: list[str],
+) -> dict[str, Any]:
     state.update(
         {
             "status": "success",
@@ -297,7 +354,10 @@ def advance_success(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
         }
     )
     saved = result(
-        "success", "project-readiness 已生成项目准备清单。", outputs=[CHECKLIST.as_posix()]
+        "success",
+        "project-readiness 已建立并验证当前项目周期的完整准备基线。",
+        outputs=[CHECKLIST.as_posix()],
+        readiness_baseline=readiness_baseline(workspace, product_outputs),
     )
     write_step_result(run_dir, STEP, saved)
     write_state(run_dir, state)
@@ -320,11 +380,14 @@ async def run(
     if position == (STEP + 1, STEP + 1, NEXT_NODE) and state.get("status") == "success":
         if checklist is None:
             raise RuntimeError("第 5 步成功现场不完整")
-        verify_existing_readiness_success(run_dir)
+        existing = verify_existing_readiness_success(
+            run_dir, workspace, product_outputs
+        )
         return result(
             "success",
-            "project-readiness 已生成项目准备清单，确认既有成功。",
+            "project-readiness 已建立完整准备基线，确认既有成功。",
             outputs=[CHECKLIST.as_posix()],
+            readiness_baseline=existing["readiness_baseline"],
         )
 
     if (
@@ -332,7 +395,9 @@ async def run(
         and checklist is not None
         and step_result_status(run_dir, STEP) == "success"
     ):
-        existing = verify_existing_readiness_success(run_dir)
+        existing = verify_existing_readiness_success(
+            run_dir, workspace, product_outputs
+        )
         state.update(
             {
                 "status": "success",
@@ -396,4 +461,4 @@ async def run(
         )
     if decision.verdict != "completed":
         raise RuntimeError("Agent 决策循环未返回完成或阻塞结论")
-    return advance_success(run_dir, state)
+    return advance_success(run_dir, state, workspace, product_outputs)

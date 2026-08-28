@@ -22,19 +22,19 @@ uv run python -m unittest \
 
 Demo v1 的适用性是确定性规则：仅当第 8 步严格 success 的空 `outputs`、result/state 一致的合法有序 `applicable_repositories` 包含 `frontend` 时适用。程序不扫描目录，也不让 Agent 判断适用性。这是当前前后端交付单元模型下的 Demo 简化，不改变通用 `ui-ux-framework` Skill 可处理更广既有项目语义的能力。
 
-无论是否适用，均须严格核验第 9 步 success 结果唯一输出为 `docs/design/工程架构设计.md`。第 8 步不逐项回放旧 `repositories` path、branch、clean 字段；适用路径在当前现场只读核验权威仓库事实。
+无论是否适用，均须严格核验第 5 步 `readiness_baseline` 与当前准备清单、两份产品定义一致，并核验第 9 步 success 结果唯一输出为 `docs/design/工程架构设计.md`。第 8 步不逐项回放旧 `repositories` path、branch、clean 字段；适用路径在当前现场只读核验权威仓库事实。
 
 适用时，输入还包括：
 
 - 第 2 步结果的两份产品定义输出；
-- 第 5 步项目准备清单；
+- 第 5 步严格成功结果和项目准备清单，当前清单及两份产品定义与 `readiness_baseline` 指纹一致；
 - 第 7 步总体技术方案；
 - 第 8 步权威仓库和实际 `frontend/` 工程；
 - 第 9 步固定工程架构设计文档。
 
 ## 不适用路径
 
-第 8 步权威仓库清单不含 `frontend` 时，步骤只核验上述第 8、9 步交接，写入：
+第 8 步权威仓库清单不含 `frontend` 时，步骤先核验上述第 5 步 readiness baseline、第 8 步仓库交接和第 9 步工程架构交接，写入：
 
 ```json
 {

@@ -17,6 +17,10 @@ from common.claude_agent import ClaudeRunResult
 from common.files import write_json
 from common.state import read_state, write_state
 from steps.step_01_create_workspace import initialize_root_repository
+from steps.step_05_project_readiness.step import (
+    readiness_baseline,
+    result as readiness_result,
+)
 from steps.step_11_requirement_breakdown.step import (
     ARCHITECTURE_OUTPUT_PATH,
     BACKLOG_PATH,
@@ -103,7 +107,15 @@ class RequirementBreakdownTests(unittest.TestCase):
             root_paths.append(BACKLOG_PATH.as_posix())
         commit_paths(workspace, *root_paths)
         write_json(run_dir / "steps/02.json", {"step": 2, "status": "success", "outputs": outputs})
-        write_json(run_dir / "steps/05.json", {"step": 5, "status": "success", "outputs": [checklist]})
+        write_json(
+            run_dir / "steps/05.json",
+            readiness_result(
+                "success",
+                "准备基线已完成。",
+                outputs=[checklist],
+                readiness_baseline=readiness_baseline(workspace, outputs),
+            ),
+        )
         write_json(run_dir / "steps/07.json", {"step": 7, "status": "success", "applicable": True, "outputs": [design]})
         write_json(run_dir / "steps/09.json", {"step": 9, "name": "工程架构设计", "status": "success", "summary": "完成", "applicable": True, "outputs": [ARCHITECTURE_OUTPUT_PATH.as_posix()], "blocked": None, "error": None})
         write_json(
