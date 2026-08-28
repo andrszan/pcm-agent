@@ -199,6 +199,9 @@ class ProjectReadinessTests(unittest.TestCase):
         self.assertIn("实际 `.env`", prompt)
         self.assertIn("`.env.example`", prompt)
         self.assertIn("最终写入项目配置的运行凭据", prompt)
+        self.assertIn("后续开发无需重新读取共享资源清单", prompt)
+        self.assertIn("不能把真实凭据只留在可信资源资料中", prompt)
+        self.assertIn("POSIX 通常为 `0600`", prompt)
         self.assertIn("任何最终范围必要条件", prompt)
         self.assertIn("完整依赖安装、构建、测试、应用启动", prompt)
         self.assertNotIn("当前只核验进入基础工程项目化前条件", prompt)
@@ -241,6 +244,9 @@ class ProjectReadinessTests(unittest.TestCase):
                     "当前项目周期唯一、完整的准备基线",
                     "不存在必要的 missing、pending 或未验证条件",
                     "最终项目运行凭据",
+                    "后续开发无需重新读取共享资源清单才能使用",
+                    "不能把真实凭据只留在外部资源资料中",
+                    "POSIX 通常为 0600",
                     "清单文字或 Agent 自述不能单独证明 ready",
                     "# 定义",
                     "适用工程",
@@ -320,6 +326,7 @@ class ProjectReadinessTests(unittest.TestCase):
             self.assertTrue(str(calls[0]["prompt"]).startswith("/project-readiness"))
             self.assertEqual(calls[1]["resume_session_id"], "session-1")
             self.assertIn("不要只补文档后宣称完成", str(calls[1]["prompt"]))
+            self.assertIn("每项 ready 外部资源的项目凭据持久化", str(calls[1]["prompt"]))
             self.assertIn("最终运行凭据最小权限验证", str(calls[1]["prompt"]))
             self.assertEqual(decision_inputs[0][-1], {"role": "user", "content": "Agent 原文 1"})
             self.assertNotIn("pending_agent_prompt", read_state(run_dir)["project_readiness"])
