@@ -11,6 +11,9 @@ from typing import Any
 from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
+    CLIConnectionError,
+    CLINotFoundError,
+    ProcessError,
     ResultMessage,
     SystemMessage,
     TextBlock,
@@ -37,6 +40,7 @@ class ClaudeRunResult:
     exception_type: str | None = None
     sdk_errors: list[str] | None = None
     exception_details: dict[str, Any] | None = None
+    retry_requested: bool = False
 
 
 def filtered_env() -> dict[str, str]:
@@ -94,6 +98,30 @@ def _api_error_status(value: Any) -> int | None:
     return None
 
 
+def is_retryable_claude_sdk_error(
+    error: BaseException | None, *, has_result: bool = False
+) -> bool:
+    if error is None or has_result or isinstance(error, asyncio.CancelledError):
+        return False
+    if isinstance(error, CLINotFoundError):
+        return False
+    return isinstance(error, (CLIConnectionError, ProcessError))
+
+
+def _retry_requested(
+    *,
+    api_error_status: int | None,
+    terminal_reason: str | None,
+    error: BaseException | None = None,
+    has_result: bool = False,
+) -> bool:
+    if terminal_reason in {"aborted_streaming", "aborted_tools"}:
+        return False
+    if api_error_status is not None or terminal_reason == "api_error":
+        return True
+    return is_retryable_claude_sdk_error(error, has_result=has_result)
+
+
 def _anthropic_secrets() -> list[str]:
     return [
         value
@@ -124,6 +152,7 @@ async def run_claude(
     exception_type: str | None = None
     exception_details: dict[str, Any] | None = None
     api_error_status: int | None = None
+    caught_error: BaseException | None = None
     known_secrets = _anthropic_secrets()
     options = ClaudeAgentOptions(
         cwd=cwd,
@@ -191,13 +220,20 @@ async def run_claude(
                             terminal_reason=result.terminal_reason,
                             has_errors=bool(result.errors) or result.is_error,
                             sdk_errors=_sdk_errors(result.errors, known_secrets),
+                            retry_requested=_retry_requested(
+                                api_error_status=_api_error_status(result),
+                                terminal_reason=result.terminal_reason,
+                                has_result=True,
+                            ),
                         )
                     )
     except asyncio.CancelledError as error:
+        caught_error = error
         exception = "CancelledError"
         exception_type = "CancelledError"
         exception_details = exception_diagnostics(error, known_secrets=known_secrets)
     except Exception as error:  # SDK may raise after yielding a ResultMessage.
+        caught_error = error
         exception_details = exception_diagnostics(error, known_secrets=known_secrets)
         exception = f"{type(error).__name__}: {exception_details['message']}"
         exception_type = type(error).__name__
@@ -209,14 +245,18 @@ async def run_claude(
         for session_id in ((init or {}).get("session_id"), result.session_id if result else None)
         if session_id
     }
-    if resume_session_id and any(
-        session_id != resume_session_id for session_id in observed_session_ids
-    ):
+    session_mismatch = bool(
+        resume_session_id
+        and any(session_id != resume_session_id for session_id in observed_session_ids)
+    )
+    if session_mismatch:
         exception = (
             f"恢复 session ID 不一致：期望 {resume_session_id}，实际 "
             f"{', '.join(sorted(observed_session_ids))}"
         )
         exception_type = "SessionMismatchError"
+    final_api_error_status = (_api_error_status(result) if result else None) or api_error_status
+    final_terminal_reason = result.terminal_reason if result else None
     final_text = result.result if result and not result.is_error and result.result else "\n".join(texts)
     return ClaudeRunResult(
         init=init,
@@ -228,11 +268,19 @@ async def run_claude(
         num_turns=result.num_turns if result else None,
         total_cost_usd=result.total_cost_usd if result else None,
         exception=exception,
-        api_error_status=(_api_error_status(result) if result else None) or api_error_status,
-        terminal_reason=result.terminal_reason if result else None,
+        api_error_status=final_api_error_status,
+        terminal_reason=final_terminal_reason,
         has_errors=bool(exception)
         or (bool(result.errors) or result.is_error if result else True),
         exception_type=exception_type,
         sdk_errors=_sdk_errors(result.errors if result else None, known_secrets),
         exception_details=exception_details,
+        retry_requested=False
+        if session_mismatch
+        else _retry_requested(
+            api_error_status=final_api_error_status,
+            terminal_reason=final_terminal_reason,
+            error=caught_error,
+            has_result=result is not None,
+        ),
     )

@@ -11,7 +11,11 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from common.claude_agent import ClaudeRunResult, run_claude
+from common.claude_agent import (
+    ClaudeRunResult,
+    is_retryable_claude_sdk_error,
+    run_claude,
+)
 from common.decision import AgentDecision, count_decisions, parse_agent_decision, request_decision
 from common.error_diagnostics import exception_diagnostics, redact_text, write_diagnostic
 from common.files import write_json
@@ -66,8 +70,15 @@ class AIDecisionFailure(RuntimeError):
 
 
 class AgentExecutionFailure(RuntimeError):
-    def __init__(self, message: str, diagnostic_path: str) -> None:
+    def __init__(
+        self,
+        message: str,
+        diagnostic_path: str,
+        *,
+        retry_requested: bool = False,
+    ) -> None:
         self.diagnostic_path = diagnostic_path
+        self.retry_requested = retry_requested
         super().__init__(message)
 
     def as_error(self) -> dict[str, str]:
@@ -307,6 +318,7 @@ def persist_agent_failure(
     value: ClaudeRunResult | None = None,
     error: BaseException | None = None,
     context: dict[str, Any] | None = None,
+    retry_requested: bool | None = None,
 ) -> AgentExecutionFailure:
     """保存公共和直连 Claude 调用共用的当前故障快照。"""
     message = _agent_reason(value, error)
@@ -343,7 +355,16 @@ def persist_agent_failure(
         exception=exception,
         error=error,
     )
-    failure = AgentExecutionFailure(message, path)
+    effective_retry_requested = (
+        value.retry_requested
+        if retry_requested is None and value is not None
+        else bool(retry_requested)
+    )
+    failure = AgentExecutionFailure(
+        message,
+        path,
+        retry_requested=effective_retry_requested,
+    )
     if state_key is not None:
         section = state.setdefault(state_key, {})
         if not isinstance(section, dict):
@@ -535,7 +556,7 @@ def _validate_agent_result(
     spec: AgentDecisionLoopSpec,
     value: ClaudeRunResult,
 ) -> None:
-    def fail(message: str) -> None:
+    def fail(message: str, *, retry_requested: bool = False) -> None:
         _clear_pending_agent_text(run_dir, state, spec)
         failure = persist_agent_failure(
             run_dir,
@@ -544,23 +565,29 @@ def _validate_agent_result(
             state_key=spec.state_key,
             value=value,
             context={"operation": "validate_agent_result", "validation_message": message},
+            retry_requested=retry_requested,
         )
         raise failure
 
     if value.result_subtype is None:
-        fail("Agent SDK 未返回 ResultMessage")
+        fail("Agent SDK 未返回 ResultMessage", retry_requested=value.retry_requested)
     if value.api_error_status is not None:
-        fail("Agent SDK API 请求失败")
+        fail("Agent SDK API 请求失败", retry_requested=value.retry_requested)
     if value.terminal_reason in _ABORTED_TERMINAL_REASONS:
         fail("Agent SDK 执行已取消")
     if value.result_subtype == "success" and value.terminal_reason not in _NORMAL_TERMINAL_REASONS:
-        fail("Agent SDK 正常结果包含不支持的终止原因")
+        fail(
+            "Agent SDK 正常结果包含不支持的终止原因",
+            retry_requested=(
+                value.retry_requested and value.terminal_reason == "api_error"
+            ),
+        )
     if value.result_subtype not in {"success", *_RECOVERABLE_SUBTYPES}:
         fail("Agent SDK 返回了不支持的终止结果")
     if value.exception and value.result_subtype not in _RECOVERABLE_SUBTYPES:
-        fail("Agent SDK 执行异常")
+        fail("Agent SDK 执行异常", retry_requested=value.retry_requested)
     if value.is_error and value.result_subtype not in _RECOVERABLE_SUBTYPES:
-        fail("Agent SDK 执行失败")
+        fail("Agent SDK 执行失败", retry_requested=value.retry_requested)
     if not isinstance(value.text, str) or not value.text.strip():
         fail("Agent SDK 未返回非空完整回复")
     if value.result_subtype in _RECOVERABLE_SUBTYPES and not _session(state, spec):
@@ -600,17 +627,34 @@ async def _run_agent(
         )
     except asyncio.CancelledError as error:
         failure = persist_agent_failure(
-            run_dir, state, key=spec.key, state_key=spec.state_key, error=error
+            run_dir,
+            state,
+            key=spec.key,
+            state_key=spec.state_key,
+            error=error,
+            retry_requested=False,
         )
         raise AgentExecutionFailure(
-            f"Agent SDK 执行异常：{failure}", failure.diagnostic_path
+            f"Agent SDK 执行异常：{failure}",
+            failure.diagnostic_path,
+            retry_requested=False,
         ) from error
     except Exception as error:
+        retry_requested = bool(getattr(error, "retry_requested", False)) or (
+            is_retryable_claude_sdk_error(error)
+        )
         failure = persist_agent_failure(
-            run_dir, state, key=spec.key, state_key=spec.state_key, error=error
+            run_dir,
+            state,
+            key=spec.key,
+            state_key=spec.state_key,
+            error=error,
+            retry_requested=retry_requested,
         )
         raise AgentExecutionFailure(
-            f"Agent SDK 执行异常：{failure}", failure.diagnostic_path
+            f"Agent SDK 执行异常：{failure}",
+            failure.diagnostic_path,
+            retry_requested=failure.retry_requested,
         ) from error
     if not isinstance(value, ClaudeRunResult):
         invalid = TypeError("Agent SDK 返回结果不符合约定")
@@ -622,7 +666,13 @@ async def _run_agent(
         _save_agent_update(run_dir, state, spec, value)
     except Exception as error:
         failure = persist_agent_failure(
-            run_dir, state, key=spec.key, state_key=spec.state_key, value=value, error=error
+            run_dir,
+            state,
+            key=spec.key,
+            state_key=spec.state_key,
+            value=value,
+            error=error,
+            retry_requested=False,
         )
         raise failure from error
     _validate_agent_result(run_dir, state, workspace, spec, value)

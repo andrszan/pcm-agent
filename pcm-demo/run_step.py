@@ -128,6 +128,7 @@ from steps.step_18_merge.step import (
 
 DEMO_ROOT = Path(__file__).resolve().parent
 STEP_RETRY_DELAYS = (10, 30)
+_RETRY_REQUESTED_EXIT_CODE = 3
 
 
 def parse_args() -> argparse.Namespace:
@@ -710,6 +711,7 @@ def main() -> int:
     error_message = ""
     no_pending = False
     caught_error: Exception | None = None
+    retry_requested = False
     try:
         if args.step == 0:
             run_dir, result = run_step_zero(args)
@@ -930,6 +932,7 @@ def main() -> int:
         error_message = str(error)
     except Exception as error:  # noqa: BLE001 - 顶层入口必须将所有步骤异常转换为结果。
         caught_error = error
+        retry_requested = bool(getattr(error, "retry_requested", False))
         error_projection = safe_error_projection(error)
         if args.step == 2:
             result_factory = project_intake_result
@@ -1402,18 +1405,20 @@ def main() -> int:
             print(scoped_path or run_dir / "steps" / f"{args.step:02d}.json")
     else:
         print(result["summary"], file=sys.stderr)
-    return 0 if result["status"] == "success" else 1
+    if result["status"] == "success":
+        return 0
+    return _RETRY_REQUESTED_EXIT_CODE if retry_requested else 1
 
 
 def retrying_main() -> int:
     exit_code = main()
     for delay in STEP_RETRY_DELAYS:
-        if exit_code != 1:
+        if exit_code != _RETRY_REQUESTED_EXIT_CODE:
             return exit_code
-        print(f"当前步骤未成功，{delay} 秒后重试。", file=sys.stderr)
+        print(f"Claude Agent SDK 执行异常，{delay} 秒后重试。", file=sys.stderr)
         time.sleep(delay)
         exit_code = main()
-    return exit_code
+    return 1 if exit_code == _RETRY_REQUESTED_EXIT_CODE else exit_code
 
 
 if __name__ == "__main__":

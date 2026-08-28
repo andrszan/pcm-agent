@@ -9,7 +9,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from claude_agent_sdk import ResultMessage, SystemMessage
+from claude_agent_sdk import (
+    CLIConnectionError,
+    CLINotFoundError,
+    ProcessError,
+    ResultMessage,
+    SystemMessage,
+)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -111,6 +117,7 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
         exception: str | None = None,
         api_error_status: int | None = None,
         terminal_reason: str | None = None,
+        retry_requested: bool = False,
     ) -> ClaudeRunResult:
         return ClaudeRunResult(
             init={
@@ -132,6 +139,7 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
             terminal_reason=terminal_reason,
             has_errors=is_error or exception is not None,
             exception_type="RuntimeError" if exception else None,
+            retry_requested=retry_requested,
         )
 
     def save_conversation(self, messages: list[dict[str, str]], *, old_reference: bool = False) -> None:
@@ -622,9 +630,10 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
                     workspace.mkdir()
                     state = copy.deepcopy(initial_state)
                     value.init["cwd"] = str(workspace if _name != "cwd" else workspace.parent)
+                    value.retry_requested = True
                     agent = FakeAgentRunner([value])
                     decisions = FakeDecisionRunner([])
-                    with self.assertRaises(RuntimeError):
+                    with self.assertRaises(AgentExecutionFailure) as raised:
                         await run_agent_decision_loop(
                             run_dir,
                             state,
@@ -636,18 +645,26 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
                             decision_runner=decisions,
                             config_loader=lambda: object(),
                         )
+                    self.assertFalse(raised.exception.retry_requested)
 
     async def test_aborted_terminal_reason_fails_before_decision(self) -> None:
         for terminal_reason in ("aborted_streaming", "aborted_tools", "unexpected_reason"):
             with self.subTest(terminal_reason=terminal_reason):
                 agent = FakeAgentRunner(
-                    [self.result("未完整的 Agent 回复", terminal_reason=terminal_reason)]
+                    [
+                        self.result(
+                            "未完整的 Agent 回复",
+                            terminal_reason=terminal_reason,
+                            retry_requested=True,
+                        )
+                    ]
                 )
                 decisions = FakeDecisionRunner([])
 
-                with self.assertRaises(RuntimeError):
+                with self.assertRaises(AgentExecutionFailure) as raised:
                     await self.run_loop(agent, decisions)
 
+                self.assertFalse(raised.exception.retry_requested)
                 self.assertEqual(decisions.calls, [])
                 self.state.clear()
                 conversation = self.run_dir / "conversations" / f"{self.spec.key}.json"
@@ -777,7 +794,7 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
 
         for runner in (raises_exception, raises_cancelled):
             with self.subTest(runner=runner.__name__):
-                with self.assertRaises(RuntimeError):
+                with self.assertRaises(AgentExecutionFailure) as raised:
                     await run_agent_decision_loop(
                         self.run_dir,
                         {},
@@ -789,23 +806,110 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
                         decision_runner=FakeDecisionRunner([]),
                         config_loader=lambda: object(),
                     )
+                self.assertFalse(raised.exception.retry_requested)
 
-    async def test_api_error_result_writes_sdk_error_projection_and_log(self) -> None:
-        value = self.result(
-            "",
-            is_error=True,
-            api_error_status=429,
-            terminal_reason="api_error",
-        )
-        value.sdk_errors = ["provider api_error: secret=hidden"]
-        with self.assertRaises(AgentExecutionFailure) as raised:
-            await self.run_loop(FakeAgentRunner([value]), FakeDecisionRunner([]))
+    async def test_direct_sdk_channel_errors_request_retry(self) -> None:
+        cases = [
+            (CLIConnectionError("connection failed"), True),
+            (ProcessError("process failed", exit_code=1), True),
+            (
+                AgentExecutionFailure(
+                    "explicit retry",
+                    "logs/original.json",
+                    retry_requested=True,
+                ),
+                True,
+            ),
+            (CLINotFoundError(), False),
+        ]
+        for error, expected in cases:
+            with self.subTest(error=type(error).__name__):
+                async def failed_runner(
+                    *_args: object,
+                    **_kwargs: object,
+                ) -> ClaudeRunResult:
+                    raise error
 
-        saved = json.loads((self.run_dir / raised.exception.diagnostic_path).read_text(encoding="utf-8"))
-        self.assertEqual(saved["details"]["sdk_errors"], ["provider api_error: secret=[REDACTED]"])
-        result = self.state[self.spec.state_key]["last_agent_result"]
-        self.assertIn("provider api_error", result["message"])
-        self.assertEqual(result["diagnostic_path"], raised.exception.diagnostic_path)
+                with tempfile.TemporaryDirectory() as directory:
+                    run_dir = Path(directory) / "run"
+                    workspace = Path(directory) / "workspace"
+                    run_dir.mkdir()
+                    workspace.mkdir()
+                    with self.assertRaises(AgentExecutionFailure) as raised:
+                        await run_agent_decision_loop(
+                            run_dir,
+                            {},
+                            workspace,
+                            self.spec,
+                            "初始 Agent 提示",
+                            lambda: None,
+                            agent_runner=failed_runner,
+                            decision_runner=FakeDecisionRunner([]),
+                            config_loader=lambda: object(),
+                        )
+                    self.assertEqual(raised.exception.retry_requested, expected)
+                    self.assertNotIn("retry_requested", raised.exception.as_error())
+
+    async def test_api_error_result_requests_retry_without_persisting_flag(self) -> None:
+        for status in (400, 403, 500):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as directory:
+                run_dir = Path(directory) / "run"
+                workspace = Path(directory) / "workspace"
+                run_dir.mkdir()
+                workspace.mkdir()
+                state: dict[str, object] = {}
+                value = self.result(
+                    "",
+                    cwd=workspace,
+                    is_error=True,
+                    api_error_status=status,
+                    terminal_reason="api_error",
+                    retry_requested=True,
+                )
+                value.sdk_errors = ["provider api_error: secret=hidden"]
+
+                with self.assertRaises(AgentExecutionFailure) as raised:
+                    await run_agent_decision_loop(
+                        run_dir,
+                        state,
+                        workspace,
+                        self.spec,
+                        "初始 Agent 提示",
+                        lambda: None,
+                        agent_runner=FakeAgentRunner([value]),
+                        decision_runner=FakeDecisionRunner([]),
+                        config_loader=lambda: object(),
+                    )
+
+                self.assertTrue(raised.exception.retry_requested)
+                self.assertNotIn("retry_requested", raised.exception.as_error())
+                saved = json.loads(
+                    (run_dir / raised.exception.diagnostic_path).read_text(encoding="utf-8")
+                )
+                self.assertEqual(
+                    saved["details"]["sdk_errors"],
+                    ["provider api_error: secret=[REDACTED]"],
+                )
+                result = state[self.spec.state_key]["last_agent_result"]
+                self.assertIn("provider api_error", result["message"])
+                self.assertEqual(
+                    result["diagnostic_path"], raised.exception.diagnostic_path
+                )
+                serialized = json.dumps(
+                    {
+                        "state": state,
+                        "diagnostic": saved,
+                        "conversation": json.loads(
+                            (
+                                run_dir
+                                / "conversations"
+                                / f"{self.spec.key}.json"
+                            ).read_text(encoding="utf-8")
+                        ),
+                    },
+                    ensure_ascii=False,
+                )
+                self.assertNotIn("retry_requested", serialized)
 
     async def test_agent_runner_exception_preserves_safe_cause_and_traceback_in_log(self) -> None:
         async def failed_runner(*_args: object, **_kwargs: object) -> ClaudeRunResult:
@@ -916,11 +1020,138 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.api_error_status, 429)
         self.assertTrue(result.has_errors)
         self.assertEqual(result.sdk_errors, ["tool warning"])
+        self.assertTrue(result.retry_requested)
         self.assertTrue(updates[-1].is_error)
         self.assertEqual(updates[-1].terminal_reason, "api_error")
         self.assertEqual(updates[-1].api_error_status, 429)
         self.assertTrue(updates[-1].has_errors)
         self.assertEqual(updates[-1].sdk_errors, ["tool warning"])
+        self.assertTrue(updates[-1].retry_requested)
+
+    async def test_all_api_statuses_and_api_terminal_reason_request_retry(self) -> None:
+        for status in (400, 403, 500, None):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as directory:
+                workspace = Path(directory)
+                write_json(
+                    workspace / "plugins-lock.json",
+                    {"version": 1, "plugins": []},
+                )
+
+                async def fake_query(*_args: object, **_kwargs: object):
+                    yield SystemMessage(
+                        subtype="init",
+                        data={"session_id": "session-1", "cwd": str(workspace)},
+                    )
+                    yield ResultMessage(
+                        subtype="success",
+                        duration_ms=1,
+                        duration_api_ms=1,
+                        is_error=True,
+                        num_turns=1,
+                        session_id="session-1",
+                        result=None,
+                        api_error_status=status,
+                        terminal_reason="api_error",
+                    )
+
+                with patch("common.claude_agent.query", new=fake_query):
+                    result = await run_claude(
+                        "测试提示",
+                        cwd=workspace,
+                        resume_session_id="session-1",
+                    )
+
+                self.assertTrue(result.retry_requested)
+
+    async def test_sdk_exception_retry_classification(self) -> None:
+        cases = [
+            (CLIConnectionError("connection failed"), True),
+            (ProcessError("process failed", exit_code=1), True),
+            (CLINotFoundError(), False),
+            (ValueError("local error"), False),
+            (asyncio.CancelledError(), False),
+        ]
+        for error, expected in cases:
+            with self.subTest(error=type(error).__name__), tempfile.TemporaryDirectory() as directory:
+                workspace = Path(directory)
+                write_json(
+                    workspace / "plugins-lock.json",
+                    {"version": 1, "plugins": []},
+                )
+
+                async def fake_query(*_args: object, **_kwargs: object):
+                    raise error
+                    yield
+
+                with patch("common.claude_agent.query", new=fake_query):
+                    result = await run_claude("测试提示", cwd=workspace)
+
+                self.assertEqual(result.retry_requested, expected)
+
+    async def test_normal_result_followed_by_process_error_does_not_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            write_json(
+                workspace / "plugins-lock.json",
+                {"version": 1, "plugins": []},
+            )
+
+            async def fake_query(*_args: object, **_kwargs: object):
+                yield SystemMessage(
+                    subtype="init",
+                    data={"session_id": "session-1", "cwd": str(workspace)},
+                )
+                yield ResultMessage(
+                    subtype="success",
+                    duration_ms=1,
+                    duration_api_ms=1,
+                    is_error=False,
+                    num_turns=1,
+                    session_id="session-1",
+                    result="Agent 的完整结果",
+                    terminal_reason="completed",
+                )
+                raise ProcessError("process failed", exit_code=1)
+
+            with patch("common.claude_agent.query", new=fake_query):
+                result = await run_claude("测试提示", cwd=workspace)
+
+        self.assertFalse(result.retry_requested)
+
+    async def test_session_mismatch_clears_api_retry_request(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            write_json(
+                workspace / "plugins-lock.json",
+                {"version": 1, "plugins": []},
+            )
+
+            async def fake_query(*_args: object, **_kwargs: object):
+                yield SystemMessage(
+                    subtype="init",
+                    data={"session_id": "other-session", "cwd": str(workspace)},
+                )
+                yield ResultMessage(
+                    subtype="success",
+                    duration_ms=1,
+                    duration_api_ms=1,
+                    is_error=True,
+                    num_turns=1,
+                    session_id="other-session",
+                    result=None,
+                    api_error_status=500,
+                    terminal_reason="api_error",
+                )
+
+            with patch("common.claude_agent.query", new=fake_query):
+                result = await run_claude(
+                    "测试提示",
+                    cwd=workspace,
+                    resume_session_id="session-1",
+                )
+
+        self.assertEqual(result.exception_type, "SessionMismatchError")
+        self.assertFalse(result.retry_requested)
 
 
 class AgentDecisionTest(unittest.IsolatedAsyncioTestCase):
