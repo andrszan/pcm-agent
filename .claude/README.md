@@ -96,7 +96,7 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 | `product-experience-audit` | 对当前完整集成产品执行跨需求、跨模块、跨页面的全项目级体验审计，输出经核验候选、重复项和覆盖缺口，不修改正式 Backlog |
 | `product-feedback-triage` | 核验、拆解、去重和分级人工产品反馈，并按项目约定形成候选变更项 |
 | `engineering-architecture` | 在单份项目架构文档中，按每个适用业务代码交付单元设计可核验的 Current/Target、职责/边界/依赖和代表性文件归属；默认不修改 `AGENTS.md` |
-| `ui-ux-framework` | 建立、校正或演进跨需求稳定的产品表面、内容语言、视觉和交互框架；不负责单需求设计或开发后验收 |
+| `ui-ux-framework` | 建立、校正或演进跨需求稳定的产品表面、App Shell Contract、内容语言、视觉和交互框架；按需使用技术中立布局资源，不负责单需求设计或开发后验收 |
 | `requirement-breakdown` | 完整覆盖最终产品范围，拆成有明确结果、依赖和验收方向的 Backlog，并建议首条验证切片 |
 | `trd-design` | 为一个内聚需求设计产品行为、体验复杂度、关键内容意图和技术实现，形成或更新活动 TRD |
 | `dev-workflow` | 实现功能、Bug 或重构，以自动化、真实运行、浏览器、实际渲染和独立审查证明功能与体验结果 |
@@ -175,7 +175,14 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 │   │   └── evals/evals.json
 │   ├── ui-ux-framework/
 │   │   ├── SKILL.md
-│   │   └── evals/
+│   │   ├── references/
+│   │   │   ├── app-shell-contract.md
+│   │   │   ├── layout-resource-library.md
+│   │   │   └── layout-selection-guide.md
+│   │   ├── assets/layout-patterns/
+│   │   │   ├── sidebar-workspace/
+│   │   │   └── top-navigation/
+│   │   └── evals/evals.json
 │   ├── find-skills -> 第三方 Skill
 │   └── shadcn -> 第三方 Skill
 ├── settings.json
@@ -183,6 +190,8 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 ```
 
 项目执行时可以另有 `.claude/rules/` 保存项目级稳定规则。普通运行不创建专属过程目录、Manifest、Run ID 或阶段报告；需要长期保留的事实进入产品文档、活动 TRD、代码、测试、Git 或项目已有记录位置。
+
+`ui-ux-framework/references/` 和 `assets/layout-patterns/` 是该 Skill 按需读取的技术中立参考：用于比较 Shell、页面模式、sticky、滚动与响应式结构，不是固定上游、生产组件库或项目默认实现。Agent 仍须依据目标项目事实作出决定，再按实际技术栈二次实现。
 
 ## 8. 使用边界摘要
 
