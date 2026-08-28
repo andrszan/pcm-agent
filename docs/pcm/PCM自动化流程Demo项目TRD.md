@@ -678,9 +678,9 @@ PCM 在请求前读取该领域完整编排历史。首次保存动态 `system` 
 - 状态必须位于 `project:05_verify_readiness`；重新核验根 Git 及每个适用子仓自身 top-level、`main`、unborn HEAD、空 index，并读取成功的 `steps/02.json`、`steps/03.json` 和 `steps/04.json`。第 2 步的两个输出必须是工作区内非空普通文件；第 3 步使用 `FoundationSelectionResult` 校验；第 4 步复用既有来源、目标、Git 边界和临时目录核验；
 - `PCM_DEV_RESOURCE_LIST` 必须是可读、非符号链接普通文件的绝对路径。Python 不解析资源内容，只把路径作为可信开发资源引用交给 Agent；完整 Agent/决策交互保存在被 Git 忽略的 run 历史中；
 - 初始提示第一行显式调用 `/project-readiness`，正文引用第 2 步实际产品定义、适用组装工程、**最小选型投影**和资源清单路径；两份产品定义是当前最终产品范围的权威来源，选型不传 `git_url` 或 `origin`，也不包含步骤号、PCM 节点或编排背景；
-- 调用方已授权为当前项目周期建立唯一、完整的准备基线并创建 `docs/requirements/项目准备清单.md`。Agent 可以原样读取任意格式的可信资源资料，从最终产品范围推导开发、联调、真实体验验收和交付所需前置条件；在授权和配置合同允许时创建项目专用开发/测试资源与最小权限运行凭据。每项判为 `ready` 的外部运行资源都必须把最终项目凭据与资源绑定持久化到所属仓库被 Git 忽略的实际 `.env` 或等价受保护配置，即使消费代码稍后实现，只要键名、归属和用途能够唯一确定也须先建立最小配置键合同；同步无秘密 `.env.example` 或公开说明，POSIX 上含秘密文件通常为 `0600`，并使用最终项目运行凭据完成最小权限验证。不得泄露秘密、创建生产或未授权付费资源、改变既有 Git 边界，或执行 Git 暂存、提交、分支、合并、push；
-- 完整依赖安装、构建、测试、应用启动、基础联调、仓库首次提交、业务实现、最终体验验收和发布不在本步骤提前执行，但这些工作所需的资源、身份、数据、浏览器、视口、回调、权限和其它不可替代前置条件必须进入准备基线；任何最终范围必要的 `missing`、`pending` 或未验证条件都必须阻塞，不能以清单文字、管理凭据、Mock、截图或 Agent 自述冒充完成；
-- 每轮从 init 核验实际 cwd、`project-readiness` Skill 和 slash command；完整真实回复先保存为 `user`，再由公共渲染器以步骤 `DECISION_RULES` 和项目上下文生成的完整 XML system snapshot 的统一 `AgentDecision` 裁决。`completed` 必须基于 Agent 的实际工具证据确认完整准备基线已建立，且不存在必要的 `missing`、`pending` 或未验证项；每项 `ready` 外部运行资源的最终凭据绑定必须已持久化到项目受保护配置并同步公开键合同，不能只留在共享资源资料中；含秘密文件权限安全；清单不能为自身状态作证。`completed` 后程序重新核验清单、交接和根/适用子仓 Git 边界；清单缺失或为空时追加固定修复提示，要求继续完成实际准备、项目凭据持久化、公开示例、文件权限和最终运行凭据验证，而不是只补文档；
+- 调用方已授权为当前自动化开发周期建立唯一资源准备基线并创建 `docs/requirements/项目准备清单.md`。Agent 可以原样读取任意格式的可信开发资源资料，从产品范围推导编码、开发环境联调和开发环境真实验收所需、且必须由调用方提供的外部服务、账号、凭据、授权素材、私有数据或专用设备；在授权和配置合同允许时创建项目专用开发/测试资源与最小权限运行凭据。每项判为 `ready` 的外部运行资源都必须把最终项目凭据与资源绑定持久化到所属仓库被 Git 忽略的实际 `.env` 或等价受保护配置，后续开发无需重新读取共享资源资料；同步无秘密 `.env.example` 或公开说明，POSIX 上含秘密文件通常为 `0600`，并使用最终项目运行凭据完成最小行为和隔离验证。不得泄露秘密、创建生产或未授权付费资源、改变既有 Git 边界，或执行 Git 暂存、提交、分支、合并、push；
+- 只允许两类 `blocked`：开发必需外部资源在候选池中不存在、当前环境无法安全生成且无兼容替代；或已匹配资源真实不可用、凭据无效、权限不足、隔离不合格，或缺少开发所需接口能力、可用配额、回调/白名单、沙箱范围及其它既定能力。依赖安装、构建、测试、migration、Seed、业务实现、项目内测试账号、完整联调和浏览器验收属于后续开发工作；生产部署、正式域名、DNS/TLS、生产凭据、监控、备份恢复、容量和发布安全属于开发范围外；产品规则和隐私事项由后续设计收敛。上述事项的 `missing` / `pending` 不得阻塞第 5 步；
+- 每轮从 init 核验实际 cwd、`project-readiness` Skill 和 slash command；完整真实回复先保存为 `user`，再由公共渲染器以步骤 `DECISION_RULES` 和项目上下文生成的完整 XML system snapshot 的统一 `AgentDecision` 裁决。`completed` 必须确认开发必需外部资源均真实可用或明确不需要，所有 `ready` 外部资源的最终凭据绑定已持久化到项目受保护配置并同步公开键合同，含秘密文件权限安全，且不存在两类开发资源阻塞；清单不能为自身状态作证。生产发布、后续业务实现和产品规则待定不得触发 `continue` 或 `blocked`。`completed` 后程序重新核验清单、交接和根/适用子仓 Git 边界；清单缺失或为空时追加固定修复提示，只继续开发资源准备、凭据持久化、公开示例、文件权限和最终运行凭据验证；
 - `blocked` 终止前也重验上述 Git 边界；只有 `status=success` 的结果可幂等复用，`failed` / `blocked` 结果不阻断原 session 恢复；
 - 单次 Agent 上限为 24 turns、`$8`，同一历史累计最多 6 轮裁决。`error_max_turns` 和 `error_max_budget_usd` 必须有 session 和非空回复才可裁决，且后续正常 `success` 前不能最终完成；对话尾部为 Agent `user` 时先裁决，为 `continue` 时恢复原 `answer`，为 `blocked` 时终止，为 `completed` 时先核验；达到上限不得额外调用；
 - `blocked` 只来自决策模型确认的不可替代外部资源缺失；其它输入、路径、状态、SDK、Skill、session、文件或决策错误为 `failed`；
@@ -693,7 +693,7 @@ PCM 在请求前读取该领域完整编排历史。首次保存动态 `system` 
 - `runs/<run-id>/conversations/project_readiness.json`；
 - `steps/05.json`。
 
-**当前合同真实验证。** run `step05-readiness-v2-20260828-b` 在独立产品工作区真实完成第 0～4 步后调用新的 `/project-readiness`。首次 success 暴露已判为 `ready` 的 MinIO/SMTP 凭据仍只位于外部资源资料、后端 `.env` 权限为 `0644`；旧 `05.json`、conversation、state 与清单已归档，旧 baseline 明确作废。收紧合同并 fresh 新 session 后，Agent 将 PostgreSQL、MinIO、SMTP 共 24 个运行字段全部持久化到被忽略且 `0600` 的 `backend/.env`，同步无秘密 `.env.example` 和前端公开地址配置；真实探针确认 PostgreSQL 开发/测试库事务性读写、管理库连接拒绝、非特权角色属性，MinIO 仅列出两个项目桶且完成读写删除、3 个范围外桶拒绝，SMTP 完成 TLS、认证和唯一授权收件人单封投递。公开文件、清单、state、conversation 与结果未发现实际秘密。负责人最终返回 `blocked`，因为当前全周期缺少授权生产或验收部署环境、域名/DNS/TLS、生产级 PostgreSQL/对象存储/邮件运行资源及凭据、监控与备份恢复目标、容量和发布安全基线，以及影响最终业务规则与隐私责任的待评审决定；该 `05.json` 为 `status=blocked`、`readiness_baseline=null`，state 保持 `project:05_verify_readiness`。这证明开发/测试资源准备和凭据持久化已完成，但全周期不可替代条件缺失时仍不会误推进。
+**当前合同真实验证。** run `step05-readiness-v2-20260828-b` 在独立产品工作区完成第 0～4 步后真实调用 `/project-readiness`，依次暴露并保留三类失败现场：外部资源标记 `ready` 但 MinIO/SMTP 凭据未持久化且 `.env` 为 `0644`；生产/发布条件和业务规则待定被错误扩大成开发阻塞；内部配置键不清可能形成第三类 blocked，且资源基本连接通过但开发必要能力、配额、回调/白名单不足未明确归入第二类。最终合同将 blocked 严格限定为：开发必需外部资源缺失、当前环境无法安全生成且无兼容替代；或已匹配资源不可用、凭据无效、权限/隔离不合格，或缺少开发所需能力、配额、回调/白名单和其它既定能力。最终 fresh Agent 将 PostgreSQL、MinIO、SMTP 共 24 个运行字段持久化到被忽略且 `0600` 的 `backend/.env`，同步无秘密 `.env.example` 和前端公开地址配置；真实探针确认 PostgreSQL 开发/测试库事务性读写、管理库连接拒绝、非特权角色属性，MinIO 仅列出两个项目桶且完成读写删除、3 个范围外桶拒绝，SMTP 完成 TLS、认证和唯一授权收件人单封投递；秘密扫描为 0。清单明确“当前开发资源阻塞：无”，将依赖、migration、Seed、业务实现、项目内账号、完整联调和浏览器验收归为后续开发，把生产与规则事项归为非阻塞。最终 conversation 为 `system → assistant → user → assistant completed`，`steps/05.json` 严格 success 且 baseline 匹配，state 推进第 6 步；0.967 秒幂等重跑三份运行文件字节不变。
 
 **重构前真实运行事实。** 第 5 步旧协议的自动化记录为 17 项专属、61 项第 0～5 步全量测试；`compileall` 与 `git diff --check` 通过。修迹真实资源准备已完成 PostgreSQL 项目角色、开发库和测试库、JSONB 读写、MinIO 开发桶和测试桶，以及被 Git 忽略的 `backend/.env` 与 `frontend/.env.local`。修正历史持久化后使用新 `project_readiness` session 重新真实核验，Agent 一轮正常 `success`；生成历史严格为 `system → assistant 初始指令 → user Agent 完整真实回复 → assistant 固定完成声明`，`decision_turn: 0`、完成声明唯一、无占位内容。未完成分支测试验证每轮 Agent 完整回复、`request_decision` 返回的完整结构化 JSON、原样 `answer` 转发及预算/turn 上限同 session 恢复。状态推进到第 6 步，重复执行幂等复用。
 
@@ -1252,14 +1252,14 @@ Git 子进程统一过滤 `GIT_*`。仓库按非 root 原顺序、root 最后的
 - 配置和敏感信息不泄露；
 - JSON、Markdown、状态和 SHA-256 读写；
 - 第 0～8、12～18 步状态转换；
-- 第 5 步本体 13 项、第 6 步本体 9 项、第 5/6/7/9/10/11 步相关回归 80 项、第 13 步本体 20 项与 CLI 10 项、显式 SDK 通道重试 7 项均保留其专属验证语境；本轮当前工作树全量 319 项 `unittest` 通过（54.766 秒），`compileall common steps run_step.py test_run_step_retry.py` 与本次目标 `git diff --check` 通过。当前工作树还包含其它公共循环/CLI 的未提交修改，故全量结果不能全部归因于第 9 步；
+- 第 5 步本体 14 项、第 6 步本体 9 项、第 5/6/7/9/10/11 步相关回归 81 项、第 13 步本体 20 项与 CLI 10 项、显式 SDK 通道重试 7 项均保留其专属验证语境；本轮当前工作树全量 320 项 `unittest` 通过（61.405 秒），`compileall common steps run_step.py test_run_step_retry.py` 与本次目标 `git diff --check` 通过。当前工作树还包含其它公共循环/CLI 的未提交修改，故全量结果不能全部归因于第 9 步；
 - 重试定向覆盖任意 API 状态、明确 `api_error`、SDK 连接/进程异常、普通失败、取消、本地合同错误、内部退出码耗尽归一和瞬时标志不落盘；本次未调用真实外部服务制造故障；
-- 第 5 步自动化覆盖全周期 Prompt/决策规则、完成后 `readiness_baseline` 写入、清单漂移、两份产品定义漂移、缺少指纹的旧 success 拒绝和幂等复用；第 6 步自动化覆盖允许环境变量改名/配置结构迁移、保持既有资源绑定与秘密值、禁止资源或凭据生命周期操作，以及工程接线与外部条件阻塞的决策边界；本次未重新执行真实外部资源或 Claude Agent 集成；
+- 第 5 步自动化覆盖当前开发资源 Prompt/决策规则、严格两类 blocked、必要能力/配额/回调/白名单、生产与后续实现非阻塞、完成后 `readiness_baseline` 写入、清单漂移、两份产品定义漂移、缺少指纹的旧 success 拒绝和幂等复用；真实 run `step05-readiness-v2-20260828-b` 已完成 PostgreSQL/MinIO/SMTP 最终凭据持久化和探针、负责人 `completed`、success baseline、状态推进与字节级幂等验证；
 - 公共错误诊断覆盖精确凭据遮盖、普通 token 语义保留、异常链与 traceback 位置、稳定有界日志名、OpenAI-compatible provider code/type/message/request ID/HTTP status、Claude Agent SDK `ResultMessage.errors`、BR-002 `api_error` 结果形态，以及第 12～18 步 scoped/protected-success 失败持久化边界；
 - 第 18 步覆盖动态仓库白名单、非 root 在前/root 最后、base/tip no-op、部分 merge、逐仓 merged state、全局 cleanup 前置、partial cleanup、result→state、上游增量字段兼容、真实 CLI、失败脱敏、完成状态防降级和 `GIT_*` 过滤；
 - 第 17 步现行实现覆盖动态多仓白名单、公共 Agent 决策conversation、`continue/blocked/completed`、同session repair与blocked resume、首次无session失败重投、残缺锚点拒绝、symlink、未跟踪文件、result→state、advanced兼容和CLI blocked/success保护；
 - BR-002在旧direct-run路径中缺少decision conversation，该历史不补造；未来第17步运行按现行合同保存完整历史。
-- 第 9 步定向 18 项通过（6.305 秒）；第 9～11 步本体共 51 项（18+18+15）通过，公共循环加第 9～11 步本体及第 10/11 步 CLI 的相关回归共 97 项通过（20.631 秒），覆盖完整 conversation 交由公共循环、执行产物 fresh 拒绝、当前 Git 现场核验、blocked 保持 blocked、按需 `/commit-changes`、无 exact prompt/相邻回复成功锚点、result→state 恢复与完整 success 重跑，以及第 10 步无 frontend 的零副作用路径；
+- 第 9 步定向 18 项通过（5.498 秒）；第 9～11 步本体共 51 项（18+18+15）通过，公共循环加第 9～11 步本体及第 10/11 步 CLI 的相关回归共 97 项通过（20.800 秒），覆盖完整 conversation 交由公共循环、执行产物 fresh 拒绝、当前 Git 现场核验、blocked 保持 blocked、按需 `/commit-changes`、无 exact prompt/相邻回复成功锚点、result→state 恢复与完整 success 重跑，以及第 10 步无 frontend 的零副作用路径；
 - Agent SDK 初始化消息与 ResultMessage 解析；
 - 探针权限拒绝；
 - Claude session ID 和 AI-compatible 决策历史分别保存与恢复；

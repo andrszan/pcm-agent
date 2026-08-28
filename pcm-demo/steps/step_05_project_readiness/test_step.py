@@ -172,7 +172,7 @@ class ProjectReadinessTests(unittest.TestCase):
             "step": 5,
             "name": "核验项目准备状态",
             "status": "success",
-            "summary": "project-readiness 已建立并验证当前项目周期的完整准备基线。",
+            "summary": "project-readiness 已建立并验证当前自动化开发周期的资源准备基线。",
             "applicable": True,
             "outputs": [CHECKLIST.as_posix()],
             "blocked": None,
@@ -195,15 +195,18 @@ class ProjectReadinessTests(unittest.TestCase):
         self.assertIn("实际工程", prompt)
         self.assertIn("可信开发资源清单：@/resource-list", prompt)
         self.assertIn("任意格式的动态候选池", prompt)
-        self.assertIn("当前项目周期唯一的完整准备基线", prompt)
+        self.assertIn("当前自动化开发周期唯一的开发资源准备基线", prompt)
         self.assertIn("实际 `.env`", prompt)
         self.assertIn("`.env.example`", prompt)
         self.assertIn("最终写入项目配置的运行凭据", prompt)
         self.assertIn("后续开发无需重新读取共享资源清单", prompt)
-        self.assertIn("不能把真实凭据只留在可信资源资料中", prompt)
+        self.assertIn("必须把最终项目运行凭据和资源绑定持久化", prompt)
         self.assertIn("POSIX 通常为 `0600`", prompt)
-        self.assertIn("任何最终范围必要条件", prompt)
-        self.assertIn("完整依赖安装、构建、测试、应用启动", prompt)
+        self.assertIn("只允许以下两类阻塞", prompt)
+        self.assertIn("生产部署、正式域名、DNS/TLS、生产凭据", prompt)
+        self.assertIn("缺失时只能记录为非阻塞未来事项", prompt)
+        self.assertIn("产品规则、隐私保留和其它设计决定", prompt)
+        self.assertIn("依赖安装、业务代码、migration、Seed", prompt)
         self.assertNotIn("当前只核验进入基础工程项目化前条件", prompt)
         self.assertIn('"applicable": true', prompt)
         self.assertIn('"id": "frontend-template"', prompt)
@@ -216,6 +219,15 @@ class ProjectReadinessTests(unittest.TestCase):
         for forbidden in ("第 5 步", "第5步", "PCM", "节点", "阶段", "调用 Skill"):
             self.assertNotIn(forbidden, prompt)
             self.assertNotIn(forbidden, PROJECT_READINESS_DECISION_RULES)
+
+    def test_decision_rules_cover_required_capabilities_without_production_scope(self) -> None:
+        for required in (
+            "开发所需接口能力、可用配额、回调注册、白名单、沙箱范围",
+            "缺少或不可用的开发资源、能力和复验条件",
+            "不得因生产发布条件",
+            "这些 missing 或 pending 均不得阻塞 completed",
+        ):
+            self.assertIn(required, PROJECT_READINESS_DECISION_RULES)
 
     def test_completed_decision_advances_after_checklist_and_preserves_agent_raw_text(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -241,11 +253,15 @@ class ProjectReadinessTests(unittest.TestCase):
                     "最高项目负责人、工程负责人、专业开发者和 Agent 专家",
                     "assistant 是你此前发给 Agent 的指令或结构化回复",
                     "user 是 Agent 返回给你的完整执行结果",
-                    "当前项目周期唯一、完整的准备基线",
-                    "不存在必要的 missing、pending 或未验证条件",
-                    "最终项目运行凭据",
-                    "后续开发无需重新读取共享资源清单才能使用",
-                    "不能把真实凭据只留在外部资源资料中",
+                    "当前开发的资源准备基线",
+                    "开发必需外部资源在候选池中缺失、当前环境无法安全生成且无兼容替代",
+                    "已匹配资源真实不可用、凭据无效、权限不足、隔离不合格",
+                    "开发所需接口能力、可用配额、回调/白名单",
+                    "生产部署环境、正式域名、DNS/TLS、生产凭据",
+                    "这些 missing 或 pending 均不得阻塞 completed",
+                    "不得因生产发布条件、业务实现、产品规则待定或未来最终验收返回 blocked",
+                    "最终写入配置的运行凭据",
+                    "最终项目凭据与资源绑定都已持久化",
                     "POSIX 通常为 0600",
                     "清单文字或 Agent 自述不能单独证明 ready",
                     "# 定义",
@@ -327,7 +343,8 @@ class ProjectReadinessTests(unittest.TestCase):
             self.assertEqual(calls[1]["resume_session_id"], "session-1")
             self.assertIn("不要只补文档后宣称完成", str(calls[1]["prompt"]))
             self.assertIn("每项 ready 外部资源的项目凭据持久化", str(calls[1]["prompt"]))
-            self.assertIn("最终运行凭据最小权限验证", str(calls[1]["prompt"]))
+            self.assertIn("最小行为/隔离验证", str(calls[1]["prompt"]))
+            self.assertIn("生产发布和后续业务实现事项必须记录为非阻塞", str(calls[1]["prompt"]))
             self.assertEqual(decision_inputs[0][-1], {"role": "user", "content": "Agent 原文 1"})
             self.assertNotIn("pending_agent_prompt", read_state(run_dir)["project_readiness"])
 
@@ -438,7 +455,10 @@ class ProjectReadinessTests(unittest.TestCase):
             outcome = self.run_step(run_dir, state, agent_runner=unexpected_agent)
 
         self.assertEqual(outcome["status"], "success")
-        self.assertIn("确认既有成功", outcome["summary"])
+        self.assertEqual(
+            outcome["summary"],
+            "project-readiness 已建立并验证当前自动化开发周期的资源准备基线。",
+        )
 
     def test_existing_success_rejects_changed_checklist(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
