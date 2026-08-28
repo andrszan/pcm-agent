@@ -27,6 +27,14 @@
 
 Agent 基于权威输入和实际工程，把总体技术方案落实为可执行的工程结构与协作规则。初始工程架构调用只允许创建或更新固定文档，不得实现业务功能、修改工程代码或配置、修改项目规则、执行 Git 写操作或处理秘密。每次请求 AI-compatible 决定前，步骤都会重新核验当前 Git-visible 工作树边界；当前可见的范围外修改会使现场核验失败。
 
+**现行语义合同：** Agent 必须为每个权威工程给出有限的 Current/Target 地图，并用 `[当前]`、`[目标]`、`[按需]`、`[迁移]` 明确标注；以有证据的架构决策矩阵收敛目录/模块职责、语义所有权、稳定公开能力、私有禁区、允许/禁止依赖和共享准入。文档还必须给出 2～5 个代表性文件放置演练、最小迁移与可观察演进路径，并收敛当前下游实际需要的高影响架构决定。
+
+MVC、分层、六边形和 DDD 不是互斥四选一；不得为了命名某种范式预建 `domain`、`application`、`infrastructure`、`shared`，或预建没有当前消费者的服务、队列、接口与其它结构。配置、运行、数据、测试和安全只按当前工程证据展开，不得虚构 Current。负责人只有在上述语义已经收敛且未越界实现时才可返回 `completed`；尚可据现有事实补全时返回 `continue`，只有缺少不可替代外部资源时才可返回 `blocked`。
+
+**核验分工：** Skill、Agent 和 AI-compatible 负责人负责上述 Markdown 语义完成；Python 不解析 Markdown 语义、目录归属或架构结论，只核验固定文档为非空、普通、非符号链接且已 tracked，并核验当前 Git 边界。Python 的薄核验不能替代语义裁决。
+
+本轮实现只更新 `ARCHITECTURE_REPAIR_PROMPT`、`ENGINEERING_ARCHITECTURE_DECISION_RULES` 与 initial prompt；Python Git verifier、result schema、session/恢复/提交/状态逻辑保持不变。
+
 ## 完成核验、提交与恢复
 
 负责人返回 `completed` 后，程序先 repair 缺失或空的 `docs/design/工程架构设计.md`；repair 只允许补全该固定文档。文档有效后，重新核验工作树边界：仅当根仓有未提交变化、该变化只涉及固定文档时，才在原 session 发送 `/commit-changes`。固定文档已经 tracked 且全仓 clean 时，直接满足提交交付条件，不制造无变化调用。`commit-changes` 仍只在实际需要时处理固定文档；Python 不执行 `add`、`commit`、`push` 或其它 Git 写操作。
@@ -49,7 +57,9 @@ Agent 基于权威输入和实际工程，把总体技术方案落实为可执�
 
 ## 自动化验证
 
-第 9～11 步新合同代码与自动化已完成：第 9～11 步本体测试合计 49 项通过；公共循环加第 9～11 步本体及第 10/11 步 CLI 定向回归共 84 项通过；PCM Demo 全量 268 项 `unittest` 通过（86.068 秒）；`compileall common steps run_step.py` 与 `git diff --check` 通过；目标第 9～11 步生产/测试和相关文档 IDE diagnostics 无新增问题（既有 pydantic 解析 warning 和第 12 步 unused hint 不属于本次）。尚未按新合同重新执行真实 Claude Agent、负责人 LLM 或 `/commit-changes` 集成；旧真实 run 仍仅为旧合同历史。
+第 9 步定向 18 项自动化测试全部通过（6.305 秒）。第 9～11 步本体合计 51 项（第 9 步 18、第 10 步 18、第 11 步 15）全部通过；公共循环加第 9～11 步本体及第 10/11 步 CLI 的相关回归 97 项全部通过（20.631 秒）；当前工作树全量 319 项 `unittest` 全部通过（54.766 秒）。`compileall common steps run_step.py test_run_step_retry.py` 与本次目标 `git diff --check` 通过。当前工作树还包含其它公共循环/CLI 的未提交修改，故全量结果是当前工作树验证，不能全部归因于第 9 步。
+
+新版 prompt 语义合同尚未执行安全的 fresh 真实 Claude Agent、AI-compatible 负责人或 `/commit-changes` 集成：`step01-mendmark` 已推进到第 13 步，仍保留旧第 9 步 success/session/conversation；其它 run 未安全到达第 9 步。不得覆盖、重写或将这些旧 session、commit 和 run 历史表述为新版合同的真实验证。
 
 ## 旧合同下的历史运行事实（非当前成功条件）
 

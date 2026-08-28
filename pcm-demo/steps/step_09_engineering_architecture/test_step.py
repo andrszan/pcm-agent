@@ -236,6 +236,25 @@ class EngineeringArchitectureTests(unittest.TestCase):
 
             self.run_step(run_dir, state, agent_runner=agent, decision_runner=self.completed, config_loader=lambda: object())
             self.assertTrue(calls[0][0].startswith("/engineering-architecture"))
+            repair_prompt = next(
+                prompt
+                for prompt, _ in calls
+                if prompt.startswith("固定工程架构设计文档缺失")
+            )
+            for required in (
+                ARCHITECTURE_PATH.as_posix(),
+                "当前工程架构合同",
+                "有限 Current/Target 地图",
+                "[当前]/[目标]/[按需]/[迁移]",
+                "目录/模块职责",
+                "公开边界",
+                "代表性文件放置演练",
+                "不得虚构 Current",
+                "不得创建目标目录",
+                "不得修改任何其他文件",
+                "不得执行 Git 写操作",
+            ):
+                self.assertIn(required, repair_prompt)
             sessions = [
                 value
                 for prompt, value in calls
@@ -387,12 +406,91 @@ class EngineeringArchitectureTests(unittest.TestCase):
                 ARCHITECTURE_PATH.as_posix(),
                 "@./frontend",
                 "@./backend",
+                "Current/Target",
+                "[当前]/[目标]/[按需]/[迁移]",
+                "架构决策矩阵",
+                "目录/模块职责",
+                "公开边界",
+                "共享准入",
+                "代表性文件放置演练",
+                "最小迁移",
+                "可观察演进",
                 "不得实现业务功能",
                 "执行 Git 写操作",
             ):
                 self.assertIn(required, prompt)
             for forbidden in ("第 9 步", "PCM", "节点", "session", "/commit-changes"):
                 self.assertNotIn(forbidden, prompt)
+
+    def test_decision_system_prompt_uses_dynamic_context_and_completion_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, _workspace, state = self.make_run(
+                Path(directory), ["frontend"], existing=True
+            )
+            system_prompts: list[str] = []
+
+            async def agent(_prompt: str, **kwargs: object) -> ClaudeRunResult:
+                value = agent_result(kwargs["cwd"])  # type: ignore[index]
+                kwargs["on_update"](value)  # type: ignore[index,operator]
+                return value
+
+            async def capture_decision(
+                _messages: list[dict[str, str]],
+                _config: object,
+                *,
+                system_prompt: str,
+            ) -> tuple[dict, int, str]:
+                system_prompts.append(system_prompt)
+                return decision("completed")
+
+            saved = self.run_step(
+                run_dir,
+                state,
+                agent_runner=agent,
+                decision_runner=capture_decision,
+                config_loader=lambda: object(),
+            )
+            self.assertEqual(saved["status"], "success")
+            self.assertEqual(len(system_prompts), 1)
+            system_prompt = system_prompts[0]
+            self.assertNotEqual(
+                system_prompt,
+                architecture_step.DECISION_LOOP_SPEC.decision_system_prompt,
+            )
+            for section in (
+                "role",
+                "project_context",
+                "responsibility",
+                "completion",
+                "output",
+            ):
+                self.assertIn(f"<{section}>", system_prompt)
+                self.assertIn(f"</{section}>", system_prompt)
+            for required in (
+                '"产品定义"',
+                '"项目准备清单"',
+                '"总体技术方案"',
+                '"权威工程"',
+                '"frontend"',
+                f'"固定输出": "{ARCHITECTURE_PATH.as_posix()}"',
+                "有限 Current/Target 地图",
+                "[当前]/[目标]/[按需]/[迁移]",
+                "架构决策矩阵",
+                "共享准入",
+                "2-5 个代表性文件放置演练",
+                "最小迁移和可观察演进",
+                "当前下游所需的高影响架构决定已收敛",
+            ):
+                self.assertIn(required, system_prompt)
+            responsibility = system_prompt.split("<responsibility>", 1)[1].split(
+                "</responsibility>", 1
+            )[0]
+            completion = system_prompt.split("<completion>", 1)[1].split(
+                "</completion>", 1
+            )[0]
+            self.assertIn("每个权威工程都有有限 Current/Target 地图", completion)
+            self.assertNotIn("每个权威工程都有有限 Current/Target 地图", responsibility)
+            self.assertNotIn("- completed：", responsibility)
 
     def test_agent_out_of_scope_changes_fail_before_decision(self) -> None:
         for mutation in ("root", "child"):
