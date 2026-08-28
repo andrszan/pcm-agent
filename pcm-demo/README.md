@@ -35,7 +35,7 @@ uv sync
 uv run python -m unittest discover -s . -t . -p 'test*.py' -v
 ```
 
-PCM Demo 全量 319 项 `unittest`、`compileall common steps run_step.py test_run_step_retry.py` 与 `git diff --check` 通过。直接执行 `run_step.py` 时，只有本次失败显式携带运行时重试请求才会在 10 秒、30 秒后重新运行当前步骤，最多三次总执行；当前仅 Claude Agent SDK 实际执行通道故障设置该请求，任意 API 状态码、明确 `api_error` 终止、连接失败和未取得 Result 的 CLI 进程失败均可重试。业务 `blocked`、普通 `failed`、AI-compatible 裁决失败、本地合同错误、CLI 参数错误、未实现步骤和主动取消不重试。重试请求不写入 state、步骤 result、diagnostic 或 conversation；耗尽后对外仍返回步骤失败码 `1`。
+PCM Demo 全量 320 项 `unittest`、`compileall common steps run_step.py test_run_step_retry.py` 与 `git diff --check` 通过。直接执行 `run_step.py` 时，只有本次失败显式携带运行时重试请求才会在 10 秒、30 秒后重新运行当前步骤，最多三次总执行；当前仅 Claude Agent SDK 实际执行通道故障设置该请求，任意 API 状态码、明确 `api_error` 终止、连接失败和未取得 Result 的 CLI 进程失败均可重试。业务 `blocked`、普通 `failed`、AI-compatible 裁决失败、本地合同错误、CLI 参数错误、未实现步骤和主动取消不重试。重试请求不写入 state、步骤 result、diagnostic 或 conversation；耗尽后对外仍返回步骤失败码 `1`。
 公共错误诊断保留 Claude Agent SDK `errors`、异常链、traceback 位置及 AI-compatible provider 的 code/type/message/request ID/HTTP status；只对明确凭据值和认证字段做精确遮盖。完整有界快照写入 Git 忽略的 `runs/<run-id>/logs/`，state、步骤结果和 stderr 保存具体安全原因与 `diagnostic_path`；合法裁决写入 conversation 后清除当前失败引用。第 13 步直接消费当前需求注册表；第 17 步通过公共 Agent 决策循环运行 `commit-changes`；第 18 步只使用确定性 Python/Git。
 
 ## 最近真实验证
@@ -88,7 +88,7 @@ commit-changes 执行轮发现文档中的 frontend Git 事实矛盾，严格未
 
 第 15 步已在同一真实 run 完成。它只消费当前 active requirement/cycle/workspace、当前需求 scoped 第 14 步 success 和非空活动 TRD，不读取第 2/5/7/8/9/10/11/13 步文档，不执行 Git 或 Git verifier。`development_<ID>` 复用公共 Agent 决策循环；prompt 只给 `/dev-workflow`、需求 ID/标题和活动 TRD 路径，Agent 按需读取项目现场并可同步稳定 TRD 偏差，但不得修改 `.claude/rules/` 或执行 stage/commit/branch/merge/push。负责人最终 `completed` 即领域完成，success result 写入 `steps/requirements/BR-001/15.json`（`outputs: []`，保存需求、TRD 与 development session），并推进 `requirement:16_rule_retrospective` / step 16；BR-001 仍为 active/completion null。
 
-唯一 development session 为 `e6bd1b82-39f9-41b2-9cc9-a69b281015dc`，Fable 5、Claude Code 2.1.233、`bypassPermissions`，最终正常 success 为 23 turns、约 `$9.784016`。首次调用在 init/session 已保存后暴露 `claude-agent-sdk` 0.2.139 单条 CLI stdout JSON 默认 1 MiB 缓冲的 `JSON message exceeded maximum buffer size`；公共 `ClaudeAgentOptions` 固定增至 10 MiB 后从同一 session 恢复，保留已有产品改动且不影响 resume。自定义 dev/reviewer 子代理曾有未识别 model 警告和一个子进程退出，但主 Agent 继续完成，生产 prompt 未改。最终 conversation 9 条，负责人先要求补齐 Firefox/WebKit 验证后最终 completed。Agent 报告后端 Ruff/format/build、pytest 16 passed 1 skipped、真实 PostgreSQL 与 Alembic 往返迁移；前端 lint/type-check/build、Vitest 15 passed；Chromium/Firefox/WebKit Playwright 矩阵 3 passed，以及真实 FastAPI/PostgreSQL/Vite 浏览器联调、截图读取和独立审查。root 保留活动 TRD和代表性截图未跟踪，frontend/backend 保留实现、测试、迁移与配置的未提交变更；三仓均为 `req/br-001`、index clean，无 commit、merge 或 push。不可用 LLM 配置幂等重跑仍 success，state/result/conversation 字节不变，SHA-256 分别为 `069b50dc583d8472683eded457bdb954265e37000b78c59860986bc8ea15bf72`、`033585fb8c7b2a43937dd67082aec8a179cc368ede869c460df4300a438487a2`、`431972a5bb43f90af90adf557bc1b92adab3599a5adb11a5696f57167a100e19`。第 16～18 步随后均已完成实现与适用真实验证。
+唯一 development session 为 `e6bd1b82-39f9-41b2-9cc9-a69b281015dc`，Fable 5、Claude Code 2.1.233、`bypassPermissions`，最终正常 success 为 23 turns、约 `$9.784016`。首次调用在 init/session 已保存后暴露 `claude-agent-sdk` 0.2.139 单条 CLI stdout JSON 默认 1 MiB 缓冲的 `JSON message exceeded maximum buffer size`；公共 `ClaudeAgentOptions` 固定增至 10 MiB 后从同一 session 恢复，保留已有产品改动且不影响 resume。自定义 dev/reviewer 子代理曾有未识别 model 警告和一个子进程退出，但主 Agent 继续完成，生产 prompt 未改。最终 conversation 9 条，负责人先要求补齐 Firefox/WebKit 验证后最终 completed。Agent 报告后端 Ruff/format/build、pytest 16 passed 1 skipped、真实 PostgreSQL 与 Alembic 往返迁移；前端 lint/type-check/build、Vitest 15 passed；Chromium/Firefox/WebKit Playwright 矩阵 3 passed，以及真实 FastAPI/PostgreSQL/Vite 浏览器联调、截图读取和独立审查。root 保留活动 TRD和代表性截图未跟踪，frontend/backend 保留实现、测试、迁移与配置的未提交变更；三仓均为 `req/br-001`、index clean，无 commit、merge 或 push。不可用 LLM 配置幂等重跑仍 success，state/result/conversation 字节不变，SHA-256 分别为 `069b50dc583d8472683eded457bdb954265e37000b78c59860986bc8ea15bf72`、`033585fb8c7b2a43937dd67082aec8a179cc368ede869c460df4300a438487a2`、`432072a5bb43f90af90adf557bc1b92adab3599a5adb11a5696f57167a100e19`。第 16～18 步随后均已完成实现与适用真实验证。
 Git 忽略 run `prompt-role-replay-20260823` 保留旧四段 XML prompt 的历史交接回放；它不是现行五段 prompt 的证据。现行 `role/project_context/responsibility/completion/output` 合同已由第 9 步 fresh 真实运行验证。
 
 ## 第 16 步现行合同与历史真实验证
@@ -103,7 +103,7 @@ Git 忽略 run `prompt-role-replay-20260823` 保留旧四段 XML prompt 的历�
 
 BR-001 的旧真实运行保存了完整四段 conversation。BR-002 在 direct-run 版本期间已经完成第 17/18 步，state 中只有 session `06edb430-9677-45e2-945f-ecff2a488ba6`，没有 decision reference 或 `conversations/requirement_commit_BR-002.json`。该历史缺口不能补造、推断或迁移；现行合同只保证未来需求保存完整决策历史，不回退或修改已完成的 BR-002。
 
-第 17 步本体 9 项、CLI 4 项；公共循环与第 17 步定向共 43 项通过。全量 319 项通过，详细合同见[第 17 步 README](steps/step_17_commit/README.md)。
+第 17 步本体 9 项、CLI 4 项；公共循环与第 17 步定向共 43 项通过。全量 320 项通过，详细合同见[第 17 步 README](steps/step_17_commit/README.md)。
 
 ## 第 18 步真实验证
 

@@ -244,11 +244,29 @@ class EngineeringArchitectureTests(unittest.TestCase):
             for required in (
                 ARCHITECTURE_PATH.as_posix(),
                 "当前工程架构合同",
+                "每个适用且含相关业务代码的交付单元",
                 "有限 Current/Target 地图",
                 "[当前]/[目标]/[按需]/[迁移]",
                 "目录/模块职责",
-                "公开边界",
-                "代表性文件放置演练",
+                "公开/私有边界",
+                "允许/禁止依赖",
+                "至少一个代表性文件放置演练",
+                "根仓或另一单元概述不得替代",
+                "应用装配/路由页面",
+                "业务功能",
+                "远程/局部/跨页面状态",
+                "传输到展示模型映射",
+                "共享 UI 准入",
+                "入口/契约",
+                "编排/规则",
+                "持久化/外部适配",
+                "事务/授权/错误/副作用/重试/恢复",
+                "双端均含业务代码时两端各至少一个演练",
+                "不适用必须基于事实",
+                "frontend/backend 本地架构文档",
+                "固定框架、FSD、DDD、Clean、目录模板或行数阈值",
+                "千行仅触发职责调查",
+                "最小迁移和可观察演进",
                 "不得虚构 Current",
                 "不得创建目标目录",
                 "不得修改任何其他文件",
@@ -406,15 +424,31 @@ class EngineeringArchitectureTests(unittest.TestCase):
                 ARCHITECTURE_PATH.as_posix(),
                 "@./frontend",
                 "@./backend",
+                "逐交付单元闭合",
+                "每个适用且含相关业务代码的交付单元",
                 "Current/Target",
                 "[当前]/[目标]/[按需]/[迁移]",
                 "架构决策矩阵",
                 "目录/模块职责",
-                "公开边界",
-                "共享准入",
-                "代表性文件放置演练",
-                "最小迁移",
-                "可观察演进",
+                "公开/私有边界",
+                "允许/禁止依赖",
+                "至少有一个代表性文件放置演练",
+                "根仓或另一单元概述不得替代",
+                "应用装配/路由页面",
+                "业务功能",
+                "远程/局部/跨页面状态",
+                "传输到展示模型映射",
+                "共享 UI 准入",
+                "入口/契约",
+                "编排/规则",
+                "持久化/外部适配",
+                "事务/授权/错误/副作用/重试/恢复",
+                "双端均含业务代码时，两端各至少有一个演练",
+                "不适用必须基于事实",
+                "frontend/backend 本地架构文档",
+                "固定框架、FSD、DDD、Clean、目录模板或行数阈值",
+                "千行仅触发职责调查",
+                "最小迁移和可观察演进",
                 "不得实现业务功能",
                 "执行 Git 写操作",
             ):
@@ -425,7 +459,7 @@ class EngineeringArchitectureTests(unittest.TestCase):
     def test_decision_system_prompt_uses_dynamic_context_and_completion_contract(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, _workspace, state = self.make_run(
-                Path(directory), ["frontend"], existing=True
+                Path(directory), ["frontend", "backend"], existing=True
             )
             system_prompts: list[str] = []
 
@@ -472,12 +506,29 @@ class EngineeringArchitectureTests(unittest.TestCase):
                 '"总体技术方案"',
                 '"权威工程"',
                 '"frontend"',
+                '"backend"',
                 f'"固定输出": "{ARCHITECTURE_PATH.as_posix()}"',
+                "每个适用且含相关业务代码的交付单元",
                 "有限 Current/Target 地图",
                 "[当前]/[目标]/[按需]/[迁移]",
                 "架构决策矩阵",
-                "共享准入",
-                "2-5 个代表性文件放置演练",
+                "公开/私有边界",
+                "允许/禁止依赖",
+                "至少有一个代表性文件放置演练",
+                "根仓或另一单元概述不能替代",
+                "应用装配/路由页面",
+                "业务功能",
+                "远程/局部/跨页面状态",
+                "传输到展示模型映射",
+                "共享 UI 准入",
+                "入口/契约",
+                "编排/规则",
+                "持久化/外部适配",
+                "事务/授权/错误/副作用/重试/恢复",
+                "frontend 和 backend 各至少有一个演练",
+                "frontend/backend 本地架构文档",
+                "固定框架、FSD、DDD、Clean、目录模板或行数阈值",
+                "千行仅触发职责调查",
                 "最小迁移和可观察演进",
                 "当前下游所需的高影响架构决定已收敛",
             ):
@@ -488,8 +539,26 @@ class EngineeringArchitectureTests(unittest.TestCase):
             completion = system_prompt.split("<completion>", 1)[1].split(
                 "</completion>", 1
             )[0]
-            self.assertIn("每个权威工程都有有限 Current/Target 地图", completion)
-            self.assertNotIn("每个权威工程都有有限 Current/Target 地图", responsibility)
+            self.assertIn(
+                "每个适用且含相关业务代码的交付单元", completion
+            )
+            for contract in (
+                "应用装配/路由页面",
+                "业务功能",
+                "远程/局部/跨页面状态",
+                "传输到展示模型映射",
+                "共享 UI 准入",
+                "入口/契约",
+                "编排/规则",
+                "持久化/外部适配",
+                "事务/授权/错误/副作用/重试/恢复",
+                "frontend 和 backend 各至少有一个演练",
+            ):
+                self.assertIn(contract, completion)
+                self.assertNotIn(contract, responsibility)
+            self.assertNotIn(
+                "每个适用且含相关业务代码的交付单元", responsibility
+            )
             self.assertNotIn("- completed：", responsibility)
 
     def test_agent_out_of_scope_changes_fail_before_decision(self) -> None:

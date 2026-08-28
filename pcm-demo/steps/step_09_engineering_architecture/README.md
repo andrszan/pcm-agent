@@ -27,13 +27,13 @@
 
 Agent 基于权威输入和实际工程，把总体技术方案落实为可执行的工程结构与协作规则。初始工程架构调用只允许创建或更新固定文档，不得实现业务功能、修改工程代码或配置、修改项目规则、执行 Git 写操作或处理秘密。每次请求 AI-compatible 决定前，步骤都会重新核验当前 Git-visible 工作树边界；当前可见的范围外修改会使现场核验失败。
 
-**现行语义合同：** Agent 必须为每个权威工程给出有限的 Current/Target 地图，并用 `[当前]`、`[目标]`、`[按需]`、`[迁移]` 明确标注；以有证据的架构决策矩阵收敛目录/模块职责、语义所有权、稳定公开能力、私有禁区、允许/禁止依赖和共享准入。文档还必须给出 2～5 个代表性文件放置演练、最小迁移与可观察演进路径，并收敛当前下游实际需要的高影响架构决定。
+**现行语义合同：** Agent 仍只维护根仓单份 `docs/design/工程架构设计.md`，不得创建 frontend/backend 本地架构文档；每个适用且含相关业务代码的交付单元必须分别闭合自己的前端或后端工程归属合同，根仓或另一单元概述不能替代。每个此类单元均须有有限 Current/Target 地图并用 `[当前]`、`[目标]`、`[按需]`、`[迁移]` 标注，明确目录/模块职责、公开/私有边界、允许/禁止依赖和至少一个代表性文件放置演练，并说明最小迁移与可观察演进。frontend 存在时按事实覆盖应用装配/路由页面、业务功能、远程/局部/跨页面状态、传输到展示模型映射和共享 UI 准入；backend 存在时按事实覆盖入口/契约、编排/规则、持久化/外部适配，以及事务/授权/错误/副作用/重试/恢复。双端均含业务代码时两端各至少一个演练；不适用必须有事实依据，不得虚构。架构决策矩阵仍以证据收敛当前下游实际需要的高影响架构决定。
 
-MVC、分层、六边形和 DDD 不是互斥四选一；不得为了命名某种范式预建 `domain`、`application`、`infrastructure`、`shared`，或预建没有当前消费者的服务、队列、接口与其它结构。配置、运行、数据、测试和安全只按当前工程证据展开，不得虚构 Current。负责人只有在上述语义已经收敛且未越界实现时才可返回 `completed`；尚可据现有事实补全时返回 `continue`，只有缺少不可替代外部资源时才可返回 `blocked`。
+不得固定框架、FSD、DDD、Clean、目录模板或行数阈值；文件达到千行仅触发职责调查，而非强制拆分。不得为了命名某种范式预建 `domain`、`application`、`infrastructure`、`shared`，或预建没有当前消费者的服务、队列、接口与其它结构。配置、运行、数据、测试和安全只按当前工程证据展开，不得虚构 Current。负责人只有在上述逐单元语义已经收敛且未越界实现时才可返回 `completed`；尚可据现有事实补全时返回 `continue`，只有缺少不可替代外部资源时才可返回 `blocked`。
 
 **核验分工：** Skill、Agent 和 AI-compatible 负责人负责上述 Markdown 语义完成；Python 不解析 Markdown 语义、目录归属或架构结论，只核验固定文档为非空、普通、非符号链接且已 tracked，并核验当前 Git 边界。Python 的薄核验不能替代语义裁决。
 
-本轮实现只更新 `ARCHITECTURE_REPAIR_PROMPT`、`ENGINEERING_ARCHITECTURE_DECISION_RULES` 与 initial prompt；Python Git verifier、result schema、session/恢复/提交/状态逻辑保持不变。
+本轮实现仅调整 `ARCHITECTURE_REPAIR_PROMPT`、`ENGINEERING_ARCHITECTURE_DECISION_RULES` 与 initial prompt 的领域语义，以及对应既有测试断言；Python 逻辑保持不变，未修改 result schema、`ARCHITECTURE_PATH`、Git verifier、`COMMIT_REPAIR_PROMPT`、session/conversation、恢复、状态或提交逻辑。
 
 ## 完成核验、提交与恢复
 
@@ -57,7 +57,7 @@ MVC、分层、六边形和 DDD 不是互斥四选一；不得为了命名某种
 
 ## 自动化验证
 
-第 9 步定向 18 项自动化测试全部通过（6.305 秒）。第 9～11 步本体合计 51 项（第 9 步 18、第 10 步 18、第 11 步 15）全部通过；公共循环加第 9～11 步本体及第 10/11 步 CLI 的相关回归 97 项全部通过（20.631 秒）；当前工作树全量 319 项 `unittest` 全部通过（54.766 秒）。`compileall common steps run_step.py test_run_step_retry.py` 与本次目标 `git diff --check` 通过。当前工作树还包含其它公共循环/CLI 的未提交修改，故全量结果是当前工作树验证，不能全部归因于第 9 步。
+第 9 步定向 18 项自动化测试全部通过（5.498 秒）。第 9～11 步本体合计 51 项（第 9 步 18、第 10 步 18、第 11 步 15）全部通过；公共循环加第 9～11 步本体及第 10/11 步 CLI 的相关回归 97 项全部通过（20.800 秒）；当前工作树全量 320 项 `unittest` 全部通过（61.405 秒）。`compileall common steps run_step.py test_run_step_retry.py` 与本次目标 `git diff --check` 通过。当前工作树还包含其它公共循环/CLI 的未提交修改，故全量结果是当前工作树验证，不能全部归因于第 9 步。
 
 新版 prompt 语义合同尚未执行安全的 fresh 真实 Claude Agent、AI-compatible 负责人或 `/commit-changes` 集成：`step01-mendmark` 已推进到第 13 步，仍保留旧第 9 步 success/session/conversation；其它 run 未安全到达第 9 步。不得覆盖、重写或将这些旧 session、commit 和 run 历史表述为新版合同的真实验证。
 
