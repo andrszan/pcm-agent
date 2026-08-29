@@ -1,6 +1,6 @@
 # 媒体测试 Fixture 维护
 
-`.claude/skills/media-assets/assets/fixtures/` 是 AI Agent 工作区中受跟踪的稳定测试媒体入口。它用于保存经确认的上传、预览、格式校验和失败状态测试文件；不是产品静态资源目录、对象存储模拟器，也不是可对外分发的素材库。
+本目录是 `media-assets` 随附的受跟踪稳定测试媒体入口。它用于保存经确认的上传、预览、格式校验和失败状态测试文件；不是产品静态资源目录、对象存储模拟器，也不是可对外分发的素材库。
 
 当前目录为空是预期状态。需要真实 fixture 时，由维护者按以下规则添加，并同步更新 `manifest.template.json` 的副本或项目约定的实际清单。
 
@@ -21,7 +21,7 @@
 1. 确认文件只包含可用于测试的内容，不含个人照片、真实用户数据、秘密、客户私有素材或不适合公开提交的信息。
 2. 选择稳定、语义中性的文件名，例如 `image-valid-landscape.jpg`、`image-invalid-text.txt`、`image-oversized.jpg`。文件名表达测试行为，不表达一次性的 Provider URL。
 3. 保持文件足够小；只有“超限”测试文件才可超过对应业务限制，并在清单中说明原因。
-4. 校验文件真实类型、尺寸和用途。macOS 可用 `shasum -a 256 <文件路径>` 计算哈希；不要把 API key、Cookie、完整请求响应或临时下载 URL 写进任何文件。
+4. 校验文件真实类型、尺寸和用途，并使用当前环境可用的 SHA-256 工具计算哈希；不要把 API key、Cookie、完整请求响应或临时下载 URL 写进任何文件。
 5. 在实际清单中记录稳定 ID、相对路径、MIME、尺寸或时长、哈希、测试用途和状态。来源、许可、模型、提示词摘要或替换依据仅在维护者确有需要时作为最小内部记录，不用于产品 UI 展示。
 6. 检查 Git diff，确认只加入预期文件；随后用目标项目真实上传路径验证 fixture。
 
@@ -40,7 +40,8 @@
   "purpose": "正常图片上传与预览",
   "status": "approved",
   "source": {
-    "type": "pixabay | generated | internal",
+    "origin": "external | generated | internal",
+    "providerId": "可选的受控 Provider ID",
     "reference": "可选的稳定资源页或内部说明",
     "licenseNote": "可选的维护说明",
     "model": "可选的生成模型",
@@ -49,7 +50,7 @@
 }
 ```
 
-`source` 是可选的维护信息。不要记录临时 CDN 下载链接、完整敏感提示词、原始 API 响应、Cookie 或任何凭据。
+`source` 是可选的维护信息。`origin` 只描述来源类别；`providerId` 在确有追溯需要时引用当前受控 Provider catalog 中的稳定 ID，不构成在线重建依赖。不要记录临时 CDN 下载链接、完整敏感提示词、原始 API 响应、Cookie 或任何凭据。
 
 ## 修改、替换与复制
 
