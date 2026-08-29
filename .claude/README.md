@@ -195,7 +195,7 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 
 项目执行时可以另有 `.claude/rules/` 保存项目级稳定规则。普通运行不创建专属过程目录、Manifest、Run ID 或阶段报告；需要长期保留的事实进入产品文档、活动 TRD、代码、测试、Git 或项目已有记录位置。
 
-根目录 `fixtures/media-assets/` 是 `media-assets` 的受跟踪测试输入维护入口，首期只包含维护说明和空清单模板；它不承载目标产品资产、对象存储数据或工作区私有凭据。
+`media-assets` 的 `.claude/skills/media-assets/assets/fixtures/` 是受跟踪测试输入的维护入口，首期只包含维护说明和空清单模板；它不承载目标产品资产、对象存储数据或工作区私有凭据。
 
 `ui-ux-framework/references/` 和 `assets/layout-patterns/` 是该 Skill 按需读取的技术中立参考：用于比较 Shell、页面模式、sticky、滚动与响应式结构，不是固定上游、生产组件库或项目默认实现。Agent 仍须依据目标项目事实作出决定，再按实际技术栈二次实现。
 

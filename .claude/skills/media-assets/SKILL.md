@@ -69,12 +69,12 @@ Pixabay 只作为 AI Agent 开发期的受控来源，不是产品运行时搜�
 
 ## Fixture 维护与使用
 
-根目录 `fixtures/media-assets/` 保存可复现测试输入的维护说明和清单模板。真实 fixture 由维护者后续添加；本能力不在首次调用时自动下载或生成 fixture。
+Skill 目录下的 `.claude/skills/media-assets/assets/fixtures/` 保存可复现测试输入的维护说明和清单模板。真实 fixture 由维护者后续添加；本能力不在首次调用时自动下载或生成 fixture。
 
 - Fixture 只用于上传、预览、格式、大小、失败状态等测试，不是产品静态资产或公开素材库；
 - 测试优先复制稳定 fixture 到目标项目约定的测试目录，不在每次测试时联网搜索；
 - 产品专属官网图、内容图或品牌图进入目标产品自己的资产目录；动态用户媒体、对象存储、权限、迁移和恢复由工程架构与活动 TRD 决定；
-- 添加、替换或删除 fixture 时遵循 `fixtures/media-assets/README.md`，不记录 API key、Cookie、完整原始响应或临时下载 URL。
+- 添加、替换或删除 fixture 时遵循 `.claude/skills/media-assets/assets/fixtures/README.md`，不记录 API key、Cookie、完整原始响应或临时下载 URL。
 
 ## 最终检查与汇报
 
