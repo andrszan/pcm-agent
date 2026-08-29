@@ -2,7 +2,6 @@
 name: media-assets
 description: Use when 需要为当前产品开发按需检索、选择、下载或生成少量图片/视频等媒体资源，维护稳定测试 fixture，并将最终资源固化到正确项目位置时。
 argument-hint: <资源用途、目标项目或目录、视觉要求、来源选择和写入授权>
-disable-model-invocation: true
 ---
 
 # media-assets — 开发期媒体资源
