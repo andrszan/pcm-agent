@@ -108,6 +108,7 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 | Skill | 依赖与边界 |
 |---|---|
 | `playwright-cli` | 依赖当前环境已具备的对应浏览器运行工具；用于真实浏览器操作与验证，核心 Skills 不得把它作为隐藏必需 Skill |
+| `media-assets` | 工作区固有、按需显式调用的开发期媒体工具；可使用根私有配置中的 Pixabay 或本地图片生成代理获取少量资源，但不构成目标产品运行时依赖 |
 
 可选工具不可用时，应记录真实验证缺口；本仓库不为此自动安装新的 CLI、插件或项目依赖。
 
@@ -150,6 +151,9 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 │   │   ├── SKILL.md
 │   │   └── evals/evals.json
 │   ├── foundation-selection/SKILL.md
+│   ├── media-assets/
+│   │   ├── SKILL.md
+│   │   └── evals/evals.json
 │   ├── pcm-product-factory/SKILL.md
 │   ├── playwright-cli/
 │   │   ├── SKILL.md
@@ -191,6 +195,8 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 
 项目执行时可以另有 `.claude/rules/` 保存项目级稳定规则。普通运行不创建专属过程目录、Manifest、Run ID 或阶段报告；需要长期保留的事实进入产品文档、活动 TRD、代码、测试、Git 或项目已有记录位置。
 
+根目录 `fixtures/media-assets/` 是 `media-assets` 的受跟踪测试输入维护入口，首期只包含维护说明和空清单模板；它不承载目标产品资产、对象存储数据或工作区私有凭据。
+
 `ui-ux-framework/references/` 和 `assets/layout-patterns/` 是该 Skill 按需读取的技术中立参考：用于比较 Shell、页面模式、sticky、滚动与响应式结构，不是固定上游、生产组件库或项目默认实现。Agent 仍须依据目标项目事实作出决定，再按实际技术栈二次实现。
 
 ## 8. 使用边界摘要
@@ -201,6 +207,7 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 - 不因为示例流程存在就机械运行所有能力；不适用时允许无副作用跳过。
 - 活动需求和活动 TRD 可随当前事实调整；归档历史保持不可变。
 - 开发 `.env` 可以在项目范围内安全使用，但不能伪造外部凭据，秘密必须保持 Git 忽略并在输出中脱敏。
+- `media-assets` 的 Pixabay 和本地图片生成凭据只存在于 AI Agent 工作区根私有 `.env`，按需显式调用；它们不属于目标项目配置、开发资源清单或产品运行时依赖。
 - 不为当前任务擅自引入新基础设施、CLI、插件或第三方 Skill。
 - 验证以真实行为和风险为中心，局部 Mock、代码阅读或工具缺位不能冒充完成。
 
