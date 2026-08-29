@@ -10,6 +10,12 @@
 
 该 Provider 是开发期定制视觉工具，不是目标产品运行时模型依赖。
 
+## 上游协议参考
+
+- [OpenAI Image generation guide](https://developers.openai.com/api/docs/guides/image-generation)
+
+这些官方资料只作为 OpenAI Images 协议的上游基线。兼容服务可能只实现部分参数或采用不同的认证、模型、返回格式和错误结构，因此每次首次接入或配置变化后仍须探测实际服务；不能因文档描述而假定本地代理完全等同于 OpenAI 官方服务。
+
 ## 配置合同
 
 | 配置键 | 必要性 | 说明 |

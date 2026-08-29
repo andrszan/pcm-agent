@@ -10,6 +10,12 @@
 
 该 Provider 只负责开发期素材搜索和下载，不是存储层、CDN、产品模块或业务数据源。
 
+## 官方参考
+
+- [Pixabay API Documentation](https://pixabay.com/api/docs/)
+
+实际调用前以官方文档中的当前 endpoint、参数、返回字段、缓存、限额和错误说明为准；本 adapter 负责补充本工作区的选择、固化与安全边界，不复制整份上游 API 文档。
+
 ## 配置合同
 
 | 配置键 | 必要性 | 说明 |
