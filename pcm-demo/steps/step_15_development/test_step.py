@@ -128,12 +128,14 @@ class DevelopmentTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))
             prompts: list[str] = []
+            decision_prompts: list[str] = []
 
             async def agent(prompt: str, **_: object) -> ClaudeRunResult:
                 prompts.append(prompt)
                 return agent_result(workspace)
 
-            async def decide(*_: object, **__: object) -> tuple[dict, int, str]:
+            async def decide(*_: object, **kwargs: object) -> tuple[dict, int, str]:
+                decision_prompts.append(str(kwargs["system_prompt"]))
                 return decision("completed")
 
             saved = self.run_step(
@@ -148,8 +150,18 @@ class DevelopmentTests(unittest.TestCase):
             self.assertTrue(prompts[0].startswith("/dev-workflow\n"))
             self.assertIn("BR-001 账户访问", prompts[0])
             self.assertIn("docs/trd/BR-001.md", prompts[0])
+            self.assertIn("按活动 TRD 中适用的体验决定执行", prompts[0])
             for forbidden in ("docs/backlog", "第 15 步", "PCM", "session"):
                 self.assertNotIn(forbidden, prompts[0])
+            self.assertEqual(len(decision_prompts), 1)
+            for required in (
+                "存在适用的已确认 Target 或有依据的默认 Target 时",
+                "决定（默认 Target 含依据与重议条件）→可观察结果→实现位置→真实浏览器和实际读取截图证据→实际结果映射",
+                "不得静默偏离",
+                "稳定偏差已同步活动 TRD",
+                "截图不替代动态交互、权限、失败恢复和持久化的真实验证",
+            ):
+                self.assertIn(required, decision_prompts[0])
             self.assertEqual(saved["outputs"], [])
             self.assertEqual(saved["development_session_id"], "development-session-1")
             self.assertEqual(

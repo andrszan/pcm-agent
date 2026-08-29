@@ -37,12 +37,12 @@ Demo 继续采用增量实施，不一次创建完整流程空壳：
 - 第 5～7 步接受适用子仓边界，在 `completed` 与 `blocked` 终止前复核；只有 `status=success` 的步骤结果可复用，`failed` / `blocked` 结果不阻断原 session 恢复；
 - 第 8 步严格使用 `['root', *steps/04.json.outputs]` 权威仓库清单，并只读核验每仓自身 top-level、`main` 与 `status --porcelain`；全部干净时零 Agent、零决策调用直接成功，dirty 时才由一个产品根 `commit-changes` session 处理必要提交，结果/state 支持幂等恢复；
 - 第 9 步始终 `applicable: true`，固定读取第 2 步两份产品定义、第 5 步准备清单、第 7 步总体技术方案和第 8 步严格 success 的空 `outputs`、result/state 一致的合法有序 `applicable_repositories`，在单一 `engineering_architecture` session 中形成单份根仓 `docs/design/工程架构设计.md`。Agent 必须以 `[当前]`、`[目标]`、`[按需]`、`[迁移]` 为每个包含业务代码且相关的适用交付单元分别建立有限地图，并以有证据的架构决策矩阵收敛职责、语义所有权、公开/私有边界、依赖与共享准入、代表性文件放置、最小迁移、可观察演进和当前下游所需的高影响决定：前端闭合装配/路由页面、功能、远程/局部/跨页状态、模型映射和共享 UI；后端闭合入口、编排规则、持久化适配、事务、授权、错误与副作用恢复；每单元至少一个文件放置演练。不得固定框架目录、以行数阈值拆分，或为 MVC、分层、六边形或 DDD 预建无当前消费者的层、服务、队列、接口或共享结构。repair 后仅在根仓存在且仅存在固定文档未提交变化时才在原 session 调用 `/commit-changes`，否则已 tracked 且全仓 clean 即完成。Python 仍不解析这些 Markdown 语义，只核验该固定文档与当前 Git 边界；
-- 第 10 步仅以第 8 步严格交接的 `applicable_repositories` 是否含 `frontend` 判断 Demo v1 适用性；不适用时按执行产物存在性拒绝并保持零执行副作用，适用时在单一 `ui_ux_framework` session 中生成 `docs/ui-ux/framework.md`，按与第 9 步相同的按需提交条件核验；
-- 第 11 步严格读取第 2/5/7/8/9/10 步交接，在单一 `requirement_breakdown` session 中生成唯一 `docs/backlog/backlog.md`；repair 后仅在固定 Backlog 是唯一根仓未提交变化时调用 `/commit-changes`。Backlog 不记录需求开发状态，Python 只读 Git，success 进入第 12 步初始化入口；
+- 第 10 步仅以第 8 步严格交接的 `applicable_repositories` 是否含 `frontend` 判断 Demo v1 适用性；不适用时按执行产物存在性拒绝并保持零执行副作用，适用时在单一 `ui_ux_framework` session 中生成 `docs/ui-ux/framework.md`，按与第 9 步相同的按需提交条件核验。负责人按新版框架合同要求适用的 App Shell Contract 闭合，区分 Current、已确认 Target、带依据和重议条件的默认 Target、具体待确认、偏差与非目标，不接受整份框架泛化待确认；
+- 第 11 步严格读取第 2/5/7/8/9/10 步交接，在单一 `requirement_breakdown` session 中生成唯一 `docs/backlog/backlog.md`；负责人只在已确认 Target 的迁移同时满足既有表面演进、独立可观察用户结果和严格开始前条件时创建迁移 BR/依赖，默认 Target 只进入相关 BR 的体验约束并保留依据/重议条件；repair 后仅在固定 Backlog 是唯一根仓未提交变化时调用 `/commit-changes`。Backlog 不记录需求开发状态，Python 只读 Git，success 进入第 12 步初始化入口；
 - 第 12 步严格消费第 11 步完整 success；Responses/Pydantic 是自由格式 Backlog 的唯一语义提取路径，只输出 `id`、`title`、`order`、`depends_on`；Python 不解析 Markdown 排版，只校验非空 catalog、合法且忽略大小写唯一的 ID、数组物理顺序对应连续 `order`、依赖存在/不重复/不自依赖/无环，从同一字节快照记录 Backlog SHA 并在模型调用后检查漂移，再先写 result、后写全 pending 注册表；不调用 Claude Agent、`AgentDecision` 或 Skill，不写产品或执行 Git；
 - 第 13 步消费第 8 步仓库交接和当前 `state.requirement_registry`，零 AI/Agent/Skill 确定性选择 ready pending 需求；不读取或按现行第 12 步 schema 复验历史 `steps/12.json` / `source`。fresh 全局预检后先写 active intent/cycle，再仅以 `git switch -c` 在全部适用仓建立 `req/<lowercase-id>`，写 scoped result 并推进第 14 步；
-- 第 14 步采用与第 15 步一致的薄编排，只消费 current active/cycle/workspace，首次持久化 exact `trd_path`，再通过 requirement-scoped 公共循环显式调用或恢复 `/trd-design`；Agent 按需读取项目事实，Python只核验指定 TRD 非空，不读取 Git或重复复验前序步骤，success 推进第 15 步；
-- 第 15 步只消费当前 active requirement/cycle/workspace、当前 requirement 的第 14 步 scoped success 与非空活动 TRD，在 `development_<ID>` session 中调用 `/dev-workflow`；负责人 completed 即领域完成，success 写 scoped result、同步 `development_session_id` 并推进第 16 步；
+- 第 14 步采用与第 15 步一致的薄编排，只消费 current active/cycle/workspace，首次持久化 exact `trd_path`，再通过 requirement-scoped 公共循环显式调用或恢复 `/trd-design`；Agent 按需读取项目事实和本需求适用的任意来源体验决定，在 TRD 中记录来源、范围、Current/Target、遵循或改变关系，默认 Target 还记录依据和重议条件；Python只核验指定 TRD 非空，不读取 Git或重复复验前序步骤，success 推进第 15 步；
+- 第 15 步只消费当前 active requirement/cycle/workspace、当前 requirement 的第 14 步 scoped success 与非空活动 TRD，在 `development_<ID>` session 中调用 `/dev-workflow`；适用体验决定映射到可观察结果、实现位置、真实浏览器和实际读取截图证据及实际结果，稳定偏差同步 TRD，截图不替代动态行为验证；负责人 completed 后写 scoped result、同步 `development_session_id` 并推进第 16 步；
 - 第 16 步采用薄编排，只消费当前 active requirement/cycle/workspace 与 `development_session_id`，建立 `rule_retrospective_<ID>` 独立负责人 conversation、预注册原 development session alias并调用 `/session-rule-retrospective`；允许规则变化或 no-change，success 写 scoped result、`outputs: []` 并推进第 17 步，不读取 Git或建立 baseline；
 - 第 17 步只消费当前 active requirement/cycle/workspace、完整 scoped 第 16 步 success、统一需求分支与各仓 base，在产品根通过公共 Agent 决策循环调用 `/commit-changes`；保存完整 conversation，负责人处理 `continue/blocked/completed`，Python只核验白名单、分支、main/base、最终 clean 和 tips并推进第 18 步；
 - 第 18 步只读取当前 active requirement/cycle、权威仓库路径和 scoped 第 17 步 success 的必要字段；以确定性 Python/Git 按非 root 在前、root 最后的顺序执行或恢复 ff-only，逐仓持久化 merged，全仓到 tip 后统一安全删除需求分支，写 scoped `18.json` 并完成注册表生命周期；
@@ -54,7 +54,7 @@ Demo 继续采用增量实施，不一次创建完整流程空壳：
 
 - `run_all.py` 完整串联入口。
 
-第 9 步当前 prompt 合同已完成代码与自动化，但尚未执行安全的 fresh 真实 Claude Agent、AI-compatible 负责人或 `/commit-changes` 集成；第 10、11 步业务合同未因本轮共享统计同步而改变。第 0～8、12～18 步已完成代码、自动化和适用真实验证；未实现能力必须返回明确程序错误，不得以空脚本、固定 JSON、旧实现或口头结论冒充成功。
+第 9 步当前 prompt 合同已完成代码与自动化，但尚未执行安全的 fresh 真实 Claude Agent、AI-compatible 负责人或 `/commit-changes` 集成；第 10、11、14、15 步已按新版 UI/UX 决定传递合同同步 Prompt、负责人完成规则与定向自动化，尚未据此改写旧合同真实运行事实。第 0～8、12～18 步已完成代码、自动化和适用真实验证；未实现能力必须返回明确程序错误，不得以空脚本、固定 JSON、旧实现或口头结论冒充成功。
 
 ### 3. 本轮实现与同步边界
 
@@ -759,8 +759,8 @@ PCM 在请求前读取该领域完整编排历史。首次保存动态 `system` 
 | 7 总体技术方案 | `solution-design` | 产品定义、已组装并项目化的工程事实、开发约束、选型 | 总体技术方案与当前工程一致，不重新选型或组装 |
 | 8 首次提交适用仓库 | 首次全仓提交检查与干净基线节点；全干净时零调用，dirty 时一个产品根 Claude Agent SDK session 显式调用 `commit-changes`，Python 不执行 Git 写操作 | 仅 `['root', *steps/04.json.outputs]` 为权威仓库；每仓自身 top-level、`main`、工作树干净，保存 `applicable_repositories` 与仓库事实 |
 | 9 工程架构设计 | 必要步骤；单份根仓 `docs/design/工程架构设计.md` 按每个包含业务代码且相关的适用交付单元闭合 Current/Target、职责/边界、依赖和代表性文件归属；`engineering-architecture` repair 后仅在固定文档是唯一根仓未提交变化时调用 `commit-changes` | 第 2 步两份产品定义、第 5 步准备清单、第 7 步总体技术方案和第 8 步严格交接 | 固定文档非空、非符号链接、tracked；全仓当前自身 top-level / `main` / clean；推进第 10 步 |
-| 10 产品级 UI/UX 框架（按需） | Demo v1 仅以第 8 步严格交接的 `applicable_repositories` 是否含 `frontend` 判断；不适用时按执行产物存在性拒绝并零副作用 | 适用时固定 `docs/ui-ux/framework.md` 非空、非符号链接、tracked，当前全仓 clean 并推进第 11 步；不适用时 `applicable: false`、`outputs: []` 且零执行副作用 |
-| 11 拆分 Backlog | `requirement-breakdown`；repair 后仅在固定 Backlog 是唯一根仓未提交变化时调用 `commit-changes` | 第 2/5/7 步文档、第 8 步严格交接、第 9 步唯一工程架构和严格第 10 步交接 | 唯一 `docs/backlog/backlog.md` 非空、非符号链接、tracked，当前全仓 `main` / clean；success 进入 `phase_1:initialize_requirement_registry` / step 12 |
+| 10 产品级 UI/UX 框架（按需） | Demo v1 仅以第 8 步严格交接是否含 `frontend` 判断；适用时 `ui-ux-framework` 形成跨需求框架和闭合的 App Shell Contract，不适用时按执行产物存在性拒绝并零副作用 | 第 2/5/7/8/9 步交接与实际 frontend | 固定框架文档非空、非符号链接、tracked；负责人确认区域、导航、页面模式、滚动/sticky、响应式及 Current/已确认 Target/默认 Target/偏差已收敛；全仓 clean并推进第 11 步 |
+| 11 拆分 Backlog | `requirement-breakdown` 将已确认/默认 Target 转成相关 BR 约束或条件性迁移 BR；repair 后仅在固定 Backlog 是唯一根仓未提交变化时调用 `commit-changes` | 第 2/5/7 步文档、第 8 步严格交接、第 9 步工程架构和严格第 10 步交接 | 默认 Target 不制造迁移 BR或严格依赖；已确认迁移仅在独立用户结果和严格前置同时成立时单列；Backlog tracked、全仓 clean并进入 step 12 |
 | 12 解析 Backlog 并初始化需求注册表 | Responses/Pydantic 从自由格式 Backlog 唯一提取静态字段；Python 只校验生命周期所需的 ID、数组顺序和依赖图；不调用 Claude Agent、`AgentDecision` 或 Skill | 第 11 步完整 success、工作区内固定非空非符号链接 Backlog 和初始化状态 | result 保存 `{path, sha256}` 来源与静态 catalog，state 初始化全 pending 注册表，推进 `phase_1:select_requirement` / step 13；零产品或 Git 操作 |
 
 #### 第 8 步已实现合同
@@ -814,7 +814,9 @@ PCM 在请求前读取该领域完整编排历史。首次保存动态 `system` 
 
 无 `frontend` 时，步骤严格核验第 5 步 `readiness_baseline` 与当前准备清单和两份产品定义一致，再读取第 8 步严格交接和第 9 步严格 success（唯一 `docs/design/工程架构设计.md`）。所有入口按本步骤 session、conversation reference、私有状态或 conversation 路径等执行产物存在性拒绝；否则零 Git、Agent、负责人决策、LLM 配置和 `docs/ui-ux/` 副作用，写入 success、`applicable: false`、`outputs: []` 并推进 `project:11_requirement_breakdown`。此路径由自动化覆盖准备清单和两份产品定义漂移均失败，黄金项目不走此分支。
 
-有 `frontend` 时，单一 key/session 为 `ui_ux_framework`，初始 prompt 首行 `/ui-ux-framework`，只允许创建或更新 `docs/ui-ux/framework.md`。领域步骤把完整 conversation 交由公共循环保存、读取和解释而不解析；每次实际 Git 状态在当前现场只读核验。`completed` 后先 repair 缺失或空文档，只有根仓存在且仅存在固定文档未提交变化时才在原 session 调用 `/commit-changes`；文档已 tracked 且全仓 clean 时直接满足交付条件。success 只要求文档非空、普通、非符号链接、tracked，全部权威仓库当前均为自身 top-level、`main`、clean；不要求 exact prompt、紧邻 Agent 回复或历史锚点。
+有 `frontend` 时，单一 key/session 为 `ui_ux_framework`，初始 prompt 首行 `/ui-ux-framework`，只允许创建或更新 `docs/ui-ux/framework.md`。Agent 按需读取 Skill 自带布局参考，但资源不成为项目默认实现；能由项目事实推导的低风险结构形成带依据和重议条件的默认 Target，真正改变跨需求体验骨架的具体分歧由负责人通过 `continue` 决定并要求回写。负责人仅在适用范围的 App Shell Contract 已闭合，产品表面、区域职责、导航层级、页面模式、常规滚动所有者、sticky 基准和窄屏转换可指导后续需求，且 Current、已确认 Target、默认 Target、具体待确认、已知偏差和非目标没有混写时返回 `completed`；不接受整份框架泛化待确认。
+
+`completed` verifier 先 repair 缺失或空文档；只有根仓存在且仅存在固定文档未提交变化时，才在原 session 发送 `/commit-changes`。已 tracked 且全仓 clean 的文档直接满足交付条件，不制造无变化调用。Python仍只核验文档非空、非符号链接普通文件、已 tracked，以及全部权威仓库当前均为自身 top-level、`main`、clean，不解析框架 Markdown 语义；不要求 exact prompt、紧邻 Agent 回复或历史执行锚点。适用路径的 fresh/resume/blocked、result/state 中断和幂等与第 9 步同构：领域步骤不解析 conversation，完整 success 只据严格 result schema、当前文档/Git事实恢复；blocked 始终保存并停在当前节点。合同保持局部实现，不改 `common`，不抽取 Git DSL、commit 事件、持久布尔标记或旧 prompt 兼容列表。
 
 第 9 步更新后的 prompt 合同及第 9～11 步相关自动化已完成本轮验证：第 9 步定向 18 项通过（5.498 秒）；第 9～11 步本体合计 51 项（18+18+15）通过；公共循环加第 9～11 步本体及第 10/11 步 CLI 的相关回归 97 项通过（20.800 秒）；当前工作树全量 320 项 `unittest` 通过（61.405 秒）；`compileall common steps run_step.py test_run_step_retry.py` 与本次目标 `git diff --check` 通过。当前工作树还包含其它公共循环/CLI 的未提交修改，故全量结果是当前工作树验证，不能全部归因于第 9 步。第 9 步新版 prompt 合同尚未执行安全的 fresh 真实 Claude Agent、AI-compatible 负责人或 `/commit-changes` 集成；`step01-mendmark` 已推进到第 13 步并保留旧第 9 步 success/session/conversation，旧真实 run 仅为旧合同历史。
 
@@ -830,9 +832,9 @@ conversation 共 7 条：`system → assistant 初始 → user → assistant com
 
 固定输入严格为第 2 步两份 outputs、第 5 步清单、第 7 步技术方案、第 8 步 strict success 的空 `outputs`、result/state 一致的合法有序 `applicable_repositories`、第 9 步唯一 `docs/design/工程架构设计.md`，以及严格第 10 步 success。第 8 步不逐项回放旧 `repositories` path、branch、clean 字段；实际 Git 状态由本步骤当前现场只读核验。第 10 步 `applicable: true` 时读取唯一 `docs/ui-ux/framework.md`；`applicable: false` 时必须为 `outputs: []`，不读取或扫描该文档。
 
-单一 key/session 为 `requirement_breakdown`，初始 prompt 首行 `/requirement-breakdown`，唯一固定输出为 `docs/backlog/backlog.md`。领域步骤把完整 conversation 交由公共循环保存、读取和解释而不解析。运行时全部权威仓库当前必须是自身 top-level、`main`；子仓一直 clean，root 只允许固定 Backlog dirty，Python 仅执行 Git 只读核验。
+单一 key/session 为 `requirement_breakdown`，初始 prompt 首行 `/requirement-breakdown`，唯一固定输出为 `docs/backlog/backlog.md`。领域步骤把完整 conversation 交由公共循环保存、读取和解释而不解析。框架中的已确认 Target 只有在要求演进既有产品表面、迁移本身形成独立可观察用户结果且其它需求开始前确实必须完成三项同时成立时，才形成迁移 BR 和严格依赖；不满足时进入相关业务 BR 的体验约束。默认 Target 只进入相关 BR 约束并保留依据与重议条件，不形成迁移 BR或严格依赖；偏离默认 Target或改变跨需求体验骨架时列为待确认。框架文档、Skill、页面、组件、CSS、目录、工程依赖和外部条件不得成为 `depends_on`，严格依赖只指开始前必须完成的正式 BR ID。运行时全部权威仓库当前必须是自身 top-level、`main`；子仓一直 clean，root 只允许固定 Backlog dirty，Python 仅执行 Git 只读核验。
 
-负责人 `completed` 后先 repair 缺失或空文档；仅当 root 有未提交变化且边界确认只有固定 Backlog 时，才在原 session 调用 `/commit-changes`。文档已 tracked 且全仓 clean 时直接满足交付条件。最终文件为非空、非符号链接、tracked 普通文件，且全仓 clean；不要求 exact prompt、紧邻 Agent 回复或历史锚点。fresh 仅按执行产物存在性拒绝，resume 由公共循环恢复；blocked 始终保存并停在当前节点，failed 保留现场，完整 success 仅按严格 result schema、当前文档/Git事实恢复。第 8～11 步的 Git/提交合同都保持局部实现，不改 `common`，不抽 Git DSL、commit 事件、持久布尔标记或旧 prompt 兼容列表。
+负责人确认上述 Backlog 语义边界后才可 `completed`；随后先 repair 缺失或空文档，仅当 root 有未提交变化且边界确认只有固定 Backlog 时，才在原 session 调用 `/commit-changes`。文档已 tracked 且全仓 clean 时直接满足交付条件。Python仍只核验最终文件非空、非符号链接、tracked 和全仓 clean，不解析 Markdown 语义；不要求 exact prompt、紧邻 Agent 回复或历史锚点。fresh 仅按执行产物存在性拒绝，resume 由公共循环恢复；blocked 始终保存并停在当前节点，failed 保留现场，完整 success 仅按严格 result schema、当前文档/Git事实恢复。第 8～11 步的 Git/提交合同都保持局部实现，不改 `common`，不抽 Git DSL、commit 事件、持久布尔标记或旧 prompt 兼容列表。
 
 第 9 步更新后的 prompt 合同及第 9～11 步相关自动化已完成本轮验证：第 9 步定向 18 项通过（5.498 秒）；第 9～11 步本体合计 51 项（18+18+15）通过；公共循环加第 9～11 步本体及第 10/11 步 CLI 的相关回归 97 项通过（20.800 秒）；当前工作树全量 320 项 `unittest` 通过（61.405 秒）；`compileall common steps run_step.py test_run_step_retry.py` 与本次目标 `git diff --check` 通过。当前工作树还包含其它公共循环/CLI 的未提交修改，故全量结果是当前工作树验证，不能全部归因于第 9 步。第 9 步新版 prompt 合同尚未执行安全的 fresh 真实 Claude Agent、AI-compatible 负责人或 `/commit-changes` 集成；`step01-mendmark` 已推进到第 13 步并保留旧第 9 步 success/session/conversation，旧真实 run 仅为旧合同历史。
 
@@ -866,8 +868,8 @@ conversation 共 7 条：`system → assistant 初始 → user → assistant com
 | 步骤 | 名称 | 核心边界与成功锚点 |
 | --- | --- | --- |
 | 13 | 选择需求并建立统一需求分支（已实现） | Python 从 ready pending 中选 `order` 最小需求；fresh 全局预检全部适用仓后先持久化 `active_requirement`（仅 ID）和 cycle（`req/<lowercase-id>`、按仓名 `base_sha`、返回节点），再以 `git switch -c` 建立同名分支。Git 子进程过滤 `GIT_*`。success 只写 `steps/requirements/<ID>/13.json` 并推进 `requirement:14_trd_design`；后续保护只验证第 13 步拥有的核心投影，允许其它步骤追加 cycle 字段；无 pending 的阶段二转场当前延期，有 pending 无候选失败 |
-| 14 | 形成活动 TRD（已实现） | 只消费当前 active requirement、cycle 和 workspace，首次持久化 `docs/trd/<YYYY-MM-DD>-<ID>-<标题>.md`，再通过 requirement-scoped 公共循环显式调用或恢复 `/trd-design`；Agent 按需读取项目事实，Python只核验指定 TRD 非空，不读取 Git或重复复验前序步骤 |
-| 15 | 实现与验证（已实现） | 调用 `dev-workflow` 完成实现、测试、构建、运行、联调、真实浏览器与渲染验收和独立审查；稳定设计偏差同步活动 TRD；保存 `development_session_id`，不提交、不合并 |
+| 14 | 形成活动 TRD（已实现） | 只消费当前 active requirement、cycle 和 workspace，首次持久化 `docs/trd/<YYYY-MM-DD>-<ID>-<标题>.md`，再通过 requirement-scoped 公共循环显式调用或恢复 `/trd-design`；Agent 按需记录本需求适用体验决定的来源、范围、Current/Target、遵循/改变关系及默认 Target 的依据/重议条件，Python只核验指定 TRD 非空，不读取 Git或重复复验前序步骤 |
+| 15 | 实现与验证（已实现） | 调用 `dev-workflow` 完成实现、测试、构建、运行、联调、真实浏览器与渲染验收和独立审查；适用体验决定映射到可观察结果、实现位置、浏览器/截图与动态证据，稳定设计偏差同步活动 TRD；保存 `development_session_id`，不提交、不合并 |
 | 16 | 原开发 session 规则复盘（已实现） | 只消费 active requirement/cycle/workspace 与 `development_session_id`；以独立 `rule_retrospective_<ID>` conversation 预注册 alias 后恢复原 session，允许规则变化或 no-change，不读取 Git或限制规则文件结构，`outputs: []`，不提交 |
 | 17 | 统一提交需求变更（已实现） | 在产品根 direct `run_claude()` session 中调用 `commit-changes`，仅处理有序 `applicable_repositories` 白名单；Python 只核验分支、main/base、最终 clean 和 tips；不合并、不标记完成 |
 | 18 | 程序化合并并完成需求（已实现） | 只使用 Python/Git；非 root 代码仓先、root 最后执行或恢复 `git merge --ff-only`。逐仓保存 merged，全仓 `main==tip` 后统一安全删除需求分支，先写 scoped `18.json` 再由 Python 写 `completed` |
@@ -878,15 +880,15 @@ conversation 共 7 条：`system → assistant 初始 → user → assistant com
 
 Python 使用首次本地日期、ID 和标题生成 exact `trd_path`，对直接用于文件名的标题做最小合法性检查，并在首次 Agent 调用前写入 cycle intent；后续恢复只沿用该值。Agent/session/conversation key 为 `trd_design_<ID>`。步骤直接复用公共 `run_agent_decision_loop` 保存和恢复 session、conversation 与待裁决回复，不解析公共 conversation 内部结构，也不覆盖 `permission_mode`、`tools`、`allowed_tools`、`disallowed_tools` 或增加私有 tool hook。
 
-负责人规则要求范围、关键行为、技术方案、验证、需求级体验和阻碍实现的决定已经采用当前基线，不能把“实现前必须确认”列表误作完成。Python completion verifier 只核验指定活动 TRD 是产品工作区内的非空文件；缺失或为空时同 session repair，不调用 `/commit-changes`。success 先写 `steps/requirements/<ID>/14.json`，再推进 `requirement:15_development`；blocked 保留路径和同一 session，result→state 中断只补状态，推进后不再读取文件或调用 Agent。第 14 步不读取 Git，不重复检查第 13 步建立的分支/base，也不监管第 17、18 步负责的提交和合并。
+负责人规则要求范围、关键行为、技术方案、验证、需求级体验和阻碍实现的决定已经收敛，不能把“实现前必须确认”列表误作完成。存在本需求真正适用的已确认 Target 或有依据的默认 Target 时，TRD 须记录其来源、适用范围、经核验 Current、Target 以及本需求遵循或改变的关系；默认 Target 还须记录依据和重议条件，偏离时说明理由，改变跨需求体验骨架时由负责人决定。没有适用决定时不虚构、不阻塞，也不固定要求 `docs/ui-ux/framework.md`、`ui-ux-framework` 或任何 UI 技术栈。Python completion verifier 只核验指定活动 TRD 是产品工作区内的非空文件；缺失或为空时同 session repair，不调用 `/commit-changes`。success 先写 `steps/requirements/<ID>/14.json`，再推进 `requirement:15_development`；blocked 保留路径和同一 session，result→state 中断只补状态，推进后不再读取文件或调用 Agent。第 14 步不读取 Git，不重复检查第 13 步建立的分支/base，也不监管第 17、18 步负责的提交和合并。
 
 真实 run 中，第 14 步使用 session `b9ed4756-0acf-4666-b3f9-c8f3628c03f1` 生成 `docs/trd/2026-08-25-BR-001-身份、角色访问与站内消息入口.md`。首次负责人错误接受 8 项实现门槛，随后在同一 session 收敛决定；负责人服务 free quota 403 后也从原 conversation 尾部恢复完成。最终 conversation 7 条且无 `/commit-changes`。当时 root 只有唯一未跟踪 TRD、frontend/backend clean、三仓无 staged、提交、merge 或 push，是旧实现结束时的历史现场，不再是现行 success 条件，也不会由现行代码重复核验；既有产物、session、result、state 和 Git 现场不因本次精简而改写。
 
 #### 第 15 步已实现合同与真实验证
 
-第 15 步只消费当前 state 的 active requirement/cycle/workspace、当前需求 scoped 第 14 步 `success` 和非空活动 TRD；不读取第 2/5/7/8/9/10/11/13 步文档，不执行 Git 命令或 Git verifier。requirement-scoped key 为 `development_<ID>`，复用公共 `run_agent_decision_loop`。prompt 只包含 `/dev-workflow`、需求 ID/标题和活动 TRD 路径；Agent 按需自行读取项目资料、代码、配置、测试和环境，允许把稳定设计偏差同步活动 TRD。它不得修改 `.claude/rules/`，也不得 stage、commit、创建或切换分支、merge 或 push。
+第 15 步只消费当前 state 的 active requirement/cycle/workspace、当前需求 scoped 第 14 步 `success` 和非空活动 TRD；不读取第 2/5/7/8/9/10/11/13 步文档，不执行 Git 命令或 Git verifier。requirement-scoped key 为 `development_<ID>`，复用公共 `run_agent_decision_loop`。prompt 只包含 `/dev-workflow`、需求 ID/标题和活动 TRD 路径；Agent 按需自行读取项目资料、代码、配置、测试和环境，允许把稳定设计偏差同步活动 TRD。活动 TRD 存在适用的已确认 Target 或默认 Target 时，负责人只在 Agent 已建立“体验决定（默认 Target 含依据与重议条件）→可观察结果→实现位置→真实浏览器和实际读取截图证据→实际结果”映射、没有静默偏离且截图未替代动态交互、权限、失败恢复和持久化验证后返回 `completed`。Agent 不得修改 `.claude/rules/`，也不得 stage、commit、创建或切换分支、merge 或 push。
 
-completion verifier 为空，负责人 `AgentDecision.completed` 即领域完成；`continue` 和 `blocked` 沿用公共语义。首次从 Agent 取得 session 后立即同步 `requirement_cycle.development_session_id`。success scoped result 写入 `steps/requirements/<ID>/15.json`，`outputs: []`，保存 requirement ID、TRD 路径和 development session ID，随后推进 `requirement:16_rule_retrospective` / step 16；blocked 保留 step 15 和同一 session。success result→state 中断恢复及推进后幂等已实现，CLI 只保护当前活动需求完整 scoped success。
+completion verifier 保持为空，体验决定与其它实现语义由 Skill、Agent 和负责人裁决；`continue` 和 `blocked` 沿用公共语义。首次从 Agent 取得 session 后立即同步 `requirement_cycle.development_session_id`。success scoped result 写入 `steps/requirements/<ID>/15.json`，`outputs: []`，保存 requirement ID、TRD 路径和 development session ID，随后推进 `requirement:16_rule_retrospective` / step 16；blocked 保留 step 15 和同一 session。success result→state 中断恢复及推进后幂等已实现，CLI 只保护当前活动需求完整 scoped success。
 
 真实 run 为 `pcm-demo/runs/step01-mendmark`，产品为 `/Users/zhou/resource/fireworks/ANDRSZAN/pcm-products/mendmark`。development session `e6bd1b82-39f9-41b2-9cc9-a69b281015dc` 的 init 确认 Fable 5、Claude Code 2.1.233、`bypassPermissions`，最终 normal success 23 turns、约 `$9.784016`。首次调用在 init/session 保存后因 `claude-agent-sdk` 0.2.139 默认单条 CLI stdout JSON 1 MiB 缓冲出现 `JSON message exceeded maximum buffer size`；仅将公共 `ClaudeAgentOptions.max_buffer_size` 固定为 `10 * 1024 * 1024`，不增配置、不影响 resume，随后恢复同一 session 并保留既有产品改动。自定义 dev/reviewer 子代理出现未识别 model 警告和一个子进程退出，但主 Agent 继续完成，生产 prompt 未改。
 

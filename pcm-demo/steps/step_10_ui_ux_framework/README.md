@@ -48,7 +48,7 @@ Demo v1 的适用性是确定性规则：仅当第 8 步严格 success 的空 `o
 
 ## 适用路径、边界、提交与恢复
 
-适用时只使用一个领域键和 Claude session：`ui_ux_framework`。初始提示首行固定为 `/ui-ux-framework`，明确授权 `bootstrap` 模式，只允许创建或更新唯一固定产物 `docs/ui-ux/framework.md`。提示要求文档区分工程事实、已确认决定、目标状态、假设和待确认事项，并覆盖产品体验目标与原则、信息与交互框架、跨需求一致性、内容与反馈、可访问性和响应式基线、设计资产边界及协作规则。高影响方向须保留给后续负责人确认。
+适用时只使用一个领域键和 Claude session：`ui_ux_framework`。初始提示首行固定为 `/ui-ux-framework`，明确授权 `bootstrap` 模式，只允许创建或更新唯一固定产物 `docs/ui-ux/framework.md`。适用范围必须闭合 App Shell Contract，明确产品表面、区域职责、导航层级、页面模式、常规滚动所有者、sticky 基准和窄屏转换；文档必须区分 Current、已确认 Target、默认 Target、具体待确认、已知偏差和非目标。能由项目事实安全推导的低风险结构直接收敛为保留依据和重议条件的默认 Target；仅实质高影响、会改变跨需求体验骨架、迁移成本或兼容性的具体分歧交由负责人决定，负责人可用 `continue` 作出决定并要求回写，不接受整份框架泛化待确认。Agent 按需读取本能力自带的 `references/` 或 `assets/` 辅助判断，但资源不是项目默认实现，不得将示例内容当作项目事实。
 
 每轮完整 Agent 回复均由公共 `run_agent_decision_loop` 保存、读取和解释，并交给 AI-compatible 负责人返回 `AgentDecision(completed/continue/blocked)`；领域步骤不解析 conversation 消息 schema、角色顺序、尾部 decision、session/reference 组合或完整 commit prompt，也不把 conversation 当长期成功证据。Agent 不得进行单项需求设计、页面/CSS/组件/主题设计或实现，不得修改代码、测试、配置、项目规则或其它文档，不得执行 Git 写操作。Python 只读 Git，并在当前现场核验权威仓库均为自身 top-level、`main`；子仓始终 clean，根仓只能出现固定文档变更。
 
@@ -59,6 +59,10 @@ Demo v1 的适用性是确定性规则：仅当第 8 步严格 success 的空 `o
 fresh 仅因本步骤 session、conversation reference、私有状态或 conversation 路径等执行产物已存在而拒绝；resume 由公共循环恢复原 session。run 目录是受控、Git 忽略的本地恢复状态，不建设防篡改日志。适用的完整 success result/state 写入中断，或完整 success 重跑时，只按严格 result schema、当前固定文档和 Git 事实补状态或确认成功；残缺 success 不受保护。
 
 负责人返回 `blocked` 时始终保存 blocked 并停在第 10 步，不能因本地文档 tracked 且 clean 改判 success；补齐外部条件后由公共循环从原 session 恢复。第 8～10 步的 Git 与提交合同保持步骤私有，不扩展 `common/`、不抽取 Git DSL、commit 事件、持久布尔标记或旧 prompt 兼容列表。
+
+## 本轮合同同步验证
+
+新版 App Shell Contract、默认 Target 收敛和负责人 `continue` 回写规则已由本步骤及第 11、14、15 步的步骤本体与 CLI 合计 72 项定向测试覆盖；PCM Demo 全量 321 项 `unittest`、`compileall common steps run_step.py test_run_step_retry.py` 与 `git diff --check` 通过。未运行新的真实 Claude Agent 或 AI-compatible 负责人集成，本轮不改写下述旧合同历史事实。
 
 ## 自动化与旧合同下的历史运行事实（非当前成功条件）
 

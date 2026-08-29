@@ -22,7 +22,7 @@ NEXT_NODE = "requirement:16_rule_retrospective"
 PHASE = "phase_1_requirement_development"
 SKILL_NAME = "dev-workflow"
 
-DEVELOPMENT_DECISION_RULES = """- completed：Agent 已明确表示当前需求的全部实现完成，所有适用测试、真实验证和审查均已完成，且没有剩余工作、验证缺口或阻断项。
+DEVELOPMENT_DECISION_RULES = """- completed：Agent 已明确表示当前需求的全部实现完成，所有适用测试、真实验证和审查均已完成，且没有剩余工作、验证缺口或阻断项。存在适用的已确认 Target 或有依据的默认 Target 时，完成报告必须建立决定（默认 Target 含依据与重议条件）→可观察结果→实现位置→真实浏览器和实际读取截图证据→实际结果映射；不得静默偏离，稳定偏差已同步活动 TRD。截图不替代动态交互、权限、失败恢复和持久化的真实验证。
 - continue：当前环境仍可继续完成实现、测试、真实验证或审查时，给出明确的下一步指令。
 - blocked：仅当缺少当前环境无法取得的不可替代外部条件时使用。"""
 
@@ -214,7 +214,7 @@ def initial_prompt(context: dict[str, Any]) -> str:
 
 活动 TRD：`{context['trd_path']}`
 
-项目资料、代码、配置、测试和运行环境请按需自行读取。必要的稳定设计偏差请同步至该 TRD。保留待提交变更；不得修改 `.claude/rules/`，不得 stage/commit、创建或切换分支、merge 或 push。"""
+项目资料、代码、配置、测试和运行环境请按需自行读取。按活动 TRD 中适用的体验决定执行；不要求固定上游资料。必要的稳定设计偏差请同步至该 TRD。保留待提交变更；不得修改 `.claude/rules/`，不得 stage/commit、创建或切换分支、merge 或 push。"""
 
 
 def _saved_result(run_dir: Path, requirement_id: str) -> dict[str, Any] | None:

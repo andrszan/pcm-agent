@@ -82,7 +82,11 @@ class RequirementBreakdownTests(unittest.TestCase):
         if ui_ux_applicable:
             (workspace / UI_UX_FRAMEWORK_PATH).parent.mkdir(parents=True)
             (workspace / UI_UX_FRAMEWORK_PATH).write_text(
-                "# UI/UX\n\n有效内容。\n", encoding="utf-8"
+                "# UI/UX\n\n## 已确认 Target\n- 运营工作台是既有产品表面，后续需求从此入口演进。\n\n"
+                "## 默认 Target\n- 窄屏将上下文导航收纳为抽屉，同时保留当前对象与返回关系。\n"
+                "  - 依据：现有任务需要保持对象上下文。\n"
+                "  - 重新评估条件：新增跨角色工作台或主要入口。\n",
+                encoding="utf-8",
             )
         if existing:
             self.write_document(workspace)
@@ -336,6 +340,7 @@ class RequirementBreakdownTests(unittest.TestCase):
                     Path(directory), ["frontend"], ui_ux_applicable=applicable
                 )
                 prompts: list[str] = []
+                decision_prompts: list[str] = []
 
                 async def agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
                     prompts.append(prompt)
@@ -347,23 +352,74 @@ class RequirementBreakdownTests(unittest.TestCase):
                     kwargs["on_update"](value)  # type: ignore[index,operator]
                     return value
 
+                async def decide(
+                    *_args: object, system_prompt: str, **_kwargs: object
+                ) -> tuple[dict, int, str]:
+                    decision_prompts.append(system_prompt)
+                    return decision("completed")
+
                 self.run_step(
                     run_dir,
                     state,
                     agent_runner=agent,
-                    decision_runner=self.completed,
+                    decision_runner=decide,
                     config_loader=lambda: object(),
                 )
                 prompt = prompts[0]
                 self.assertTrue(prompt.startswith("/requirement-breakdown\n"))
-                self.assertIn(ARCHITECTURE_OUTPUT_PATH.as_posix(), prompt)
-                self.assertIn(BACKLOG_PATH.as_posix(), prompt)
+                for required in (
+                    ARCHITECTURE_OUTPUT_PATH.as_posix(),
+                    BACKLOG_PATH.as_posix(),
+                    "已确认 Target",
+                    "演进既有产品表面",
+                    "独立可观察的用户结果",
+                    "其它需求开始前确实必须完成",
+                    "默认 Target",
+                    "依据和重议条件",
+                ):
+                    self.assertIn(required, prompt)
                 if applicable:
                     self.assertIn(UI_UX_FRAMEWORK_PATH.as_posix(), prompt)
                 else:
                     self.assertIn("当前产品没有适用的产品级体验框架文档", prompt)
                 for forbidden in ("第 11 步", "PCM", "节点", "session", "Skill", "/commit-changes"):
                     self.assertNotIn(forbidden, prompt)
+
+                self.assertTrue(decision_prompts)
+                for system_prompt in decision_prompts:
+                    for required in (
+                        "已确认 Target",
+                        "演进既有产品表面",
+                        "独立可观察的用户结果",
+                        "其它需求开始前确实必须完成",
+                        "迁移 BR",
+                        "严格依赖",
+                        "体验约束",
+                        "默认 Target",
+                        "依据和重议条件",
+                        "偏离默认 Target",
+                        "跨需求体验骨架",
+                        "框架文档",
+                        "页面",
+                        "组件",
+                        "CSS",
+                        "目录",
+                        "工程依赖",
+                        "外部条件",
+                        "depends_on",
+                        "正式 BR ID",
+                    ):
+                        self.assertIn(required, system_prompt)
+                    self.assertNotIn("Skill", system_prompt)
+                    if applicable:
+                        self.assertIn("运营工作台是既有产品表面", system_prompt)
+                        self.assertIn("窄屏将上下文导航收纳为抽屉", system_prompt)
+                        self.assertIn("现有任务需要保持对象上下文", system_prompt)
+                        self.assertIn("新增跨角色工作台或主要入口", system_prompt)
+                    else:
+                        self.assertIn("当前产品没有适用的产品级体验框架文档", system_prompt)
+                        self.assertNotIn("运营工作台是既有产品表面", system_prompt)
+                        self.assertNotIn("窄屏将上下文导航收纳为抽屉", system_prompt)
 
         for invalid_step in ("02", "05", "07", "09", "10"):
             with self.subTest(invalid_step=invalid_step), tempfile.TemporaryDirectory() as directory:

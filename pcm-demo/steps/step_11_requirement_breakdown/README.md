@@ -43,9 +43,9 @@ Agent 只允许创建或更新唯一固定产物：
 docs/backlog/backlog.md
 ```
 
-Backlog 必须基于权威输入和实际工程形成可独立交付、可验证、顺序合理的正式需求，说明范围、目标、验收要点、依赖与风险。它不记录“待开发”“开发中”“已完成”“阻塞”等需求开发状态；活动需求、完成情况与恢复位置由调用方的外部结构化运行状态管理。业务对象或业务流程自身的状态仍可作为需求内容。
+Backlog 必须基于权威输入和实际工程形成可独立交付、可验证、顺序合理的正式需求，说明范围、目标、验收要点、依赖与风险。跨需求体验决定中，只有已确认 Target 同时要求演进既有产品表面、迁移本身形成独立可观察的用户结果，且其它需求开始前确实必须完成时，才创建迁移 BR 和严格依赖；其余已确认 Target 写为相关 BR 的体验约束。默认 Target 只作为体验约束，保留依据和重议条件，不创建迁移 BR 或严格依赖；偏离默认 Target 或改变跨需求体验骨架时列为待确认。`depends_on` 只指向开始前必须完成的正式 BR ID，框架文档、Skill、页面、组件、CSS、目录、工程依赖及外部条件均不得写为严格依赖。它不记录“待开发”“开发中”“已完成”“阻塞”等需求开发状态；活动需求、完成情况与恢复位置由调用方的外部结构化运行状态管理。业务对象或业务流程自身的状态仍可作为需求内容。
 
-Agent 不得实施需求，或修改代码、测试、配置、项目规则、其它文档；初始工作不得执行 Git 写操作。负责人 `completed` 后，verifier 才进行完成核验；`continue` 继续原 session，`blocked` 仅用于当前环境无法取得的不可替代外部资源。
+Agent 不得实施需求，或修改代码、测试、配置、项目规则、其它文档；初始提示只简短交接体验决定，不复制完整领域合同，不改变固定输入和路径；初始工作不得执行 Git 写操作。负责人 `completed` 后，verifier 才进行完成核验；`continue` 继续原 session，`blocked` 仅用于当前环境无法取得的不可替代外部资源。
 
 ## 工作树、提交与恢复
 
@@ -62,6 +62,10 @@ Agent 不得实施需求，或修改代码、测试、配置、项目规则、�
 - **success**：固定 Backlog 为非空、非符号链接普通文件且已被根仓跟踪；全部权威仓库当前均为自身 top-level、`main`、clean；`steps/11.json` 严格为 `applicable: true` 和唯一输出 `docs/backlog/backlog.md`。状态进入 `phase_1_requirement_development` / `phase_1:initialize_requirement_registry`，`step` 与 `current_step` 均为 12，`active_requirement`、`requirement_cycle` 均为 `null`；本步骤不新增 `completed_requirements` 或 `phase_two`。
 
 result 已 success 而 state 推进中断，或完整 success 重跑时，只按严格 result schema、当前固定文档和 Git 事实补状态或确认成功，不依赖 conversation。`run_step.py` 仅保护 schema 完整的第 8～12 步 success，残缺 success 不受保护。第 8～11 步的 Git 与提交合同保持各步骤局部实现，不修改 `common/`，不抽取 Git DSL、commit 事件、持久布尔标记或旧 prompt 兼容列表。
+
+## 本轮合同同步验证
+
+新版已确认/默认 Target、条件性迁移 BR 和严格依赖规则已由本步骤及第 10、14、15 步的步骤本体与 CLI 合计 72 项定向测试覆盖；PCM Demo 全量 321 项 `unittest`、`compileall common steps run_step.py test_run_step_retry.py` 与 `git diff --check` 通过。未运行新的真实 Claude Agent 或 AI-compatible 负责人集成，本轮不改写下述旧合同历史事实。
 
 ## 自动化与旧合同下的历史运行事实（非当前成功条件）
 

@@ -33,14 +33,16 @@ Claude Agent 在产品根运行，使用 requirement-scoped key：
 trd_design_<requirement-id>
 ```
 
-初始 prompt 首行显式调用 `/trd-design`，只给出当前需求 ID、标题和唯一 `trd_path`，其它项目资料由 Agent 按需读取。prompt 只允许创建或更新该 TRD，禁止实现业务功能、修改其它文件或执行 Git 写操作。
+初始 prompt 首行显式调用 `/trd-design`，只给出当前需求 ID、标题和唯一 `trd_path`，以及收敛活动 TRD 的简短职责；其它项目资料由 Agent 按需读取。prompt 只允许创建或更新该 TRD，禁止实现业务功能、修改其它文件或执行 Git 写操作。
+
+对本需求真正适用的体验决定，Agent 按需从任意来源发现已确认的 Target 或有依据的默认 Target，并在 TRD 记录来源、适用范围、经核验的 Current、Target 与本需求遵循或改变。默认 Target 必须包含依据与重议条件，偏离必须说明理由；改变跨需求骨架由负责人决定。没有适用决定时不虚构也不阻塞，不要求固定框架文档、资料来源或技术栈。
 
 第 14 步直接复用公共 `run_agent_decision_loop`：
 
 - 公共循环保存并恢复 Claude session、conversation 和待裁决 Agent 回复；
 - `continue` 恢复同一 session；
 - `blocked` 只用于当前环境无法取得的不可替代外部条件；
-- `completed` 要求范围、关键行为、技术方案、验证场景、需求级体验设计和阻碍实现的决定已经收敛。
+- `completed` 要求范围、关键行为、技术方案、验证场景、需求级体验设计和阻碍实现的决定已经收敛；适用体验决定已在 TRD 留下来源、范围、Current、Target 与遵循或改变的记录，默认 Target 的依据和重议条件齐全、没有静默偏离，跨需求骨架改变已有负责人决定。
 
 领域步骤不解析公共 conversation 的消息结构，不重复核验 session/reference 组合，也不增加步骤私有 tool hook 或 Git 监管逻辑。
 
@@ -86,7 +88,9 @@ requirement:15_development
 - result 写入后 state 推进中断恢复；
 - 推进到第 15 步后的无文件、无 Agent 幂等；
 - CLI scoped success、blocked、failed 与成功保护；
-- 第 14 步不导入或执行 Git `subprocess`。
+- 第 14 步不导入或执行 Git `subprocess`；
+- 本轮与第 10、11、15 步合计 72 项步骤本体和 CLI 定向测试通过；
+- PCM Demo 全量 321 项 `unittest`、`compileall common steps run_step.py test_run_step_retry.py` 与 `git diff --check` 通过；未运行新的真实 Claude Agent 或负责人集成。
 
 ## 历史真实运行
 

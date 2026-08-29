@@ -318,6 +318,7 @@ class UIUXFrameworkTests(unittest.TestCase):
                 Path(directory), ["frontend", "backend"]
             )
             prompts: list[str] = []
+            decision_prompts: list[str] = []
 
             async def agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
                 prompts.append(prompt)
@@ -329,11 +330,17 @@ class UIUXFrameworkTests(unittest.TestCase):
                 kwargs["on_update"](value)  # type: ignore[index,operator]
                 return value
 
+            async def decide(
+                *_args: object, system_prompt: str, **_kwargs: object
+            ) -> tuple[dict, int, str]:
+                decision_prompts.append(system_prompt)
+                return decision("completed")
+
             self.run_step(
                 run_dir,
                 state,
                 agent_runner=agent,
-                decision_runner=self.completed,
+                decision_runner=decide,
                 config_loader=lambda: object(),
             )
             prompt = prompts[0]
@@ -346,12 +353,43 @@ class UIUXFrameworkTests(unittest.TestCase):
                 ARCHITECTURE_OUTPUT_PATH.as_posix(),
                 FRAMEWORK_PATH.as_posix(),
                 "@./frontend",
+                "默认 Target",
+                "依据和重议条件",
+                "高影响",
+                "references/",
+                "assets/",
+                "资源不是项目默认实现",
                 "不得开展单项需求设计",
                 "不得执行 Git 写操作",
             ):
                 self.assertIn(required, prompt)
-            for forbidden in ("第 10 步", "PCM", "节点", "session", "/commit-changes"):
+            for forbidden in ("第 10 步", "PCM", "节点", "session", "Skill", "/commit-changes"):
                 self.assertNotIn(forbidden, prompt)
+
+            self.assertTrue(decision_prompts)
+            for system_prompt in decision_prompts:
+                for required in (
+                    "App Shell Contract",
+                    "产品表面",
+                    "区域职责",
+                    "导航层级",
+                    "页面模式",
+                    "常规滚动所有者",
+                    "sticky 基准",
+                    "窄屏转换",
+                    "Current",
+                    "已确认 Target",
+                    "默认 Target",
+                    "具体待确认",
+                    "已知偏差",
+                    "非目标",
+                    "事实依据和重议条件",
+                    "真正高影响的具体取舍",
+                    "continue",
+                    "要求 Agent 回写",
+                    "整份框架泛化为待确认",
+                ):
+                    self.assertIn(required, system_prompt)
 
         with tempfile.TemporaryDirectory() as directory:
             run_dir, _workspace, state = self.make_run(Path(directory), ["frontend"])

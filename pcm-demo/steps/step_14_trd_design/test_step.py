@@ -126,12 +126,15 @@ class TRDDesignTests(unittest.TestCase):
 
     def test_decision_rules_require_implementation_ready_design(self) -> None:
         self.assertIn("没有阻碍实现的未决事项", TRD_DESIGN_DECISION_RULES)
+        self.assertIn("来源、适用范围、经核验的 Current、Target", TRD_DESIGN_DECISION_RULES)
+        self.assertIn("不得静默偏离", TRD_DESIGN_DECISION_RULES)
         self.assertIn("明确的下一步指令", TRD_DESIGN_DECISION_RULES)
 
     def test_fresh_persists_path_before_agent_and_uses_only_thin_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))
             prompts: list[str] = []
+            decision_prompts: list[str] = []
 
             async def agent(prompt: str, **_: object) -> ClaudeRunResult:
                 persisted = read_state(run_dir)
@@ -143,7 +146,8 @@ class TRDDesignTests(unittest.TestCase):
                 self.write_trd(workspace, persisted)
                 return agent_result(workspace)
 
-            async def decide(*_: object, **__: object) -> tuple[dict, int, str]:
+            async def decide(*_: object, **kwargs: object) -> tuple[dict, int, str]:
+                decision_prompts.append(str(kwargs["system_prompt"]))
                 return decision("completed")
 
             saved = self.run_step(
@@ -158,8 +162,40 @@ class TRDDesignTests(unittest.TestCase):
             self.assertEqual(len(prompts), 1)
             self.assertTrue(prompts[0].startswith("/trd-design\n"))
             self.assertIn(saved["trd_path"], prompts[0])
-            for forbidden in ("第 14 步", "PCM", "session", "@./docs/"):
-                self.assertNotIn(forbidden, prompts[0])
+            for required in (
+                "任意来源发现已确认的 Target 或有依据的默认 Target",
+                "来源、适用范围、经核验的 Current、Target",
+                "遵循或改变",
+                "依据与重议条件",
+                "偏离须说明理由",
+                "跨需求骨架须由负责人决定",
+                "没有适用决定时不得虚构或阻塞",
+            ):
+                self.assertIn(required, prompts[0])
+            self.assertEqual(len(decision_prompts), 1)
+            for required in (
+                "体验决定已在 TRD 收敛",
+                "任意来源发现已确认的 Target 或有依据的默认 Target",
+                "来源、适用范围、经核验的 Current、Target",
+                "默认 Target 已说明依据与重议条件",
+                "不得静默偏离",
+                "跨需求骨架改变已有负责人决定",
+                "不适用时不得虚构或阻塞",
+            ):
+                self.assertIn(required, decision_prompts[0])
+            for content in (prompts[0], decision_prompts[0]):
+                for forbidden in (
+                    "第 14 步",
+                    "PCM",
+                    "session",
+                    "@./docs/",
+                    "docs/ui-ux/framework.md",
+                    "ui-ux-framework",
+                    "React",
+                    "Tailwind",
+                    "shadcn",
+                ):
+                    self.assertNotIn(forbidden, content)
             self.assertFalse((run_dir / "steps/02.json").exists())
             self.assertFalse((run_dir / "steps/13.json").exists())
             self.assertEqual(saved["trd_session_id"], "trd-session-1")

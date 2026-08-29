@@ -6,7 +6,7 @@
 
 ## Agent、session 与边界
 
-Claude Agent 在产品根以 requirement-scoped key `development_<requirement-id>` 复用公共 `run_agent_decision_loop` 调用。初始 prompt 只包含 `/dev-workflow`、需求 ID/标题和活动 TRD 路径；Agent 按需自行读取项目资料、代码、配置、测试和运行环境。稳定设计偏差可同步至活动 TRD。
+Claude Agent 在产品根以 requirement-scoped key `development_<requirement-id>` 复用公共 `run_agent_decision_loop` 调用。初始 prompt 只包含 `/dev-workflow`、需求 ID/标题和活动 TRD 路径；Agent 按活动 TRD 中适用的体验决定执行，并按需自行读取项目资料、代码、配置、测试和运行环境，不要求固定上游资料。稳定设计偏差可同步至活动 TRD。
 
 Agent 不得修改 `.claude/rules/`，也不得 stage、commit、创建或切换分支、merge 或 push。完成 verifier 为空；负责人 `AgentDecision.completed` 即为本步骤领域完成，`continue` 和 `blocked` 沿用公共循环语义。
 
@@ -17,6 +17,16 @@ steps/requirements/<requirement-id>/15.json
 ```
 
 其 `outputs` 固定为空，并保存 `requirement_id`、`trd_path` 和 `development_session_id`。success 推进至 `requirement:16_rule_retrospective` / step 16；blocked 保留 step 15 与同一 session。success result 已写而 state 尚未推进时可恢复推进；推进后及 CLI 幂等保护只核验当前活动需求的完整 scoped success。
+
+## 适用体验决定与完成判断
+
+存在活动 TRD 中适用的已确认 Target 或有依据的默认 Target 时，负责人只在完成报告建立以下可追溯链路后才可返回 `completed`：
+
+```text
+决定（默认 Target 含依据与重议条件）→可观察结果→实现位置→真实浏览器和实际读取截图证据→实际结果映射
+```
+
+不得静默偏离适用决定；稳定偏差必须同步活动 TRD。截图只是其中一项证据，不能替代动态交互、权限、失败恢复和持久化的真实验证。
 
 ## 真实验证
 
@@ -30,7 +40,7 @@ Agent 报告后端 Ruff/format/build、pytest 16 passed 1 skipped、真实 Postg
 
 ## 自动化与运行
 
-第 15 步本体 6 项、CLI 4 项，共 10 项；当前混合工作树全量 282 项 `unittest`、`compileall` 与 `git diff --check` 均已通过。第 17 步现行精简实现本体 10 项与 CLI 3 项已纳入全量回归。Pyright langserver 未安装，未执行 IDE/LSP 诊断；能力仓未安装 Ruff，未执行 Ruff。独立只读审查在修复后最终无高、中置信缺陷。
+第 10、11、14、15 步的步骤本体与 CLI 合计 72 项定向测试通过；PCM Demo 全量 321 项 `unittest`、`compileall common steps run_step.py test_run_step_retry.py` 与 `git diff --check` 通过。未运行新的真实 Claude Agent、AI-compatible 负责人或产品浏览器流程，本轮只调整编排 Prompt、负责人完成规则和相应自动化。第 17、18 步既有代码与验证事实保持不变。
 
 ```bash
 cd /Users/zhou/resource/fireworks/ANDRSZAN/pcm-agent-skills/pcm-demo
