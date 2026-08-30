@@ -1,0 +1,103 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "id": "image-valid-landscape",
+      "relativePath": "image-valid-landscape.jpg",
+      "mimeType": "image/jpeg",
+      "sizeBytes": 169177,
+      "width": 1200,
+      "height": 800,
+      "sha256": "50cda6e3deecf354639eb061be95af1466b1bed1f61d9672683ea4dc1c38c370",
+      "purpose": "正常 JPG 上传、横向预览、缩略图、裁切和方向检查",
+      "expectedResult": "accepted",
+      "status": "approved",
+      "source": {
+        "origin": "generated",
+        "providerId": "openai-compatible-image",
+        "model": "gpt-image-2",
+        "promptSummary": "非对称几何静物测试图，包含四角差异、渐变与自然纹理，无人物、文字、Logo 或水印"
+      }
+    },
+    {
+      "id": "image-valid-square-alpha",
+      "relativePath": "image-valid-square-alpha.png",
+      "mimeType": "image/png",
+      "sizeBytes": 293557,
+      "width": 512,
+      "height": 512,
+      "hasAlpha": true,
+      "sha256": "fa0d520c56c1d3cdd8c5cf05aa7443ad38c29f01b5192356a4ec5b31f9ef09f9",
+      "purpose": "正常 PNG 上传、方形预览、透明和半透明边缘检查",
+      "expectedResult": "accepted",
+      "status": "approved",
+      "source": {
+        "origin": "generated",
+        "providerId": "openai-compatible-image",
+        "model": "gpt-image-2",
+        "promptSummary": "透明背景的非对称几何测试图，包含玻璃质感和半透明边缘，无人物、文字、Logo 或水印"
+      }
+    },
+    {
+      "id": "image-valid-portrait",
+      "relativePath": "image-valid-portrait.webp",
+      "mimeType": "image/webp",
+      "sizeBytes": 61836,
+      "width": 1024,
+      "height": 1536,
+      "sha256": "5e099ea87f9c506c794d1d137242f40b4f37705a602cb1a0525160f573a78137",
+      "purpose": "正常 WebP 上传、纵向预览、缩略图和上下方向检查",
+      "expectedResult": "accepted",
+      "status": "approved",
+      "source": {
+        "origin": "generated",
+        "providerId": "openai-compatible-image",
+        "model": "gpt-image-2",
+        "promptSummary": "上下方向明确的非对称纵向静物测试图，包含几何边缘和自然纹理，无人物、文字、Logo 或水印",
+        "processingNote": "Provider 返回图片经本地浏览器编码为真实 WebP"
+      }
+    },
+    {
+      "id": "image-invalid-extension",
+      "relativePath": "image-invalid-extension.txt",
+      "mimeType": "text/plain",
+      "sizeBytes": 139,
+      "sha256": "6a5652bc72238e58283c66b4273afe2014794d6c78b14b3dfc24d28f871fd386",
+      "purpose": "验证上传链路拒绝不支持的文件扩展名",
+      "expectedResult": "rejected",
+      "status": "approved",
+      "source": {
+        "origin": "internal",
+        "reference": "手工构造的 UTF-8 文本 fixture"
+      }
+    },
+    {
+      "id": "image-invalid-signature",
+      "relativePath": "image-invalid-signature.jpg",
+      "mimeType": "text/plain",
+      "sizeBytes": 170,
+      "sha256": "c07bd6b71721ded4f647142bcf583fe2df259743e567c7dce2c72d82ae24a093",
+      "purpose": "验证上传链路检查文件签名而不是仅信任 JPG 扩展名",
+      "expectedResult": "rejected",
+      "status": "approved",
+      "source": {
+        "origin": "internal",
+        "reference": "使用 JPG 扩展名的 UTF-8 文本 fixture"
+      }
+    },
+    {
+      "id": "image-corrupt-truncated",
+      "relativePath": "image-corrupt-truncated.jpg",
+      "mimeType": "image/jpeg",
+      "sizeBytes": 164,
+      "sha256": "2db9a16a319e2c5380cc901d06f19ebbb46838235c496aca4251b6e000cd974a",
+      "purpose": "验证保留 JPEG 文件签名但内容损坏时的解析失败和错误状态",
+      "expectedResult": "rejected",
+      "status": "approved",
+      "source": {
+        "origin": "internal",
+        "reference": "由有效 JPG 保留文件头后截断并替换载荷构造"
+      }
+    }
+  ]
+}

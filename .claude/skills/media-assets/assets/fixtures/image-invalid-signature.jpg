@@ -1,0 +1,2 @@
+This file intentionally uses a .jpg extension while containing plain UTF-8 text.
+It is used to verify that uploads inspect file signatures instead of trusting filenames.

@@ -1,0 +1,2 @@
+This is a plain UTF-8 text fixture used to verify rejection of unsupported file extensions.
+It intentionally contains no valid image data.
