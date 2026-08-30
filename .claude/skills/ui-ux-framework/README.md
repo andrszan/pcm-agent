@@ -15,6 +15,7 @@ ui-ux-framework/
 │   ├── app-shell-contract.md
 │   └── layout-resource-library.md
 ├── assets/layout-patterns/
+│   ├── list-detail-workspace/
 │   ├── sidebar-workspace/
 │   └── top-navigation/
 └── evals/evals.json

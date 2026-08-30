@@ -45,6 +45,27 @@
 - [`script.js`](../assets/layout-patterns/top-navigation/script.js)：当前项、tabs 和 Drawer 交互；
 - `desktop-preview.png`、`mobile-preview.png`：固定初始状态下的正式参考图。
 
+### List–Detail Workspace
+
+路径：[`../assets/layout-patterns/list-detail-workspace/`](../assets/layout-patterns/list-detail-workspace/)
+
+适合研究：
+
+- 围绕对象列表连续扫描、选择和处理的工作区；
+- `100dvh` 下列表与详情两个独立滚动 pane；
+- 分别相对列表 pane 和详情 pane sticky 的头部；
+- 按钮通过 `aria-controls`、`aria-pressed` 和详情 `hidden` 建立当前项关系；
+- 窄屏在列表与详情间转换，并恢复焦点和列表滚动位置。
+
+主要文件：
+
+- [`README.md`](../assets/layout-patterns/list-detail-workspace/README.md)：适用条件、双 pane 合同、窄屏焦点和非目标；
+- [`index.html`](../assets/layout-patterns/list-detail-workspace/index.html)：语义列表、预置详情与中性演示内容；
+- [`styles.css`](../assets/layout-patterns/list-detail-workspace/styles.css)：双滚动 pane、sticky 头部与窄屏转换；
+- [`script.js`](../assets/layout-patterns/list-detail-workspace/script.js)：目标验证、互斥选择、焦点和滚动恢复；
+- [`desktop-preview.png`](../assets/layout-patterns/list-detail-workspace/desktop-preview.png)：`1440 × 1024` 的桌面初始状态预览；
+- [`mobile-preview.png`](../assets/layout-patterns/list-detail-workspace/mobile-preview.png)：`390 × 844` 的窄屏详情状态预览，显示返回入口与详情标题。
+
 ## 2. 使用方式
 
 1. 先根据产品表面、任务频率、入口数量、信息密度、对象上下文、设备和迁移成本形成布局候选。

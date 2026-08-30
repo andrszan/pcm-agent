@@ -191,6 +191,7 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 │   │   │   ├── layout-resource-library.md
 │   │   │   └── layout-selection-guide.md
 │   │   ├── assets/layout-patterns/
+│   │   │   ├── list-detail-workspace/
 │   │   │   ├── sidebar-workspace/
 │   │   │   └── top-navigation/
 │   │   └── evals/evals.json
