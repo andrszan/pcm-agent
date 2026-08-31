@@ -40,7 +40,6 @@ DESIGN_PATH = Path("docs/design/技术方案.md")
 CHECKLIST = Path("docs/requirements/项目准备清单.md")
 MAX_DECISION_ROUNDS = 8
 SOLUTION_DESIGN_MAX_TURNS = 48
-SOLUTION_DESIGN_MAX_BUDGET_USD = 16.0
 LEGACY_COMPLETION_MESSAGES = (
     "已完成 solution-design：总体技术方案已生成并通过完成条件与工程事实核验。",
 )
@@ -55,7 +54,6 @@ DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     skill_name=SKILL_NAME,
     max_decision_rounds=MAX_DECISION_ROUNDS,
     max_turns=SOLUTION_DESIGN_MAX_TURNS,
-    max_budget_usd=SOLUTION_DESIGN_MAX_BUDGET_USD,
     decision_system_prompt=render_decision_system_prompt(SOLUTION_DESIGN_DECISION_RULES, {}),
     legacy_completion_messages=LEGACY_COMPLETION_MESSAGES,
 )

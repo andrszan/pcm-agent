@@ -299,7 +299,6 @@ async def run(
         skill_name=SKILL_NAME,
         max_decision_rounds=8,
         max_turns=48,
-        max_budget_usd=16.0,
         decision_system_prompt=render_decision_system_prompt(
             RULE_RETROSPECTIVE_DECISION_RULES, {}
         ),

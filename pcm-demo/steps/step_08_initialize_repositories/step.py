@@ -19,7 +19,6 @@ CONVERSATION_KEY = "initialize_repositories"
 SKILL_NAME = "commit-changes"
 MAX_DECISION_ROUNDS = 8
 INITIALIZE_REPOSITORIES_MAX_TURNS = 48
-INITIALIZE_REPOSITORIES_MAX_BUDGET_USD = 16.0
 REPOSITORY_REPAIR_PROMPT = "请只处理权威仓库清单中的未提交变更；完成后重新核验每个仓库的工作区和暂存区均干净。"
 
 INITIALIZE_REPOSITORIES_DECISION_RULES = """- completed：权威仓库清单中的每个独立仓库均处于 main 分支，且工作区和暂存区干净。
@@ -303,7 +302,6 @@ async def run(
         skill_name=SKILL_NAME,
         max_decision_rounds=MAX_DECISION_ROUNDS,
         max_turns=INITIALIZE_REPOSITORIES_MAX_TURNS,
-        max_budget_usd=INITIALIZE_REPOSITORIES_MAX_BUDGET_USD,
         decision_system_prompt=render_decision_system_prompt(
             INITIALIZE_REPOSITORIES_DECISION_RULES,
             {

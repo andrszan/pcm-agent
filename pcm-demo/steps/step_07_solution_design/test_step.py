@@ -27,7 +27,6 @@ from steps.step_07_solution_design.step import (
     DESIGN_REPAIR_PROMPT,
     LEGACY_COMPLETION_MESSAGES,
     NEXT_NODE,
-    SOLUTION_DESIGN_MAX_BUDGET_USD,
     SOLUTION_DESIGN_MAX_TURNS,
     SolutionDesignBlocked,
     run,
@@ -231,7 +230,7 @@ class SolutionDesignTests(unittest.TestCase):
             ):
                 self.assertNotIn(forbidden, prompt)
             self.assertEqual(calls[0]["max_turns"], SOLUTION_DESIGN_MAX_TURNS)
-            self.assertEqual(calls[0]["max_budget_usd"], SOLUTION_DESIGN_MAX_BUDGET_USD)
+            self.assertNotIn("max_budget_usd", calls[0])
             self.assertEqual(len(system_prompts), 2)
             for system_prompt in system_prompts:
                 for tag in ("role", "project_context", "responsibility", "completion", "output"):

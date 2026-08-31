@@ -210,7 +210,15 @@ class ProjectIntakeTests(unittest.TestCase):
             self.assertIn("请生成或补全两份非空正式产品定义文档", str(calls[1]["prompt"]))
             self.assertEqual(decision_inputs[0][-1], {"role": "user", "content": "完整 Agent 原文 1"})
             saved = read_state(run_dir)
-            self.assertEqual((saved["status"], saved["current_step"]), ("success", 2))
+            self.assertEqual(
+                (
+                    saved["status"],
+                    saved["step"],
+                    saved["current_step"],
+                    saved["current_node"],
+                ),
+                ("success", 3, 3, "project:03_foundation_selection"),
+            )
             self.assertNotIn("pending_agent_prompt", saved["project_intake"])
             history = json.loads(
                 (run_dir / "conversations/project_intake.json").read_text(encoding="utf-8")
@@ -270,7 +278,7 @@ class ProjectIntakeTests(unittest.TestCase):
                     "error": None,
                 },
             )
-            state.update({"status": "success", "current_step": 2})
+            state.update({"status": "running", "current_step": 2})
             write_state(run_dir, state)
 
             async def unexpected_agent(*args: object, **kwargs: object) -> ClaudeRunResult:
@@ -278,8 +286,13 @@ class ProjectIntakeTests(unittest.TestCase):
 
             outcome = asyncio.run(run(run_dir, state, agent_runner=unexpected_agent))
 
-        self.assertEqual(outcome["status"], "success")
-        self.assertEqual(outcome["outputs"], [path.as_posix() for path in OUTPUTS])
+            self.assertEqual(outcome["status"], "success")
+            self.assertEqual(outcome["outputs"], [path.as_posix() for path in OUTPUTS])
+            saved = read_state(run_dir)
+            self.assertEqual(
+                (saved["step"], saved["current_step"], saved["current_node"]),
+                (3, 3, "project:03_foundation_selection"),
+            )
 
     def test_legacy_completion_record_remains_read_only_compatible(self) -> None:
         legacy_completion = "已完成 project-intake：两份正式产品定义文档已生成并通过文件事实核验。"

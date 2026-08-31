@@ -102,6 +102,34 @@ class FoundationSelectionTests(unittest.TestCase):
             ),
         )
 
+    def saved_result(self) -> dict[str, object]:
+        return {
+            "step": 3,
+            "name": "基础工程选型",
+            "status": "success",
+            "summary": "基础工程模板选择已完成。",
+            "applicable": True,
+            "outputs": [],
+            "blocked": None,
+            "error": None,
+            "template_selection": {
+                "frontend": {
+                    "id": "web-next",
+                    "git_url": "https://example.invalid/web.git",
+                    "default_branch": "main",
+                    "path": "templates/web-next",
+                    "reason": "产品需要浏览器界面。",
+                },
+                "backend": {
+                    "id": "api-fastapi",
+                    "git_url": "https://example.invalid/api.git",
+                    "default_branch": "main",
+                    "path": "templates/api-fastapi",
+                    "reason": "产品需要业务 API。",
+                },
+            },
+        }
+
     def test_loads_pydantic_input_from_products_and_catalog(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, state, catalog_path = self.make_run(Path(directory))
@@ -236,7 +264,16 @@ class FoundationSelectionTests(unittest.TestCase):
             )
             self.assertEqual(result["status"], "success")
             self.assertEqual(result["template_selection"]["frontend"]["id"], "web-next")
-            self.assertEqual(read_state(run_dir)["current_step"], 4)
+            saved_state = read_state(run_dir)
+            self.assertEqual(
+                (
+                    saved_state["phase"],
+                    saved_state["step"],
+                    saved_state["current_step"],
+                    saved_state["current_node"],
+                ),
+                ("project_initialization", 4, 4, "project:04_assemble_foundation"),
+            )
             saved = json.loads((run_dir / "steps" / "03.json").read_text(encoding="utf-8"))
             self.assertEqual(saved, result)
 
@@ -262,7 +299,62 @@ class FoundationSelectionTests(unittest.TestCase):
             self.assertEqual(result["error"]["message"], "api_key=[REDACTED]")
             self.assertEqual(result["error"]["diagnostic_path"], "logs/step-03-error.json")
             self.assertTrue((run_dir / "logs/step-03-error.json").is_file())
-            self.assertEqual(read_state(run_dir)["current_step"], 3)
+            saved_state = read_state(run_dir)
+            self.assertEqual(
+                (
+                    saved_state["step"],
+                    saved_state["current_step"],
+                    saved_state["current_node"],
+                ),
+                (3, 3, "project:03_foundation_selection"),
+            )
+
+    def test_existing_success_advances_state_without_model_call(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, state, _catalog_path = self.make_run(Path(directory))
+            existing = self.saved_result()
+            write_json(run_dir / "steps/03.json", existing)
+
+            async def unexpected_runner(*_args, **_kwargs):
+                raise AssertionError("已有成功结果不应再次调用模型")
+
+            outcome = asyncio.run(
+                run(
+                    run_dir,
+                    state,
+                    catalog_loader=lambda _: (_ for _ in ()).throw(
+                        AssertionError("已有成功结果不应重新加载目录")
+                    ),
+                    model_runner=unexpected_runner,
+                )
+            )
+
+            self.assertEqual(outcome, existing)
+            saved = read_state(run_dir)
+            self.assertEqual(
+                (saved["step"], saved["current_step"], saved["current_node"]),
+                (4, 4, "project:04_assemble_foundation"),
+            )
+
+    def test_advanced_state_is_not_downgraded(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, state, catalog_path = self.make_run(Path(directory))
+            state.update(
+                {
+                    "phase": "project_initialization",
+                    "step": 5,
+                    "current_step": 5,
+                    "current_node": "project:05_verify_readiness",
+                }
+            )
+            write_state(run_dir, state)
+            before = (run_dir / "state.json").read_bytes()
+
+            with self.assertRaisesRegex(RuntimeError, "第 3 步恢复锚点"):
+                asyncio.run(run(run_dir, state, catalog_path=catalog_path))
+
+            self.assertEqual((run_dir / "state.json").read_bytes(), before)
+            self.assertFalse((run_dir / "steps/03.json").exists())
 
 
 if __name__ == "__main__":

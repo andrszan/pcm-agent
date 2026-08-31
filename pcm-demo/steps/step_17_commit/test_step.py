@@ -17,7 +17,6 @@ from common.claude_agent import ClaudeRunResult
 from common.state import read_state, write_requirement_step_result, write_state
 from steps.step_17_commit.step import (
     CURRENT_NODE,
-    MAX_BUDGET_USD,
     MAX_TURNS,
     NEXT_NODE,
     PHASE,
@@ -218,7 +217,7 @@ class RequirementCommitTests(unittest.TestCase):
         )
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0]["max_turns"], MAX_TURNS)
-        self.assertEqual(calls[0]["max_budget_usd"], MAX_BUDGET_USD)
+        self.assertNotIn("max_budget_usd", calls[0])
         self.assertEqual(calls[0]["prompt"].count("/commit-changes"), 1)
         saved_state = read_state(run_dir)
         key = "requirement_commit_BR-001"

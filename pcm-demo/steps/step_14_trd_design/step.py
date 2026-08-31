@@ -25,7 +25,6 @@ PHASE = "phase_1_requirement_development"
 SKILL_NAME = "trd-design"
 MAX_DECISION_ROUNDS = 8
 TRD_DESIGN_MAX_TURNS = 48
-TRD_DESIGN_MAX_BUDGET_USD = 16.0
 
 _FORBIDDEN_TITLE_CHARACTERS = set('<>:"/\\|?*')
 
@@ -389,7 +388,6 @@ async def run(
         skill_name=SKILL_NAME,
         max_decision_rounds=MAX_DECISION_ROUNDS,
         max_turns=TRD_DESIGN_MAX_TURNS,
-        max_budget_usd=TRD_DESIGN_MAX_BUDGET_USD,
         decision_system_prompt=render_decision_system_prompt(
             TRD_DESIGN_DECISION_RULES,
             {

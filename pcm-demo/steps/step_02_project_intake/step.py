@@ -9,12 +9,15 @@ from common.agent_decision_loop import AgentDecisionLoopSpec, run_agent_decision
 from common.claude_agent import run_claude
 from common.decision import render_decision_system_prompt, request_decision
 from common.files import resolve_workspace_output, sha256, write_json
-from common.state import write_state
+from common.state import write_state, write_step_result
 from config import LLMConfig
 from steps.step_01_create_workspace import inspect_root_repository
 
 STEP = 2
 NAME = "项目需求与产品定义"
+PHASE = "project_initialization"
+CURRENT_NODE = "project:02_intake"
+NEXT_NODE = "project:03_foundation_selection"
 CONVERSATION_KEY = "project_intake"
 SKILL_NAME = "project-intake"
 OUTPUTS = (
@@ -23,7 +26,6 @@ OUTPUTS = (
 )
 MAX_DECISION_ROUNDS = 8
 PROJECT_INTAKE_MAX_TURNS = 48
-PROJECT_INTAKE_MAX_BUDGET_USD = 16.0
 
 PROJECT_INTAKE_DECISION_RULES = """completed 表示两份正式产品定义文档已经生成，且当前事实足以确认其非空并可用。
 continue 表示还需给出明确指令以澄清产品或完成、修复这两份文档。
@@ -35,7 +37,6 @@ DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     skill_name=SKILL_NAME,
     max_decision_rounds=MAX_DECISION_ROUNDS,
     max_turns=PROJECT_INTAKE_MAX_TURNS,
-    max_budget_usd=PROJECT_INTAKE_MAX_BUDGET_USD,
     decision_system_prompt=render_decision_system_prompt(PROJECT_INTAKE_DECISION_RULES, {}),
     legacy_completion_messages=(
         "已完成 project-intake：两份正式产品定义文档已生成并通过文件事实核验。",
@@ -80,8 +81,30 @@ def trust_project(workspace: Path) -> None:
     write_json(claude_json, data)
 
 
+def _has_valid_entry_position(state: dict[str, Any]) -> bool:
+    position = (state.get("step"), state.get("current_step"), state.get("current_node"))
+    if state.get("phase") == PHASE and position == (STEP, STEP, CURRENT_NODE):
+        return True
+    return (
+        state.get("phase") is None
+        and state.get("step") is None
+        and state.get("current_node") is None
+        and state.get("current_step") in {1, STEP}
+    )
+
+
+def _is_legacy_completed_position(state: dict[str, Any]) -> bool:
+    return (
+        state.get("phase") is None
+        and state.get("step") is None
+        and state.get("current_node") is None
+        and state.get("current_step") == STEP
+        and state.get("status") == "success"
+    )
+
+
 def validate_inputs(run_dir: Path, state: dict[str, Any]) -> tuple[Path, Path]:
-    if state.get("current_step") not in {1, 2} or state.get("publication_phase") != "git_initialized":
+    if not _has_valid_entry_position(state) or state.get("publication_phase") != "git_initialized":
         raise RuntimeError("第 1 步尚未成功发布并初始化根 Git 仓库")
     workspace = Path(state["workspace"]["final_path"]).resolve()
     root = Path(state["workspace"]["root"]).resolve()
@@ -216,19 +239,40 @@ async def run(
 ) -> dict[str, Any]:
     workspace, draft = validate_inputs(run_dir, state)
     existing_outputs = output_contents(workspace)
-    if (
-        state.get("current_step") == STEP
-        and state.get("status") == "success"
-        and existing_outputs is not None
-        and (run_dir / "steps" / "02.json").is_file()
-    ):
-        return verify_existing_intake_success(run_dir)
+    if existing_outputs is not None and (run_dir / "steps" / "02.json").is_file():
+        try:
+            existing = verify_existing_intake_success(run_dir)
+        except RuntimeError:
+            existing = None
+        if existing is not None:
+            state.update(
+                {
+                    "status": "success",
+                    "phase": PHASE,
+                    "step": STEP + 1,
+                    "current_step": STEP + 1,
+                    "current_node": NEXT_NODE,
+                    "blocked": None,
+                    "error": None,
+                }
+            )
+            write_state(run_dir, state)
+            return existing
+    if _is_legacy_completed_position(state):
+        raise RuntimeError("第 2 步成功状态缺少可复用的完整结果")
 
+    state.update(
+        {
+            "phase": PHASE,
+            "step": STEP,
+            "current_step": STEP,
+            "current_node": CURRENT_NODE,
+        }
+    )
+    write_state(run_dir, state)
     trust_project(workspace)
     if state.get("status") != "blocked":
-        state.update(
-            {"current_step": STEP, "status": "running", "blocked": None, "error": None}
-        )
+        state.update({"status": "running", "blocked": None, "error": None})
         write_state(run_dir, state)
 
     def verify_completed() -> str | None:
@@ -266,17 +310,22 @@ async def run(
     if decision.verdict != "completed":
         raise RuntimeError("Agent 决策循环未返回完成或阻塞结论")
 
+    completed = result(
+        "success",
+        "project-intake 已生成产品定义文档。",
+        outputs=[relative.as_posix() for relative in OUTPUTS],
+    )
+    write_step_result(run_dir, STEP, completed)
     state.update(
         {
             "status": "success",
-            "current_step": STEP,
+            "phase": PHASE,
+            "step": STEP + 1,
+            "current_step": STEP + 1,
+            "current_node": NEXT_NODE,
             "blocked": None,
             "error": None,
         }
     )
     write_state(run_dir, state)
-    return result(
-        "success",
-        "project-intake 已生成产品定义文档。",
-        outputs=[relative.as_posix() for relative in OUTPUTS],
-    )
+    return completed

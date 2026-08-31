@@ -34,7 +34,6 @@ SKILL_NAME = "project-bootstrap"
 CHECKLIST = Path("docs/requirements/项目准备清单.md")
 MAX_DECISION_ROUNDS = 8
 PROJECT_BOOTSTRAP_MAX_TURNS = 48
-PROJECT_BOOTSTRAP_MAX_BUDGET_USD = 16.0
 LEGACY_COMPLETION_MESSAGES = (
     "已完成 project-bootstrap：基础工程已完成项目化并通过完成条件与工程边界核验。",
 )
@@ -49,7 +48,6 @@ DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     skill_name=SKILL_NAME,
     max_decision_rounds=MAX_DECISION_ROUNDS,
     max_turns=PROJECT_BOOTSTRAP_MAX_TURNS,
-    max_budget_usd=PROJECT_BOOTSTRAP_MAX_BUDGET_USD,
     decision_system_prompt=render_decision_system_prompt(BOOTSTRAP_DECISION_RULES, {}),
     legacy_completion_messages=LEGACY_COMPLETION_MESSAGES,
 )

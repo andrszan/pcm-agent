@@ -42,7 +42,13 @@ from steps.step_01_create_workspace import (
 from steps.step_02_project_intake import ProjectIntakeBlocked
 from steps.step_02_project_intake import result as project_intake_result
 from steps.step_02_project_intake import run as run_project_intake
+from steps.step_02_project_intake.step import (
+    CURRENT_NODE as PROJECT_INTAKE_NODE,
+    NEXT_NODE as FOUNDATION_SELECTION_NODE,
+    PHASE as PROJECT_INITIALIZATION_PHASE,
+)
 from steps.step_03_foundation_selection import run as run_foundation_selection
+from steps.step_03_foundation_selection.step import result as foundation_selection_result
 from steps.step_04_assemble_foundation import run as run_assemble_foundation
 from steps.step_04_assemble_foundation.step import result as assembly_result
 from steps.step_05_project_readiness import ProjectReadinessBlocked
@@ -127,8 +133,31 @@ from steps.step_18_merge.step import (
 )
 
 DEMO_ROOT = Path(__file__).resolve().parent
+PRODUCT_DRAFT_NODE = "project:00_product_draft"
+CREATE_WORKSPACE_NODE = "project:01_create_workspace"
 STEP_RETRY_DELAYS = (10, 30)
 _RETRY_REQUESTED_EXIT_CODE = 3
+
+
+def _at_early_failure_anchor(step: int, state: dict[str, Any]) -> bool:
+    node = CREATE_WORKSPACE_NODE if step == 1 else PROJECT_INTAKE_NODE
+    canonical = (
+        state.get("phase") == PROJECT_INITIALIZATION_PHASE
+        and (state.get("step"), state.get("current_step"), state.get("current_node"))
+        == (step, step, node)
+    )
+    current_step = state.get("current_step")
+    status = state.get("status")
+    legacy = (
+        state.get("phase") is None
+        and state.get("step") is None
+        and state.get("current_node") is None
+        and (
+            (current_step == step - 1 and status == "success")
+            or (current_step == step and status in {"running", "failed", "blocked"})
+        )
+    )
+    return canonical or legacy
 
 
 def parse_args() -> argparse.Namespace:
@@ -321,10 +350,27 @@ def load_or_create_step_one_run(args: argparse.Namespace) -> tuple[Path, dict[st
     if args.run_id and run_dir_for(args.run_id).is_dir():
         run_dir = run_dir_for(args.run_id)
         state = read_state(run_dir)
+        canonical = (
+            state.get("phase") == PROJECT_INITIALIZATION_PHASE
+            and (state.get("step"), state.get("current_step"), state.get("current_node"))
+            == (1, 1, CREATE_WORKSPACE_NODE)
+        )
+        legacy = (
+            state.get("phase") is None
+            and state.get("step") is None
+            and state.get("current_node") is None
+            and (
+                (state.get("current_step") == 0 and state.get("status") == "success")
+                or (
+                    state.get("current_step") == 1
+                    and state.get("status") in {"running", "failed", "blocked"}
+                )
+            )
+        )
+        if not canonical and not legacy:
+            raise RuntimeError("已有运行状态不属于第 1 步恢复锚点")
         if state.get("current_step") == 0 and state.get("status") != "success":
             raise RuntimeError("第 0 步尚未成功，不能建立项目工作区")
-        if state.get("current_step") not in {0, 1}:
-            raise RuntimeError("已有运行状态不属于第 0 或第 1 步")
         draft_path = Path(state["input"]["source_path"])
         if args.product_draft and args.product_draft.resolve() != draft_path:
             raise RuntimeError("--product-draft 与已有运行记录不一致")
@@ -338,7 +384,10 @@ def load_or_create_step_one_run(args: argparse.Namespace) -> tuple[Path, dict[st
     state = {
         "run_id": run_id,
         "status": "running",
+        "phase": PROJECT_INITIALIZATION_PHASE,
+        "step": 1,
         "current_step": 1,
+        "current_node": CREATE_WORKSPACE_NODE,
         "input": {
             "type": "product_draft",
             "source_path": str(draft_path),
@@ -362,6 +411,18 @@ def complete_step_one(
     draft_bytes = state["input"]["content"].encode("utf-8")
     if sha256(draft_path) != source_hash or sha256_bytes(draft_bytes) != source_hash:
         raise RuntimeError("产品初稿与已保存运行输入不一致")
+    state.update(
+        {
+            "status": "running",
+            "phase": PROJECT_INITIALIZATION_PHASE,
+            "step": 1,
+            "current_step": 1,
+            "current_node": CREATE_WORKSPACE_NODE,
+            "blocked": None,
+            "error": None,
+        }
+    )
+    write_state(run_dir, state)
 
     if "project" not in state:
         identity, attempts = asyncio.run(
@@ -474,10 +535,19 @@ def complete_step_one(
     if sha256(draft_path) != source_hash:
         raise RuntimeError("第 1 步发布期间源产品初稿发生变化")
     published_draft = final_path / "docs" / "产品初稿.md"
+    completed = workspace_result(
+        "success",
+        "已从固定模板发布独立产品项目工作区，并初始化零提交根 Git 仓库。",
+        outputs=["docs/产品初稿.md"],
+    )
+    write_step_result(run_dir, 1, completed)
     state.update(
         {
             "status": "success",
-            "current_step": 1,
+            "phase": PROJECT_INITIALIZATION_PHASE,
+            "step": 2,
+            "current_step": 2,
+            "current_node": PROJECT_INTAKE_NODE,
             "publication_phase": "git_initialized",
             "root_repository": root_repository,
             "input": {**state["input"], "published_path": str(published_draft)},
@@ -497,11 +567,7 @@ def complete_step_one(
         }
     )
     write_state(run_dir, state)
-    return run_dir, workspace_result(
-        "success",
-        "已从固定模板发布独立产品项目工作区，并初始化零提交根 Git 仓库。",
-        outputs=["docs/产品初稿.md"],
-    )
+    return run_dir, completed
 
 
 def load_step_two_run(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
@@ -674,21 +740,55 @@ def sha256_bytes(data: bytes) -> str:
 
 
 def run_step_zero(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
-    draft_path = require_draft(args.product_draft)
+    run_dir: Path | None = None
+    state: dict[str, Any] | None = None
+    if args.run_id:
+        candidate = run_dir_for(args.run_id)
+        if candidate.is_dir():
+            state = read_state(candidate)
+            canonical = (
+                state.get("phase") == PROJECT_INITIALIZATION_PHASE
+                and (state.get("step"), state.get("current_step"), state.get("current_node"))
+                == (0, 0, PRODUCT_DRAFT_NODE)
+            )
+            legacy_failed = (
+                state.get("phase") is None
+                and state.get("step") is None
+                and state.get("current_node") is None
+                and state.get("current_step") == 0
+                and state.get("status") != "success"
+            )
+            if not canonical and not legacy_failed:
+                raise RuntimeError("已有运行状态不属于第 0 步恢复锚点")
+            recorded_path = Path(state["input"]["source_path"]).resolve()
+            if args.product_draft and args.product_draft.resolve() != recorded_path:
+                raise RuntimeError("--product-draft 与已有运行记录不一致")
+            draft_path = recorded_path
+            run_dir = candidate
+        else:
+            draft_path = require_draft(args.product_draft)
+    else:
+        draft_path = require_draft(args.product_draft)
+
     before_hash = sha256(draft_path)
     result = run_product_draft(draft_path)
     after_hash = sha256(draft_path)
     if before_hash != after_hash:
         raise RuntimeError("第 0 步意外修改了产品初稿")
     run_id = args.run_id or new_run_id()
-    run_dir = create_run_dir(DEMO_ROOT / "runs", run_id)
+    if run_dir is None:
+        run_dir = create_run_dir(DEMO_ROOT / "runs", run_id)
     write_step_result(run_dir, 0, result)
-    write_state(
-        run_dir,
+    next_step = 1 if result["status"] == "success" else 0
+    next_node = CREATE_WORKSPACE_NODE if result["status"] == "success" else PRODUCT_DRAFT_NODE
+    next_state = state or {"run_id": run_id}
+    next_state.update(
         {
-            "run_id": run_id,
             "status": result["status"],
-            "current_step": 0,
+            "phase": PROJECT_INITIALIZATION_PHASE,
+            "step": next_step,
+            "current_step": next_step,
+            "current_node": next_node,
             "input": {
                 "type": "product_draft",
                 "source_path": str(draft_path),
@@ -696,8 +796,11 @@ def run_step_zero(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
                 "content": draft_path.read_text(encoding="utf-8"),
                 "published_path": None,
             },
-        },
+            "blocked": result["blocked"],
+            "error": result["error"],
+        }
     )
+    write_state(run_dir, next_state)
     return run_dir, result
 
 
@@ -936,6 +1039,8 @@ def main() -> int:
         error_projection = safe_error_projection(error)
         if args.step == 2:
             result_factory = project_intake_result
+        elif args.step == 3:
+            result_factory = foundation_selection_result
         elif args.step == 4:
             result_factory = assembly_result
         elif args.step == 5:
@@ -1346,11 +1451,18 @@ def main() -> int:
                 )
                 write_state(run_dir, state)
     elif run_dir is not None and args.step in {1, 2, 5, 6, 7, 8, 9, 10, 11, 12}:
-        if result["status"] != "success" and not protected_success:
+        persist_failure = result["status"] != "success" and not protected_success
+        state: dict[str, Any] | None = None
+        if persist_failure:
             try:
                 state = read_state(run_dir)
-            except Exception:  # noqa: BLE001 - 状态损坏时仍需保存步骤失败结果。
+            except Exception:  # noqa: BLE001 - 状态损坏时不能安全改写早期锚点。
                 state = None
+            if args.step in {1, 2} and (
+                state is None or not _at_early_failure_anchor(args.step, state)
+            ):
+                persist_failure = False
+        if persist_failure:
             if caught_error is not None:
                 attach_failure_diagnostic(run_dir, args.step, caught_error, result)
                 error_message = result["error"]["message"]
@@ -1362,7 +1474,23 @@ def main() -> int:
                 }
                 if args.step != 12:
                     update["current_step"] = args.step
-                if args.step == 5:
+                if args.step == 1:
+                    update.update(
+                        {
+                            "phase": PROJECT_INITIALIZATION_PHASE,
+                            "step": 1,
+                            "current_node": CREATE_WORKSPACE_NODE,
+                        }
+                    )
+                elif args.step == 2:
+                    update.update(
+                        {
+                            "phase": PROJECT_INITIALIZATION_PHASE,
+                            "step": 2,
+                            "current_node": PROJECT_INTAKE_NODE,
+                        }
+                    )
+                elif args.step == 5:
                     update.update({"step": 5, "current_node": PROJECT_READINESS_NODE})
                 elif args.step == 6:
                     update.update({"step": 6, "current_node": PROJECT_BOOTSTRAP_NODE})
@@ -1378,7 +1506,8 @@ def main() -> int:
                     update.update({"step": 11, "current_node": REQUIREMENT_BREAKDOWN_NODE})
                 state.update(update)
                 write_state(run_dir, state)
-        if not protected_success:
+            write_step_result(run_dir, args.step, result)
+        elif result["status"] == "success" and not protected_success:
             write_step_result(run_dir, args.step, result)
 
     if run_dir is not None:

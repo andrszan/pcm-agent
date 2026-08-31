@@ -21,7 +21,6 @@ from common.state import read_state, write_state
 from steps.step_01_create_workspace import initialize_root_repository
 from steps.step_08_initialize_repositories.step import (
     CURRENT_NODE,
-    INITIALIZE_REPOSITORIES_MAX_BUDGET_USD,
     INITIALIZE_REPOSITORIES_MAX_TURNS,
     NEXT_NODE,
     REPOSITORY_REPAIR_PROMPT,
@@ -194,7 +193,7 @@ class InitializeRepositoriesTests(unittest.TestCase):
             self.assertEqual(calls[0]["cwd"].resolve(), workspace.resolve())
             self.assertIsNone(calls[0]["resume_session_id"])
             self.assertEqual(calls[0]["max_turns"], INITIALIZE_REPOSITORIES_MAX_TURNS)
-            self.assertEqual(calls[0]["max_budget_usd"], INITIALIZE_REPOSITORIES_MAX_BUDGET_USD)
+            self.assertNotIn("max_budget_usd", calls[0])
             self.assertTrue(calls[0]["prompt"].startswith("/commit-changes\n"))
             for forbidden in ("expected_head", "INITIAL_COMMITS", "SHA", "组装", "唯一", "无父"):
                 self.assertNotIn(forbidden, calls[0]["prompt"])

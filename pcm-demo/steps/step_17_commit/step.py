@@ -25,7 +25,6 @@ PHASE = "phase_1_requirement_development"
 SKILL_NAME = "commit-changes"
 MAX_DECISION_ROUNDS = 8
 MAX_TURNS = 48
-MAX_BUDGET_USD = 16.0
 REPOSITORY_REPAIR_PROMPT = (
     "请只处理权威仓库清单中的未提交变更；不得修改或丢弃文件内容来让检查通过。"
     "完成后重新核验每个仓库的工作区和暂存区均干净。"
@@ -336,7 +335,6 @@ def _decision_spec(context: dict[str, Any]) -> AgentDecisionLoopSpec:
         skill_name=SKILL_NAME,
         max_decision_rounds=MAX_DECISION_ROUNDS,
         max_turns=MAX_TURNS,
-        max_budget_usd=MAX_BUDGET_USD,
         decision_system_prompt=render_decision_system_prompt(
             REQUIREMENT_COMMIT_DECISION_RULES,
             {

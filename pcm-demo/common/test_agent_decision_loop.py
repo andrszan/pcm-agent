@@ -97,7 +97,6 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
             skill_name="test-skill",
             max_decision_rounds=3,
             max_turns=7,
-            max_budget_usd=1.5,
             decision_system_prompt="决策 system prompt",
         )
 
@@ -785,28 +784,81 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
                         )
                     self.assertNotIn("API_KEY=secret", json.dumps(state, ensure_ascii=False))
 
-    async def test_agent_exception_and_cancellation_fail_as_safe_runtime_errors(self) -> None:
+    async def test_agent_exception_fails_as_safe_runtime_error(self) -> None:
         async def raises_exception(*_args: object, **_kwargs: object) -> ClaudeRunResult:
             raise ValueError("API_KEY=secret")
 
+        with self.assertRaises(AgentExecutionFailure) as raised:
+            await run_agent_decision_loop(
+                self.run_dir,
+                {},
+                self.workspace,
+                self.spec,
+                "初始 Agent 提示",
+                lambda: None,
+                agent_runner=raises_exception,
+                decision_runner=FakeDecisionRunner([]),
+                config_loader=lambda: object(),
+            )
+        self.assertFalse(raised.exception.retry_requested)
+
+    async def test_agent_cancellation_is_propagated(self) -> None:
         async def raises_cancelled(*_args: object, **_kwargs: object) -> ClaudeRunResult:
             raise asyncio.CancelledError()
 
-        for runner in (raises_exception, raises_cancelled):
-            with self.subTest(runner=runner.__name__):
-                with self.assertRaises(AgentExecutionFailure) as raised:
-                    await run_agent_decision_loop(
-                        self.run_dir,
-                        {},
-                        self.workspace,
-                        self.spec,
-                        "初始 Agent 提示",
-                        lambda: None,
-                        agent_runner=runner,
-                        decision_runner=FakeDecisionRunner([]),
-                        config_loader=lambda: object(),
-                    )
-                self.assertFalse(raised.exception.retry_requested)
+        with self.assertRaises(asyncio.CancelledError):
+            await run_agent_decision_loop(
+                self.run_dir,
+                {},
+                self.workspace,
+                self.spec,
+                "初始 Agent 提示",
+                lambda: None,
+                agent_runner=raises_cancelled,
+                decision_runner=FakeDecisionRunner([]),
+                config_loader=lambda: object(),
+            )
+
+    async def test_decision_and_completion_cancellation_are_propagated(self) -> None:
+        async def cancelled_decision(*_args: object, **_kwargs: object):
+            raise asyncio.CancelledError()
+
+        with self.assertRaises(asyncio.CancelledError):
+            await run_agent_decision_loop(
+                self.run_dir,
+                {},
+                self.workspace,
+                self.spec,
+                "初始 Agent 提示",
+                lambda: None,
+                agent_runner=FakeAgentRunner([self.result("Agent 完整回复")]),
+                decision_runner=cancelled_decision,
+                config_loader=lambda: object(),
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = Path(directory) / "run"
+            workspace = Path(directory) / "workspace"
+            run_dir.mkdir()
+            workspace.mkdir()
+
+            async def cancelled_verifier() -> None:
+                raise asyncio.CancelledError()
+
+            with self.assertRaises(asyncio.CancelledError):
+                await run_agent_decision_loop(
+                    run_dir,
+                    {},
+                    workspace,
+                    self.spec,
+                    "初始 Agent 提示",
+                    cancelled_verifier,
+                    agent_runner=FakeAgentRunner([self.result("Agent 完整回复", cwd=workspace)]),
+                    decision_runner=FakeDecisionRunner(
+                        [decision("completed", reason="等待完成核验")]
+                    ),
+                    config_loader=lambda: object(),
+                )
 
     async def test_direct_sdk_channel_errors_request_retry(self) -> None:
         cases = [
@@ -1016,6 +1068,7 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(captured_options[0].max_buffer_size, 10 * 1024 * 1024)
         self.assertEqual(captured_options[0].resume, "session-1")
+        self.assertIsNone(captured_options[0].max_budget_usd)
         self.assertEqual(result.terminal_reason, "api_error")
         self.assertEqual(result.api_error_status, 429)
         self.assertTrue(result.has_errors)
@@ -1069,7 +1122,6 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
             (ProcessError("process failed", exit_code=1), True),
             (CLINotFoundError(), False),
             (ValueError("local error"), False),
-            (asyncio.CancelledError(), False),
         ]
         for error, expected in cases:
             with self.subTest(error=type(error).__name__), tempfile.TemporaryDirectory() as directory:
@@ -1087,6 +1139,89 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
                     result = await run_claude("测试提示", cwd=workspace)
 
                 self.assertEqual(result.retry_requested, expected)
+
+    async def test_sdk_timeout_is_not_reported_as_wall_clock_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            write_json(
+                workspace / "plugins-lock.json",
+                {"version": 1, "plugins": []},
+            )
+
+            async def fake_query(*_args: object, **_kwargs: object):
+                raise TimeoutError("SDK internal timeout")
+                yield
+
+            with patch("common.claude_agent.query", new=fake_query):
+                result = await run_claude("测试提示", cwd=workspace)
+
+        self.assertEqual(result.exception_type, "TimeoutError")
+        self.assertIn("SDK internal timeout", result.exception or "")
+        self.assertNotIn("10 小时", result.exception or "")
+        self.assertFalse(result.retry_requested)
+
+    async def test_timeout_preserves_session_and_does_not_request_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            write_json(
+                workspace / "plugins-lock.json",
+                {"version": 1, "plugins": []},
+            )
+            cleaned_up = False
+
+            async def fake_query(*_args: object, **_kwargs: object):
+                nonlocal cleaned_up
+                try:
+                    yield SystemMessage(
+                        subtype="init",
+                        data={"session_id": "session-timeout", "cwd": str(workspace)},
+                    )
+                    await asyncio.Event().wait()
+                finally:
+                    cleaned_up = True
+
+            with (
+                patch("common.claude_agent.query", new=fake_query),
+                patch("common.claude_agent.CLAUDE_AGENT_TIMEOUT_SECONDS", 0.001),
+            ):
+                result = await run_claude("测试提示", cwd=workspace)
+
+        self.assertTrue(cleaned_up)
+        self.assertEqual(result.session_id, "session-timeout")
+        self.assertEqual(result.exception_type, "TimeoutError")
+        self.assertIn("10 小时", result.exception or "")
+        self.assertFalse(result.retry_requested)
+
+    async def test_external_cancellation_is_propagated(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            write_json(
+                workspace / "plugins-lock.json",
+                {"version": 1, "plugins": []},
+            )
+            started = asyncio.Event()
+            cleaned_up = False
+
+            async def fake_query(*_args: object, **_kwargs: object):
+                nonlocal cleaned_up
+                try:
+                    yield SystemMessage(
+                        subtype="init",
+                        data={"session_id": "session-cancel", "cwd": str(workspace)},
+                    )
+                    started.set()
+                    await asyncio.Event().wait()
+                finally:
+                    cleaned_up = True
+
+            with patch("common.claude_agent.query", new=fake_query):
+                task = asyncio.create_task(run_claude("测试提示", cwd=workspace))
+                await started.wait()
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+
+        self.assertTrue(cleaned_up)
 
     async def test_normal_result_followed_by_process_error_does_not_retry(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
