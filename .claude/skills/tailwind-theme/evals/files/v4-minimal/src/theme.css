@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.15 0 0);
+  --primary: oklch(0.25 0 0);
+  --primary-foreground: oklch(0.98 0 0);
+  --destructive: oklch(0.58 0.24 27);
+  --destructive-foreground: oklch(1 0 0);
+  --border: oklch(0.92 0 0);
+  --input: oklch(0.92 0 0);
+  --ring: oklch(0.7 0 0);
+  --warning: oklch(0.78 0.16 75);
+  --warning-foreground: oklch(0.24 0.05 55);
+  --radius: 0.5rem;
+}
+
+[data-theme="dark"] {
+  --background: oklch(0.15 0 0);
+  --foreground: oklch(0.98 0 0);
+  --primary: oklch(0.9 0 0);
+  --primary-foreground: oklch(0.2 0 0);
+  --destructive: oklch(0.7 0.19 22);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.28 0 0);
+  --input: oklch(0.32 0 0);
+  --ring: oklch(0.56 0 0);
+  --warning: oklch(0.72 0.15 75);
+  --warning-foreground: oklch(0.18 0.04 55);
+  --radius: 0.5rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --radius-lg: var(--radius);
+}

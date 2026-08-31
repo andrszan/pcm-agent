@@ -103,14 +103,15 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 | `session-rule-retrospective` | 从一次真实执行中提炼可复用项目规则，只增量编辑 `.claude/rules/` |
 | `commit-changes` | 分析真实 Git 变更，按功能结果精确创建一个或多个本地提交 |
 
-### 可选工具适配 Skills
+### 可选技术与工具适配 Skills
 
 | Skill | 依赖与边界 |
 |---|---|
+| `tailwind-theme` | 适用于 Tailwind CSS v4 CSS-first 前端；根据项目事实和明确主题要求选择经校验的 tweakcn 内置主题或生成自定义配色，只落实完整 light/dark 语义颜色并验证真实渲染，不修改字体、圆角、阴影、布局、组件或业务页面，也不自动安装 Tailwind 或组件库 |
 | `playwright-cli` | 依赖当前环境已具备的对应浏览器运行工具；用于真实浏览器操作与验证，核心 Skills 不得把它作为隐藏必需 Skill |
 | `media-assets` | 工作区固有、按需调用的开发期媒体工具；通过受控 Provider catalog 选择适配来源，获取少量资源并固化到目标项目，但不构成产品运行时依赖 |
 
-可选工具不可用时，应记录真实验证缺口；本仓库不为此自动安装新的 CLI、插件或项目依赖。
+可选技术或工具能力不适用、不可用时，应无副作用跳过或记录真实验证缺口；本仓库不为此自动安装新的 CLI、插件或项目依赖。
 
 ### 第三方 Skills
 
@@ -181,6 +182,12 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 │   │   └── evals/evals.json
 │   ├── session-rule-retrospective/SKILL.md
 │   ├── solution-design/SKILL.md
+│   ├── tailwind-theme/
+│   │   ├── SKILL.md
+│   │   ├── references/theme-selection.md
+│   │   └── evals/
+│   │       ├── evals.json
+│   │       └── files/
 │   ├── trd-design/
 │   │   ├── SKILL.md
 │   │   └── evals/evals.json
@@ -209,6 +216,8 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 项目执行时可以另有 `.claude/rules/` 保存项目级稳定规则。普通运行不创建专属过程目录、Manifest、Run ID 或阶段报告；需要长期保留的事实进入产品文档、活动 TRD、代码、测试、Git 或项目已有记录位置。
 
 `media-assets` 的 `providers/` 维护显式准入的 Provider catalog 和适配说明，不扫描目录或自动安装来源；`assets/fixtures/` 是受跟踪测试输入的维护入口，不承载目标产品资产、对象存储数据或工作区私有凭据。
+
+`tailwind-theme` 只面向实际采用 Tailwind CSS v4 CSS-first 语义颜色变量的前端。它按需读取 tweakcn 当前动态 registry，但只消费经过校验的 light/dark 颜色白名单并把最终值固化进目标项目；网络不可用或没有合适 preset 时依据项目事实生成自定义配色，不把动态 URL、完整远程 CSS、字体、圆角、阴影或其它非颜色 token 变成产品依赖。
 
 `ui-ux-framework` 的布局资源分为两层：`assets/layout-patterns/` 是技术中立、原生、自包含且可运行的固定六文件模式；`assets/layout-source-snapshots/` 是记录上游来源、许可与未知边界、带有外部依赖且不可独立运行的部分框架源码快照，只用于分析结构、交互和实现假设，不代表项目技术栈或组件选型。两类资源都按需只读最相关单套，Agent 必须依据目标项目的真实用户、任务、层级、设备、技术栈和品牌事实二次设计，不能复制后只换皮。具体索引与维护合同以 `ui-ux-framework/references/layout-resource-library.md` 为准。
 
@@ -244,7 +253,7 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 
 ### 空白项目怎么开始？
 
-先使用 `project-intake` 收敛目标用户、产品范围、核心流程和外部约束，再按项目是否需要模板选型调用 `foundation-selection` 并组装适用基础工程。随后使用 `project-readiness` 建立当前自动化开发周期唯一的开发资源准备基线，实际准备并核验后续编码和开发联调所需的外部资源、权限和开发配置；生产发布条件不属于该基线。基线完成后执行 `project-bootstrap` 项目化工程，再基于真实工程事实调用 `solution-design` 形成总体技术方案。默认完整顺序见人工流程文档，但每个 Skill 仍可独立调用。
+先使用 `project-intake` 收敛目标用户、产品范围、核心流程和外部约束，再按项目是否需要模板选型调用 `foundation-selection` 并组装适用基础工程。随后使用 `project-readiness` 建立当前自动化开发周期唯一的开发资源准备基线，实际准备并核验后续编码和开发联调所需的外部资源、权限和开发配置；生产发布条件不属于该基线。基线完成后执行 `project-bootstrap` 项目化工程；当前存在 Tailwind CSS v4 CSS-first 前端且尚无项目专属主题配色时，在项目化完成后、初始提交前条件性调用 `tailwind-theme`，同时落实并验证 light/dark 语义颜色，不新增固定编号步骤。然后基于真实工程事实调用 `solution-design` 形成总体技术方案。默认完整顺序见人工流程文档，但每个 Skill 仍可独立调用。
 
 ### 小改动或 Bug 修复也要走完整流程吗？
 

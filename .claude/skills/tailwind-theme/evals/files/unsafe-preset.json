@@ -1,0 +1,48 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "unsafe-preset",
+  "type": "registry:style",
+  "css": {
+    "@layer base": {
+      "body": {
+        "letterSpacing": "0.08em"
+      }
+    }
+  },
+  "cssVars": {
+    "theme": {
+      "font-sans": "Remote Sans",
+      "radius": "1.5rem"
+    },
+    "light": {
+      "background": "oklch(0.99 0.01 210)",
+      "foreground": "oklch(0.18 0.03 235)",
+      "card": "oklch(1 0 0)",
+      "card-foreground": "oklch(0.18 0.03 235)",
+      "primary": "oklch(0.56 0.14 225)",
+      "primary-foreground": "oklch(0.99 0 0)",
+      "accent": "oklch(0.9 0.08 190); color: red",
+      "accent-foreground": "oklch(0.2 0.03 230)",
+      "font-sans": "Remote Sans",
+      "radius": "1.5rem",
+      "shadow-md": "0 20px 60px red",
+      "letter-spacing": "0.08em",
+      "success": "oklch(0.7 0.2 150)",
+      "unknown-token": "oklch(0.5 0.2 20)"
+    },
+    "dark": {
+      "background": "oklch(0.16 0.03 235)",
+      "foreground": "oklch(0.96 0.01 210)",
+      "card": "oklch(0.21 0.03 235)",
+      "card-foreground": "oklch(0.96 0.01 210)",
+      "primary": "oklch(0.75 0.13 210)",
+      "primary-foreground": "oklch(0.17 0.03 235)",
+      "accent": "oklch(0.35 0.08 205)",
+      "accent-foreground": "oklch(0.96 0.01 210)",
+      "font-sans": "Remote Sans",
+      "radius": "1.5rem",
+      "shadow-md": "0 20px 60px black",
+      "success": "oklch(0.74 0.18 150)"
+    }
+  }
+}
