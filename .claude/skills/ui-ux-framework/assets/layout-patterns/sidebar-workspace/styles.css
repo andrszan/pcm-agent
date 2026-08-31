@@ -28,6 +28,8 @@ body {
   line-height: 1.5;
 }
 
+[hidden] { display: none !important; }
+
 button { font: inherit; cursor: pointer; }
 button, a { -webkit-tap-highlight-color: transparent; }
 a { color: var(--accent-strong); }
