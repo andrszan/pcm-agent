@@ -108,6 +108,7 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 | Skill | 依赖与边界 |
 |---|---|
 | `tailwind-theme` | 适用于 Tailwind CSS v4 CSS-first 前端；根据项目事实和明确主题要求选择经校验的 tweakcn 内置主题或生成自定义配色，只落实完整 light/dark 语义颜色并验证真实渲染，不修改字体、圆角、阴影、布局、组件或业务页面，也不自动安装 Tailwind 或组件库 |
+| `ui-component-patterns` | 适用于 React + shadcn/ui Base UI + Tailwind CSS v4 的具体 Chat、认证、业务卡片、结构化表单和真实趋势场景；从本地受控参考中选择少量候选并按真实业务、品牌、数据和状态二次设计，不安装或复制 registry，不决定 Shell、信息架构或主题；Radix 及其它不兼容栈无副作用跳过 |
 | `playwright-cli` | 依赖当前环境已具备的对应浏览器运行工具；用于真实浏览器操作与验证，核心 Skills 不得把它作为隐藏必需 Skill |
 | `media-assets` | 工作区固有、按需调用的开发期媒体工具；通过受控 Provider catalog 选择适配来源，获取少量资源并固化到目标项目，但不构成产品运行时依赖 |
 
@@ -188,6 +189,27 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 │   │   └── evals/
 │   │       ├── evals.json
 │   │       └── files/
+│   ├── ui-component-patterns/
+│   │   ├── SKILL.md
+│   │   ├── references/
+│   │   │   ├── adaptation-checklist.md
+│   │   │   └── catalog.md
+│   │   ├── assets/react-shadcn/base-tailwind-v4/
+│   │   │   ├── LICENSE.md
+│   │   │   ├── manifest.json
+│   │   │   ├── chat/
+│   │   │   │   ├── attachment-conversation/
+│   │   │   │   ├── streaming-chat-card/
+│   │   │   │   └── transcript-foundation/
+│   │   │   ├── business/
+│   │   │   │   ├── faq/
+│   │   │   │   ├── invoice/
+│   │   │   │   ├── invite-team/
+│   │   │   │   ├── login-two-column/
+│   │   │   │   ├── notification-settings/
+│   │   │   │   └── shipping-address/
+│   │   │   └── chart/line-trend/
+│   │   └── evals/evals.json
 │   ├── trd-design/
 │   │   ├── SKILL.md
 │   │   └── evals/evals.json
@@ -218,6 +240,8 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 `media-assets` 的 `providers/` 维护显式准入的 Provider catalog 和适配说明，不扫描目录或自动安装来源；`assets/fixtures/` 是受跟踪测试输入的维护入口，不承载目标产品资产、对象存储数据或工作区私有凭据。
 
 `tailwind-theme` 只面向实际采用 Tailwind CSS v4 CSS-first 语义颜色变量的前端。它按需读取 tweakcn 当前动态 registry，但只消费经过校验的 light/dark 颜色白名单并把最终值固化进目标项目；网络不可用或没有合适 preset 时依据项目事实生成自定义配色，不把动态 URL、完整远程 CSS、字体、圆角、阴影或其它非颜色 token 变成产品依赖。
+
+`ui-component-patterns` 只面向实际采用 React、shadcn/ui Base UI 与 Tailwind CSS v4 的具体 UI 实现场景。其 `assets/react-shadcn/base-tailwind-v4/` 保存固定上游 commit 的独立 registry block、preview 内部模块和明确标记为派生的 example 函数摘录；不复制基础 primitives、完整 gallery、可运行 demo 或正式预览。Agent 每次只读取最相关的少量候选，并使用目标项目自己的业务、品牌、数据、状态、组件和 token 二次设计；MIT 代码许可不自动覆盖商标、远程媒体或演示中的安全、监管和商业声明。
 
 `ui-ux-framework` 的布局资源分为两层：`assets/layout-patterns/` 是技术中立、原生、自包含且可运行的固定六文件模式；`assets/layout-source-snapshots/` 是记录上游来源、许可与未知边界、带有外部依赖且不可独立运行的部分框架源码快照，只用于分析结构、交互和实现假设，不代表项目技术栈或组件选型。两类资源都按需只读最相关单套，Agent 必须依据目标项目的真实用户、任务、层级、设备、技术栈和品牌事实二次设计，不能复制后只换皮。具体索引与维护合同以 `ui-ux-framework/references/layout-resource-library.md` 为准。
 

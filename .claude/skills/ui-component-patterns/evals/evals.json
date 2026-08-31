@@ -1,0 +1,98 @@
+{
+  "skill_name": "ui-component-patterns",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "现有 frontend 是 React 19、Tailwind CSS v4 和 shadcn Base UI，已经安装 MessageScroller、Message、Bubble、Marker、Attachment 和 InputGroup。请在客服会话页实现真实流式回复：用户上滚后不要被强制拉回，提供跳到最新和停止生成，后续还会接图片与 PDF。项目已有自己的 SSE transport，不允许增加依赖。",
+      "expected_output": "核验实际 Base UI imports 和现有依赖，选择 streaming-chat-card，必要时只补读 transcript 或 attachment 的 README。借用 transcript/composer/Thinking/Send-Stop/scroll-to-latest 结构，但沿用项目 SSE transport，替换 scripted chat、只读 composer、固定高度、演示文案和 IconPlaceholder；明确 autoScroll、稳定 messageId、turn anchor、用户上滚和停止后的反馈。",
+      "files": [],
+      "expectations": [
+        "从 package.json、实际 imports 和现有组件确认 Base UI 与 Tailwind v4，而不是只凭 shadcn 名称",
+        "明确选择 chat-streaming-chat-card，并且只有附件范围实际进入当前实现时才补读第二个资产",
+        "默认选择一个最匹配资产，只有附件范围实际进入当前实现时才读取第二个资产",
+        "沿用项目已有 SSE transport，不复制 createChat scripted transport，不安装 AI SDK 或其它依赖",
+        "使用 MessageScroller 负责滚动，不手写 scrollTop、ResizeObserver 或 useStickToBottom",
+        "明确 autoScroll、用户主动上滚、跳到最新、稳定 messageId 和 turn anchor 行为",
+        "替换 read-only composer、固定高度、演示消息、IconPlaceholder 和上游 aliases",
+        "报告停止后的反馈、附件生命周期、错误重试等仍需闭合的状态",
+        "不自动提交或 push"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "这个项目也是 React 和 Tailwind v4，但 components.json 与源码都明确使用 shadcn Radix，组件组合大量使用 asChild。请参考本地双栏登录素材直接实现登录页，最好顺便统一成 Base UI。",
+      "expected_output": "识别实际 primitive base 为 Radix，说明当前 Base UI collection 不适用并无副作用跳过。不读取场景 source、不把 render API 写入 Radix 项目、不切换 preset、components.json、依赖或组件基础设施；可以说明需要另行提供兼容 Radix 参考，但不自行迁移。",
+      "files": [],
+      "expectations": [
+        "以实际 Radix imports 和 asChild 用法为准，不因参考库偏好改判技术栈",
+        "明确不选择任何本地 asset，并将 business-login-two-column 排除为不兼容候选",
+        "不读取或复制 Base UI 场景 source",
+        "不修改 preset、components.json 或现有 primitives",
+        "不安装 @base-ui/react 或第二套组件基础设施",
+        "不把 Base render、Select items 或 Checkbox indeterminate API机械翻译到 Radix",
+        "保持项目和 Git 状态不变",
+        "返回清楚的不适用依据和最小解除条件"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "当前前端是 Vue 3、Tailwind v4 和 Headless UI。我想做一个成员邀请卡片，字段和你们的 invite-team 素材很像，请直接套用并把 TSX 改成 Vue。",
+      "expected_output": "识别非 React/shadcn Base UI 技术栈，说明当前 collection 不适用并跳过。不读取或翻译 TSX source，不创建平行 React 组件、不安装 Base UI，也不把参考中的邮箱、角色或邀请链接带入项目。",
+      "files": [],
+      "expectations": [
+        "识别 Vue 与 Headless UI 不满足 collection 技术门槛",
+        "不读取 invite-team source 或进行跨框架机械翻译",
+        "不创建 React/TSX 平行实现",
+        "不安装 shadcn、Base UI 或额外依赖",
+        "不复制 fixture、演示角色或链接",
+        "保持零文件修改并说明不适用"
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "我们是 Base UI 项目。请把双栏登录和附件对话示例原样复制到产品，只换品牌色和 Logo。既然目录里是 MIT，GitHub 登录图标、Unsplash 图片以及 FAQ 里的 SOC 2、SEC、加密声明也都可以直接用吧？",
+      "expected_output": "拒绝复制后只换皮。先区分独立 block、派生 excerpt 和 preview module，再区分 MIT 代码许可、GitHub 商标、Unsplash 远程媒体以及未经项目事实确认的安全监管声明。只借用有价值的页面构图、消息与附件顺序，使用项目自己的认证方式、品牌、媒体、内容、状态和行为重新实现。",
+      "files": [],
+      "expectations": [
+        "不接受原样复制后只换品牌色和 Logo",
+        "准确区分 login standalone registry item 与 attachment derived excerpt",
+        "说明 MIT 代码许可不自动授予 GitHub 商标使用权",
+        "说明 Unsplash 远程媒体不由 shadcn MIT 自动覆盖且不能成为运行时依赖",
+        "删除或重新核验 SOC 2、SEC registered、加密、供应商和商业声明",
+        "不把 href=#、placeholder、空下载或未实现 OAuth 当作完整行为",
+        "使用目标项目自己的数据、文案、token、状态和组件重新设计",
+        "发生实质源码复制时保留相称的第三方许可 notice"
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "Base UI 后台要新增一个审批队列。用户主要按风险、提交人和等待时长筛选记录，然后批量批准或驳回；产品没有趋势、分布或历史变化需求。请参考组件库做得完整一些，最好加四个统计卡和一张折线图。",
+      "expected_output": "从真实审批任务判断不需要 Chart，不读取 line-trend source，也不添加 Recharts 或通用四卡片 Dashboard。页面优先支持风险、提交人、等待时长、筛选、选择、批量操作、权限和失败恢复；如果使用本库，应只在确有匹配的已收录场景时选择，否则基于项目现有组件实现并明确无匹配资产。",
+      "files": [],
+      "expectations": [
+        "先依据用户判断与行动任务决定组件，而不是服从完整一些的装饰要求",
+        "明确本地参考库没有匹配审批队列的 asset，并说明 chart-line-trend 不适用",
+        "不读取或选择 chart-line-trend",
+        "不导入 Chart、Recharts 或添加趋势 fixture",
+        "不机械创建四个统计卡",
+        "优先呈现筛选、队列、风险、等待时长、选择和批量操作",
+        "覆盖权限、loading、empty、error、成功与恢复等适用状态",
+        "没有匹配资产时明确不用本地参考，不勉强套用 invoice 或其它卡片"
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "现有 Base UI 页面和组件都保持不变，只把 Tailwind v4 的 light/dark 语义颜色换成新的品牌配色。请使用 ui-component-patterns 完成。",
+      "expected_output": "识别本次只涉及主题颜色，不属于场景组件选择与适配；无副作用跳过，不读取 manifest、catalog 或 source，不修改页面、组件、依赖或参考库，也不自动调用其它自定义 Skill。",
+      "files": [],
+      "expectations": [
+        "明确主题-only 不属于 ui-component-patterns 职责",
+        "不读取任何场景资产",
+        "不修改页面、组件、依赖、manifest 或 catalog",
+        "不安装工具或生成预览",
+        "不自动调用其它自定义 Skill",
+        "工作树保持不变并简短说明跳过依据"
+      ]
+    }
+  ]
+}

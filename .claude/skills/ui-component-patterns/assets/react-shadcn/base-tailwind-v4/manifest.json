@@ -1,0 +1,626 @@
+{
+  "version": 1,
+  "collection": {
+    "id": "react-shadcn-base-tailwind-v4",
+    "framework": "React",
+    "componentSystem": "shadcn/ui",
+    "primitiveBase": "Base UI",
+    "styling": "Tailwind CSS v4",
+    "validatedAgainst": {
+      "react": "19.2.3",
+      "shadcn": "4.19.0",
+      "baseUi": "1.6.0",
+      "tailwindCss": "4.3.0"
+    },
+    "referenceOnly": true,
+    "independentlyRunnable": false
+  },
+  "provider": {
+    "id": "shadcn-ui",
+    "repository": "https://github.com/shadcn-ui/ui",
+    "commit": "b4a618b97e35f5dadf3a00d51f410c84a2567d4d",
+    "license": "MIT",
+    "licenseFile": "LICENSE.md"
+  },
+  "assets": [
+    {
+      "id": "chat-transcript-foundation",
+      "category": "chat",
+      "relativePath": "chat/transcript-foundation",
+      "applicableWhen": [
+        "连续对话需要区分自己与对方消息，并组织连续回复分组"
+      ],
+      "notApplicableWhen": [
+        "需要滚动、composer、流式状态或附件的完整 Chat"
+      ],
+      "sources": [
+        {
+          "repository": "https://github.com/shadcn-ui/ui",
+          "commit": "b4a618b97e35f5dadf3a00d51f410c84a2567d4d",
+          "path": "apps/v4/registry/bases/base/examples/message-example.tsx",
+          "sourceKind": "example-internal-function",
+          "scope": [
+            "MessageDefault, upstream lines 170-213"
+          ],
+          "contentMode": "derived",
+          "localFiles": [
+            "source/message-default.tsx"
+          ],
+          "transformations": [
+            "removed the Example wrapper",
+            "pruned unrelated imports and sibling examples",
+            "exported MessageDefault"
+          ]
+        }
+      ],
+      "dependencies": {
+        "packages": [],
+        "registryComponents": [
+          "bubble",
+          "message"
+        ],
+        "projectLocal": []
+      },
+      "baseUiApis": [],
+      "replaceBeforeUse": [
+        "演示对话",
+        "角色语义",
+        "宽度与消息间距",
+        "Bubble variants"
+      ],
+      "knownGaps": [
+        "没有滚动、输入、传输、状态、附件或持久化"
+      ],
+      "license": {
+        "spdx": "MIT",
+        "file": "LICENSE.md",
+        "notes": []
+      }
+    },
+    {
+      "id": "chat-streaming-chat-card",
+      "category": "chat",
+      "relativePath": "chat/streaming-chat-card",
+      "applicableWhen": [
+        "AI 助手或客服需要流式消息、Thinking、Send/Stop 和跳到最新"
+      ],
+      "notApplicableWhen": [
+        "普通评论或目标项目没有现有流式协议且不允许引入依赖"
+      ],
+      "sources": [
+        {
+          "repository": "https://github.com/shadcn-ui/ui",
+          "commit": "b4a618b97e35f5dadf3a00d51f410c84a2567d4d",
+          "path": "apps/v4/registry/bases/base/examples/message-scroller-example.tsx",
+          "sourceKind": "example-internal-function",
+          "scope": [
+            "scripted fixture, upstream lines 51-121",
+            "MessageScrollerDemo, upstream lines 123-252"
+          ],
+          "contentMode": "derived",
+          "localFiles": [
+            "source/message-scroller-demo.tsx"
+          ],
+          "transformations": [
+            "removed the gallery wrapper",
+            "pruned unrelated imports",
+            "exported MessageScrollerDemo"
+          ]
+        }
+      ],
+      "dependencies": {
+        "packages": [
+          "@ai-sdk/react@4.0.0-canary.162"
+        ],
+        "registryComponents": [
+          "bubble",
+          "card",
+          "input-group",
+          "marker",
+          "message",
+          "message-scroller",
+          "spinner"
+        ],
+        "projectLocal": [
+          "@/lib/ai",
+          "@/app/(create)/components/icon-placeholder"
+        ]
+      },
+      "baseUiApis": [],
+      "replaceBeforeUse": [
+        "scripted transport",
+        "read-only composer",
+        "fixed height",
+        "demo messages",
+        "IconPlaceholder",
+        "status mapping"
+      ],
+      "knownGaps": [
+        "没有生产 transport、附件、错误重试、停止后反馈或多部件渲染",
+        "示例未显式启用 autoScroll"
+      ],
+      "license": {
+        "spdx": "MIT",
+        "file": "LICENSE.md",
+        "notes": []
+      }
+    },
+    {
+      "id": "chat-attachment-conversation",
+      "category": "chat",
+      "relativePath": "chat/attachment-conversation",
+      "applicableWhen": [
+        "Chat 中需要组织用户图片输入、文本回复和系统生成文件"
+      ],
+      "notApplicableWhen": [
+        "只需要普通文件上传控件，或尚未设计文件生命周期"
+      ],
+      "sources": [
+        {
+          "repository": "https://github.com/shadcn-ui/ui",
+          "commit": "b4a618b97e35f5dadf3a00d51f410c84a2567d4d",
+          "path": "apps/v4/registry/bases/base/examples/message-example.tsx",
+          "sourceKind": "example-internal-function",
+          "scope": [
+            "MessageAttachment, upstream lines 595-669"
+          ],
+          "contentMode": "derived",
+          "localFiles": [
+            "source/message-attachment.tsx"
+          ],
+          "transformations": [
+            "removed the Example wrapper",
+            "pruned unrelated imports and sibling examples",
+            "exported MessageAttachment"
+          ]
+        }
+      ],
+      "dependencies": {
+        "packages": [],
+        "registryComponents": [
+          "attachment",
+          "bubble",
+          "message"
+        ],
+        "projectLocal": [
+          "@/app/(create)/components/icon-placeholder"
+        ]
+      },
+      "baseUiApis": [],
+      "replaceBeforeUse": [
+        "Unsplash URL",
+        "file names and sizes",
+        "download behavior",
+        "IconPlaceholder",
+        "file permissions and lifecycle"
+      ],
+      "knownGaps": [
+        "没有文件选择、上传、进度、取消、删除、失败重试或下载授权"
+      ],
+      "license": {
+        "spdx": "MIT",
+        "file": "LICENSE.md",
+        "notes": [
+          "Referenced Unsplash media is not covered by the shadcn/ui MIT License."
+        ]
+      }
+    },
+    {
+      "id": "business-login-two-column",
+      "category": "business",
+      "relativePath": "business/login-two-column",
+      "applicableWhen": [
+        "认证入口需要桌面辅助视觉区和窄屏单栏表单"
+      ],
+      "notApplicableWhen": [
+        "登录应位于 Dialog/Sheet，或不需要辅助品牌表面"
+      ],
+      "sources": [
+        {
+          "repository": "https://github.com/shadcn-ui/ui",
+          "commit": "b4a618b97e35f5dadf3a00d51f410c84a2567d4d",
+          "path": "apps/v4/registry/bases/base/blocks/login-02",
+          "sourceKind": "standalone-registry-item",
+          "scope": [
+            "page.tsx",
+            "components/login-form.tsx"
+          ],
+          "contentMode": "verbatim",
+          "localFiles": [
+            "source/page.tsx",
+            "source/components/login-form.tsx"
+          ],
+          "transformations": []
+        }
+      ],
+      "dependencies": {
+        "packages": [],
+        "registryComponents": [
+          "button",
+          "field",
+          "input",
+          "label"
+        ],
+        "projectLocal": [
+          "@/app/(create)/components/icon-placeholder",
+          "/placeholder.svg"
+        ]
+      },
+      "baseUiApis": [
+        "FieldGroup",
+        "Field",
+        "FieldLabel",
+        "FieldSeparator"
+      ],
+      "replaceBeforeUse": [
+        "Acme Inc.",
+        "GitHub mark and provider",
+        "href=\"#\"",
+        "/placeholder.svg",
+        "IconPlaceholder",
+        "authentication behavior and errors"
+      ],
+      "knownGaps": [
+        "没有认证提交、会话、错误恢复、MFA、OAuth 或真实路由"
+      ],
+      "license": {
+        "spdx": "MIT",
+        "file": "LICENSE.md",
+        "notes": [
+          "MIT does not grant GitHub trademark rights."
+        ]
+      }
+    },
+    {
+      "id": "business-invoice",
+      "category": "business",
+      "relativePath": "business/invoice",
+      "applicableWhen": [
+        "账单、订单或报价需要明细、金额汇总、状态与后续操作"
+      ],
+      "notApplicableWhen": [
+        "只展示单个金额，或金融规则尚未确定"
+      ],
+      "sources": [
+        {
+          "repository": "https://github.com/shadcn-ui/ui",
+          "commit": "b4a618b97e35f5dadf3a00d51f410c84a2567d4d",
+          "path": "apps/v4/registry/bases/base/blocks/preview/cards/invoice.tsx",
+          "sourceKind": "preview-internal-module",
+          "scope": [
+            "complete file"
+          ],
+          "contentMode": "verbatim",
+          "localFiles": [
+            "source/invoice.tsx"
+          ],
+          "transformations": []
+        }
+      ],
+      "dependencies": {
+        "packages": [],
+        "registryComponents": [
+          "badge",
+          "button",
+          "card",
+          "table"
+        ],
+        "projectLocal": []
+      },
+      "baseUiApis": [],
+      "replaceBeforeUse": [
+        "invoice number and date",
+        "items and prices",
+        "USD/en-US",
+        "tax rules",
+        "payment and PDF actions"
+      ],
+      "knownGaps": [
+        "没有真实账单、税务、支付、PDF、权限或财务精度合同"
+      ],
+      "license": {
+        "spdx": "MIT",
+        "file": "LICENSE.md",
+        "notes": []
+      }
+    },
+    {
+      "id": "business-shipping-address",
+      "category": "business",
+      "relativePath": "business/shipping-address",
+      "applicableWhen": [
+        "创建或编辑结构化地址，需要分组字段、地区 Select 和默认地址"
+      ],
+      "notApplicableWhen": [
+        "只需要自由文本地址，或准备把美国模型当成全球通用"
+      ],
+      "sources": [
+        {
+          "repository": "https://github.com/shadcn-ui/ui",
+          "commit": "b4a618b97e35f5dadf3a00d51f410c84a2567d4d",
+          "path": "apps/v4/registry/bases/base/blocks/preview/cards/shipping-address.tsx",
+          "sourceKind": "preview-internal-module",
+          "scope": [
+            "complete file"
+          ],
+          "contentMode": "verbatim",
+          "localFiles": [
+            "source/shipping-address.tsx"
+          ],
+          "transformations": []
+        }
+      ],
+      "dependencies": {
+        "packages": [],
+        "registryComponents": [
+          "button",
+          "card",
+          "checkbox",
+          "field",
+          "input",
+          "select"
+        ],
+        "projectLocal": []
+      },
+      "baseUiApis": [
+        "Select items",
+        "Select defaultValue",
+        "SelectGroup",
+        "Field orientation=\"horizontal\""
+      ],
+      "replaceBeforeUse": [
+        "US state and ZIP model",
+        "country and state fixtures",
+        "defaults",
+        "validation and internationalization",
+        "save and cancel behavior"
+      ],
+      "knownGaps": [
+        "没有 form submit、地址补全、地区联动、错误或真实国际地址支持"
+      ],
+      "license": {
+        "spdx": "MIT",
+        "file": "LICENSE.md",
+        "notes": []
+      }
+    },
+    {
+      "id": "business-invite-team",
+      "category": "business",
+      "relativePath": "business/invite-team",
+      "applicableWhen": [
+        "邀请多个成员并为每人选择角色，同时提供邀请链接"
+      ],
+      "notApplicableWhen": [
+        "权限模型尚未定义，或只有单个简单邮箱输入"
+      ],
+      "sources": [
+        {
+          "repository": "https://github.com/shadcn-ui/ui",
+          "commit": "b4a618b97e35f5dadf3a00d51f410c84a2567d4d",
+          "path": "apps/v4/registry/bases/base/blocks/preview/cards/invite-team.tsx",
+          "sourceKind": "preview-internal-module",
+          "scope": [
+            "complete file"
+          ],
+          "contentMode": "verbatim",
+          "localFiles": [
+            "source/invite-team.tsx"
+          ],
+          "transformations": []
+        }
+      ],
+      "dependencies": {
+        "packages": [],
+        "registryComponents": [
+          "button",
+          "card",
+          "field",
+          "input",
+          "input-group",
+          "select",
+          "separator"
+        ],
+        "projectLocal": [
+          "@/app/(create)/components/icon-placeholder"
+        ]
+      },
+      "baseUiApis": [
+        "Select items",
+        "SelectContent alignItemWithTrigger",
+        "InputGroupInput",
+        "InputGroupAddon"
+      ],
+      "replaceBeforeUse": [
+        "emails and roles",
+        "invite link",
+        "IconPlaceholder",
+        "add/copy/send behavior",
+        "validation and permissions"
+      ],
+      "knownGaps": [
+        "没有动态行、剪贴板、邀请 API、loading、成功或恢复状态"
+      ],
+      "license": {
+        "spdx": "MIT",
+        "file": "LICENSE.md",
+        "notes": []
+      }
+    },
+    {
+      "id": "business-notification-settings",
+      "category": "business",
+      "relativePath": "business/notification-settings",
+      "applicableWhen": [
+        "用户需要选择多种通知，并支持全选和部分选中"
+      ],
+      "notApplicableWhen": [
+        "只有一个布尔开关，或强制通知规则尚未设计"
+      ],
+      "sources": [
+        {
+          "repository": "https://github.com/shadcn-ui/ui",
+          "commit": "b4a618b97e35f5dadf3a00d51f410c84a2567d4d",
+          "path": "apps/v4/registry/bases/base/blocks/preview-02/cards/notification-settings.tsx",
+          "sourceKind": "preview-internal-module",
+          "scope": [
+            "complete file"
+          ],
+          "contentMode": "verbatim",
+          "localFiles": [
+            "source/notification-settings.tsx"
+          ],
+          "transformations": []
+        }
+      ],
+      "dependencies": {
+        "packages": [],
+        "registryComponents": [
+          "button",
+          "card",
+          "checkbox",
+          "field"
+        ],
+        "projectLocal": []
+      },
+      "baseUiApis": [
+        "Checkbox checked",
+        "Checkbox indeterminate",
+        "Checkbox onCheckedChange"
+      ],
+      "replaceBeforeUse": [
+        "financial notification categories",
+        "defaults",
+        "in-memory state",
+        "save behavior",
+        "permission and mandatory rules"
+      ],
+      "knownGaps": [
+        "没有持久化、异步状态、冲突恢复或服务端同步"
+      ],
+      "license": {
+        "spdx": "MIT",
+        "file": "LICENSE.md",
+        "notes": []
+      }
+    },
+    {
+      "id": "business-faq",
+      "category": "business",
+      "relativePath": "business/faq",
+      "applicableWhen": [
+        "帮助问题稳定分为少量类别，适合 Tabs + Accordion 扫描"
+      ],
+      "notApplicableWhen": [
+        "问题很少，或规模需要搜索、深链和独立知识库"
+      ],
+      "sources": [
+        {
+          "repository": "https://github.com/shadcn-ui/ui",
+          "commit": "b4a618b97e35f5dadf3a00d51f410c84a2567d4d",
+          "path": "apps/v4/registry/bases/base/blocks/preview-02/cards/faq.tsx",
+          "sourceKind": "preview-internal-module",
+          "scope": [
+            "complete file"
+          ],
+          "contentMode": "verbatim",
+          "localFiles": [
+            "source/faq.tsx"
+          ],
+          "transformations": []
+        }
+      ],
+      "dependencies": {
+        "packages": [],
+        "registryComponents": [
+          "accordion",
+          "button",
+          "card",
+          "tabs"
+        ],
+        "projectLocal": []
+      },
+      "baseUiApis": [
+        "Accordion array defaultValue",
+        "numeric AccordionItem value",
+        "TabsList contains TabsTrigger"
+      ],
+      "replaceBeforeUse": [
+        "Ledger, Plaid and MX references",
+        "security and regulatory claims",
+        "pricing and trial claims",
+        "support links and navigation"
+      ],
+      "knownGaps": [
+        "没有搜索、深链、内容管理、分析或真实支持入口"
+      ],
+      "license": {
+        "spdx": "MIT",
+        "file": "LICENSE.md",
+        "notes": [
+          "MIT does not validate security, regulatory, vendor, or commercial claims in demo copy."
+        ]
+      }
+    },
+    {
+      "id": "chart-line-trend",
+      "category": "chart",
+      "relativePath": "chart/line-trend",
+      "applicableWhen": [
+        "真实任务需要观察一个或两个指标随时间变化"
+      ],
+      "notApplicableWhen": [
+        "表单、设置、审批队列或普通表格没有趋势判断需求"
+      ],
+      "sources": [
+        {
+          "repository": "https://github.com/shadcn-ui/ui",
+          "commit": "b4a618b97e35f5dadf3a00d51f410c84a2567d4d",
+          "path": "apps/v4/registry/bases/base/examples/chart-example.tsx",
+          "sourceKind": "example-internal-function",
+          "scope": [
+            "line data/config and ChartLineExample, upstream lines 210-297"
+          ],
+          "contentMode": "derived",
+          "localFiles": [
+            "source/chart-line-example.tsx"
+          ],
+          "transformations": [
+            "removed the combined chart gallery and Example wrapper",
+            "pruned non-line chart imports",
+            "exported ChartLineExample"
+          ]
+        }
+      ],
+      "dependencies": {
+        "packages": [
+          "recharts@3.8.0"
+        ],
+        "registryComponents": [
+          "card",
+          "chart"
+        ],
+        "projectLocal": [
+          "@/app/(create)/components/icon-placeholder"
+        ]
+      },
+      "baseUiApis": [],
+      "replaceBeforeUse": [
+        "visitor data",
+        "months and series",
+        "5.2% claim",
+        "time range and labels",
+        "IconPlaceholder",
+        "chart tokens and tooltip"
+      ],
+      "knownGaps": [
+        "没有数据加载、空态、失败、时区、筛选、降采样或实时更新"
+      ],
+      "license": {
+        "spdx": "MIT",
+        "file": "LICENSE.md",
+        "notes": []
+      }
+    }
+  ]
+}

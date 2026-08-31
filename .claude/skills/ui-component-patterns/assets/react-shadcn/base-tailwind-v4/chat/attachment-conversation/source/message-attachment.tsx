@@ -1,0 +1,85 @@
+import {
+  Attachment,
+  AttachmentAction,
+  AttachmentActions,
+  AttachmentContent,
+  AttachmentDescription,
+  AttachmentMedia,
+  AttachmentTitle,
+} from "@/registry/bases/base/ui/attachment"
+import { Bubble, BubbleContent } from "@/registry/bases/base/ui/bubble"
+import { Message, MessageContent } from "@/registry/bases/base/ui/message"
+import { IconPlaceholder } from "@/app/(create)/components/icon-placeholder"
+
+export function MessageAttachment() {
+  return (
+    <div className="flex w-full max-w-sm flex-col gap-8">
+      <Message align="end">
+        <MessageContent>
+          <Attachment orientation="vertical">
+            <AttachmentMedia variant="image">
+              <img
+                src="https://images.unsplash.com/photo-1497366754035-f200968a6e72?w=900&auto=format&fit=crop&q=80"
+                alt="Workspace"
+              />
+            </AttachmentMedia>
+          </Attachment>
+          <Bubble>
+            <BubbleContent>
+              Here&apos;s the image. Can you add it to the PDF? Use it for the
+              cover page.
+            </BubbleContent>
+          </Bubble>
+        </MessageContent>
+      </Message>
+      <Message>
+        <MessageContent>
+          <Bubble variant="muted">
+            <BubbleContent>
+              Done. Here&apos;s the PDF with the image added as the cover page.
+            </BubbleContent>
+          </Bubble>
+          <Attachment>
+            <AttachmentMedia>
+              <IconPlaceholder
+                lucide="FileTextIcon"
+                tabler="IconFileText"
+                hugeicons="FileIcon"
+                phosphor="FileTextIcon"
+                remixicon="RiFileTextLine"
+              />
+            </AttachmentMedia>
+            <AttachmentContent>
+              <AttachmentTitle>sales-dashboard.pdf</AttachmentTitle>
+              <AttachmentDescription>PDF · 2.4 MB</AttachmentDescription>
+            </AttachmentContent>
+            <AttachmentActions>
+              <AttachmentAction
+                type="button"
+                title="Download"
+                aria-label="Download"
+                size="icon-sm"
+                variant="secondary"
+              >
+                <IconPlaceholder
+                  lucide="DownloadIcon"
+                  tabler="IconDownload"
+                  hugeicons="Download01Icon"
+                  phosphor="DownloadIcon"
+                  remixicon="RiDownloadLine"
+                />
+              </AttachmentAction>
+            </AttachmentActions>
+          </Attachment>
+        </MessageContent>
+      </Message>
+      <Message align="end">
+        <MessageContent>
+          <Bubble>
+            <BubbleContent>Thanks. Looks good.</BubbleContent>
+          </Bubble>
+        </MessageContent>
+      </Message>
+    </div>
+  )
+}
