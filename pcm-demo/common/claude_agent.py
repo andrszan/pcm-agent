@@ -22,6 +22,12 @@ from claude_agent_sdk import (
 
 from common.error_diagnostics import exception_diagnostics, redact_text
 
+CLAUDE_AGENT_TIMEOUT_SECONDS = 10 * 60 * 60
+
+
+class _QueryRaisedTimeout(RuntimeError):
+    pass
+
 
 @dataclass
 class ClaudeRunResult:
@@ -142,7 +148,6 @@ async def run_claude(
     cwd: Path,
     resume_session_id: str | None = None,
     max_turns: int = 12,
-    max_budget_usd: float = 2.0,
     on_update: Callable[[ClaudeRunResult], None] | None = None,
 ) -> ClaudeRunResult:
     init: dict[str, Any] | None = None
@@ -160,14 +165,21 @@ async def run_claude(
         skills="all",
         plugins=load_plugins(cwd),
         max_turns=max_turns,
-        max_budget_usd=max_budget_usd,
         max_buffer_size=10 * 1024 * 1024,
         resume=resume_session_id,
         env=filtered_env(),
     )
 
-    try:
-        async for message in query(prompt=prompt, options=options):
+    async def guarded_messages():
+        try:
+            async for message in query(prompt=prompt, options=options):
+                yield message
+        except TimeoutError as error:
+            raise _QueryRaisedTimeout(str(error)) from error
+
+    async def consume_messages() -> None:
+        nonlocal init, result
+        async for message in guarded_messages():
             if isinstance(message, SystemMessage) and message.subtype == "init":
                 init = {
                     key: message.data.get(key)
@@ -227,11 +239,27 @@ async def run_claude(
                             ),
                         )
                     )
-    except asyncio.CancelledError as error:
-        caught_error = error
-        exception = "CancelledError"
-        exception_type = "CancelledError"
-        exception_details = exception_diagnostics(error, known_secrets=known_secrets)
+
+    try:
+        await asyncio.wait_for(
+            consume_messages(), timeout=CLAUDE_AGENT_TIMEOUT_SECONDS
+        )
+    except _QueryRaisedTimeout as wrapped:
+        original = wrapped.__cause__ or wrapped
+        caught_error = original
+        exception_details = exception_diagnostics(original, known_secrets=known_secrets)
+        exception = f"TimeoutError: {exception_details['message']}"
+        exception_type = "TimeoutError"
+    except TimeoutError:
+        timeout_error = TimeoutError("Claude Agent SDK 调用超过 10 小时墙钟期限")
+        caught_error = timeout_error
+        exception_details = exception_diagnostics(
+            timeout_error, known_secrets=known_secrets
+        )
+        exception = f"TimeoutError: {exception_details['message']}"
+        exception_type = "TimeoutError"
+    except asyncio.CancelledError:
+        raise
     except Exception as error:  # SDK may raise after yielding a ResultMessage.
         caught_error = error
         exception_details = exception_diagnostics(error, known_secrets=known_secrets)

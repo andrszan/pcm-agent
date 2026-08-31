@@ -34,7 +34,6 @@ FRAMEWORK_PATH = Path("docs/ui-ux/framework.md")
 ARCHITECTURE_OUTPUT_PATH = Path("docs/design/工程架构设计.md")
 MAX_DECISION_ROUNDS = 8
 UI_UX_FRAMEWORK_MAX_TURNS = 48
-UI_UX_FRAMEWORK_MAX_BUDGET_USD = 16.0
 
 FRAMEWORK_REPAIR_PROMPT = (
     "固定产品级 UI/UX 框架文档缺失或为空。请仅创建或补全 "
@@ -53,7 +52,6 @@ DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     skill_name=SKILL_NAME,
     max_decision_rounds=MAX_DECISION_ROUNDS,
     max_turns=UI_UX_FRAMEWORK_MAX_TURNS,
-    max_budget_usd=UI_UX_FRAMEWORK_MAX_BUDGET_USD,
     decision_system_prompt=render_decision_system_prompt(UI_UX_FRAMEWORK_DECISION_RULES, {}),
 )
 

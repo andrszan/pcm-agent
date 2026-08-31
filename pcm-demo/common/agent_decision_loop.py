@@ -96,7 +96,6 @@ class AgentDecisionLoopSpec:
     skill_name: str
     max_decision_rounds: int
     max_turns: int
-    max_budget_usd: float
     decision_system_prompt: str
     legacy_completion_messages: tuple[str, ...] = ()
 
@@ -123,12 +122,6 @@ class AgentDecisionLoopSpec:
             or self.max_turns <= 0
         ):
             raise ValueError("max_turns 必须是正整数")
-        if (
-            not isinstance(self.max_budget_usd, (int, float))
-            or isinstance(self.max_budget_usd, bool)
-            or self.max_budget_usd <= 0
-        ):
-            raise ValueError("max_budget_usd 必须是正数")
         if not isinstance(self.decision_system_prompt, str) or not self.decision_system_prompt:
             raise ValueError("decision_system_prompt 不能为空")
         if any(not isinstance(message, str) or not message for message in self.legacy_completion_messages):
@@ -622,23 +615,10 @@ async def _run_agent(
             cwd=workspace,
             resume_session_id=_session(state, spec),
             max_turns=spec.max_turns,
-            max_budget_usd=spec.max_budget_usd,
             on_update=lambda update: _save_agent_update(run_dir, state, spec, update),
         )
-    except asyncio.CancelledError as error:
-        failure = persist_agent_failure(
-            run_dir,
-            state,
-            key=spec.key,
-            state_key=spec.state_key,
-            error=error,
-            retry_requested=False,
-        )
-        raise AgentExecutionFailure(
-            f"Agent SDK 执行异常：{failure}",
-            failure.diagnostic_path,
-            retry_requested=False,
-        ) from error
+    except asyncio.CancelledError:
+        raise
     except Exception as error:
         retry_requested = bool(getattr(error, "retry_requested", False)) or (
             is_retryable_claude_sdk_error(error)
@@ -691,8 +671,8 @@ async def _request_next_decision(
     _require_decision_capacity(messages, spec)
     try:
         config = config_loader()
-    except asyncio.CancelledError as error:
-        raise RuntimeError("AI-compatible 决策已取消") from error
+    except asyncio.CancelledError:
+        raise
     except Exception as error:
         _raise_decision_failure(
             run_dir, state, spec, {"kind": "configuration"}, error
@@ -704,8 +684,8 @@ async def _request_next_decision(
             config,
             system_prompt=messages[0]["content"],
         )
-    except asyncio.CancelledError as error:
-        raise RuntimeError("AI-compatible 决策已取消") from error
+    except asyncio.CancelledError:
+        raise
     except ResponsesFailure as error:
         _raise_decision_failure(run_dir, state, spec, error.diagnostic, error)
     except ValidationError as error:
@@ -737,8 +717,8 @@ async def _verify_completed(
         repair = completion_verifier()
         if inspect.isawaitable(repair):
             repair = await repair
-    except asyncio.CancelledError as error:
-        raise RuntimeError("完成核验已取消") from error
+    except asyncio.CancelledError:
+        raise
     except Exception as error:
         raise RuntimeError(f"完成核验失败：{redact_text(str(error))}") from error
     if repair is None:

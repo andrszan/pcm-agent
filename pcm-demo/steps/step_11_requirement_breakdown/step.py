@@ -36,7 +36,6 @@ ARCHITECTURE_OUTPUT_PATH = Path("docs/design/工程架构设计.md")
 UI_UX_FRAMEWORK_PATH = Path("docs/ui-ux/framework.md")
 MAX_DECISION_ROUNDS = 8
 REQUIREMENT_BREAKDOWN_MAX_TURNS = 48
-REQUIREMENT_BREAKDOWN_MAX_BUDGET_USD = 16.0
 
 BACKLOG_REPAIR_PROMPT = (
     "固定 Backlog 文档缺失或为空。请仅创建或补全 docs/backlog/backlog.md；"
@@ -55,7 +54,6 @@ DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     skill_name=SKILL_NAME,
     max_decision_rounds=MAX_DECISION_ROUNDS,
     max_turns=REQUIREMENT_BREAKDOWN_MAX_TURNS,
-    max_budget_usd=REQUIREMENT_BREAKDOWN_MAX_BUDGET_USD,
     decision_system_prompt=render_decision_system_prompt(REQUIREMENT_BREAKDOWN_DECISION_RULES, {}),
 )
 

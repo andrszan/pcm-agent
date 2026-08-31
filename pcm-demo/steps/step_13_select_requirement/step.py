@@ -164,7 +164,7 @@ def _repository_handoff(run_dir: Path, state: dict[str, Any]) -> list[dict[str, 
     return repositories
 
 
-def _registry_handoff(
+def registry_handoff(
     state: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     registry = state.get("requirement_registry")
@@ -253,7 +253,7 @@ def _cycle(
 
 def _context(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
     repositories = _repository_handoff(run_dir, state)
-    catalog, requirements = _registry_handoff(state)
+    catalog, requirements = registry_handoff(state)
     active = state.get("active_requirement")
     cycle = state.get("requirement_cycle")
     active_entries = [requirement for requirement in requirements if requirement["status"] == "active"]

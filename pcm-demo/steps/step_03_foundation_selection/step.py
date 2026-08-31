@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from common.error_diagnostics import exception_projection, write_diagnostic
 from common.files import resolve_workspace_output
@@ -14,6 +14,8 @@ from config import LLMConfig, load_template_catalog
 
 STEP = 3
 NAME = "基础工程选型"
+PHASE = "project_initialization"
+CURRENT_NODE = "project:03_foundation_selection"
 NEXT_NODE = "project:04_assemble_foundation"
 SYSTEM_PROMPT = """<task>
 根据产品定义和候选模板，为产品选择适用的前端与后端基础工程。
@@ -157,6 +159,102 @@ class FoundationSelectionResult(BaseModel):
     backend: TemplateSelection | None
 
 
+def result(
+    status: str,
+    summary: str,
+    *,
+    template_selection: dict[str, Any] | None = None,
+    error: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    selection = (
+        FoundationSelectionResult.model_validate(template_selection)
+        if template_selection is not None
+        else None
+    )
+    return {
+        "step": STEP,
+        "name": NAME,
+        "status": status,
+        "summary": summary,
+        "applicable": (
+            bool(selection.frontend is not None or selection.backend is not None)
+            if status == "success" and selection is not None
+            else True
+        ),
+        "outputs": [],
+        "blocked": None,
+        "error": error,
+        "template_selection": template_selection,
+    }
+
+
+def verify_existing_success(result_path: Path) -> dict[str, Any]:
+    try:
+        existing = json.loads(result_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise RuntimeError("第 3 步成功结果不可读取") from error
+    expected_keys = {
+        "step",
+        "name",
+        "status",
+        "summary",
+        "applicable",
+        "outputs",
+        "blocked",
+        "error",
+        "template_selection",
+    }
+    if (
+        not isinstance(existing, dict)
+        or set(existing) != expected_keys
+        or existing.get("step") != STEP
+        or existing.get("name") != NAME
+        or existing.get("status") != "success"
+        or not isinstance(existing.get("summary"), str)
+        or not existing["summary"].strip()
+        or existing.get("outputs") != []
+        or existing.get("blocked") is not None
+        or existing.get("error") is not None
+        or not isinstance(existing.get("template_selection"), dict)
+    ):
+        raise RuntimeError("第 3 步成功结果不可复用")
+    try:
+        selection = FoundationSelectionResult.model_validate(existing["template_selection"])
+    except ValidationError as error:
+        raise RuntimeError("第 3 步成功结果模板选择无效") from error
+    applicable = selection.frontend is not None or selection.backend is not None
+    if existing.get("applicable") is not applicable:
+        raise RuntimeError("第 3 步成功结果适用性不一致")
+    return existing
+
+
+def _position(state: dict[str, Any]) -> tuple[Any, Any, Any]:
+    return state.get("step"), state.get("current_step"), state.get("current_node")
+
+
+def _is_legacy_current(state: dict[str, Any]) -> bool:
+    if state.get("phase") is not None or state.get("step") is not None or state.get("current_node") is not None:
+        return False
+    current_step = state.get("current_step")
+    if current_step == STEP - 1:
+        return state.get("status") == "success"
+    return current_step == STEP and state.get("status") in {"running", "failed", "blocked"}
+
+
+def _advance_state(state: dict[str, Any]) -> None:
+    state.update(
+        {
+            "status": "success",
+            "phase": PHASE,
+            "step": STEP + 1,
+            "current_step": STEP + 1,
+            "current_node": NEXT_NODE,
+            "blocked": None,
+            "error": None,
+        }
+    )
+
+
 def load_selection_input(
     run_dir: Path, state: dict[str, Any], catalog_path: Path
 ) -> FoundationSelectionInput:
@@ -265,12 +363,36 @@ async def run(
     model_runner=parse_response,
 ) -> dict[str, Any]:
     result_path = run_dir / "steps" / "03.json"
-    if state.get("current_step") == 4 and result_path.is_file():
-        existing = json.loads(result_path.read_text(encoding="utf-8"))
-        if existing.get("status") == "success":
+    position = _position(state)
+    current = state.get("phase") == PHASE and position == (STEP, STEP, CURRENT_NODE)
+    advanced = state.get("phase") == PHASE and position == (STEP + 1, STEP + 1, NEXT_NODE)
+    legacy_current = _is_legacy_current(state)
+
+    if advanced:
+        return verify_existing_success(result_path)
+    if not current and not legacy_current:
+        raise RuntimeError("运行状态不位于第 3 步恢复锚点")
+    if result_path.is_file():
+        try:
+            existing = verify_existing_success(result_path)
+        except RuntimeError:
+            existing = None
+        if existing is not None:
+            _advance_state(state)
+            write_state(run_dir, state)
             return existing
 
-    state.update({"status": "running", "current_step": STEP, "blocked": None, "error": None})
+    state.update(
+        {
+            "status": "running",
+            "phase": PHASE,
+            "step": STEP,
+            "current_step": STEP,
+            "current_node": CURRENT_NODE,
+            "blocked": None,
+            "error": None,
+        }
+    )
     write_state(run_dir, state)
     try:
         resolved_catalog, _ = catalog_loader(catalog_path)
@@ -281,31 +403,15 @@ async def run(
             model_runner=model_runner,
         )
         template_selection = selection.model_dump(mode="json")
-        result = {
-            "step": STEP,
-            "name": NAME,
-            "status": "success",
-            "summary": "基础工程模板选择已完成。",
-            "applicable": selection.frontend is not None or selection.backend is not None,
-            "outputs": [],
-            "blocked": None,
-            "error": None,
-            "template_selection": template_selection,
-        }
-        write_step_result(run_dir, STEP, result)
-        state.update(
-            {
-                "status": "success",
-                "phase": "project_initialization",
-                "current_node": NEXT_NODE,
-                "step": 4,
-                "current_step": 4,
-                "blocked": None,
-                "error": None,
-            }
+        completed = result(
+            "success",
+            "基础工程模板选择已完成。",
+            template_selection=template_selection,
         )
+        write_step_result(run_dir, STEP, completed)
+        _advance_state(state)
         write_state(run_dir, state)
-        return result
+        return completed
     except Exception as error:  # noqa: BLE001 - 步骤入口统一保存脱敏失败结果。
         diagnostic_path = write_diagnostic(
             run_dir,
@@ -315,25 +421,22 @@ async def run(
             context={"step": STEP, "component": "foundation_selection", "operation": "select_foundations"},
             error=error,
         )
-        result = {
-            "step": STEP,
-            "name": NAME,
-            "status": "failed",
-            "summary": "基础工程模板选择失败。",
-            "applicable": True,
-            "outputs": [],
-            "blocked": None,
-            "error": exception_projection(error, diagnostic_path=diagnostic_path),
-            "template_selection": None,
-        }
-        write_step_result(run_dir, STEP, result)
+        failed = result(
+            "failed",
+            "基础工程模板选择失败。",
+            error=exception_projection(error, diagnostic_path=diagnostic_path),
+        )
+        write_step_result(run_dir, STEP, failed)
         state.update(
             {
                 "status": "failed",
+                "phase": PHASE,
+                "step": STEP,
                 "current_step": STEP,
+                "current_node": CURRENT_NODE,
                 "blocked": None,
-                "error": result["error"],
+                "error": failed["error"],
             }
         )
         write_state(run_dir, state)
-        return result
+        return failed

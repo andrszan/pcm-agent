@@ -27,7 +27,6 @@ from steps.step_06_project_bootstrap.step import (
     DECISION_LOOP_SPEC,
     LEGACY_COMPLETION_MESSAGES,
     NEXT_NODE,
-    PROJECT_BOOTSTRAP_MAX_BUDGET_USD,
     PROJECT_BOOTSTRAP_MAX_TURNS,
     README_REPAIR_PROMPT,
     ProjectBootstrapBlocked,
@@ -216,7 +215,7 @@ class ProjectBootstrapTests(unittest.TestCase):
             for forbidden in ("git_url", "origin", "第 6 步", "PCM", "节点", "阶段", "调用Skill"):
                 self.assertNotIn(forbidden, prompt)
             self.assertEqual(calls[0]["max_turns"], PROJECT_BOOTSTRAP_MAX_TURNS)
-            self.assertEqual(calls[0]["max_budget_usd"], PROJECT_BOOTSTRAP_MAX_BUDGET_USD)
+            self.assertNotIn("max_budget_usd", calls[0])
             self.assertEqual(len(system_prompts), 2)
             for system_prompt in system_prompts:
                 for tag in ("role", "project_context", "responsibility", "completion", "output"):
