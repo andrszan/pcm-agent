@@ -48,3 +48,6 @@
 .agents/plugins/**/__pycache__/
 .agents/plugins/**/*.pyc
 .agents/plugins/**/.orphaned_at
+
+# pcm-demo
+pcm-demo/
