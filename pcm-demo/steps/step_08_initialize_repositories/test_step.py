@@ -195,6 +195,7 @@ class InitializeRepositoriesTests(unittest.TestCase):
             self.assertEqual(calls[0]["max_turns"], INITIALIZE_REPOSITORIES_MAX_TURNS)
             self.assertNotIn("max_budget_usd", calls[0])
             self.assertTrue(calls[0]["prompt"].startswith("/commit-changes\n"))
+            self.assertIn("必须原样保留", calls[0]["prompt"])
             for forbidden in ("expected_head", "INITIAL_COMMITS", "SHA", "组装", "唯一", "无父"):
                 self.assertNotIn(forbidden, calls[0]["prompt"])
             self.assertEqual(saved["applicable_repositories"], names)
