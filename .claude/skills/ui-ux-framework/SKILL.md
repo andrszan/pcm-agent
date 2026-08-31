@@ -52,9 +52,11 @@ allowed-tools: Read, Glob, Grep, Bash, Write, Edit, TodoWrite
 |---|---|
 | 区分产品 Shell、页面模式与滚动模型，比较真实布局方向 | [`references/layout-selection-guide.md`](./references/layout-selection-guide.md) |
 | 正式确定或演进 Shell、导航、sticky、滚动与响应式合同 | [`references/app-shell-contract.md`](./references/app-shell-contract.md) |
-| 需要结构与交互参考，或维护新的布局资源 | [`references/layout-resource-library.md`](./references/layout-resource-library.md) 及其中选中的单个资源 |
+| 需要结构与交互参考，或维护布局资源 | [`references/layout-resource-library.md`](./references/layout-resource-library.md) 及其中选中的单个资源 |
 
-参考资源只证明一种结构如何工作。不得把示例的导航项、尺寸、颜色、文案、数据或代码当作项目事实、品牌成品或可直接复制的生产实现。
+`assets/layout-patterns/` 保持技术中立、原生、自包含、可运行和固定六文件；`assets/layout-source-snapshots/` 保存部分第三方框架源码快照，带有上游依赖和许可，不保证独立运行，只用于分析结构、交互与实现假设，不构成项目技术栈或组件选型。每次只读取与当前问题最相关的一套；选择源码快照时先读 README，再按需读取 source。
+
+参考资源只证明一种结构如何工作。使用时按“项目事实 → 借用原理 → 项目化表达 → 有依据差异 → 真实验证”完成转译；不得复制后只替换 Logo、颜色或文案，也不得复制 fixture、品牌、token、固定宽度、断点或 demo logic。相同或不同的关键决定都必须有项目事实依据，不要求随机变化。具体规则见 [`references/layout-resource-library.md`](./references/layout-resource-library.md)。
 
 开始前读取足以支撑判断的真实上下文，通常包括：
 
@@ -226,6 +228,7 @@ docs/ui-ux/framework.md
 - 是否只把真正改变跨需求体验骨架的取舍留作确认，其余可判定部分已经形成有依据的默认 Target；
 - 内容是否使用用户语言，术语、动作和状态是否跨页面一致；
 - 页面构图是否体现任务与产品特性，而非通用 Card/Table/Badge 堆砌；
+- 参考资源的项目事实、借用原理、有依据差异和真实验证是否可追溯；
 - 功能状态、失败恢复、移动端、键盘、焦点和辅助技术是否覆盖；
 - 品牌或局部定制是否污染共享体验；
 - 是否避免一次性重写、假设性抽象和专属过程产物；
