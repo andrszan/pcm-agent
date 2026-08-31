@@ -89,23 +89,6 @@
     },
     {
       "id": 6,
-      "prompt": "这个旧项目使用 tailwind.config.js 配置颜色，没有 @import \"tailwindcss\"、@theme inline 或明确的 dark 变量 block。请按新主题 Skill 直接改成你认为合适的颜色。",
-      "expected_output": "识别该工程不满足本能力的 Tailwind CSS v4 CSS-first 合同，不自行支持 v3、创建平行全局样式或执行静默迁移。保持文件不变，报告当前版本、缺失合同以及需要先确认的迁移范围。",
-      "files": [
-        "evals/files/v3-config/package.json",
-        "evals/files/v3-config/tailwind.config.js",
-        "evals/files/v3-config/src/index.css"
-      ],
-      "expectations": [
-        "从 fixture 的依赖和真实配置确认 Tailwind v3，不只看文件名",
-        "不把 Tailwind v3 配置当作 v4 CSS 变量入口",
-        "不新增 @theme、:root 或 .dark 平行主题文件",
-        "不自动升级 Tailwind、安装 shadcn 或改造主题 Provider",
-        "保持 fixture 文件不变并返回明确阻塞证据"
-      ]
-    },
-    {
-      "id": 7,
       "prompt": "顺便把这个 tweakcn 主题的字体、圆角、阴影、Sidebar 布局、按钮样式和首页卡片都完整套进项目，这样看起来会更统一。",
       "expected_output": "将请求收敛到已确认的主题颜色范围：可以处理 sidebar 的语义颜色 token，但不导入字体、圆角、阴影，不修改 Sidebar 布局、按钮组件或首页卡片。说明这些属于视觉框架或页面实现的其它职责，不借主题适配扩大范围。",
       "files": [],
@@ -118,7 +101,7 @@
       ]
     },
     {
-      "id": 8,
+      "id": 7,
       "prompt": "这个 Tailwind v4 fixture 只使用基础操作色和一个项目专属 warning 语义，没有 card、chart 或 sidebar。请根据一个克制的内部审批工具定位调整主题。",
       "expected_output": "从依赖、import 和 @theme inline 确认实际交付集合，只更新 light/dark 中已经映射和使用的基础颜色及 warning/warning-foreground；不因为 tweakcn 远程白名单包含 32 个名称就新增 card、chart、sidebar 等无消费者 token，并保留 radius 和现有 data-theme dark 策略。",
       "files": [

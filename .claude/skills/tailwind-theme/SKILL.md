@@ -34,7 +34,7 @@ allowed-tools: Read, Glob, Grep, Bash, WebFetch, Write, Edit, TodoWrite
 - 修改字体、字阶、圆角、阴影、间距、tracking、动效、图标或媒体；
 - 重构组件、页面、业务功能、主题 Provider 或主题切换交互；
 - 把单个 preset 的第三方品牌、Logo、文案或素材带入目标产品；
-- 支持 Tailwind CSS v3 配置式主题，或把 v3 工程静默迁移到 v4；
+- 处理 Tailwind CSS v4 CSS-first 之外的主题结构、版本迁移或主题基础设施改造；
 - 创建主题报告、Manifest、TRD、Backlog、提交或 push。
 
 已有产品级视觉方向时，将其作为最高优先级的目标输入；没有时，本能力可以根据充分的项目事实形成低风险、可替换的初始主题。改变明确品牌方向、已发布客户定制或兼容合同时，应先说明影响并等待相应决定。
