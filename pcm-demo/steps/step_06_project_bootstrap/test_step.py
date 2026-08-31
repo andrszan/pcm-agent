@@ -29,8 +29,14 @@ from steps.step_06_project_bootstrap.step import (
     NEXT_NODE,
     PROJECT_BOOTSTRAP_MAX_TURNS,
     README_REPAIR_PROMPT,
+    TAILWIND_THEME_DECISION_LOOP_SPEC,
+    TAILWIND_THEME_MAX_TURNS,
     ProjectBootstrapBlocked,
+    result,
     run,
+    tailwind_theme_initial_prompt,
+    verify_existing_bootstrap_success,
+    verify_tailwind_v4_frontend,
 )
 
 
@@ -55,6 +61,21 @@ def agent_result(
     )
 
 
+def agent_result_for_prompt(
+    prompt: str,
+    *,
+    cwd: Path,
+    text: str | None = None,
+) -> ClaudeRunResult:
+    is_theme = prompt.startswith("/tailwind-theme\n")
+    return agent_result(
+        cwd=cwd,
+        session="session-theme" if is_theme else "session-bootstrap",
+        text=text or ("主题完整回复" if is_theme else "项目化完整回复"),
+        skills=["tailwind-theme"] if is_theme else ["project-bootstrap"],
+    )
+
+
 def decision(
     verdict: str,
     *,
@@ -73,7 +94,11 @@ def decision(
 
 class ProjectBootstrapTests(unittest.TestCase):
     def make_run(
-        self, root: Path, *, applicable: bool = True
+        self,
+        root: Path,
+        *,
+        applicable: bool = True,
+        frontend: bool = True,
     ) -> tuple[Path, Path, dict]:
         run_dir = root / "run"
         (run_dir / "steps").mkdir(parents=True)
@@ -86,27 +111,40 @@ class ProjectBootstrapTests(unittest.TestCase):
         for output in (requirements, features, checklist):
             (workspace / output).write_text(f"# {Path(output).stem}\n", encoding="utf-8")
 
-        frontend = None
         outputs: list[str] = []
-        assembly_frontend = None
+        selections: dict[str, dict | None] = {"frontend": None, "backend": None}
+        assembly_entries: dict[str, dict | None] = {"frontend": None, "backend": None}
         if applicable:
-            (workspace / "frontend").mkdir()
-            (workspace / "frontend/package.json").write_text("{}\n", encoding="utf-8")
-            initialize_root_repository(workspace / "frontend")
-            frontend = TemplateSelection(
-                id="frontend-template",
+            target = "frontend" if frontend else "backend"
+            target_path = workspace / target
+            target_path.mkdir()
+            if frontend:
+                (target_path / "src").mkdir()
+                (target_path / "package.json").write_text(
+                    '{"dependencies":{"tailwindcss":"^4.1.0"}}\n', encoding="utf-8"
+                )
+                (target_path / "src/index.css").write_text(
+                    '@import "tailwindcss";\n', encoding="utf-8"
+                )
+            else:
+                (target_path / "pyproject.toml").write_text(
+                    '[project]\nname = "backend"\nversion = "0.1.0"\n', encoding="utf-8"
+                )
+            initialize_root_repository(target_path)
+            selections[target] = TemplateSelection(
+                id=f"{target}-template",
                 git_url="file:///templates.git",
                 default_branch="main",
-                path="templates/frontend",
+                path=f"templates/{target}",
                 reason="test",
             ).model_dump(mode="json")
-            outputs = ["frontend"]
-            assembly_frontend = {
-                "target": "frontend",
-                "id": "frontend-template",
+            outputs = [target]
+            assembly_entries[target] = {
+                "target": target,
+                "id": f"{target}-template",
                 "git_url": "file:///templates.git",
                 "default_branch": "main",
-                "path": "templates/frontend",
+                "path": f"templates/{target}",
                 "origin": "file:///templates.git",
                 "branch": "main",
                 "commit_sha": "a" * 40,
@@ -121,7 +159,7 @@ class ProjectBootstrapTests(unittest.TestCase):
             {
                 "step": 3,
                 "status": "success",
-                "template_selection": {"frontend": frontend, "backend": None},
+                "template_selection": selections,
             },
         )
         write_json(
@@ -131,7 +169,7 @@ class ProjectBootstrapTests(unittest.TestCase):
                 "status": "success",
                 "applicable": applicable,
                 "outputs": outputs,
-                "assembly": {"frontend": assembly_frontend, "backend": None},
+                "assembly": assembly_entries,
             },
         )
         write_json(
@@ -174,14 +212,15 @@ class ProjectBootstrapTests(unittest.TestCase):
                 calls.append({"prompt": prompt, **kwargs})
                 if len(calls) == 2:
                     (workspace / "README.md").write_text("# 项目\n", encoding="utf-8")
-                current = agent_result(
-                    cwd=kwargs["cwd"], text=f"项目化回复 {len(calls)}"  # type: ignore[arg-type, index]
+                current = agent_result_for_prompt(
+                    prompt,
+                    cwd=kwargs["cwd"],  # type: ignore[arg-type, index]
+                    text=f"执行回复 {len(calls)}",
                 )
                 kwargs["on_update"](current)  # type: ignore[index, operator]
                 return current
 
             async def completed(messages, config, *, system_prompt):
-                self.assertEqual(messages[-1]["content"], f"项目化回复 {len(system_prompts) + 1}")
                 system_prompts.append(system_prompt)
                 return decision("completed")
 
@@ -193,69 +232,126 @@ class ProjectBootstrapTests(unittest.TestCase):
                 config_loader=lambda: object(),
             )
             self.assertEqual(outcome["outputs"], ["frontend"])
-            self.assertEqual(len(calls), 2)
+            self.assertIs(outcome["tailwind_theme"], True)
+            self.assertEqual(len(calls), 3)
             self.assertIsNone(calls[0]["resume_session_id"])
-            self.assertEqual(calls[1]["resume_session_id"], "session-1")
+            self.assertEqual(calls[1]["resume_session_id"], "session-bootstrap")
             self.assertEqual(calls[1]["prompt"], README_REPAIR_PROMPT)
-            prompt = calls[0]["prompt"]
-            self.assertTrue(prompt.startswith("/project-bootstrap\n"))
-            self.assertIn("docs/requirements/项目需求说明.md", prompt)
-            self.assertIn("@./frontend", prompt)
-            self.assertIn("产品根 README", prompt)
-            self.assertIn("真实浏览器", prompt)
-            self.assertIn("实际 `.env`", prompt)
-            self.assertIn("环境变量改名", prompt)
-            self.assertIn("配置结构迁移", prompt)
-            self.assertIn("同一既有资源绑定和真实值", prompt)
-            self.assertIn("资源身份、endpoint 与权限范围", prompt)
-            self.assertIn("不得重新选择、创建、派生、轮换或替换", prompt)
-            self.assertIn("工程接线无法继续修复", prompt)
-            self.assertIn("不得修改权威产品定义或项目准备清单", prompt)
-            self.assertIn("不得初始化、暂存、提交", prompt)
+            self.assertIsNone(calls[2]["resume_session_id"])
+            self.assertEqual(calls[2]["max_turns"], TAILWIND_THEME_MAX_TURNS)
+
+            bootstrap_prompt = calls[0]["prompt"]
+            self.assertTrue(bootstrap_prompt.startswith("/project-bootstrap\n"))
+            self.assertIn("docs/requirements/项目需求说明.md", bootstrap_prompt)
+            self.assertIn("@./frontend", bootstrap_prompt)
+            self.assertIn("产品根 README", bootstrap_prompt)
+            self.assertIn("真实浏览器", bootstrap_prompt)
+            self.assertIn("实际 `.env`", bootstrap_prompt)
+            self.assertIn("环境变量改名", bootstrap_prompt)
+            self.assertIn("配置结构迁移", bootstrap_prompt)
+            self.assertIn("同一既有资源绑定和真实值", bootstrap_prompt)
+            self.assertIn("资源身份、endpoint 与权限范围", bootstrap_prompt)
+            self.assertIn("不得重新选择、创建、派生、轮换或替换", bootstrap_prompt)
+            self.assertIn("工程接线无法继续修复", bootstrap_prompt)
+            self.assertIn("不得修改权威产品定义或项目准备清单", bootstrap_prompt)
+            self.assertIn("不得初始化、暂存、提交", bootstrap_prompt)
+            self.assertIn("不要选择或生成项目专属主题配色", bootstrap_prompt)
             for forbidden in ("git_url", "origin", "第 6 步", "PCM", "节点", "阶段", "调用Skill"):
-                self.assertNotIn(forbidden, prompt)
+                self.assertNotIn(forbidden, bootstrap_prompt)
             self.assertEqual(calls[0]["max_turns"], PROJECT_BOOTSTRAP_MAX_TURNS)
             self.assertNotIn("max_budget_usd", calls[0])
-            self.assertEqual(len(system_prompts), 2)
+
+            theme_prompt = calls[2]["prompt"]
+            self.assertEqual(theme_prompt, tailwind_theme_initial_prompt([
+                "docs/requirements/项目需求说明.md",
+                "docs/requirements/产品功能说明.md",
+            ]))
+            self.assertTrue(theme_prompt.startswith("/tailwind-theme\n"))
+            for required in (
+                "Tailwind CSS v4 CSS-first",
+                "@./frontend",
+                "完整 light/dark",
+                "tweakcn",
+                "不得修改字体",
+                "真实浏览器",
+                "不得初始化、暂存、提交",
+            ):
+                self.assertIn(required, theme_prompt)
+            for forbidden in ("git_url", "origin", "第 6 步", "PCM", "节点", "阶段", "session"):
+                self.assertNotIn(forbidden, theme_prompt)
+
+            self.assertEqual(len(system_prompts), 3)
             for system_prompt in system_prompts:
                 for tag in ("role", "project_context", "responsibility", "completion", "output"):
                     self.assertIn(f"<{tag}>", system_prompt)
                     self.assertIn(f"</{tag}>", system_prompt)
+                self.assertNotIn("file:///templates.git", system_prompt)
+                self.assertNotIn("git_url", system_prompt)
+                self.assertNotIn("origin", system_prompt)
+            for bootstrap_system_prompt in system_prompts[:2]:
                 for required in (
-                    "最高项目负责人、工程负责人、专业开发者和 Agent 专家",
-                    "assistant 是你此前发给 Agent 的指令或结构化回复",
-                    "user 是 Agent 返回给你的完整执行结果",
                     "产品根 README 和各适用工程的项目身份",
-                    "允许为匹配工程实际加载合同维护受保护的实际 `.env`",
-                    "配置读取或迁移、工程接线",
-                    "已经使用既有配置排除工程接线问题",
-                    "不得通过重新选择、创建、派生、轮换或替换资源或凭据消除阻塞",
                     "已完成的项目准备基线",
                     "配置迁移与既有资源边界",
-                    "# 项目需求说明",
-                    "# 产品功能说明",
-                    "# 项目准备清单",
-                    '"frontend"',
-                    '"commit_sha"',
+                    "不把模板默认主题认定为项目专属主题",
                 ):
-                    self.assertIn(required, system_prompt)
-                self.assertNotEqual(system_prompt, DECISION_LOOP_SPEC.decision_system_prompt)
-                for forbidden in ("file:///templates.git", "git_url", "origin"):
-                    self.assertNotIn(forbidden, system_prompt)
+                    self.assertIn(required, bootstrap_system_prompt)
+                self.assertNotEqual(
+                    bootstrap_system_prompt, DECISION_LOOP_SPEC.decision_system_prompt
+                )
+            theme_system_prompt = system_prompts[2]
+            for required in (
+                "Tailwind CSS v4 CSS-first",
+                "完整落实并验证项目专属 light/dark",
+                "tweakcn 网络不可用必须回退到自定义配色",
+                '"frontend"',
+            ):
+                self.assertIn(required, theme_system_prompt)
+            self.assertNotEqual(
+                theme_system_prompt,
+                TAILWIND_THEME_DECISION_LOOP_SPEC.decision_system_prompt,
+            )
 
             saved = read_state(run_dir)
             self.assertEqual((saved["step"], saved["current_node"]), (7, NEXT_NODE))
-            history = json.loads(
-                (run_dir / "conversations/project_bootstrap.json").read_text(encoding="utf-8")
+            self.assertEqual(
+                saved["claude_sessions"],
+                {
+                    "project_bootstrap": "session-bootstrap",
+                    "tailwind_theme": "session-theme",
+                },
+            )
+            bootstrap_history = json.loads(
+                (run_dir / "conversations/project_bootstrap.json").read_text(
+                    encoding="utf-8"
+                )
             )["messages"]
             self.assertEqual(
-                [item["role"] for item in history],
+                [item["role"] for item in bootstrap_history],
                 ["system", "assistant", "user", "assistant", "assistant", "user", "assistant"],
             )
-            self.assertEqual(json.loads(history[-1]["content"])["verdict"], "completed")
-            self.assertNotIn(LEGACY_COMPLETION_MESSAGES[0], [item["content"] for item in history])
+            self.assertEqual(
+                json.loads(bootstrap_history[-1]["content"])["verdict"], "completed"
+            )
+            self.assertNotIn(
+                LEGACY_COMPLETION_MESSAGES[0],
+                [item["content"] for item in bootstrap_history],
+            )
+            theme_history = json.loads(
+                (run_dir / "conversations/tailwind_theme.json").read_text(
+                    encoding="utf-8"
+                )
+            )["messages"]
+            self.assertEqual(
+                [item["role"] for item in theme_history],
+                ["system", "assistant", "user", "assistant"],
+            )
+            self.assertEqual(
+                json.loads(theme_history[-1]["content"])["verdict"], "completed"
+            )
 
             saved.pop("project_bootstrap", None)
+            saved.pop("tailwind_theme", None)
             saved.pop("claude_sessions", None)
             saved.pop("decision_conversations", None)
             write_state(run_dir, saved)
@@ -270,6 +366,7 @@ class ProjectBootstrapTests(unittest.TestCase):
                 decision_runner=unexpected,
             )
             self.assertEqual(reused["status"], "success")
+            self.assertIs(reused["tailwind_theme"], True)
             self.assertIn("确认既有成功", reused["summary"])
 
     def test_unignored_coverage_artifact_uses_same_session_repair(self) -> None:
@@ -284,7 +381,9 @@ class ProjectBootstrapTests(unittest.TestCase):
                 calls.append({"prompt": prompt, **kwargs})
                 if len(calls) == 2:
                     coverage.unlink()
-                current = agent_result(cwd=kwargs["cwd"])  # type: ignore[arg-type, index]
+                current = agent_result_for_prompt(
+                    prompt, cwd=kwargs["cwd"]  # type: ignore[arg-type, index]
+                )
                 kwargs["on_update"](current)  # type: ignore[index, operator]
                 return current
 
@@ -299,9 +398,11 @@ class ProjectBootstrapTests(unittest.TestCase):
                 config_loader=lambda: object(),
             )
             self.assertEqual(saved["status"], "success")
-            self.assertEqual(len(calls), 2)
-            self.assertEqual(calls[1]["resume_session_id"], "session-1")
+            self.assertIs(saved["tailwind_theme"], True)
+            self.assertEqual(len(calls), 3)
+            self.assertEqual(calls[1]["resume_session_id"], "session-bootstrap")
             self.assertEqual(calls[1]["prompt"], COVERAGE_ARTIFACT_REPAIR_PROMPT)
+            self.assertTrue(calls[2]["prompt"].startswith("/tailwind-theme\n"))
 
     def test_blocked_decision_preserves_domain_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -333,6 +434,8 @@ class ProjectBootstrapTests(unittest.TestCase):
             )
             self.assertEqual(raised.exception.outputs, ["frontend"])
             self.assertTrue(workspace.is_dir())
+            self.assertFalse((run_dir / "conversations/tailwind_theme.json").exists())
+            self.assertNotIn("tailwind_theme", read_state(run_dir).get("claude_sessions", {}))
 
     def test_blocked_decision_rechecks_git_boundaries(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -470,7 +573,9 @@ class ProjectBootstrapTests(unittest.TestCase):
 
             async def fake_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
                 (workspace / "README.md").write_text("# 项目\n", encoding="utf-8")
-                current = agent_result(cwd=kwargs["cwd"])  # type: ignore[arg-type, index]
+                current = agent_result_for_prompt(
+                    prompt, cwd=kwargs["cwd"]  # type: ignore[arg-type, index]
+                )
                 kwargs["on_update"](current)  # type: ignore[index, operator]
                 return current
 
@@ -485,6 +590,238 @@ class ProjectBootstrapTests(unittest.TestCase):
                 config_loader=lambda: object(),
             )
             self.assertEqual(saved["status"], "success")
+            self.assertIs(saved["tailwind_theme"], True)
+
+    def test_backend_only_runs_bootstrap_and_skips_theme(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(
+                Path(directory), frontend=False
+            )
+            calls: list[dict] = []
+
+            async def fake_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
+                calls.append({"prompt": prompt, **kwargs})
+                (workspace / "README.md").write_text("# 项目\n", encoding="utf-8")
+                current = agent_result_for_prompt(
+                    prompt, cwd=kwargs["cwd"]  # type: ignore[arg-type, index]
+                )
+                kwargs["on_update"](current)  # type: ignore[index, operator]
+                return current
+
+            async def completed(messages, config, *, system_prompt):
+                return decision("completed")
+
+            outcome = self.run_step(
+                run_dir,
+                state,
+                agent_runner=fake_agent,
+                decision_runner=completed,
+                config_loader=lambda: object(),
+            )
+            self.assertEqual(outcome["outputs"], ["backend"])
+            self.assertIs(outcome["tailwind_theme"], False)
+            self.assertEqual(len(calls), 1)
+            self.assertTrue(calls[0]["prompt"].startswith("/project-bootstrap\n"))
+            self.assertFalse((run_dir / "conversations/tailwind_theme.json").exists())
+            self.assertNotIn("tailwind_theme", read_state(run_dir).get("claude_sessions", {}))
+
+    def test_tailwind_gate_accepts_explicit_v4_ranges_and_single_quote_import(self) -> None:
+        for version in ("^4", "4.1.0", "workspace:^4.1.0", ">=4 <5"):
+            with self.subTest(version=version), tempfile.TemporaryDirectory() as directory:
+                _, workspace, _ = self.make_run(Path(directory))
+                (workspace / "frontend/package.json").write_text(
+                    json.dumps(
+                        {"dependencies": {"tailwindcss": version}}, ensure_ascii=False
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                (workspace / "frontend/src/index.css").write_text(
+                    "@import 'tailwindcss';\n", encoding="utf-8"
+                )
+                verify_tailwind_v4_frontend(workspace)
+
+    def test_frontend_must_be_tailwind_v4_css_first_before_theme_session(self) -> None:
+        for invalid in (
+            "v3",
+            "file-version",
+            "ambiguous-range",
+            "missing-import",
+            "commented-import",
+            "split-import-token",
+            "split-module-name",
+        ):
+            with self.subTest(invalid=invalid), tempfile.TemporaryDirectory() as directory:
+                run_dir, workspace, state = self.make_run(Path(directory))
+                (workspace / "README.md").write_text("# 项目\n", encoding="utf-8")
+                if invalid in {"v3", "file-version", "ambiguous-range"}:
+                    versions = {
+                        "v3": "^3.4.0",
+                        "file-version": "file:../tailwindcss4",
+                        "ambiguous-range": "4 || 5",
+                    }
+                    (workspace / "frontend/package.json").write_text(
+                        json.dumps(
+                            {"dependencies": {"tailwindcss": versions[invalid]}},
+                            ensure_ascii=False,
+                        )
+                        + "\n",
+                        encoding="utf-8",
+                    )
+                elif invalid == "missing-import":
+                    (workspace / "frontend/src/index.css").write_text(
+                        "body { color: black; }\n", encoding="utf-8"
+                    )
+                elif invalid == "commented-import":
+                    (workspace / "frontend/src/index.css").write_text(
+                        '/* @import "tailwindcss"; */\nbody { color: black; }\n',
+                        encoding="utf-8",
+                    )
+                elif invalid == "split-import-token":
+                    (workspace / "frontend/src/index.css").write_text(
+                        '@im/**/port "tailwindcss";\n', encoding="utf-8"
+                    )
+                else:
+                    (workspace / "frontend/src/index.css").write_text(
+                        '@import "tail/*x*/windcss";\n', encoding="utf-8"
+                    )
+                calls: list[dict] = []
+
+                async def bootstrap_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
+                    if prompt.startswith("/tailwind-theme\n"):
+                        raise AssertionError("无效 Tailwind 合同不应调用 theme Agent")
+                    calls.append({"prompt": prompt, **kwargs})
+                    current = agent_result_for_prompt(
+                        prompt, cwd=kwargs["cwd"]  # type: ignore[arg-type, index]
+                    )
+                    kwargs["on_update"](current)  # type: ignore[index, operator]
+                    return current
+
+                async def completed(messages, config, *, system_prompt):
+                    return decision("completed")
+
+                with self.assertRaisesRegex(RuntimeError, "Tailwind CSS v4"):
+                    self.run_step(
+                        run_dir,
+                        state,
+                        agent_runner=bootstrap_agent,
+                        decision_runner=completed,
+                        config_loader=lambda: object(),
+                    )
+                self.assertEqual(len(calls), 1)
+                self.assertFalse((run_dir / "conversations/tailwind_theme.json").exists())
+                result_path = run_dir / "steps/06.json"
+                if result_path.exists():
+                    self.assertNotEqual(
+                        json.loads(result_path.read_text(encoding="utf-8"))["status"],
+                        "success",
+                    )
+
+    def test_theme_blocked_resumes_theme_without_rerunning_bootstrap_agent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory))
+            (workspace / "README.md").write_text("# 项目\n", encoding="utf-8")
+            calls: list[dict] = []
+
+            async def first_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
+                calls.append({"prompt": prompt, **kwargs})
+                current = agent_result_for_prompt(
+                    prompt, cwd=kwargs["cwd"]  # type: ignore[arg-type, index]
+                )
+                kwargs["on_update"](current)  # type: ignore[index, operator]
+                return current
+
+            async def first_decision(messages, config, *, system_prompt):
+                if "项目专属 light/dark" in system_prompt:
+                    return decision(
+                        "blocked",
+                        reason="缺少不可替代的授权品牌资料",
+                        required_inputs=["提供授权品牌资料"],
+                    )
+                return decision("completed")
+
+            with self.assertRaises(ProjectBootstrapBlocked):
+                self.run_step(
+                    run_dir,
+                    state,
+                    agent_runner=first_agent,
+                    decision_runner=first_decision,
+                    config_loader=lambda: object(),
+                )
+            self.assertEqual(len(calls), 2)
+            self.assertTrue(calls[0]["prompt"].startswith("/project-bootstrap\n"))
+            self.assertTrue(calls[1]["prompt"].startswith("/tailwind-theme\n"))
+
+            resumed_state = read_state(run_dir)
+            resumed_state.update(
+                {
+                    "status": "blocked",
+                    "blocked": {
+                        "reason": "缺少不可替代的授权品牌资料",
+                        "required_inputs": ["提供授权品牌资料"],
+                    },
+                }
+            )
+            write_state(run_dir, resumed_state)
+            resumed_calls: list[dict] = []
+
+            async def resumed_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
+                resumed_calls.append({"prompt": prompt, **kwargs})
+                self.assertEqual(kwargs["resume_session_id"], "session-theme")
+                current = agent_result(
+                    cwd=kwargs["cwd"],  # type: ignore[arg-type, index]
+                    session="session-theme",
+                    text="主题恢复完成",
+                    skills=["tailwind-theme"],
+                )
+                kwargs["on_update"](current)  # type: ignore[index, operator]
+                return current
+
+            async def resumed_decision(messages, config, *, system_prompt):
+                self.assertIn("项目专属 light/dark", system_prompt)
+                return decision("completed")
+
+            outcome = self.run_step(
+                run_dir,
+                resumed_state,
+                agent_runner=resumed_agent,
+                decision_runner=resumed_decision,
+                config_loader=lambda: object(),
+            )
+            self.assertIs(outcome["tailwind_theme"], True)
+            self.assertEqual(len(resumed_calls), 1)
+            self.assertFalse(resumed_calls[0]["prompt"].startswith("/project-bootstrap\n"))
+
+    def test_success_marker_is_strict_and_matches_frontend_applicability(self) -> None:
+        cases = (
+            (["frontend"], None, False),
+            (["frontend"], 1, False),
+            (["frontend"], False, False),
+            (["frontend"], True, True),
+            (["backend"], True, False),
+            (["backend"], False, True),
+            ([], False, True),
+        )
+        for outputs, marker, accepted in cases:
+            with self.subTest(outputs=outputs, marker=marker), tempfile.TemporaryDirectory() as directory:
+                run_dir = Path(directory)
+                (run_dir / "steps").mkdir()
+                payload = {
+                    "step": 6,
+                    "status": "success",
+                    "applicable": bool(outputs),
+                    "outputs": outputs,
+                }
+                if marker is not None:
+                    payload["tailwind_theme"] = marker
+                write_json(run_dir / "steps/06.json", payload)
+                if accepted:
+                    self.assertEqual(
+                        verify_existing_bootstrap_success(run_dir, outputs), payload
+                    )
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "不可复用"):
+                        verify_existing_bootstrap_success(run_dir, outputs)
 
     def test_no_applicable_foundation_skips_without_agent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -502,6 +839,7 @@ class ProjectBootstrapTests(unittest.TestCase):
             self.assertEqual(outcome["status"], "success")
             self.assertFalse(outcome["applicable"])
             self.assertEqual(outcome["outputs"], [])
+            self.assertIs(outcome["tailwind_theme"], False)
 
     def test_cli_requires_run_id_and_handles_corrupt_state(self) -> None:
         completed = subprocess.run(
@@ -537,6 +875,7 @@ class ProjectBootstrapTests(unittest.TestCase):
             self.assertNotIn("Traceback", broken.stderr)
             saved = json.loads((run_dir / "steps/06.json").read_text(encoding="utf-8"))
             self.assertEqual(saved["status"], "failed")
+            self.assertIs(saved["tailwind_theme"], False)
         finally:
             if run_dir.exists():
                 shutil.rmtree(run_dir)

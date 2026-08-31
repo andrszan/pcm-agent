@@ -418,7 +418,7 @@ Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重�
 - `completed` 只表示负责人根据 Agent 执行结果相信当前任务完成，步骤程序仍以现有文件、Git、命令和交接 verifier 二次核验；
 - 首行 slash command 只属于 Agent initial prompt；该 prompt 正文不写步骤编号、PCM 节点、阶段、session 或 Skill 编排；
 - `request_decision` 的 system prompt 为必传参数，并原样传给一次 `responses.parse`；Pydantic `AgentDecision` 是唯一结构化输出合同，没有公共默认 system prompt、公共 JSON 追加 prompt 或格式重试；
-- 项目上下文范围固定为：第 2 步初稿原文和目标路径；第 5 步产品定义原文、适用工程、选型白名单投影及资源清单仅路径/可读性；第 6、7 步产品定义原文、准备清单原文、适用工程和组装白名单投影；第 8 步合法有序 `applicable_repositories`；第 9～11 步各自的固定领域输入、权威工程和固定输出路径。第 8～11 步其余只读 Git 核验与 verifier 仍由步骤私有实现；
+- 项目上下文范围固定为：第 2 步初稿原文和目标路径；第 5 步产品定义原文、适用工程、选型白名单投影及资源清单仅路径/可读性；第 6 步的 `project_bootstrap` spec 使用产品定义原文、准备清单原文、适用工程和组装白名单投影，`tailwind_theme` spec 另以产品定义原文、实际 frontend 和主题颜色边界形成独立 snapshot；第 7 步使用产品定义原文、准备清单原文、适用工程和组装白名单投影；第 8 步合法有序 `applicable_repositories`；第 9～11 步各自的固定领域输入、权威工程和固定输出路径。第 8～11 步其余只读 Git 核验与 verifier 仍由步骤私有实现；
 - 选型和组装投影不包含 `git_url`、`origin`、`remote`。资源清单正文和 `.env` 不进入项目上下文；资源清单仍按步骤 Agent initial prompt 的既有授权处理；
 - 项目上下文只做标准 XML 转义；
 - repair prompt 只说明程序发现的固定缺口。
@@ -441,7 +441,7 @@ Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重�
 |---|---|---|
 | 2 `project-intake` | 收敛产品定义两件套 | 两份固定产品定义为非空普通文件 |
 | 5 `project-readiness` | 核验进入项目化前的资源与配置 | 固定准备清单为非空普通文件 |
-| 6 `project-bootstrap` | 有限项目化和真实工程验证 | 前序交接、根 README、工程和 Git 边界 |
+| 6 `project-bootstrap` / `tailwind-theme` | 同一数字步骤先有限项目化和真实工程验证；有 frontend 时再以独立 spec/session/conversation 落实项目专属 light/dark 主题 | bootstrap 核验前序交接、根 README、工程和 Git 边界；theme 前置核验 Tailwind v4 CSS-first，完成后复验 gate、工程和 Git 边界；最终 marker 严格对应 frontend |
 | 7 `solution-design` | 基于真实工程形成总体技术方案 | 固定方案文档、前序交接和 Git 边界 |
 | 8 `commit-changes` | 对权威仓库清单形成首次全仓干净基线；已全干净时零调用，dirty 时同一产品根 session 处理必要提交 | 步骤专属多仓 top-level、`main` 与工作树只读核验 |
 | 9 `engineering-architecture` | 必须基于固定权威输入形成工程架构文档；文档 repair 后，仅在根仓存在且仅存在固定文档未提交变化时才在原 session 调用 `commit-changes` | 固定文档非空、非符号链接、tracked；全体权威仓库当前为自身 top-level / `main` / clean |
@@ -449,7 +449,7 @@ Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重�
 | 11 `requirement-breakdown` | 基于严格第 2/5/7/8/9/10 交接形成固定 Backlog；只在唯一根仓文档未提交变化时调用 `commit-changes` | 固定 Backlog 非空、非符号链接、tracked；全体权威仓库当前为自身 top-level / `main` / clean |
 | 17 `commit-changes` | 在一个产品根 session 中提交当前需求的有序权威仓库白名单；负责人处理确认、意外、blocked和继续 | 各仓仍在统一需求分支，`main==base`、`HEAD==target`，工作树与暂存区 clean；记录 `tip_sha` |
 
-第 6 步没有适用基础工程时，继续 `applicable: false` 无副作用跳过，不调用 Agent 或决策模型。第 9 步始终 `applicable: true`，不存在简单项目跳过或不适用结果；第 10 步仍按第 8 步严格交接是否含 `frontend` 确定，未含时按执行产物存在性拒绝且零 Git、Agent、负责人决策、LLM 配置和文档副作用。第 11 步与第 9 步同样仅在固定 Backlog 造成唯一根仓未提交变化时调用 `commit-changes`。
+第 6 步没有适用基础工程时，继续 `applicable: false` 无副作用跳过，两个 spec 都不调用；backend-only 只运行 `project_bootstrap`，frontend 路径在 bootstrap 完成后才运行独立 `tailwind_theme`，两个领域都完成前不写 success。第 6 步没有新增节点或公共多阶段 runner，theme blocked/failed 后重跑只实际恢复 theme。第 9 步始终 `applicable: true`，不存在简单项目跳过或不适用结果；第 10 步仍按第 8 步严格交接是否含 `frontend` 确定，未含时按执行产物存在性拒绝且零 Git、Agent、负责人决策、LLM 配置和文档副作用。第 11 步与第 9 步同样仅在固定 Backlog 造成唯一根仓未提交变化时调用 `commit-changes`。
 
 ## 13. 旧记录兼容
 
@@ -467,14 +467,14 @@ Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重�
 - 旧 conversation 不转换、不覆盖；
 - 新 run 只写新 `verdict` 结构；
 - 旧内部控制 JSON 不得作为普通 Prompt 发给 Agent；
-- 已推进且步骤结果完整的 run 继续按幂等成功事实复用；
+- 已推进且步骤结果完整的 run 继续按幂等成功事实复用；第 6 步完整 success 另要求真实布尔 `tailwind_theme == ("frontend" in outputs)`，旧结果缺失或不一致 marker 不保护；
 - 第 9～11 步完整 success 的保护、result→state 中断恢复和完整 success 重跑均只依严格 result schema、当前固定文档和 Git事实，不依赖 conversation；字段残缺的 success 不保护。
 
 ## 14. 验收与真实证据
 
 自动化验证：
 
-- 公共精确脱敏、Claude Agent SDK/Responses/负责人裁决诊断、显式 SDK 通道重试、第 14 步零 Agent 恢复及 CLI 映射已完成；PCM Demo 全量 319 项 `unittest`、`compileall common steps run_step.py test_run_step_retry.py` 与 `git diff --check` 通过。现行重试 7 项覆盖首次成功、显式请求后恢复、三次耗尽归一、普通失败、CLI 错误、桥接映射和主动取消；公共循环测试另覆盖任意 API 状态、连接/进程异常、本地合同错误与瞬时标志不落盘。当时统一重试 5 项及“任意非 success 后恢复”只属于旧策略自动化历史；本次未为了制造错误调用真实外部服务。
+- 公共精确脱敏、Claude Agent SDK/Responses/负责人裁决诊断、显式 SDK 通道重试、第 14 步零 Agent 恢复及 CLI 映射已完成；PCM Demo 全量 351 项 `unittest`、`compileall common steps run_step.py run_all.py test_run_step_retry.py test_run_all.py` 与 `git diff --check` 通过。现行重试 7 项覆盖首次成功、显式请求后恢复、三次耗尽归一、普通失败、CLI 错误、桥接映射和主动取消；公共循环测试另覆盖任意 API 状态、连接/进程异常、本地合同错误与瞬时标志不落盘。当时统一重试 5 项及“任意非 success 后恢复”只属于旧策略自动化历史；本次未为了制造错误调用真实外部服务。
 
 兼容验证：
 

@@ -2,7 +2,7 @@
 
 > 本文定义正式 PCM 开发前的轻量 Python 验证项目。Demo 的目的不是提前实现正式 PCM，而是用可独立运行、可串联的一组脚本，真实验证 [`PCM 程序化调度的 AI Agent 产品开发流程`](../../.claude/PCM版AI%20Agent自动化流程设计.md)。
 >
-> 第 17 步现行实现本体 9 项、CLI 4 项；第 18 步本体 10 项、CLI 5 项。PCM Demo 当前工作树全量 321 项 `unittest`、`compileall common steps run_step.py test_run_step_retry.py` 与 `git diff --check` 通过（全量耗时 52.810 秒）。当前工作树还包含其它公共循环/CLI 的未提交修改，故该全量结果不能全部归因于第 9 步。第 17 步通过公共 Agent 决策循环保存完整 conversation、处理 continue/blocked/completed和同session repair，同时继续不做 fingerprint 或 Git 内容取证。`run_step.py` 只对 Claude Agent SDK 执行通道故障产生的运行时请求按 10 秒、30 秒重跑当前步骤两次；任意 API 状态均可请求重试，业务 `blocked`、普通 `failed`、本地合同错误和取消不重试，且该请求不持久化。真实 `step01-mendmark` 已完成 BR-001 与 BR-002；BR-002 在旧 direct-run 期间缺少 decision conversation，该历史不能补造，未来需求按现行合同保存完整历史。
+> 第 17 步现行实现本体 9 项、CLI 4 项；第 18 步本体 10 项、CLI 5 项。PCM Demo 当前工作树全量 351 项 `unittest`、`compileall common steps run_step.py run_all.py test_run_step_retry.py test_run_all.py` 与 `git diff --check` 通过（全量耗时 61.878 秒）。当前工作树还包含其它公共循环/CLI 的未提交修改，故该全量结果不能全部归因于第 9 步。第 17 步通过公共 Agent 决策循环保存完整 conversation、处理 continue/blocked/completed和同session repair，同时继续不做 fingerprint 或 Git 内容取证。`run_step.py` 只对 Claude Agent SDK 执行通道故障产生的运行时请求按 10 秒、30 秒重跑当前步骤两次；任意 API 状态均可请求重试，业务 `blocked`、普通 `failed`、本地合同错误和取消不重试，且该请求不持久化。真实 `step01-mendmark` 已完成 BR-001 与 BR-002；BR-002 在旧 direct-run 期间缺少 decision conversation，该历史不能补造，未来需求按现行合同保存完整历史。
 > 第 0～18 步均已完成代码与自动化；第 0～8、12～18 步已有适用的真实验证。第 9 步当前新版 prompt 合同仅完成自动化，尚未进行安全的 fresh 真实 Agent、负责人或 `/commit-changes` 集成；`step01-mendmark` 中保留的第 9～11 步 session、commit 与成功状态均属旧合同历史。第 12 步现行合同已用自由格式 Backlog 真实提取 `BR-AI-001`～`BR-AI-003` 并完成零模型幂等重跑；历史 `step01-mendmark` 的 14 项 BR 注册表属于旧三字段 source 合同。第 13～17 步完成 BR-001 的统一分支、活动 TRD、实现验证、规则复盘和提交；第 18 步已将 root/frontend/backend ff-only 到记录 tip、删除需求分支并把 BR-001 标记为 completed。旧 403、非 JSON、非法 completed 和旧 prompt 设计只保留为已修复的根因历史；`step08-real-20260823-a/b` 的 prompt、API、`.coverage`、授权循环和提交事实继续仅属于旧“唯一初始提交证明”合同的历史运行。
 
 ## 一、验证目标
@@ -16,7 +16,7 @@
 → 基础工程选型
 → 基础工程组装
 → 项目准备核验
-→ 基础工程项目化
+→ 基础工程项目化与项目专属主题配色
 → 总体技术方案
 → 初始化并首次提交适用仓库
 → 必要的工程架构设计
@@ -223,7 +223,7 @@ pcm-demo/
 uv run python -m unittest discover -s . -t . -p 'test*.py' -v
 ```
 
-本次 project-readiness 修正验证包含第 5 步 15 项、第 6/7/9/10/11 步下游交接 68 项，合计 83 项；此前第 13 步 30 项和显式 SDK 通道重试 7 项保留其原验证语境。本轮当前工作树全量 321 项 `unittest` 通过（52.810 秒），`compileall common steps run_step.py test_run_step_retry.py` 与本次目标 `git diff --check` 通过；当前工作树还包含其它公共循环/CLI 的未提交修改，故全量结果不能全部归因于第 9 步。重试定向还由公共 Agent 循环测试覆盖任意 API 状态、连接/进程异常、取消、本地合同错误和瞬时标志不落盘；本次未调用真实外部服务制造故障。第 5 步新增准备清单与两份产品定义指纹、旧成功拒绝、清单漂移和产品范围漂移覆盖；第 6 步新增配置迁移与既有资源边界的 Prompt/决策覆盖。真实 BR-002 既有验证事实保持不变。Ruff 未安装，未执行 Ruff。
+本次 project-readiness 修正验证包含第 5 步 15 项、第 6/7/9/10/11 步下游交接 68 项，合计 83 项；此前第 13 步 30 项和显式 SDK 通道重试 7 项保留其原验证语境。本轮当前工作树全量 351 项 `unittest` 通过（61.878 秒），`compileall common steps run_step.py run_all.py test_run_step_retry.py test_run_all.py` 与本次目标 `git diff --check` 通过；当前工作树还包含其它公共循环/CLI 的未提交修改，故全量结果不能全部归因于第 9 步。重试定向还由公共 Agent 循环测试覆盖任意 API 状态、连接/进程异常、取消、本地合同错误和瞬时标志不落盘；本次未调用真实外部服务制造故障。第 5 步新增准备清单与两份产品定义指纹、旧成功拒绝、清单漂移和产品范围漂移覆盖；第 6 步新增配置迁移与既有资源边界的 Prompt/决策覆盖。真实 BR-002 既有验证事实保持不变。Ruff 未安装，未执行 Ruff。
 
 ## 七、执行架构与职责
 
@@ -308,7 +308,7 @@ Python 负责确定性操作和最终状态裁决：
 | 3 | 基础工程选型 | 使用 Pydantic 输入输出和 `responses.parse` 从本次 catalog 选择适用模板 | `steps/03.json.template_selection` |
 | 4 | 组装基础工程 | 在 run-owned payload 中拒绝上游 `.git`/符号链接，建立适用子仓 `main` / unborn / 空 index 边界后原子发布 | 适用前后端独立基础工程仓 |
 | 5 | 核验项目准备状态 | 调用 `project-readiness` 建立当前自动化开发周期唯一的开发资源准备基线，实际准备资源、运行配置并使用最终运行凭据核验 | 准备清单、受保护本地配置、公开示例与无秘密基线指纹 |
-| 6 | 项目化基础工程 | 调用 `project-bootstrap` 收口项目身份和工程接线，允许在保持既有资源绑定的前提下迁移配置结构，并完成真实工程验证 | 可安装、构建、测试、启动和基础联调的工程 |
+| 6 | 项目化基础工程与主题配色 | 先调用 `project-bootstrap` 收口项目身份和工程接线，允许在保持既有资源绑定的前提下迁移配置结构并完成真实工程验证；有 frontend 时再以独立 session/conversation 调用 `tailwind-theme`，落实并验证项目专属 light/dark 语义颜色 | 可安装、构建、测试、启动和基础联调的工程；`steps/06.json.tailwind_theme` 严格等于 outputs 是否含 frontend |
 | 7 | 总体技术方案 | 调用 `solution-design`，基于已组装并项目化的工程事实设计 | 总体技术方案 |
 | 8 | 首次提交适用仓库 | 以固定权威仓库清单执行首次全仓提交检查；全干净零调用直接成功，dirty 时一个 `commit-changes` session 处理必要提交，Python 只读复验 | `applicable_repositories` 与仓库干净事实 |
 | 9 | 工程架构设计 | 必要步骤；单份根仓文档按每个包含业务代码且相关的适用交付单元闭合 Current/Target、职责/边界、依赖和代表性文件归属；repair 后仅在其为唯一根仓未提交变化时调用 `commit-changes` | `docs/design/工程架构设计.md` 非空、非符号链接、tracked，当前全仓 clean 并推进第 10 步 |
@@ -343,21 +343,23 @@ Python 负责确定性操作和最终状态裁决：
 
 **重构前真实运行事实。** 修迹项目曾完成 PostgreSQL、MinIO 与本地配置准备，并在旧 session 语义下推进到第 6 步；该业务事实保留。旧历史中的固定完成声明和 `decision_turn` 属于旧协议，不是新循环会写入的状态。
 
-第 6 步只从前序结果读取两份产品定义、第 4 步实际适用工程与白名单化组装来源，以及经过严格指纹核验的第 5 步准备基线；工程内部事实由 Agent 按现场读取。初始提示以 `/project-bootstrap` 开始，正文不包含步骤编号、PCM 节点、session 或其它外层编排背景，也不向 Agent 或决策模型传递可能带凭据的 `git_url`、`origin`。Agent 负责有限项目化和真实工程验证，可按工程实际加载合同维护受保护的实际 `.env` 或等价配置，允许环境变量改名和配置结构迁移并同步无秘密公开示例；迁移必须复用同一既有资源绑定和真实值，保留资源身份、endpoint 与权限范围，不重新选择、创建、派生、轮换或替换外部资源或凭据。安装、检查、测试、构建、启动、健康检查、真实浏览器和基础联调失败时先修复工程接线并重跑，只有排除接线问题后既有外部条件本身不可用才阻塞。Agent 必须删除或在所属仓忽略可再生产的 `.coverage`；Python 只核验 readiness 指纹、根仓及适用子仓 `main` / unborn / 空 index、README、`.coverage` 和其它稳定交接事实，不解析实际 `.env`、资源身份或清单语义，也不重复运行 Agent 已完成的工程命令。没有适用工程时的无副作用跳过保持不变，只有 `status=success` 可复用。
+第 6 步只从前序结果读取两份产品定义、第 4 步实际适用工程与白名单化组装来源，以及经过严格指纹核验的第 5 步准备基线；工程内部事实由 Agent 按现场读取。步骤在同一个数字节点内顺序运行两个独立公共循环实例：`project_bootstrap` session/conversation 的初始提示以 `/project-bootstrap` 开始，负责有限项目化、配置迁移、真实工程验证和可替换主题基础设施，但不选择项目专属配色；该领域 completed 并通过 README、`.coverage`、Git 等现有 verifier 后，有 `frontend` 时先由 Python 核验 `frontend/package.json` 中唯一且明确 major 4 的直接 `tailwindcss` 声明，并在 frontend 自身 Git 可见且未忽略的 CSS 中确认 `@import "tailwindcss"` CSS-first 证据，再新建或恢复独立的 `tailwind_theme` session/conversation，初始提示以 `/tailwind-theme` 开始，只引用产品定义和实际 frontend，完成项目专属 light/dark 语义颜色及前端构建、真实浏览器两种模式渲染验证。无 frontend 时只运行 bootstrap 并记录 `tailwind_theme:false`；存在 frontend 但版本或 CSS-first 合同不成立时为 `failed`，不创建主题 session。两个 prompt 都不包含步骤编号、PCM 节点、session 或其它编排背景，也不传 `git_url`、`origin`。两个领域完成后才写 success `steps/06.json` 并推进第 7 步；`outputs` 和顶层 `applicable` 保持原语义，新增真实布尔 `tailwind_theme == ("frontend" in outputs)`，旧 success 缺失或不一致 marker 不可复用。项目化与主题均不得执行 Git 写操作；主题网络来源不可用时生成 custom，不改变字体、圆角、阴影、间距、布局、组件或业务。Python 不解析实际 `.env`、资源身份、主题 token 或渲染语义，也不重复运行 Agent 已完成的工程命令。没有适用工程时的无副作用跳过保持不变，只有完整 `status=success` 可复用。
 
 **重构前真实运行事实。** 修迹项目曾完成前后端项目化、安装、检查、测试、构建、真实启动、浏览器检查和基础联调，并推进到第 7 步；根 README 收口、根仓零提交和无 staged 是历史交付证据。当时适用工程尚未建立独立 Git 边界；第 4 步现行实现已替代该旧现场。旧专属裁决、格式重试和连接恢复的叙述不代表本次公共循环已被真实新 session 验证。
 
 修迹真实项目化将产品根 README 收口为 MendMark 项目总说明，将前端收口为 `mendmark-web`、后端收口为 `mendmark-api`，同步公开配置、基础页面、健康检查与模板测试，保留有效基础设施并未实现业务功能。前端 `pnpm install --frozen-lockfile`、lint、type-check、10 项测试、build 和 1 项 Playwright E2E 通过；后端锁定、`uv sync --locked`、Ruff、15 项含 PostgreSQL `SELECT 1` 的测试和 `uv build` 通过；真实 Uvicorn/Vite、`/health`、`/ready`、OpenAPI、浏览器健康联调、375px 窄视口、控制台和网络检查通过。临时服务已停止，实际 `.env` 仍被忽略且权限为 `600`；根仓及适用子仓保持 `main`、unborn HEAD、空 index。源 PRD 与项目初稿的既有 SHA-256 事实均为 `d7d9b8054b226ef2abf730cfb29e59b30d5e39d68eb9121ded22a16750414fee`，状态推进到 `project:07_solution_design`，成功复用耗时约 1 秒且不再调用 Agent。
 
-第 7 步只从前序结果读取两份产品定义、第 5 步项目准备清单、第 4 步实际适用工程和白名单组装来源，以及第 6 步成功结果；工程内部事实由 Agent 按需读取，**不要求全仓扫描**。初始提示以 `/solution-design` 开始，只授权创建或更新 `docs/design/技术方案.md`，不包含步骤编号、PCM 节点或其它编排背景，不传递 `git_url` 或 `origin`。Agent 不重新选型、组装模板、实现业务、修改业务代码或执行 Git 写操作。`completed` 和 `blocked` 终止前都复核根仓及适用子仓的 `main` / unborn / 空 index；只有 `status=success` 的结果可幂等复用。新 run 的完整回复、pending 文本与决策输入保留原文于 Git 忽略目录；仍禁止 Agent 主动披露秘密。
+上述真实运行只证明旧版单 `project-bootstrap` 合同。当前第 6 步双 Skill 实现已由 14 项第 6 步、9 项第 7 步、58 项相邻步骤和 351 项全量自动化覆盖，确认两个独立 session/conversation、Tailwind v4 CSS-first gate、严格 marker 与恢复边界。隔离 run `step06-tailwind-theme-20260831` 确认 bootstrap Skill/slash command、产品 cwd 和原 session 加载；内置 Explore 未识别模型后，run-local 同 session 恢复实际执行 43 turns 并形成项目改动，但 SDK 最终 `terminal_reason=api_error` 且没有完整 Agent 回复，后续恢复因不合法 `pending_agent_text` 被严格拒绝，主题 session 从未创建。旧修迹运行和该失败现场都不能补造为新双 Skill 集成成功证据。
 
-公共循环使第 2/5/6/7/8/9/10/11 步共享 `AgentDecision(completed/continue/blocked)`、完整 conversation 的保存、读取、解释、恢复与 SDK 错误边界：`completed` 后才执行步骤核验，若固定产物可安全补完则追加普通修复提示并继续同一 session，`continue` 留在内部，`blocked` 或失败终止。第 9～11 步不解析 conversation 消息 schema、角色顺序、尾部 decision、session/reference 组合或完整 commit prompt，也不把 conversation 当长期成功证据；fresh 只按本步骤 session/reference/private state/conversation 路径等执行产物存在性拒绝，resume 交给公共循环。第 8 步的多仓只读 Git 核验和干净基线逻辑、第 9～11 步的固定文档工作树边界、tracked 核验和按需提交仍由步骤自身负责，公共循环不成为 Git DSL，也不抽取通用 commit 能力。第 10 步不适用路径在调用公共循环前以确定性规则结束，按执行产物存在性拒绝且零调用。`error_max_turns` / `error_max_budget_usd` 有 session 与非空回复时可裁决，但必须在正常 `success` 后才可最终完成；400/429/500、连接/CLI/进程、无 Result、`terminal_reason` 为 `aborted_streaming`/`aborted_tools`，以及 `success` 下未知终止原因均在裁决前失败。公共循环自身不做 HTTP 重试；只有其中属于 Claude Agent SDK 执行通道故障的失败才携带瞬时请求，由外层 `run_step.py` 有界重放，取消和本地合同错误不重放。run 目录是受控、Git 忽略的本地恢复状态，不建设防篡改日志。
+第 7 步只从前序结果读取两份产品定义、第 5 步项目准备清单、第 4 步实际适用工程和白名单组装来源，以及第 6 步严格成功结果；第 6 步 `outputs` 必须与第 4 步一致，且 `tailwind_theme` 必须是真实布尔并严格等于 outputs 是否含 frontend。工程内部事实由 Agent 按需读取，**不要求全仓扫描**。初始提示以 `/solution-design` 开始，只授权创建或更新 `docs/design/技术方案.md`，不包含步骤编号、PCM 节点或其它编排背景，不传递 `git_url` 或 `origin`。Agent 不重新选型、组装模板、实现业务、修改业务代码或执行 Git 写操作。`completed` 和 `blocked` 终止前都复核根仓及适用子仓的 `main` / unborn / 空 index；只有 `status=success` 的结果可幂等复用。新 run 的完整回复、pending 文本与决策输入保留原文于 Git 忽略目录；仍禁止 Agent 主动披露秘密。
+
+公共循环使第 2/5/6/7/8/9/10/11 步共享 `AgentDecision(completed/continue/blocked)`、完整 conversation 的保存、读取、解释、恢复与 SDK 错误边界：`completed` 后才执行步骤核验，若固定产物可安全补完则追加普通修复提示并继续同一 session，`continue` 留在内部，`blocked` 或失败终止。第 6 步只是在同一数字步骤内顺序实例化 `project_bootstrap` 和 `tailwind_theme` 两个现有公共循环 spec，各自拥有独立 key、session、conversation、system snapshot 和私有状态；公共循环本身不增加多阶段抽象。第 9～11 步不解析 conversation 消息 schema、角色顺序、尾部 decision、session/reference 组合或完整 commit prompt，也不把 conversation 当长期成功证据；fresh 只按本步骤 session/reference/private state/conversation 路径等执行产物存在性拒绝，resume 交给公共循环。第 8 步的多仓只读 Git 核验和干净基线逻辑、第 9～11 步的固定文档工作树边界、tracked 核验和按需提交仍由步骤自身负责，公共循环不成为 Git DSL，也不抽取通用 commit 能力。第 10 步不适用路径在调用公共循环前以确定性规则结束，按执行产物存在性拒绝且零调用。`error_max_turns` / `error_max_budget_usd` 有 session 与非空回复时可裁决，但必须在正常 `success` 后才可最终完成；400/429/500、连接/CLI/进程、无 Result、`terminal_reason` 为 `aborted_streaming`/`aborted_tools`，以及 `success` 下未知终止原因均在裁决前失败。公共循环自身不做 HTTP 重试；只有其中属于 Claude Agent SDK 执行通道故障的失败才携带瞬时请求，由外层 `run_step.py` 有界重放，取消和本地合同错误不重放。run 目录是受控、Git 忽略的本地恢复状态，不建设防篡改日志。
 
 ### 4. 动态决策 XML system snapshot 与项目上下文
 
 第 2、5、6、7、8、9 步各自只维护领域 `DECISION_RULES`。每次新 conversation 创建前，`common/decision.py` 将统一负责人角色、项目上下文、统一职责、步骤完成条件和输出合同分别渲染为 `<role>`、`<project_context>`、`<responsibility>`、`<completion>`、`<output>`。步骤规则只进入 completion；output 约束 `completed/continue/blocked` 的 `answer`、`required_inputs` 组合并要求 `reason` 非空。公共循环首次保存该 snapshot，恢复既有 conversation 时严格使用历史 `messages[0]`。
 
-项目上下文范围固定为：第 2 步初稿原文和目标路径；第 5 步产品定义原文、适用工程、选型白名单投影和资源清单的绝对路径/可读性（不读或内联资源清单正文）；第 6 步产品定义原文、已完成准备清单原文、配置迁移与既有资源边界、适用工程和组装白名单投影；第 7 步产品定义原文、准备清单原文、适用工程和组装白名单投影；第 8 步合法有序的 `applicable_repositories`；第 9 步两份产品定义、准备清单、总体技术方案、有序权威工程和固定输出路径；第 10 步适用时还包括第 9 步固定工程架构文档与实际 `frontend`；第 11 步则读取第 2/5/7 步文档、第 8 步权威工程、第 9 步工程架构及严格第 10 步交接，且仅在第 10 步 true 时包含 UI/UX 框架文档。第 6、7、9、10、11 步读取第 5 步结果前均核对当前准备清单和两份产品定义与 `readiness_baseline` 一致；第 8～11 步实际 top-level、`main` 和工作树的只读 Git 核验及 verifier 继续由步骤私有逻辑处理。
+项目上下文范围固定为：第 2 步初稿原文和目标路径；第 5 步产品定义原文、适用工程、选型白名单投影和资源清单的绝对路径/可读性（不读或内联资源清单正文）；第 6 步 `project_bootstrap` 上下文包含产品定义原文、已完成准备清单原文、配置迁移与既有资源边界、适用工程和组装白名单投影，`tailwind_theme` 上下文只包含产品定义原文、实际 frontend 和主题颜色边界；两个 context 分别渲染和保存；第 7 步产品定义原文、准备清单原文、适用工程和组装白名单投影；第 8 步合法有序的 `applicable_repositories`；第 9 步两份产品定义、准备清单、总体技术方案、有序权威工程和固定输出路径；第 10 步适用时还包括第 9 步固定工程架构文档与实际 `frontend`；第 11 步则读取第 2/5/7 步文档、第 8 步权威工程、第 9 步工程架构及严格第 10 步交接，且仅在第 10 步 true 时包含 UI/UX 框架文档。第 6、7、9、10、11 步读取第 5 步结果前均核对当前准备清单和两份产品定义与 `readiness_baseline` 一致；第 8～11 步实际 top-level、`main` 和工作树的只读 Git 核验及 verifier 继续由步骤私有逻辑处理。
 
 选型和组装投影不含 `git_url`、`origin`、`remote`，`.env` 与资源清单正文因输入来源边界不进入项目上下文。渲染器仅对项目上下文做标准 XML 转义。`request_decision` 要求显式传入该完整 XML prompt，将其原样传给一次 `responses.parse`，并以 Pydantic `AgentDecision` 取得结构化输出；没有公共默认或隐藏追加 prompt，也没有格式重试。Agent initial prompt、conversation schema、公共循环状态机、repair/session/错误分类和第 8 步 Git 逻辑均不变，未引入 `task_contract`。
 
@@ -392,7 +394,7 @@ Probe C 的早期成功和格式重试结果均为旧合同历史。现行公共
 
 **证据边界：** Python 只核验当前 Git-visible 工作树和 index；这不是不可绕过的安全隔离，不证明整个 Agent 执行历史未发生 Git 写入，也不覆盖 ignored 文件。本地 Demo 信任项目权限配置和 Agent 遵守领域约束；未来若要求不可绕过隔离，应在项目级权限或沙箱统一实现，而非由领域步骤解析 conversation 或扩展 Git DSL。第 10、11 步沿用该边界。
 
-第 9 步更新后的 prompt 合同及第 9～11 步相关自动化已完成本轮验证：第 9 步定向 18 项通过（5.498 秒）；第 9～11 步本体合计 51 项（18+18+15）通过；公共循环加第 9～11 步本体及第 10/11 步 CLI 的相关回归 97 项通过（20.800 秒）；当前工作树全量 320 项 `unittest` 通过（61.405 秒）；`compileall common steps run_step.py test_run_step_retry.py` 与本次目标 `git diff --check` 通过。当前工作树还包含其它公共循环/CLI 的未提交修改，故全量结果是当前工作树验证，不能全部归因于第 9 步。第 9 步新版 prompt 合同尚未执行安全的 fresh 真实 Claude Agent、AI-compatible 负责人或 `/commit-changes` 集成；`step01-mendmark` 已推进到第 13 步并保留旧第 9 步 success/session/conversation，旧真实 run 仅为旧合同历史。
+第 9 步更新后的 prompt 合同及第 9～11 步相关自动化已完成本轮验证：第 9 步定向 18 项通过（5.498 秒）；第 9～11 步本体合计 51 项（18+18+15）通过；公共循环加第 9～11 步本体及第 10/11 步 CLI 的相关回归 97 项通过（20.800 秒）；当前工作树全量 351 项 `unittest` 通过（61.878 秒）；`compileall common steps run_step.py run_all.py test_run_step_retry.py test_run_all.py` 与本次目标 `git diff --check` 通过。当前工作树还包含其它公共循环/CLI 的未提交修改，故全量结果是当前工作树验证，不能全部归因于第 9 步。第 9 步新版 prompt 合同尚未执行安全的 fresh 真实 Claude Agent、AI-compatible 负责人或 `/commit-changes` 集成；`step01-mendmark` 已推进到第 13 步并保留旧第 9 步 success/session/conversation，旧真实 run 仅为旧合同历史。
 
 旧失败依次暴露 HTTP 403、非 JSON 普通文本和 `completed` 非空 `answer`。根因是旧 prompt 把步骤规则混入 responsibility、硬编码并重复 completion 语义且缺少 output。用户将其重构为 `role/project_context/responsibility/completion/output` 五段，补齐 f-string JSON 花括号转义和字段组合约束，并同步 common 与第 2/5/6/7/9 步测试。
 
@@ -414,7 +416,7 @@ Probe C 的早期成功和格式重试结果均为旧合同历史。现行公共
 
 `completed` verifier 先 repair 缺失或空文档；只有根仓存在且仅存在固定文档未提交变化时，才在原 session 发送 `/commit-changes`。已 tracked 且全仓 clean 的文档直接满足交付条件，不制造无变化调用。最终 success 只要求文档非空、非符号链接普通文件、已 tracked，全部权威仓库当前均为自身 top-level、`main`、clean；不要求 exact prompt、紧邻 Agent 回复或历史执行锚点。适用路径的 fresh/resume/blocked、result/state 中断和幂等与第 9 步同构：领域步骤不解析 conversation，完整 success 只据严格 result schema、当前文档/Git事实恢复；blocked 始终保存并停在当前节点。合同保持局部实现，不改 `common`，不抽取 Git DSL、commit 事件、持久布尔标记或旧 prompt 兼容列表。
 
-第 9 步更新后的 prompt 合同及第 9～11 步相关自动化已完成本轮验证：第 9 步定向 18 项通过（5.498 秒）；第 9～11 步本体合计 51 项（18+18+15）通过；公共循环加第 9～11 步本体及第 10/11 步 CLI 的相关回归 97 项通过（20.800 秒）；当前工作树全量 320 项 `unittest` 通过（61.405 秒）；`compileall common steps run_step.py test_run_step_retry.py` 与本次目标 `git diff --check` 通过。当前工作树还包含其它公共循环/CLI 的未提交修改，故全量结果是当前工作树验证，不能全部归因于第 9 步。第 9 步新版 prompt 合同尚未执行安全的 fresh 真实 Claude Agent、AI-compatible 负责人或 `/commit-changes` 集成；`step01-mendmark` 已推进到第 13 步并保留旧第 9 步 success/session/conversation，旧真实 run 仅为旧合同历史。 以下真实 run 为旧合同下的历史执行路径。
+第 9 步更新后的 prompt 合同及第 9～11 步相关自动化已完成本轮验证：第 9 步定向 18 项通过（5.498 秒）；第 9～11 步本体合计 51 项（18+18+15）通过；公共循环加第 9～11 步本体及第 10/11 步 CLI 的相关回归 97 项通过（20.800 秒）；当前工作树全量 351 项 `unittest` 通过（61.878 秒）；`compileall common steps run_step.py run_all.py test_run_step_retry.py test_run_all.py` 与本次目标 `git diff --check` 通过。当前工作树还包含其它公共循环/CLI 的未提交修改，故全量结果是当前工作树验证，不能全部归因于第 9 步。第 9 步新版 prompt 合同尚未执行安全的 fresh 真实 Claude Agent、AI-compatible 负责人或 `/commit-changes` 集成；`step01-mendmark` 已推进到第 13 步并保留旧第 9 步 success/session/conversation，旧真实 run 仅为旧合同历史。 以下真实 run 为旧合同下的历史执行路径。
 
 真实 run `pcm-demo/runs/step01-mendmark` 的权威仓库为 `root/frontend/backend`，因此适用。session `2d052d9a-b9fd-4fcd-b5f9-ff724f25dbc1` 的 init 确认 skill/slash command 已加载、cwd 为产品根、模型 `claude-fable-5[1M]`、Claude Code 2.1.233、permissionMode `bypassPermissions`；最终 Agent success，5 turns，cost `$3.207112`，`terminal_reason=completed`，无错误。fresh 调用的内置 Explore 子代理曾输出未识别模型 `gpt-5.6-terra[1m]` 警告，但主 Agent 同次调用继续并 success，未追加人工或 run-history 恢复提示。
 
@@ -428,7 +430,7 @@ Agent 只可生成或更新该 Backlog，不能实施需求或修改代码、测
 
 领域步骤使用公共循环保存、读取、解释完整 conversation，但不解析其 schema、角色顺序、尾部 decision、session/reference 组合或完整 commit prompt。fresh 仅因既有执行产物存在性拒绝，resume 由公共循环恢复；blocked 始终保存并停在当前节点，failed 保留现场。完整 success 的 result/state 中断恢复与幂等复验仅按当前步骤必要事实恢复。当前 `run_step.py` 已支持第 0～18 步：完整第 8～12 步 fixed success 与当前 active requirement 的第 13～18 步 scoped success 分别受保护。
 
-第 9 步更新后的 prompt 合同及第 9～11 步相关自动化已完成本轮验证：第 9 步定向 18 项通过（5.498 秒）；第 9～11 步本体合计 51 项（18+18+15）通过；公共循环加第 9～11 步本体及第 10/11 步 CLI 的相关回归 97 项通过（20.800 秒）；当前工作树全量 320 项 `unittest` 通过（61.405 秒）；`compileall common steps run_step.py test_run_step_retry.py` 与本次目标 `git diff --check` 通过。当前工作树还包含其它公共循环/CLI 的未提交修改，故全量结果是当前工作树验证，不能全部归因于第 9 步。第 9 步新版 prompt 合同尚未执行安全的 fresh 真实 Claude Agent、AI-compatible 负责人或 `/commit-changes` 集成；`step01-mendmark` 已推进到第 13 步并保留旧第 9 步 success/session/conversation，旧真实 run 仅为旧合同历史。 以下 `step01-mendmark` 事实为旧合同下的历史运行路径。真实 `step01-mendmark` run 前，旧 Skill 已单独由真实 `/commit-changes` 提交 `9263d28`（只改 Skill、未 push、三仓 clean），这是新合同测试前置而非步骤输出。session `af7d198c-b090-44d8-9d92-ae0738150854` 生成约 59,140 字节、约 1,110 行 Backlog：14 项 BR 完整覆盖 E.1，未自动纳入 E.2/E.3，首条验证切片为完整 BR-001～BR-006。负责人瞬时 failed 依靠正常原节点重跑恢复，未注入 conversation 的只读诊断不作为正式决定；未增加 HTTP 重试或修改生产 prompt。最终 exact commit 一次，根仓本地提交 `2aaa743a97d96fe93deaaaaa13a94e4c414369a2`（`docs: 建立 MendMark 首版正式 Backlog`）仅新增 Backlog，三仓 `main`/clean；历史第 11 步 success 当时进入旧 `phase_1:select_requirement` / step 12 占位入口。
+第 9 步更新后的 prompt 合同及第 9～11 步相关自动化已完成本轮验证：第 9 步定向 18 项通过（5.498 秒）；第 9～11 步本体合计 51 项（18+18+15）通过；公共循环加第 9～11 步本体及第 10/11 步 CLI 的相关回归 97 项通过（20.800 秒）；当前工作树全量 351 项 `unittest` 通过（61.878 秒）；`compileall common steps run_step.py run_all.py test_run_step_retry.py test_run_all.py` 与本次目标 `git diff --check` 通过。当前工作树还包含其它公共循环/CLI 的未提交修改，故全量结果是当前工作树验证，不能全部归因于第 9 步。第 9 步新版 prompt 合同尚未执行安全的 fresh 真实 Claude Agent、AI-compatible 负责人或 `/commit-changes` 集成；`step01-mendmark` 已推进到第 13 步并保留旧第 9 步 success/session/conversation，旧真实 run 仅为旧合同历史。 以下 `step01-mendmark` 事实为旧合同下的历史运行路径。真实 `step01-mendmark` run 前，旧 Skill 已单独由真实 `/commit-changes` 提交 `9263d28`（只改 Skill、未 push、三仓 clean），这是新合同测试前置而非步骤输出。session `af7d198c-b090-44d8-9d92-ae0738150854` 生成约 59,140 字节、约 1,110 行 Backlog：14 项 BR 完整覆盖 E.1，未自动纳入 E.2/E.3，首条验证切片为完整 BR-001～BR-006。负责人瞬时 failed 依靠正常原节点重跑恢复，未注入 conversation 的只读诊断不作为正式决定；未增加 HTTP 重试或修改生产 prompt。最终 exact commit 一次，根仓本地提交 `2aaa743a97d96fe93deaaaaa13a94e4c414369a2`（`docs: 建立 MendMark 首版正式 Backlog`）仅新增 Backlog，三仓 `main`/clean；历史第 11 步 success 当时进入旧 `phase_1:select_requirement` / step 12 占位入口。
 
 
 ### 第 12 步已实现合同与真实验证
@@ -509,7 +511,7 @@ fresh 全仓 clean 时零 Agent，直接记录 `tip=base`。存在 dirty 仓时�
 
 完整 diff、提交分组、精确暂存、空提交和提交历史由 `commit-changes` 自己负责。Python 不再制作工作树 fingerprint，不读取 blob/tree，不校验 merge commit、净零提交或首次内容等价。success 只保存各仓 `name/path/base_sha/tip_sha`，再将 cycle 写为 `{base_sha,tip_sha,merged:false}` 并推进 step 18；result→state 和 advanced 幂等保持不变，旧真实 run 的 fingerprint/conversation 遗留字段不迁移、不清理。
 
-现行实现第 17 步本体 9 项、CLI 4 项，共 13 项；公共循环与第 17 步定向 43 项通过。当前工作树全量 320 项 `unittest` 通过（61.405 秒），`compileall common steps run_step.py test_run_step_retry.py` 与本次目标 `git diff --check` 通过；当前工作树还包含其它公共循环/CLI 的未提交修改，故全量结果不能全部归因于第 9 步。独立只读审查无高、中置信发现。现行第 17 步恢复完整 conversation、负责人决策、同 session continue/blocked resume/completed repair，同时继续不做 fingerprint、blob/tree、merge或空提交取证。BR-002 在旧 direct-run 版本期间只有 Claude session、没有 conversation；该历史缺口不补造，后续需求按现行合同保存完整历史。
+现行实现第 17 步本体 9 项、CLI 4 项，共 13 项；公共循环与第 17 步定向 43 项通过。当前工作树全量 351 项 `unittest` 通过（61.878 秒），`compileall common steps run_step.py run_all.py test_run_step_retry.py test_run_all.py` 与本次目标 `git diff --check` 通过；当前工作树还包含其它公共循环/CLI 的未提交修改，故全量结果不能全部归因于第 9 步。独立只读审查无高、中置信发现。现行第 17 步恢复完整 conversation、负责人决策、同 session continue/blocked resume/completed repair，同时继续不做 fingerprint、blob/tree、merge或空提交取证。BR-002 在旧 direct-run 版本期间只有 Claude session、没有 conversation；该历史缺口不补造，后续需求按现行合同保存完整历史。
 
 ### 第 18 步已实现合同与真实验证
 

@@ -10,7 +10,7 @@
 - [第 3 步：基础工程选型](steps/step_03_foundation_selection/README.md)
 - [第 4 步：组装基础工程](steps/step_04_assemble_foundation/README.md)
 - [第 5 步：核验项目准备状态](steps/step_05_project_readiness/README.md)
-- [第 6 步：项目化基础工程](steps/step_06_project_bootstrap/README.md)
+- [第 6 步：项目化基础工程与主题配色](steps/step_06_project_bootstrap/README.md)
 - [第 7 步：总体技术方案](steps/step_07_solution_design/README.md)
 - [第 8 步：首次提交适用仓库](steps/step_08_initialize_repositories/README.md)
 - [第 9 步：工程架构设计](steps/step_09_engineering_architecture/README.md)
@@ -35,12 +35,14 @@ uv sync
 uv run python -m unittest discover -s . -t . -p 'test*.py' -v
 ```
 
-PCM Demo 全量 320 项 `unittest`、`compileall common steps run_step.py test_run_step_retry.py` 与 `git diff --check` 通过。直接执行 `run_step.py` 时，只有本次失败显式携带运行时重试请求才会在 10 秒、30 秒后重新运行当前步骤，最多三次总执行；当前仅 Claude Agent SDK 实际执行通道故障设置该请求，任意 API 状态码、明确 `api_error` 终止、连接失败和未取得 Result 的 CLI 进程失败均可重试。业务 `blocked`、普通 `failed`、AI-compatible 裁决失败、本地合同错误、CLI 参数错误、未实现步骤和主动取消不重试。重试请求不写入 state、步骤 result、diagnostic 或 conversation；耗尽后对外仍返回步骤失败码 `1`。
+PCM Demo 全量 351 项 `unittest`、`compileall common steps run_step.py run_all.py test_run_step_retry.py test_run_all.py` 与 `git diff --check` 通过。直接执行 `run_step.py` 时，只有本次失败显式携带运行时重试请求才会在 10 秒、30 秒后重新运行当前步骤，最多三次总执行；当前仅 Claude Agent SDK 实际执行通道故障设置该请求，任意 API 状态码、明确 `api_error` 终止、连接失败和未取得 Result 的 CLI 进程失败均可重试。业务 `blocked`、普通 `failed`、AI-compatible 裁决失败、本地合同错误、CLI 参数错误、未实现步骤和主动取消不重试。重试请求不写入 state、步骤 result、diagnostic 或 conversation；耗尽后对外仍返回步骤失败码 `1`。
 公共错误诊断保留 Claude Agent SDK `errors`、异常链、traceback 位置及 AI-compatible provider 的 code/type/message/request ID/HTTP status；只对明确凭据值和认证字段做精确遮盖。完整有界快照写入 Git 忽略的 `runs/<run-id>/logs/`，state、步骤结果和 stderr 保存具体安全原因与 `diagnostic_path`；合法裁决写入 conversation 后清除当前失败引用。第 13 步直接消费当前需求注册表；第 17 步通过公共 Agent 决策循环运行 `commit-changes`；第 18 步只使用确定性 Python/Git。
 
 ## 最近真实验证
 
 第 9～11 步下述 exact commit prompt、conversation 条数、提交和 `commit-changes` 发现文档矛盾的叙述，均是**旧合同下的历史运行事实/当时执行路径**，保留作排障和演进依据，不是当前成功条件。现行新合同以严格 result schema、固定文档和当前 Git 事实判定 success；验证正在进行。
+
+第 6 步现行实现已在同一数字步骤内顺序实例化 `project_bootstrap` 与 `tailwind_theme` 两个独立公共循环 spec；有 frontend 时 bootstrap completed 后才通过 Tailwind v4 CSS-first gate 并创建主题 session，无 frontend 时跳过，非 v4 为 failed。第 6 步 14 项、第 7 步 9 项、相关第 6/7/8/10 步 58 项、公共循环与入口 64 项及全量 351 项自动化通过。隔离 run `step06-tailwind-theme-20260831` 已确认 `project-bootstrap` Skill/slash command、产品 cwd 和原 session 加载；内置 Explore 请求未识别模型后，run-local 同 session 恢复实际执行 43 turns 并修改项目，但 SDK 以 `terminal_reason=api_error` 结束且未保存完整 Agent 回复，后续按恢复合同拒绝不合法 `pending_agent_text`，因此未进入独立 `tailwind_theme` session。该真实缺口保留，不以自动化或产品工作树改动冒充双 Skill 集成成功。
 
 隔离 run `agent-loop-step7-20260822T190149Z` 已真实验证公共循环的第 7 步路径：初次环境内部 Explore 子代理模型错误超时后保留 session 与初始对话；仅在隔离历史追加普通 assistant 提示后从同一 session 恢复，完成正常 `success`、两次 `completed` 裁决和固定方案文档补完核验，最终推进到第 8 步。隔离副本未修改既有 `step01-mendmark`；该测试提示和文档置空 failpoint 均不属于生产代码或生产 prompt。
 

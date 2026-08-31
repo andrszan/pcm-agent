@@ -151,6 +151,7 @@ class SolutionDesignTests(unittest.TestCase):
                 "status": "success",
                 "applicable": applicable,
                 "outputs": outputs,
+                "tailwind_theme": "frontend" in outputs,
             },
         )
         root_repository = initialize_root_repository(workspace)
@@ -457,6 +458,37 @@ class SolutionDesignTests(unittest.TestCase):
                         agent_runner=unexpected_agent,
                         config_loader=lambda: object(),
                     )
+
+    def test_step_six_tailwind_theme_marker_must_match_frontend(self) -> None:
+        for marker in (None, False, 1):
+            with self.subTest(marker=marker), tempfile.TemporaryDirectory() as directory:
+                run_dir, _, state = self.make_run(Path(directory))
+                step_six_path = run_dir / "steps/06.json"
+                payload = json.loads(step_six_path.read_text(encoding="utf-8"))
+                if marker is None:
+                    payload.pop("tailwind_theme", None)
+                else:
+                    payload["tailwind_theme"] = marker
+                write_json(step_six_path, payload)
+
+                async def unexpected(*args, **kwargs):
+                    raise AssertionError("无效第 6 步 marker 不应调用 Agent")
+
+                with self.assertRaisesRegex(RuntimeError, "不可复用"):
+                    self.run_step(run_dir, state, agent_runner=unexpected)
+
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, _, state = self.make_run(Path(directory), applicable=False)
+            step_six_path = run_dir / "steps/06.json"
+            payload = json.loads(step_six_path.read_text(encoding="utf-8"))
+            payload["tailwind_theme"] = True
+            write_json(step_six_path, payload)
+
+            async def unexpected(*args, **kwargs):
+                raise AssertionError("无 frontend 却标记主题成功不应调用 Agent")
+
+            with self.assertRaisesRegex(RuntimeError, "不可复用"):
+                self.run_step(run_dir, state, agent_runner=unexpected)
 
     def test_failed_result_file_does_not_block_recovery(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

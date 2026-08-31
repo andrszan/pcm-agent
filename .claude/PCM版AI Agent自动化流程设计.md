@@ -17,7 +17,7 @@ PCM 自动化流程接收一份产品初稿；资料不足时先形成产品初�
 → 基础工程选型
 → 基础工程组装
 → 项目准备核验
-→ 基础工程项目化
+→ 基础工程项目化与项目专属主题配色
 → 总体技术方案
 → 首次提交适用仓库
 → 必要的工程架构设计和按需 UI/UX 框架
@@ -157,7 +157,7 @@ Demo 和默认 PCM 流程只进行本地文件修改、测试、构建、服务�
 
 ## 四、运行上下文与恢复
 
-第 17 步现行实现本体 9 项与 CLI 4 项，共 13 项；第 18 步本体 10 项与 CLI 5 项，共 15 项。PCM Demo 当前工作树全量 321 项 `unittest`、`compileall common steps run_step.py test_run_step_retry.py` 与 `git diff --check` 通过（全量耗时 52.810 秒）。当前工作树还包含其它公共循环/CLI 的未提交修改，故该全量结果不能全部归因于第 9 步。`run_step.py` 只对 Claude Agent SDK 执行通道故障产生的瞬时请求有界重跑两次；任意 API 状态均可请求重试，业务 `blocked`、普通失败、AI-compatible 裁决失败、本地合同错误和取消不重试，且请求不写入 state/result/diagnostic/conversation。公共错误诊断保留经精确凭据遮盖的 Claude Agent SDK `errors`、异常链和 traceback 位置，以及 AI-compatible provider 的 code/type/message/request ID/HTTP status；完整有界快照写入 Git 忽略的 `logs/`，state/result/stderr 保存具体安全原因和引用。第 13 步直接消费当前需求注册表；第 17 步通过公共 Agent 决策循环运行 `commit-changes`；第 18 步只使用确定性 Python/Git。真实 `step01-mendmark` 已连续完成 BR-001 与 BR-002 两个需求循环。BR-002 在旧 direct-run 第 17 步期间只保存了 Claude session，没有 decision conversation；该历史不能补造，现行合同保证后续需求保存完整 conversation。root/frontend/backend 的 local main tips 分别为 `2f39fbe7e26d6e4905142925ae149ba83d9e70fe`、`f290ff85ed779a1f100eeded7eedfcfb0376b826`、`204a7a6b48c43a80f573dc9e70acedddb59bbe4f`，三仓 clean、`req/br-002` 已删除且未 push。
+第 17 步现行实现本体 9 项与 CLI 4 项，共 13 项；第 18 步本体 10 项与 CLI 5 项，共 15 项。PCM Demo 当前工作树全量 351 项 `unittest`、`compileall common steps run_step.py run_all.py test_run_step_retry.py test_run_all.py` 与 `git diff --check` 通过（全量耗时 61.878 秒）。当前工作树还包含其它公共循环/CLI 的未提交修改，故该全量结果不能全部归因于第 9 步。`run_step.py` 只对 Claude Agent SDK 执行通道故障产生的瞬时请求有界重跑两次；任意 API 状态均可请求重试，业务 `blocked`、普通失败、AI-compatible 裁决失败、本地合同错误和取消不重试，且请求不写入 state/result/diagnostic/conversation。公共错误诊断保留经精确凭据遮盖的 Claude Agent SDK `errors`、异常链和 traceback 位置，以及 AI-compatible provider 的 code/type/message/request ID/HTTP status；完整有界快照写入 Git 忽略的 `logs/`，state/result/stderr 保存具体安全原因和引用。第 13 步直接消费当前需求注册表；第 17 步通过公共 Agent 决策循环运行 `commit-changes`；第 18 步只使用确定性 Python/Git。真实 `step01-mendmark` 已连续完成 BR-001 与 BR-002 两个需求循环。BR-002 在旧 direct-run 第 17 步期间只保存了 Claude session，没有 decision conversation；该历史不能补造，现行合同保证后续需求保存完整 conversation。root/frontend/backend 的 local main tips 分别为 `2f39fbe7e26d6e4905142925ae149ba83d9e70fe`、`f290ff85ed779a1f100eeded7eedfcfb0376b826`、`204a7a6b48c43a80f573dc9e70acedddb59bbe4f`，三仓 clean、`req/br-002` 已删除且未 push。
 
 ```json
 {
@@ -390,14 +390,18 @@ Demo 和默认 PCM 流程只进行本地文件修改、测试、构建、服务�
 - 完成条件：所有进入项目准备清单的当前开发必需外部资源均真实可用；不存在两类阻塞：开发必需外部资源在候选池中缺失、当前环境无法安全生成且无兼容替代，或已匹配资源真实不可用、凭据无效、权限不足、隔离不合格，或缺少开发所需接口能力、可用配额、回调/白名单及其它既定能力。清单、管理凭据、Mock、截图或 Agent 自述不能单独证明完成。
 - 自动化说明：依赖安装、migration、Seed、业务实现、项目内测试账号、完整联调和浏览器验收由后续开发步骤完成。只服务生产部署或生产运行的正式域名、DNS/TLS、生产资源与凭据、生产回调与配额、监控、备份恢复、容量和发布安全属于开发及清单准入范围外。项目准备清单正文任何位置都不得列举、命名或汇总这些事项，也不得以“未纳入清单”、范围外、未来事项、非阻塞、无状态或 `not-applicable` 章节保留它们；开发 SMTP TLS、localhost 回调、开发白名单、沙箱范围和开发配额仍按当前开发用途纳入。产品规则和隐私治理同样不写入清单。已有成功结果只有在当前 `scope_contract`、清单和产品定义指纹一致时才可幂等复用。
 
-### 第 6 步：项目化基础工程
+### 第 6 步：项目化基础工程与主题配色
 
-- 能力：`project-bootstrap`。
-- 输入：基础工程、产品定义、基础工程选型结论和经过严格指纹核验的准备基线；已有项目可另外提供既有技术方案。
-- 输出：完成项目身份、基础配置、文档和最小联调的工程。用户可见项目只落实已经确认的品牌、视觉和交互事实；尚无产品级体验方向时保持中性、可替换的基础样式，不把模板默认配色、字体、首页或组件外观认定为产品设计。
-- 配置边界：可以为匹配工程实际加载合同维护受保护的实际 `.env` 或等价配置，允许环境变量改名和配置结构迁移并同步无秘密公开示例；迁移必须复用同一既有资源绑定和真实值，保留资源身份、endpoint 与权限范围，不重新选择、创建、派生、轮换或替换外部资源或凭据。
-- 完成条件：适用安装、检查、测试、构建、启动、健康检查、真实浏览器检查和基础联调通过，留下待提交变更。
-- 自动化说明：发现模板残留、配置读取、变量迁移、脚本、代码、代理、启动、健康入口、前后端连接或测试入口问题时在本步骤内修正并重跑。只有排除工程接线问题后，既有外部条件本身不可用才返回 `blocked`；不得通过替代资源或新凭据规避。
+- 能力：同一数字步骤顺序显式调用 `project-bootstrap`，并在 `steps/04.json.outputs` 含 `frontend` 时显式调用 `tailwind-theme`。两个 Skill 使用独立 Claude session、独立 decision conversation、独立 XML system snapshot 和私有恢复状态，不由前一个 Skill 隐式调用后一个，也不新增步骤编号或内部节点。
+- 输入：基础工程、产品定义、基础工程选型结论和经过严格指纹核验的准备基线；已有项目可另外提供既有技术方案。主题调用只引用两份产品定义和实际 frontend，工程事实由 Agent 现场读取，不依赖尚未执行的 UI/UX 框架产物。
+- 项目化：`project-bootstrap` 完成项目身份、基础配置、文档和最小联调，保持或建立可替换的 Tailwind 语义颜色基础设施，但不选择或生成项目专属主题，也不把模板默认色认定为最终产品主题。配置可以为匹配工程实际加载合同迁移键名与结构并同步无秘密公开示例，但必须复用同一既有资源绑定和真实值，保持资源身份、endpoint 与权限范围，不重新选择、创建、派生、轮换或替换外部资源或凭据。
+- 主题适用性：无 frontend 时只运行项目化并以 `tailwind_theme:false` 跳过主题。存在 frontend 时，bootstrap 完成后由 Python 确认 `frontend/package.json` 直接声明可明确判断为 major 4 的 `tailwindcss`，并在 frontend 自身 Git 可见且未忽略的 CSS 中找到 `@import "tailwindcss"` CSS-first 证据；版本不明确、非 v4 或缺少 CSS-first 证据属于本地模板合同 `failed`，不创建主题 session，也不作为 `blocked`。
+- 主题动作：`tailwind-theme` 根据产品定义和当前前端选择经校验的 tweakcn preset 或生成 custom，同时落实完整 light/dark 语义颜色；网络不可用时必须 custom fallback。只允许修改颜色值和必要颜色映射，不修改字体、圆角、阴影、间距、tracking、布局、组件、页面、主题切换交互或业务功能，不安装、升级或迁移 Tailwind，也不执行 Git 写操作。完成前运行适用前端检查、测试和构建，并在真实浏览器中切换 light/dark、读取实际渲染和 computed color，检查控制台及失败网络请求。
+- 输出：完成项目化与条件性主题处理的工程。`steps/06.json.outputs` 继续等于第 4 步实际适用工程，顶层 `applicable` 语义不变，新增真实布尔 `tailwind_theme`，严格满足 `tailwind_theme == ("frontend" in outputs)`；字段缺失、类型错误或不一致的旧 success 不可复用。
+- 完成条件：适用安装、检查、测试、构建、启动、健康检查、真实浏览器检查和基础联调通过；有 frontend 时项目专属 light/dark 主题及真实两种模式渲染也完成。两个独立领域都 completed 后才写 success 并推进第 7 步，留下待提交变更。
+- 恢复：仍停留在 `project:06_bootstrap_foundation`。bootstrap completed/theme 未开始、theme 中断或 blocked 时，重跑先只复验 bootstrap，再创建或恢复 `tailwind_theme`；theme 失败不重新执行 bootstrap Agent。bootstrap blocked 时不创建主题执行产物。result 已写而 state 未推进时按严格 marker、前序交接、Tailwind gate 和 Git 事实只补状态。
+- 自动化说明：发现模板残留、配置读取、变量迁移、脚本、代码、代理、启动、健康入口、前后端连接或测试入口问题时在项目化领域修正并重跑；主题或验证可继续完成时在主题领域修正并重跑。`blocked` 仍只用于当前环境无法取得的不可替代外部条件；本地版本、文件、主题入口、工作树或状态冲突为 `failed`，不得用替代资源、新凭据或降低验证标准规避。第 8 步自然提交主题变更，第 10 步只把已提交主题视为 Current，不重新调用主题能力。
+- 当前验证：第 6 步 14 项、第 7 步 9 项、相关第 6/7/8/10 步 58 项、公共循环与入口 64 项及全量 351 项自动化通过。隔离 run `step06-tailwind-theme-20260831` 已确认 bootstrap Skill/slash command、产品 cwd 与原 session 加载；内置 Explore 未识别模型后，run-local 同 session 恢复实际执行 43 turns 并修改项目，但 SDK 以 `terminal_reason=api_error` 结束且没有完整 Agent 回复，后续严格拒绝不合法 `pending_agent_text`，未进入独立 theme session。该结果只证明真实通道失败和恢复保护生效，不构成 `/tailwind-theme`、实际 CSS light/dark 修改或浏览器集成成功证据。
 
 ### 第 7 步：总体技术方案
 
@@ -415,7 +419,7 @@ Demo 和默认 PCM 流程只进行本地文件修改、测试、构建、服务�
 - 输出：`steps/08.json` 的 `outputs` 固定为空，并保存 `applicable_repositories` 和 `repositories` 列表；每项为相对 `path`、`branch`、`worktree_clean`。状态保存同样事实但路径为绝对路径，成功推进到 `project:09_engineering_architecture`。
 - 完成条件：每仓自身 top-level、`main` 且 `status --porcelain` 为空。无需检查 HEAD、提交是否产生、提交数、父提交、SHA、marker、历史替换或根 tree。
 - 恢复：`completed` 后 Python 只读复验；仍 dirty 则以固定 repair prompt 继续同一 session。`blocked` 后重读，已全干净直接成功，仍 dirty 才保存 blocked。恢复也先读现场，已全干净直接成功，仍 dirty 才恢复原 session。`failed` / `blocked` 的步骤结果不能当作成功；只有 `status=success` 可幂等复用。成功后的第 9 步状态若权威仓库变 dirty，拒绝复用，避免第 8 步替后续修改提交。
-- 第 9 步更新后的 prompt 合同及第 9～11 步相关自动化已完成本轮验证：第 9 步定向 18 项通过（5.498 秒）；第 9～11 步本体合计 51 项（18+18+15）通过；公共循环加第 9～11 步本体及第 10/11 步 CLI 的相关回归 97 项通过（20.800 秒）；当前工作树全量 320 项 `unittest` 通过（61.405 秒）；`compileall common steps run_step.py test_run_step_retry.py` 与本次目标 `git diff --check` 通过。当前工作树还包含其它公共循环/CLI 的未提交修改，故全量结果是当前工作树验证，不能全部归因于第 9 步。第 9 步新版 prompt 合同尚未执行安全的 fresh 真实 Claude Agent、AI-compatible 负责人或 `/commit-changes` 集成；`step01-mendmark` 已推进到第 13 步并保留旧第 9 步 success/session/conversation，旧真实 run 仅为旧合同历史。
+- 第 9 步更新后的 prompt 合同及第 9～11 步相关自动化已完成本轮验证：第 9 步定向 18 项通过（5.498 秒）；第 9～11 步本体合计 51 项（18+18+15）通过；公共循环加第 9～11 步本体及第 10/11 步 CLI 的相关回归 97 项通过（20.800 秒）；当前工作树全量 351 项 `unittest` 通过（61.878 秒）；`compileall common steps run_step.py run_all.py test_run_step_retry.py test_run_all.py` 与本次目标 `git diff --check` 通过。当前工作树还包含其它公共循环/CLI 的未提交修改，故全量结果是当前工作树验证，不能全部归因于第 9 步。第 9 步新版 prompt 合同尚未执行安全的 fresh 真实 Claude Agent、AI-compatible 负责人或 `/commit-changes` 集成；`step01-mendmark` 已推进到第 13 步并保留旧第 9 步 success/session/conversation，旧真实 run 仅为旧合同历史。
 - 真实验证：当前合同已在真实 run `pcm-demo/runs/step01-mendmark` 和产品工作区 `/Users/zhou/resource/fireworks/ANDRSZAN/pcm-products/mendmark` 完成验证；run 目录名与 state 内历史 `run_id` 不一致是既有已知事实。权威仓库为 `root/frontend/backend`，第 4 步 `outputs` 为 `frontend/backend`；首次执行前三仓均为自身 top-level、`main`、dirty 且 HEAD 不存在。
 - 环境恢复：首次执行只启动 `initialize_repositories` session `f6d42df8-13e5-437b-ada3-eef1015ecc87`。Agent 尝试内置 Explore 时遇到环境未识别模型 `gpt-5.6-sol[1m]`，无 Result、无 Git 变化，挂起进程停止后保存 session、conversation 和 init 证据；这是环境内部子代理问题，不是第 8 步业务或 Git 逻辑失败。仅在 Git 忽略的真实 run 历史中追加普通恢复指令“不要使用子代理/Explore，直接工具完成”，生产 prompt 和代码未改变，并恢复同一 session。
 - 提交与决策：Agent 先创建 frontend `dbab574dbe4d83a02323a750afd04de007565ac5`、backend `9682be837759c20f1a9ebbdf8fa2cfc09c2768d4` 两个本地提交；随后针对根仓运行时产物和 `.agents/plugins/superpowers/.git` 请求决策。AI-compatible 负责人返回 `continue`，授权删除 61 个 `.in_use/*`、`.orphaned_at`、`.coverage` 运行时产物、补 `.gitignore`、移除嵌套 `.git`，并将 superpowers 作为普通受控插件快照而非 submodule 提交。root 创建 `02ba4c1`、`ae72c31`、`5eeeacd217bbd27e03483b1b6d32915c721aadd9` 三个本地提交；全程未 push。
@@ -433,7 +437,7 @@ Demo 和默认 PCM 流程只进行本地文件修改、测试、构建、服务�
 - 完成条件：固定文档为非空、非符号链接普通文件且被根仓 Git 跟踪；其语义完成由 Skill、Agent 与 AI-compatible 负责人按上述逐交付单元闭合要求裁决。Python 仍只核验这一单份固定文档和当前 Git 事实：根仓及所有适用子仓在当前现场均为各自自身 top-level、位于 `main` 且 clean；Python 不读取 HEAD、SHA、提交数或历史，不执行 Git 写操作；不要求 exact commit prompt、紧邻 Agent 回复或历史执行锚点。
 - 证据边界：Python 只核验当前 Git-visible 工作树和 index；这不是不可绕过的安全隔离，不证明整个 Agent 执行历史未发生 Git 写入，也不覆盖 ignored 文件。本地 Demo 信任项目权限配置和 Agent 遵守领域约束；未来若要求不可绕过隔离，应在项目级权限或沙箱统一实现，而非由领域步骤解析 conversation 或扩展 Git DSL。第 10、11 步沿用该边界。
 - 恢复与安全：fresh 入口要求全仓 clean，并仅因本步骤 session、conversation reference、私有状态或 conversation 路径等执行产物存在而拒绝；resume 由公共循环恢复原 session。负责人 `blocked` 时始终保存 blocked 并停在当前节点，不因文档 tracked+clean 改判 success。result 已 success 而 state 推进中断或完整 success 重跑时，只按严格 result schema、当前文档和 Git 事实补状态或确认成功。成功后推进 `project:10_ui_ux_framework`；第 10 步仍按需。
-- 第 9 步更新后的 prompt 合同及第 9～11 步相关自动化已完成本轮验证：第 9 步定向 18 项通过（5.498 秒）；第 9～11 步本体合计 51 项（18+18+15）通过；公共循环加第 9～11 步本体及第 10/11 步 CLI 的相关回归 97 项通过（20.800 秒）；当前工作树全量 320 项 `unittest` 通过（61.405 秒）；`compileall common steps run_step.py test_run_step_retry.py` 与本次目标 `git diff --check` 通过。当前工作树还包含其它公共循环/CLI 的未提交修改，故全量结果是当前工作树验证，不能全部归因于第 9 步。第 9 步新版 prompt 合同尚未执行安全的 fresh 真实 Claude Agent、AI-compatible 负责人或 `/commit-changes` 集成；`step01-mendmark` 已推进到第 13 步并保留旧第 9 步 success/session/conversation，旧真实 run 仅为旧合同历史。
+- 第 9 步更新后的 prompt 合同及第 9～11 步相关自动化已完成本轮验证：第 9 步定向 18 项通过（5.498 秒）；第 9～11 步本体合计 51 项（18+18+15）通过；公共循环加第 9～11 步本体及第 10/11 步 CLI 的相关回归 97 项通过（20.800 秒）；当前工作树全量 351 项 `unittest` 通过（61.878 秒）；`compileall common steps run_step.py run_all.py test_run_step_retry.py test_run_all.py` 与本次目标 `git diff --check` 通过。当前工作树还包含其它公共循环/CLI 的未提交修改，故全量结果是当前工作树验证，不能全部归因于第 9 步。第 9 步新版 prompt 合同尚未执行安全的 fresh 真实 Claude Agent、AI-compatible 负责人或 `/commit-changes` 集成；`step01-mendmark` 已推进到第 13 步并保留旧第 9 步 success/session/conversation，旧真实 run 仅为旧合同历史。
 - 旧失败与根因：曾依次出现 free quota / `use free tier only` 导致的 HTTP 403、访问恢复后的非 JSON 普通文本，以及 `completed` 携带非空 `answer`。根因是旧 `render_decision_system_prompt` 将步骤规则混入 responsibility、硬编码并重复 completion 语义且缺少 output。用户将公共 prompt 重构为 `role/project_context/responsibility/completion/output` 五段，补齐 f-string JSON 花括号转义和 `AgentDecision` 字段组合约束，并同步 common 与第 2/5/6/7/9 步测试。
 - 旧合同下的历史运行：以下第 9 步 fresh session、11 条 conversation、固定 commit 调用、commit-changes 发现事实矛盾与提交事实均不构成当前成功条件。按用户要求两次清理第 9 步局部 result、conversation、session、private state 和失败生成的未跟踪文档，保留第 0～8 步历史与三仓提交。最终唯一 session `f41fc439-4c46-434f-b3e9-d15c18c89601`，conversation 11 条：`system → assistant 初始 → user → assistant continue → user → assistant completed → assistant commit prompt → user → assistant continue → user → assistant completed`。
 - 执行事实：首轮 Agent 请求确认，负责人合法 `continue` 后创建约 32 KB 固定文档；负责人 `completed` 后 verifier 同 session 发送 `/commit-changes`。该 Skill 发现 frontend Git 事实矛盾，严格未修改、未暂存、未提交并报告；外层负责人普通 `continue` 授权通用 Agent 仅修正文档并精确提交。
@@ -448,7 +452,7 @@ Demo 和默认 PCM 流程只进行本地文件修改、测试、构建、服务�
 - 不适用：只作上述交接核验，按本步骤执行产物存在性拒绝；否则零 Git、Agent、决策、LLM 配置和 `docs/ui-ux/` 副作用，写入 `success`、`applicable: false`、`outputs: []` 并推进第 11 步。此分支由自动化覆盖，黄金项目不走此分支。
 - 适用动作与输出：单一键/session 为 `ui_ux_framework`，初始提示首行 `/ui-ux-framework` 并明确 `bootstrap`；只允许创建或更新 `docs/ui-ux/framework.md`，禁止单需求设计、代码、配置、项目规则和 Git。Agent 按需读取 Skill 自带参考资源，但参考资源不是项目默认实现；能由项目事实推导的低风险结构收敛为带依据和重议条件的默认 Target，真正改变跨需求体验骨架的具体分歧交由负责人通过 `continue` 决定并回写。Demo v1 成功结果为 `applicable: true` 与该唯一输出；已有项目接入和显式既有路径属于未来扩展，不能据此把当前固定路径泛化为通用 Skill 的永久限制。
 - 完成、恢复与安全：负责人仅在适用范围的 App Shell Contract 已闭合，产品表面、区域职责、导航层级、页面模式、常规滚动所有者、sticky 基准和窄屏转换可指导后续需求，且 Current、已确认 Target、默认 Target、具体待确认、已知偏差与非目标没有混写时返回 `completed`；默认 Target 必须保留依据和重议条件，不能以整份框架泛化待确认替代收敛。`completed` 后先 repair 缺失或空文档；只有根仓存在且仅存在固定文档未提交变化时，才在原 session 调用 `/commit-changes`，文档已 tracked 且全仓 clean 时不制造无变化调用。Python 仍只核验文档非空、非符号链接、已 tracked 和全部权威仓库当前为自身 top-level、`main`、clean，不解析框架 Markdown 语义；不要求 exact prompt、紧邻 Agent 回复或历史锚点。fresh、resume、blocked、写入中断与幂等规则同第 9 步同构且保持步骤私有，blocked 始终保存并停在当前节点，完整 success 只依严格 result schema、当前文档与 Git事实恢复。
-- 第 9 步更新后的 prompt 合同及第 9～11 步相关自动化已完成本轮验证：第 9 步定向 18 项通过（5.498 秒）；第 9～11 步本体合计 51 项（18+18+15）通过；公共循环加第 9～11 步本体及第 10/11 步 CLI 的相关回归 97 项通过（20.800 秒）；当前工作树全量 320 项 `unittest` 通过（61.405 秒）；`compileall common steps run_step.py test_run_step_retry.py` 与本次目标 `git diff --check` 通过。当前工作树还包含其它公共循环/CLI 的未提交修改，故全量结果是当前工作树验证，不能全部归因于第 9 步。第 9 步新版 prompt 合同尚未执行安全的 fresh 真实 Claude Agent、AI-compatible 负责人或 `/commit-changes` 集成；`step01-mendmark` 已推进到第 13 步并保留旧第 9 步 success/session/conversation，旧真实 run 仅为旧合同历史。
+- 第 9 步更新后的 prompt 合同及第 9～11 步相关自动化已完成本轮验证：第 9 步定向 18 项通过（5.498 秒）；第 9～11 步本体合计 51 项（18+18+15）通过；公共循环加第 9～11 步本体及第 10/11 步 CLI 的相关回归 97 项通过（20.800 秒）；当前工作树全量 351 项 `unittest` 通过（61.878 秒）；`compileall common steps run_step.py run_all.py test_run_step_retry.py test_run_all.py` 与本次目标 `git diff --check` 通过。当前工作树还包含其它公共循环/CLI 的未提交修改，故全量结果是当前工作树验证，不能全部归因于第 9 步。第 9 步新版 prompt 合同尚未执行安全的 fresh 真实 Claude Agent、AI-compatible 负责人或 `/commit-changes` 集成；`step01-mendmark` 已推进到第 13 步并保留旧第 9 步 success/session/conversation，旧真实 run 仅为旧合同历史。
 
 ### 第 11 步：拆分 Backlog
 
@@ -459,7 +463,7 @@ Demo 和默认 PCM 流程只进行本地文件修改、测试、构建、服务�
 - 完成条件：负责人确认上述体验决定和严格依赖边界已经落实后，Python仍只核验 Backlog 非空、非符号链接、已 tracked，以及全部权威仓库当前为各自自身 top-level、`main`、clean；Python 不解析 Backlog Markdown 语义，不要求提交调用锚点。
 - 恢复：领域步骤把完整 conversation 交给公共循环保存、读取和解释，fresh 仅按执行产物存在性拒绝，resume 由公共循环恢复。blocked 始终保存并停在当前节点；success 状态中断和完整重跑仅按严格 result schema、当前文档/Git事实恢复。
 - 现行推进：第 11 步只生成和提交 Backlog，success 进入 `phase_1:initialize_requirement_registry` / step 12；第 11 步本身不写注册表。
-- 第 9 步更新后的 prompt 合同及第 9～11 步相关自动化已完成本轮验证：第 9 步定向 18 项通过（5.498 秒）；第 9～11 步本体合计 51 项（18+18+15）通过；公共循环加第 9～11 步本体及第 10/11 步 CLI 的相关回归 97 项通过（20.800 秒）；当前工作树全量 320 项 `unittest` 通过（61.405 秒）；`compileall common steps run_step.py test_run_step_retry.py` 与本次目标 `git diff --check` 通过。当前工作树还包含其它公共循环/CLI 的未提交修改，故全量结果是当前工作树验证，不能全部归因于第 9 步。第 9 步新版 prompt 合同尚未执行安全的 fresh 真实 Claude Agent、AI-compatible 负责人或 `/commit-changes` 集成；`step01-mendmark` 已推进到第 13 步并保留旧第 9 步 success/session/conversation，旧真实 run 仅为旧合同历史。
+- 第 9 步更新后的 prompt 合同及第 9～11 步相关自动化已完成本轮验证：第 9 步定向 18 项通过（5.498 秒）；第 9～11 步本体合计 51 项（18+18+15）通过；公共循环加第 9～11 步本体及第 10/11 步 CLI 的相关回归 97 项通过（20.800 秒）；当前工作树全量 351 项 `unittest` 通过（61.878 秒）；`compileall common steps run_step.py run_all.py test_run_step_retry.py test_run_all.py` 与本次目标 `git diff --check` 通过。当前工作树还包含其它公共循环/CLI 的未提交修改，故全量结果是当前工作树验证，不能全部归因于第 9 步。第 9 步新版 prompt 合同尚未执行安全的 fresh 真实 Claude Agent、AI-compatible 负责人或 `/commit-changes` 集成；`step01-mendmark` 已推进到第 13 步并保留旧第 9 步 success/session/conversation，旧真实 run 仅为旧合同历史。
 
 ## 六、阶段一：注册需求并逐需求开发
 
