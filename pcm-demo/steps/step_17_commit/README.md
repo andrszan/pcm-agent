@@ -2,14 +2,15 @@
 
 ## 职责
 
-本步骤在产品根使用一个 requirement-scoped Claude session 调用 `commit-changes`，并通过公共 Agent 决策循环处理提交中的确认、意外和阻塞：
+本步骤在产品根使用一个 requirement-scoped Claude session 调用 `commit-changes`，并通过公共 Agent 决策循环处理纯 Git 提交动作中的确认和阻塞：
 
+- 第 15 步的实现、适用测试、真实验证和审查，以及第 16 步规则复盘，均作为不可在本步骤重新打开的权威上游完成事实；
 - 仓库集合只来自有序 `applicable_repositories` 白名单；
-- `commit-changes` 负责读取完整 diff、规划提交、精确暂存和创建本地提交；
-- AI-compatible 负责人根据 Agent 完整回复返回 `completed / continue / blocked`；
+- `commit-changes` 只负责读取 Git 状态和候选 diff、规划提交、精确暂存、创建本地提交及提交后 Git 核验；
+- AI-compatible 负责人只能返回纯 Git 提交范围内的 `completed / continue / blocked`，不得授权重新开发、测试、构建、浏览器验收或审查；
 - `continue`、blocked 解除和 completed 后 repair 都恢复同一 Claude session；
 - Python 最终只核验仓库边界和 clean 状态，并记录每仓 `tip_sha`；
-- 不 merge、不删除分支、不 push，也不把需求标记为 `completed`。
+- 不修改、删除、格式化、忽略或清理文件，不 merge、不删除分支、不 push，也不把需求标记为 `completed`。
 
 Python 不重复实现工作树 fingerprint、blob/tree hashing、Git attributes、merge commit、空提交或净零差异取证；这些提交语义由 `commit-changes` 负责。
 
@@ -55,15 +56,15 @@ system
 → ...
 ```
 
-运行上限为 48 turns、`$16` 和 8 轮负责人决策。
+单次 Agent 调用上限为 48 turns，不配置金额预算；负责人决策最多 3 轮，只用于正常提交、一次纯 Git retry/repair 和 blocked 恢复。
 
 负责人语义：
 
-- `completed`：白名单内提交工作完成，全部仓库仍在统一需求分支且 clean；
-- `continue`：当前环境仍可处理提交、核验或确认，`answer` 给出明确下一步；
-- `blocked`：仅用于当前环境无法取得的 Git 作者身份、强制签名凭据或外部授权。
+- `completed`：只根据 Git 提交结果判断；已有变更均已提交或原本无变更，全部仓库仍在统一需求分支且 clean；
+- `continue`：只允许读取 Git 状态和 diff、确认范围、精确暂存、创建本地提交及提交后核验，不得要求修改文件内容；
+- `blocked`：用于 Git 作者身份、强制签名、外部授权，或真实秘密、范围冲突等导致现有内容无法原样安全提交的情况；需要修改实现、文档、测试或生成物时，要求返回上游开发步骤处理。
 
-负责人不得授权扩大白名单、创建或切换分支、merge、rebase、reset、amend、改写历史、绕过检查或 push。
+负责人不得授权重新实现或修复功能、修改文档、格式化、补充或执行测试、运行 lint/build、启动服务、浏览器验收、安全审查或代码审查，也不得修改 `.gitignore`、删除或清理文件；同时不得扩大白名单、创建或切换分支、merge、rebase、reset、amend、改写历史、绕过检查或 push。
 
 负责人返回 `completed` 后，Python重新读取最小 Git facts：
 
@@ -110,9 +111,7 @@ steps/requirements/<ID>/17.json
 
 ## 验证
 
-现行实现的第 17 步本体 9 项、CLI 4 项；公共 Agent 决策循环与第 17 步定向共 43 项通过。PCM Demo 全量 303 项 `unittest`、`compileall common steps run_step.py test_run_step_retry.py` 与 `git diff --check` 通过；独立只读审查最终无高、中置信代码问题。
-
-覆盖范围包括 fresh clean、完整 conversation、continue、completed repair、blocked 与 blocked resume、首次无 session 失败重试、残缺锚点、未跟踪文件、symlink、result→state、advanced 兼容和 CLI blocked。
+定向测试覆盖 fresh clean、完整 conversation、纯 Git continue、三轮决策上限、completed repair、blocked 与 blocked resume、首次无 session 失败重试、残缺锚点、未跟踪文件、symlink、result→state、advanced 兼容和 CLI blocked。验证时运行第 17 步本体与 CLI 测试、公共 Agent 决策循环相关测试、`compileall` 和 `git diff --check`。
 
 ## 历史事实
 

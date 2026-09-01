@@ -17,6 +17,7 @@ from common.claude_agent import ClaudeRunResult
 from common.state import read_state, write_requirement_step_result, write_state
 from steps.step_17_commit.step import (
     CURRENT_NODE,
+    MAX_DECISION_ROUNDS,
     MAX_TURNS,
     NEXT_NODE,
     PHASE,
@@ -200,6 +201,7 @@ class RequirementCommitTests(unittest.TestCase):
         names = ["root", "web", "api"]
         self.dirty(workspace, names)
         calls: list[dict[str, Any]] = []
+        decision_prompts: list[str] = []
 
         async def agent(prompt: str, **kwargs: Any) -> ClaudeRunResult:
             calls.append({"prompt": prompt, **kwargs})
@@ -209,6 +211,7 @@ class RequirementCommitTests(unittest.TestCase):
             return value
 
         async def completed(messages, config, *, system_prompt):
+            decision_prompts.append(system_prompt)
             return decision("completed")
 
         self.execute(
@@ -219,6 +222,28 @@ class RequirementCommitTests(unittest.TestCase):
         self.assertEqual(calls[0]["max_turns"], MAX_TURNS)
         self.assertNotIn("max_budget_usd", calls[0])
         self.assertEqual(calls[0]["prompt"].count("/commit-changes"), 1)
+        self.assertEqual(MAX_DECISION_ROUNDS, 3)
+        self.assertEqual(len(decision_prompts), 1)
+        for required in (
+            "第 15 步已经完成",
+            "第 16 步已经完成",
+            "定稿提交输入",
+            "不得重新打开实现或验收结论",
+            "不得实现或修复代码",
+            "不得运行 lint、build",
+            "不得创建或修改 `.gitignore`",
+            "若现有内容不能在上述边界内原样安全提交",
+        ):
+            self.assertIn(required, calls[0]["prompt"])
+        for required in (
+            "只根据本步骤的 Git 提交结果判断",
+            "answer 只能包含这些 Git 提交动作",
+            "需要修改实现、文档、测试或生成物时",
+            "第 15 步已经完成当前需求",
+            "不得要求 Agent 实现或修复功能",
+            "不得创建或修改 .gitignore",
+        ):
+            self.assertIn(required, decision_prompts[0])
         saved_state = read_state(run_dir)
         key = "requirement_commit_BR-001"
         self.assertEqual(saved_state["claude_sessions"][key], "commit-session-1")
@@ -277,8 +302,12 @@ class RequirementCommitTests(unittest.TestCase):
         run_dir, workspace, state, _bases = self.make_run()
         self.dirty(workspace, ["root"])
         calls: list[dict[str, Any]] = []
+        git_continue = (
+            "不要修改文件内容；只重新读取白名单仓库的 Git 状态和剩余 diff，"
+            "精确暂存并提交现有定稿变更，然后核验提交后状态。"
+        )
         decisions = [
-            decision("continue", answer="继续完成提交。"),
+            decision("continue", answer=git_continue),
             decision("completed"),
         ]
         decision_calls = 0
@@ -306,7 +335,7 @@ class RequirementCommitTests(unittest.TestCase):
         )
         self.assertEqual(len(calls), 2)
         self.assertEqual(calls[1]["resume_session_id"], "commit-session-1")
-        self.assertEqual(calls[1]["prompt"], "继续完成提交。")
+        self.assertEqual(calls[1]["prompt"], git_continue)
         self.assertEqual(sum(call["prompt"].count("/commit-changes") for call in calls), 1)
 
     def test_completed_dirty_repairs_same_session(self) -> None:
@@ -332,6 +361,46 @@ class RequirementCommitTests(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         self.assertEqual(calls[1]["prompt"], REPOSITORY_REPAIR_PROMPT)
         self.assertEqual(calls[1]["resume_session_id"], "commit-session-1")
+        for required in (
+            "不要重新开发或重新验收",
+            "精确暂存",
+            "不得实现或修复代码",
+            "不得运行 lint、build",
+            "不得创建或修改 .gitignore",
+            "不得删除、移动、忽略或丢弃文件",
+            "不能原样安全提交",
+        ):
+            self.assertIn(required, calls[1]["prompt"])
+
+    def test_decision_round_limit_stops_before_fourth_agent_call(self) -> None:
+        run_dir, workspace, state, _bases = self.make_run()
+        self.dirty(workspace, ["root"])
+        calls: list[dict[str, Any]] = []
+        decision_calls = 0
+        git_continue = "只读取 Git 状态和 diff，精确暂存并提交现有变更。"
+
+        async def agent(prompt: str, **kwargs: Any) -> ClaudeRunResult:
+            calls.append({"prompt": prompt, **kwargs})
+            value = agent_result(kwargs["cwd"], text=f"第 {len(calls)} 轮仍有未提交内容")
+            kwargs["on_update"](value)
+            return value
+
+        async def decide(messages, config, *, system_prompt):
+            nonlocal decision_calls
+            decision_calls += 1
+            return decision("continue", answer=git_continue)
+
+        with self.assertRaisesRegex(RuntimeError, "达到上限"):
+            self.execute(
+                run_dir,
+                state,
+                agent_runner=agent,
+                decision_runner=decide,
+                config_loader=lambda: object(),
+            )
+
+        self.assertEqual(len(calls), MAX_DECISION_ROUNDS)
+        self.assertEqual(decision_calls, MAX_DECISION_ROUNDS)
 
     def test_blocked_then_resume_same_conversation(self) -> None:
         run_dir, workspace, state, _bases = self.make_run()

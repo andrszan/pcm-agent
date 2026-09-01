@@ -23,15 +23,21 @@ CURRENT_NODE = "requirement:17_commit"
 NEXT_NODE = "requirement:18_merge"
 PHASE = "phase_1_requirement_development"
 SKILL_NAME = "commit-changes"
-MAX_DECISION_ROUNDS = 16
+MAX_DECISION_ROUNDS = 3
 MAX_TURNS = 48
 REPOSITORY_REPAIR_PROMPT = (
-    "请只处理权威仓库清单中的未提交变更；不得修改或丢弃文件内容来让检查通过。"
-    "完成后重新核验每个仓库的工作区和暂存区均干净。"
+    "白名单仓库仍有未提交的定稿输入。不要重新开发或重新验收。"
+    "只读取剩余的 Git status 和 diff，确认提交范围、真实秘密与意外文件，"
+    "然后精确暂存、创建必要的本地提交并执行提交后 Git 核验。"
+    "不得实现或修复代码、文档或测试，不得格式化、补充或执行测试，不得运行 lint、build、"
+    "服务、浏览器、安全审查或代码审查；不得创建或修改 .gitignore，不得删除、移动、忽略或丢弃文件。"
+    "若现有内容不能原样安全提交，停止并报告具体仓库、路径和原因。"
 )
-REQUIREMENT_COMMIT_DECISION_RULES = """- completed：白名单内已有需求变更均已完成必要的本地提交；每个仓库仍位于统一需求分支，且工作区和暂存区干净。
-- continue：当前环境仍可处理白名单内的提交、核验或确认时，在 answer 中给出明确的下一步指令。
-- blocked：仅可用于缺少当前环境无法取得的合法 Git 作者身份、强制签名凭据或外部授权。
+REQUIREMENT_COMMIT_DECISION_RULES = """- completed：只根据本步骤的 Git 提交结果判断。白名单内已有需求变更均已完成必要的本地提交或原本无变更；每个仓库仍位于统一需求分支，且工作区和暂存区干净。不得重新判断实现正确性、测试充分性、安全设计或产品验收。
+- continue：仅当仍可在不修改、删除、格式化或重新生成任何文件内容的前提下，通过读取 Git 状态和 diff、确认提交范围、精确暂存、创建本地提交或核验提交结果完成当前工作时使用。answer 只能包含这些 Git 提交动作。
+- blocked：仅用于缺少合法 Git 作者身份、强制签名凭据、外部授权，或现有变更因真实秘密、范围归属冲突等原因无法在不修改内容的情况下安全提交。需要修改实现、文档、测试或生成物时，required_inputs 必须要求返回上游开发步骤处理，不得在本步骤内修复。
+
+第 15 步已经完成当前需求的实现、适用测试、真实验证和审查，第 16 步已经完成规则复盘；这是本步骤的权威上游事实。不得要求 Agent 实现或修复功能、修改文档、格式化文件、补充或执行测试、运行 lint 或 build、启动服务、进行浏览器验收、安全审查、代码审查或重新验收；不得创建或修改 .gitignore，也不得删除、移动、忽略或丢弃文件来获得 clean 状态。
 
 不得授权扩大白名单、切换或创建分支、merge、rebase、reset、amend、改写历史、绕过检查或 push。"""
 _HEX = set("0123456789abcdef")
@@ -237,11 +243,17 @@ def initial_prompt(context: dict[str, Any]) -> str:
     return f"""/commit-changes
 请提交当前需求 `{context['requirement_id']} {context['title']}` 已完成并验证的已有变更。
 
+第 15 步已经完成当前需求的实现、适用测试、真实验证和审查，第 16 步已经完成规则复盘。当前工作树中的需求变更是本步骤的定稿提交输入，不得重新打开实现或验收结论。
+
 统一需求分支：`{context['branch']}`
 适用仓库白名单（集合和顺序均不可扩大）：
 {repositories}
 
-只在白名单内的独立仓库处理已有 dirty 变更；clean 仓库不提交且不制造空提交。不得修改或丢弃文件内容来让检查通过，不得处理白名单外仓库，不得创建或切换分支、merge、rebase、reset、amend、改写历史或 push。完成后确保每个白名单仓库仍在统一需求分支，且 `git status --porcelain` 为空。"""
+只在白名单内的独立仓库处理已有 dirty 变更；clean 仓库不提交且不制造空提交。只为确认仓库边界、提交分组、文件归属、真实秘密和意外范围读取 Git 状态、完整 diff 及必要候选文件内容，然后精确暂存、创建本地提交并核验提交后的 Git 状态。
+
+不得实现或修复代码、文档或测试，不得格式化文件、补充或执行测试，不得运行 lint、build、服务、浏览器、安全审查或代码审查；不得创建或修改 `.gitignore`，不得删除、移动、忽略或丢弃文件来让检查通过。不得处理白名单外仓库，不得创建或切换分支、merge、rebase、reset、amend、改写历史、绕过 hook 或 push。
+
+若现有内容不能在上述边界内原样安全提交，停止并报告具体仓库、路径和原因。完成后确保每个白名单仓库仍在统一需求分支，且 `git status --porcelain` 为空。"""
 
 
 def _fresh_success(
@@ -342,6 +354,11 @@ def _decision_spec(context: dict[str, Any]) -> AgentDecisionLoopSpec:
                     "id": context["requirement_id"],
                     "title": context["title"],
                     "branch": context["branch"],
+                },
+                "上游完成事实": {
+                    "实现与验证": "第 15 步已完成当前需求的实现、适用测试、真实验证和审查。",
+                    "规则复盘": "第 16 步已完成规则复盘。",
+                    "当前职责": "第 17 步只提交现有定稿变更，不重新开发或重新验收。",
                 },
                 "有序权威仓库": repositories,
             },
