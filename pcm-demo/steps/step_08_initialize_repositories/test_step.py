@@ -170,6 +170,7 @@ class InitializeRepositoriesTests(unittest.TestCase):
             names = ["root", "frontend", "backend"]
             self.dirty(workspace, names)
             calls: list[dict] = []
+            decision_prompts: list[str] = []
 
             async def fake_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
                 calls.append({"prompt": prompt, **kwargs})
@@ -179,6 +180,7 @@ class InitializeRepositoriesTests(unittest.TestCase):
                 return value
 
             async def completed(messages, config, *, system_prompt):
+                decision_prompts.append(system_prompt)
                 return decision("completed")
 
             saved = self.run_step(
@@ -195,7 +197,17 @@ class InitializeRepositoriesTests(unittest.TestCase):
             self.assertEqual(calls[0]["max_turns"], INITIALIZE_REPOSITORIES_MAX_TURNS)
             self.assertNotIn("max_budget_usd", calls[0])
             self.assertTrue(calls[0]["prompt"].startswith("/commit-changes\n"))
-            self.assertIn("必须原样保留", calls[0]["prompt"])
+            self.assertEqual(len(decision_prompts), 1)
+            for required in (
+                ".agents/",
+                ".claude/",
+                "plugins-lock.json",
+                "精确暂存并原样提交",
+                "不得创建、修改、删除",
+                "无人值守权限合同必须原样保留",
+            ):
+                self.assertIn(required, calls[0]["prompt"])
+                self.assertIn(required, decision_prompts[0])
             for forbidden in ("expected_head", "INITIAL_COMMITS", "SHA", "组装", "唯一", "无父"):
                 self.assertNotIn(forbidden, calls[0]["prompt"])
             self.assertEqual(saved["applicable_repositories"], names)
@@ -229,6 +241,15 @@ class InitializeRepositoriesTests(unittest.TestCase):
 
             self.assertEqual(len(calls), 2)
             self.assertEqual(calls[1]["prompt"], REPOSITORY_REPAIR_PROMPT)
+            for required in (
+                ".agents/",
+                ".claude/",
+                "plugins-lock.json",
+                "精确暂存并原样提交",
+                "不得创建、修改、删除",
+                "无人值守权限合同必须原样保留",
+            ):
+                self.assertIn(required, calls[1]["prompt"])
             self.assertEqual(calls[1]["resume_session_id"], "session-1")
 
     def test_blocked_after_agent_clean_state_succeeds(self) -> None:
