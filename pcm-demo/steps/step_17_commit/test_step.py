@@ -225,8 +225,7 @@ class RequirementCommitTests(unittest.TestCase):
         self.assertEqual(MAX_DECISION_ROUNDS, 3)
         self.assertEqual(len(decision_prompts), 1)
         for required in (
-            "第 15 步已经完成",
-            "第 16 步已经完成",
+            "当前需求的实现、适用测试、真实验证、审查与规则复盘均已完成",
             "定稿提交输入",
             "不得重新打开实现或验收结论",
             "不得实现或修复代码",
@@ -236,14 +235,26 @@ class RequirementCommitTests(unittest.TestCase):
         ):
             self.assertIn(required, calls[0]["prompt"])
         for required in (
-            "只根据本步骤的 Git 提交结果判断",
+            "只根据当前 Git 提交结果判断",
             "answer 只能包含这些 Git 提交动作",
             "需要修改实现、文档、测试或生成物时",
-            "第 15 步已经完成当前需求",
-            "不得要求 Agent 实现或修复功能",
+            "当前需求的实现、适用测试、真实验证、审查与规则复盘均已完成",
+            "不得实现或修复功能",
             "不得创建或修改 .gitignore",
         ):
             self.assertIn(required, decision_prompts[0])
+        for forbidden in (
+            "第 15 步",
+            "第 16 步",
+            "第 17 步",
+            "本步骤",
+            "上游开发步骤",
+            "PCM",
+            "current_node",
+            "session",
+        ):
+            self.assertNotIn(forbidden, calls[0]["prompt"])
+            self.assertNotIn(forbidden, decision_prompts[0])
         saved_state = read_state(run_dir)
         key = "requirement_commit_BR-001"
         self.assertEqual(saved_state["claude_sessions"][key], "commit-session-1")
