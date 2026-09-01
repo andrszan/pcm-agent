@@ -490,6 +490,60 @@ class InitializeRepositoriesTests(unittest.TestCase):
             self.assertEqual(saved["status"], "success")
             self.assertEqual(read_state(run_dir)["status"], "success")
 
+    def test_clean_recovery_closes_existing_conversation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory), [])
+            self.dirty(workspace, ["root"])
+            relative_path = "conversations/initialize_repositories.json"
+            state.update(
+                {
+                    "status": "failed",
+                    "claude_sessions": {"initialize_repositories": "session-1"},
+                    "decision_conversations": {
+                        "initialize_repositories": {"path": relative_path}
+                    },
+                }
+            )
+            write_state(run_dir, state)
+            conversation_path = run_dir / relative_path
+            conversation_path.parent.mkdir()
+            write_json(
+                conversation_path,
+                {
+                    "messages": [
+                        {"role": "system", "content": "测试 system"},
+                        {"role": "assistant", "content": "执行提交"},
+                        {"role": "user", "content": "尚未提交"},
+                        {
+                            "role": "assistant",
+                            "content": json.dumps(
+                                decision("continue", answer="继续提交")[0],
+                                ensure_ascii=False,
+                            ),
+                        },
+                    ]
+                },
+            )
+            commit_all(workspace)
+
+            async def unexpected(*args: object, **kwargs: object) -> ClaudeRunResult:
+                raise AssertionError("已清理的恢复不应调用 Agent 或负责人")
+
+            saved = self.run_step(
+                run_dir,
+                state,
+                agent_runner=unexpected,
+                decision_runner=unexpected,
+            )
+
+            self.assertEqual(saved["status"], "success")
+            messages = json.loads(conversation_path.read_text(encoding="utf-8"))["messages"]
+            completion = json.loads(messages[-1]["content"])
+            self.assertEqual(completion["verdict"], "completed")
+            self.assertEqual(completion["answer"], "")
+            self.assertEqual(completion["required_inputs"], [])
+            self.assertIn("PCM 确定性恢复核验", completion["reason"])
+
     def test_step_nine_success_refuses_later_dirty_changes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory), [])

@@ -8,6 +8,7 @@ from typing import Any
 from common.agent_decision_loop import AgentDecisionLoopSpec, run_agent_decision_loop
 from common.claude_agent import run_claude
 from common.decision import parse_agent_decision, render_decision_system_prompt, request_decision
+from common.files import write_json
 from common.state import write_state, write_step_result
 from config import LLMConfig
 
@@ -225,12 +226,60 @@ def _require_resume_anchor(run_dir: Path, state: dict[str, Any]) -> None:
         raise RuntimeError("仓库提交恢复历史尾部不是 blocked 决策")
 
 
+def _record_recovered_completion(run_dir: Path, state: dict[str, Any]) -> None:
+    relative_path = f"conversations/{CONVERSATION_KEY}.json"
+    conversation_path = run_dir / relative_path
+    if not conversation_path.exists():
+        return
+    try:
+        conversation = json.loads(conversation_path.read_text(encoding="utf-8"))
+        messages = conversation["messages"]
+    except (OSError, UnicodeError, json.JSONDecodeError, KeyError) as error:
+        raise RuntimeError("仓库提交恢复对话不可读取") from error
+    if not isinstance(messages, list) or not messages:
+        raise RuntimeError("仓库提交恢复对话不符合约定")
+    tail = messages[-1]
+    if isinstance(tail, dict) and tail.get("role") == "assistant":
+        try:
+            decision = parse_agent_decision(tail.get("content"))
+        except (TypeError, ValueError):
+            pass
+        else:
+            if decision.verdict == "completed":
+                return
+    messages.append(
+        {
+            "role": "assistant",
+            "content": json.dumps(
+                {
+                    "verdict": "completed",
+                    "answer": "",
+                    "reason": "权威仓库已由 PCM 确定性恢复核验为 main 分支且工作区和暂存区干净。",
+                    "required_inputs": [],
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
+        }
+    )
+    write_json(conversation_path, {"messages": messages})
+    references = state.setdefault("decision_conversations", {})
+    if not isinstance(references, dict):
+        raise RuntimeError("决策历史引用不符合约定")
+    reference = references.get(CONVERSATION_KEY)
+    if reference is None:
+        references[CONVERSATION_KEY] = {"path": relative_path}
+    elif not isinstance(reference, dict) or reference.get("path") != relative_path:
+        raise RuntimeError("仓库提交决策历史引用不符合约定")
+
+
 def advance_success(
     run_dir: Path,
     state: dict[str, Any],
     names: list[str],
     repositories: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    _record_recovered_completion(run_dir, state)
     saved = result(
         "success",
         "已完成首次全仓提交检查，权威仓库均位于 main 分支且工作树干净。",
