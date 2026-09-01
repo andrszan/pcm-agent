@@ -430,7 +430,7 @@ def _save_agent_update(
         }
     if value.result_subtype is not None:
         section["last_agent_result"] = _safe_agent_result(value)
-        if isinstance(value.text, str):
+        if isinstance(value.text, str) and value.text.strip():
             section["pending_agent_text"] = value.text
     write_state(run_dir, state)
 
@@ -497,8 +497,11 @@ def _append_pending_agent_text(
     pending = _state_section(state, spec).get("pending_agent_text")
     if pending is None:
         return messages
-    if not isinstance(pending, str) or not pending.strip():
+    if not isinstance(pending, str):
         raise RuntimeError("待恢复 Agent 回复不符合约定")
+    if not pending.strip():
+        _clear_pending_agent_text(run_dir, state, spec)
+        return messages
     tail = messages[-1]
     if tail == {"role": "user", "content": pending}:
         _clear_pending_agent_text(run_dir, state, spec)

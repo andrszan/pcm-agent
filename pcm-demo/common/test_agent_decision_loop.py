@@ -343,7 +343,8 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
             "last_decision_failure", self.state[self.spec.state_key]
         )
 
-    async def test_empty_pending_agent_text_cannot_resume_to_decision(self) -> None:
+    async def test_empty_pending_agent_text_is_discarded_before_resume(self) -> None:
+        self.state["claude_sessions"] = {self.spec.key: "session-1"}
         self.state[self.spec.state_key] = {"pending_agent_text": ""}
         self.save_conversation(
             [
@@ -351,9 +352,24 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
                 {"role": "assistant", "content": "初始 Agent 提示"},
             ]
         )
+        agent = FakeAgentRunner([self.result("恢复后的完整回复")])
 
-        with self.assertRaisesRegex(RuntimeError, "待恢复 Agent 回复"):
-            await self.run_loop(FakeAgentRunner([]), FakeDecisionRunner([]))
+        outcome = await self.run_loop(
+            agent,
+            FakeDecisionRunner([decision("completed", reason="已核验")]),
+        )
+
+        self.assertEqual(outcome.verdict, "completed")
+        self.assertEqual(agent.calls[0][1]["resume_session_id"], "session-1")
+        self.assertNotIn("pending_agent_text", self.state[self.spec.state_key])
+
+    async def test_empty_agent_result_is_not_saved_as_pending_text(self) -> None:
+        agent = FakeAgentRunner([self.result("")])
+
+        with self.assertRaises(AgentExecutionFailure):
+            await self.run_loop(agent, FakeDecisionRunner([]))
+
+        self.assertNotIn("pending_agent_text", self.state[self.spec.state_key])
 
     async def test_decision_uses_persisted_system_prompt_on_recovery(self) -> None:
         original = "已落盘的完整 Agent 原文"
