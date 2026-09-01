@@ -46,7 +46,7 @@ def commit_all(repository: Path, message: str = "test commit") -> str:
 
 def agent_result(
     cwd: Path,
-    session: str = "commit-session-1",
+    session: str = "development-session-1",
     text: str = "已处理当前提交任务。",
 ) -> ClaudeRunResult:
     return ClaudeRunResult(
@@ -135,6 +135,10 @@ class RequirementCommitTests(unittest.TestCase):
                 }],
             },
             "active_requirement": "BR-001",
+            "claude_sessions": {
+                "development_BR-001": "development-session-1",
+                "rule_retrospective_BR-001": "development-session-1",
+            },
             "requirement_cycle": {
                 "requirement_id": "BR-001",
                 "branch": "req/br-001",
@@ -193,7 +197,7 @@ class RequirementCommitTests(unittest.TestCase):
         self.assertEqual([item["tip_sha"] for item in saved["repositories"]], list(bases.values()))
         completed = read_state(run_dir)
         self.assertEqual(completed["current_node"], NEXT_NODE)
-        self.assertNotIn("claude_sessions", completed)
+        self.assertNotIn("requirement_commit_BR-001", completed["claude_sessions"])
         self.assertFalse((run_dir / "conversations/requirement_commit_BR-001.json").exists())
 
     def test_dirty_completed_creates_full_conversation(self) -> None:
@@ -221,26 +225,25 @@ class RequirementCommitTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0]["max_turns"], MAX_TURNS)
         self.assertNotIn("max_budget_usd", calls[0])
-        self.assertEqual(calls[0]["prompt"].count("/commit-changes"), 1)
+        self.assertEqual(
+            calls[0]["prompt"],
+            "/commit-changes\n"
+            "请提交当前需求 `BR-001 账户访问` 在以下仓库中的全部已有变更：\n"
+            "- root: `.`\n"
+            "- web: `web`\n"
+            "- api: `api`\n\n"
+            "统一需求分支：`req/br-001`\n"
+            "只 commit，不 push。",
+        )
+        self.assertEqual(calls[0]["resume_session_id"], "development-session-1")
         self.assertEqual(MAX_DECISION_ROUNDS, 3)
         self.assertEqual(len(decision_prompts), 1)
         for required in (
-            "当前需求的实现、适用测试、真实验证、审查与规则复盘均已完成",
-            "定稿提交输入",
-            "不得重新打开实现或验收结论",
-            "不得实现或修复代码",
-            "不得运行 lint、build",
-            "不得创建或修改 `.gitignore`",
-            "若现有内容不能在上述边界内原样安全提交",
-        ):
-            self.assertIn(required, calls[0]["prompt"])
-        for required in (
-            "只根据当前 Git 提交结果判断",
-            "answer 只能包含这些 Git 提交动作",
-            "需要修改实现、文档、测试或生成物时",
-            "当前需求的实现、适用测试、真实验证、审查与规则复盘均已完成",
-            "不得实现或修复功能",
-            "不得创建或修改 .gitignore",
+            "全部白名单仓库仍在统一需求分支",
+            "仅当仍有读取 Git 状态",
+            "现有变更无法原样安全提交",
+            "只处理 Git 提交",
+            "不 push",
         ):
             self.assertIn(required, decision_prompts[0])
         for forbidden in (
@@ -252,12 +255,16 @@ class RequirementCommitTests(unittest.TestCase):
             "PCM",
             "current_node",
             "session",
+            "不得运行 lint",
+            "不得创建或修改 .gitignore",
+            "浏览器验收",
+            "安全审查",
         ):
             self.assertNotIn(forbidden, calls[0]["prompt"])
             self.assertNotIn(forbidden, decision_prompts[0])
         saved_state = read_state(run_dir)
         key = "requirement_commit_BR-001"
-        self.assertEqual(saved_state["claude_sessions"][key], "commit-session-1")
+        self.assertEqual(saved_state["claude_sessions"][key], "development-session-1")
         self.assertEqual(
             saved_state["decision_conversations"][key]["path"],
             "conversations/requirement_commit_BR-001.json",
@@ -269,7 +276,7 @@ class RequirementCommitTests(unittest.TestCase):
             "system", "assistant", "user", "assistant",
         ])
 
-    def test_failure_before_session_retries_original_prompt(self) -> None:
+    def test_failure_retries_with_development_session(self) -> None:
         run_dir, workspace, state, _bases = self.make_run()
         self.dirty(workspace, ["root"])
 
@@ -284,7 +291,9 @@ class RequirementCommitTests(unittest.TestCase):
             )
         failed_state = read_state(run_dir)
         key = "requirement_commit_BR-001"
-        self.assertNotIn(key, failed_state.get("claude_sessions", {}))
+        self.assertEqual(
+            failed_state["claude_sessions"][key], "development-session-1"
+        )
         self.assertEqual(
             failed_state["decision_conversations"][key]["path"],
             "conversations/requirement_commit_BR-001.json",
@@ -306,7 +315,9 @@ class RequirementCommitTests(unittest.TestCase):
             decision_runner=completed, config_loader=lambda: object(),
         )
         self.assertEqual(len(calls), 1)
-        self.assertIsNone(calls[0]["resume_session_id"])
+        self.assertEqual(
+            calls[0]["resume_session_id"], "development-session-1"
+        )
         self.assertTrue(calls[0]["prompt"].startswith("/commit-changes\n"))
 
     def test_continue_then_completed_reuses_session(self) -> None:
@@ -345,7 +356,7 @@ class RequirementCommitTests(unittest.TestCase):
             config_loader=lambda: object(),
         )
         self.assertEqual(len(calls), 2)
-        self.assertEqual(calls[1]["resume_session_id"], "commit-session-1")
+        self.assertEqual(calls[1]["resume_session_id"], "development-session-1")
         self.assertEqual(calls[1]["prompt"], git_continue)
         self.assertEqual(sum(call["prompt"].count("/commit-changes") for call in calls), 1)
 
@@ -371,15 +382,11 @@ class RequirementCommitTests(unittest.TestCase):
         )
         self.assertEqual(len(calls), 2)
         self.assertEqual(calls[1]["prompt"], REPOSITORY_REPAIR_PROMPT)
-        self.assertEqual(calls[1]["resume_session_id"], "commit-session-1")
+        self.assertEqual(calls[1]["resume_session_id"], "development-session-1")
         for required in (
-            "不要重新开发或重新验收",
-            "精确暂存",
-            "不得实现或修复代码",
-            "不得运行 lint、build",
-            "不得创建或修改 .gitignore",
-            "不得删除、移动、忽略或丢弃文件",
-            "不能原样安全提交",
+            "使用 commit-changes",
+            "提交这些已有变更",
+            "只 commit，不 push",
         ):
             self.assertIn(required, calls[1]["prompt"])
 
@@ -455,7 +462,7 @@ class RequirementCommitTests(unittest.TestCase):
             decision_runner=completed, config_loader=lambda: object(),
         )
         self.assertEqual(calls[0]["prompt"], BLOCKED_RESUME_PROMPT)
-        self.assertEqual(calls[0]["resume_session_id"], "commit-session-1")
+        self.assertEqual(calls[0]["resume_session_id"], "development-session-1")
 
     def test_incomplete_resume_anchors_are_rejected(self) -> None:
         variants = ("session", "reference", "conversation")
@@ -465,7 +472,7 @@ class RequirementCommitTests(unittest.TestCase):
                 self.dirty(workspace, ["root"])
                 key = "requirement_commit_BR-001"
                 if variant == "session":
-                    state["claude_sessions"] = {key: "commit-session-1"}
+                    state["claude_sessions"][key] = "commit-session-1"
                 elif variant == "reference":
                     state["decision_conversations"] = {
                         key: {"path": f"conversations/{key}.json"}
@@ -479,7 +486,7 @@ class RequirementCommitTests(unittest.TestCase):
                 async def unexpected(*args: Any, **kwargs: Any) -> Any:
                     raise AssertionError("残缺锚点不应调用 Agent 或负责人")
 
-                with self.assertRaisesRegex(RuntimeError, "恢复缺少"):
+                with self.assertRaisesRegex(RuntimeError, "恢复缺少|没有复用"):
                     self.execute(
                         run_dir, state, agent_runner=unexpected,
                         decision_runner=unexpected, config_loader=lambda: object(),

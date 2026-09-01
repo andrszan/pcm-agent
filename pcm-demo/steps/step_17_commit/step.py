@@ -26,20 +26,14 @@ SKILL_NAME = "commit-changes"
 MAX_DECISION_ROUNDS = 3
 MAX_TURNS = 48
 REPOSITORY_REPAIR_PROMPT = (
-    "白名单仓库仍有未提交的定稿输入。不要重新开发或重新验收。"
-    "只读取剩余的 Git status 和 diff，确认提交范围、真实秘密与意外文件，"
-    "然后精确暂存、创建必要的本地提交并执行提交后 Git 核验。"
-    "不得实现或修复代码、文档或测试，不得格式化、补充或执行测试，不得运行 lint、build、"
-    "服务、浏览器、安全审查或代码审查；不得创建或修改 .gitignore，不得删除、移动、忽略或丢弃文件。"
-    "若现有内容不能原样安全提交，停止并报告具体仓库、路径和原因。"
+    "白名单仓库仍有未提交变更。请继续使用 commit-changes 提交这些已有变更，"
+    "完成后确认所有仓库的工作区和暂存区干净；只 commit，不 push。"
 )
-REQUIREMENT_COMMIT_DECISION_RULES = """- completed：只根据当前 Git 提交结果判断。白名单内已有需求变更均已完成必要的本地提交或原本无变更；每个仓库仍位于统一需求分支，且工作区和暂存区干净。不得重新判断实现正确性、测试充分性、安全设计或产品验收。
-- continue：仅当仍可在不修改、删除、格式化或重新生成任何文件内容的前提下，通过读取 Git 状态和 diff、确认提交范围、精确暂存、创建本地提交或核验提交结果完成当前工作时使用。answer 只能包含这些 Git 提交动作。
-- blocked：仅用于缺少合法 Git 作者身份、强制签名凭据、外部授权，或现有变更因真实秘密、范围归属冲突等原因无法在不修改内容的情况下安全提交。需要修改实现、文档、测试或生成物时，required_inputs 必须明确要求交由实现与验证任务处理，当前提交任务不得修改内容。
+REQUIREMENT_COMMIT_DECISION_RULES = """- completed：已有变更均已提交或原本无变更；全部白名单仓库仍在统一需求分支，且工作区和暂存区干净。
+- continue：仅当仍有读取 Git 状态、确认提交范围、精确暂存、创建本地提交或核验提交结果等提交动作可继续完成时使用。
+- blocked：仅用于缺少 Git 作者身份、签名凭据、外部授权，或现有变更无法原样安全提交的情况。
 
-当前需求的实现、适用测试、真实验证、审查与规则复盘均已完成，这是不可重新打开的权威事实。不得实现或修复功能、修改文档、格式化文件、补充或执行测试、运行 lint 或 build、启动服务、进行浏览器验收、安全审查、代码审查或重新验收；不得创建或修改 .gitignore，也不得删除、移动、忽略或丢弃文件来获得 clean 状态。
-
-不得授权扩大白名单、切换或创建分支、merge、rebase、reset、amend、改写历史、绕过检查或 push。"""
+当前需求的实现、验证、审查与规则复盘均已完成；只处理 Git 提交，不重新开发或重新验收，不 push。"""
 _HEX = set("0123456789abcdef")
 _RESULT_FIELDS = {"step", "name", "status", "summary", "applicable", "outputs", "blocked", "error", "requirement_id", "branch", "repositories"}
 
@@ -161,7 +155,22 @@ def _context(run_dir: Path, state: dict[str, Any], *, advanced: bool) -> dict[st
     requirement_id, title, cycle = _active(state, require_title=not advanced)
     names = _names(state)
     bases, tips = _cycle_repositories(cycle, names, advanced=advanced)
-    context = {"requirement_id": requirement_id, "title": title, "branch": cycle["branch"], "cycle": cycle, "names": names, "bases": bases, "tips": tips, "key": f"requirement_commit_{requirement_id}"}
+    development_session_id = cycle.get("development_session_id")
+    _require(
+        isinstance(development_session_id, str) and bool(development_session_id),
+        "活动需求缺少开发 session",
+    )
+    context = {
+        "requirement_id": requirement_id,
+        "title": title,
+        "branch": cycle["branch"],
+        "cycle": cycle,
+        "names": names,
+        "bases": bases,
+        "tips": tips,
+        "key": f"requirement_commit_{requirement_id}",
+        "development_session_id": development_session_id,
+    }
     if advanced:
         return context
     try:
@@ -184,6 +193,14 @@ def _context(run_dir: Path, state: dict[str, Any], *, advanced: bool) -> dict[st
         )
         repositories.append({"name": name, "path": path.resolve()})
     _step_sixteen_success(run_dir, requirement_id, cycle)
+    sessions = state.get("claude_sessions")
+    _require(
+        isinstance(sessions, dict)
+        and sessions.get(f"development_{requirement_id}") == development_session_id
+        and sessions.get(f"rule_retrospective_{requirement_id}")
+        == development_session_id,
+        "开发与规则复盘没有共享原开发 session",
+    )
     return {**context, "workspace": workspace, "repositories": repositories}
 
 
@@ -239,21 +256,16 @@ def _completion_repair(context: dict[str, Any]) -> str | None:
 
 
 def initial_prompt(context: dict[str, Any]) -> str:
-    repositories = "\n".join(f"- {item['name']}: `{'.' if item['name'] == 'root' else item['name']}`" for item in context["repositories"])
+    repositories = "\n".join(
+        f"- {item['name']}: `{'.' if item['name'] == 'root' else item['name']}`"
+        for item in context["repositories"]
+    )
     return f"""/commit-changes
-请提交当前需求 `{context['requirement_id']} {context['title']}` 已完成并验证的已有变更。
-
-当前需求的实现、适用测试、真实验证、审查与规则复盘均已完成。当前工作树中的需求变更是定稿提交输入，不得重新打开实现或验收结论。
-
-统一需求分支：`{context['branch']}`
-适用仓库白名单（集合和顺序均不可扩大）：
+请提交当前需求 `{context['requirement_id']} {context['title']}` 在以下仓库中的全部已有变更：
 {repositories}
 
-只在白名单内的独立仓库处理已有 dirty 变更；clean 仓库不提交且不制造空提交。只为确认仓库边界、提交分组、文件归属、真实秘密和意外范围读取 Git 状态、完整 diff 及必要候选文件内容，然后精确暂存、创建本地提交并核验提交后的 Git 状态。
-
-不得实现或修复代码、文档或测试，不得格式化文件、补充或执行测试，不得运行 lint、build、服务、浏览器、安全审查或代码审查；不得创建或修改 `.gitignore`，不得删除、移动、忽略或丢弃文件来让检查通过。不得处理白名单外仓库，不得创建或切换分支、merge、rebase、reset、amend、改写历史、绕过 hook 或 push。
-
-若现有内容不能在上述边界内原样安全提交，停止并报告具体仓库、路径和原因。完成后确保每个白名单仓库仍在统一需求分支，且 `git status --porcelain` 为空。"""
+统一需求分支：`{context['branch']}`
+只 commit，不 push。"""
 
 
 def _fresh_success(
@@ -303,34 +315,25 @@ def _execution_scene(run_dir: Path, state: dict[str, Any], context: dict[str, An
         return False
     session = sessions.get(key) if isinstance(sessions, dict) else None
     reference = references.get(key) if isinstance(references, dict) else None
+    _require(
+        session == context["development_session_id"],
+        "需求提交没有复用原开发 session",
+    )
     _require(isinstance(reference, dict) and reference.get("path") == expected, "需求提交恢复缺少原决策历史引用")
     _require(not conversation.is_symlink() and conversation.is_file(), "需求提交恢复缺少原决策历史")
-    if session is None:
-        _require(state.get("status") != "blocked", "需求提交恢复缺少原 Claude session")
-        saved = _read_json(conversation, "需求提交恢复缺少原决策历史")
-        messages = saved.get("messages")
-        section = state.get(key)
-        _require(
-            isinstance(messages, list)
-            and messages == [
-                {"role": "system", "content": _decision_spec(context).decision_system_prompt},
-                {"role": "assistant", "content": initial_prompt(context)},
-            ]
-            and (
-                section is None
-                or isinstance(section, dict)
-                and "pending_agent_text" not in section
-                and (
-                    "last_agent_result" not in section
-                    or isinstance(section["last_agent_result"], dict)
-                    and not section["last_agent_result"].get("session_id")
-                )
-            ),
-            "需求提交恢复缺少原 Claude session",
-        )
-        return True
-    _require(isinstance(session, str) and bool(session), "需求提交恢复缺少原 Claude session")
     return True
+
+
+def _prepare_session(state: dict[str, Any], context: dict[str, Any]) -> None:
+    sessions = state.get("claude_sessions")
+    _require(isinstance(sessions, dict), "Claude session 状态不符合约定")
+    alias = sessions.get(context["key"])
+    _require(
+        alias in {None, context["development_session_id"]},
+        "需求提交恢复没有原开发 session 别名",
+    )
+    if alias is None:
+        sessions[context["key"]] = context["development_session_id"]
 
 
 def _decision_spec(context: dict[str, Any]) -> AgentDecisionLoopSpec:
@@ -354,11 +357,6 @@ def _decision_spec(context: dict[str, Any]) -> AgentDecisionLoopSpec:
                     "id": context["requirement_id"],
                     "title": context["title"],
                     "branch": context["branch"],
-                },
-                "既有完成事实": {
-                    "实现与验证": "当前需求的实现、适用测试、真实验证和审查已经完成。",
-                    "规则复盘": "当前需求的规则复盘已经完成。",
-                    "当前任务": "只提交现有定稿变更，不重新开发或重新验收。",
                 },
                 "有序权威仓库": repositories,
             },
@@ -475,6 +473,7 @@ async def run(
     _verify_boundary(context, facts, fresh=not scene)
     if not scene and not any(fact["dirty"] for fact in facts):
         return _fresh_success(run_dir, state, context, facts)
+    _prepare_session(state, context)
     if state.get("status") != "blocked":
         _running(run_dir, state)
 

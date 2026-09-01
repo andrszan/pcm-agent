@@ -2,7 +2,7 @@
 
 ## 职责
 
-本步骤在产品根使用一个 requirement-scoped Claude session 调用 `commit-changes`，并通过公共 Agent 决策循环处理纯 Git 提交动作中的确认和阻塞：
+本步骤在产品根复用当前需求的开发 Claude session 调用 `commit-changes`，并使用独立的负责人 conversation 处理纯 Git 提交动作中的确认和阻塞：
 
 - 当前需求的实现、适用测试、真实验证、审查与规则复盘，均作为不可在提交任务中重新打开的权威完成事实；
 - 仓库集合只来自有序 `applicable_repositories` 白名单；
@@ -34,17 +34,21 @@ Python只检查：
 
 ## Agent 决策循环
 
-conversation key 和 session key 均为：
+conversation key 为：
 
 ```text
 requirement_commit_<ID>
 ```
 
-有 dirty 仓时，公共循环创建：
+对应 `claude_sessions.requirement_commit_<ID>` 只是别名，其值必须等于 `requirement_cycle.development_session_id`。因此开发、规则复盘和提交使用同一个 Claude Agent session ID，但各自保留独立的负责人 conversation。
+
+有 dirty 仓时，公共循环创建独立的负责人对话：
 
 ```text
 conversations/requirement_commit_<ID>.json
 ```
+
+初始 Agent prompt 只包含 `/commit-changes`、当前需求、仓库清单、统一需求分支以及“只 commit，不 push”；完整提交规则由 `commit-changes` Skill 自身提供，不在步骤 prompt 中重复。
 
 完整历史形态为：
 
@@ -76,13 +80,13 @@ blocked 会写 scoped `17.json` 和 state；条件解除后，公共循环从同
 
 ## 恢复锚点
 
-已启动的第 17 步通常要求三项一致：
+已启动的第 17 步要求三项一致：
 
-- `claude_sessions.requirement_commit_<ID>`；
+- `claude_sessions.requirement_commit_<ID>` 必须等于 `requirement_cycle.development_session_id`；
 - `decision_conversations.requirement_commit_<ID>.path`；
 - 非符号链接的 `conversations/requirement_commit_<ID>.json`。
 
-唯一例外是首次 Agent 尚未取得 session 就发生连接或进程错误：此时 conversation 只能包含 `system → 初始 assistant`，且没有 Agent 回复或 session 结果；重试会以 `resume_session_id=None` 重投原始初始指令。其它残缺锚点均拒绝恢复，不能静默创建替代 session 或补造历史。
+任一锚点缺失或 session ID 不一致都拒绝恢复，不能静默创建替代 session 或补造历史。
 
 fresh 全仓 clean 时零 Agent、零负责人决策、零 conversation，直接记录 `tip_sha = base_sha`。
 
@@ -111,7 +115,7 @@ steps/requirements/<ID>/17.json
 
 ## 验证
 
-定向测试覆盖 fresh clean、完整 conversation、纯 Git continue、三轮决策上限、completed repair、blocked 与 blocked resume、首次无 session 失败重试、残缺锚点、未跟踪文件、symlink、result→state、advanced 兼容和 CLI blocked。验证时运行第 17 步本体与 CLI 测试、公共 Agent 决策循环相关测试、`compileall` 和 `git diff --check`。
+定向测试覆盖 fresh clean、开发 session 复用、独立 conversation、纯 Git continue、三轮决策上限、completed repair、blocked 与 blocked resume、残缺或错误 session alias、未跟踪文件、symlink、result→state、advanced 兼容和 CLI blocked。验证时运行第 17 步本体与 CLI 测试、公共 Agent 决策循环相关测试、`compileall` 和 `git diff --check`。
 
 ## 历史事实
 
