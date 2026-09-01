@@ -67,7 +67,10 @@ class DevelopmentTests(unittest.TestCase):
         workspace = workspace_root / "project"
         trd_path = "docs/trd/BR-001.md"
         (workspace / "docs/trd").mkdir(parents=True)
-        (workspace / trd_path).write_text("# 活动 TRD\n\n实现约束。\n", encoding="utf-8")
+        (workspace / trd_path).write_text(
+            "# 活动 TRD\n\nTRD_CONTEXT_MARKER：必须验证账户锁定恢复。\n",
+            encoding="utf-8",
+        )
         (run_dir / "steps").mkdir(parents=True)
         state = {
             "status": "success",
@@ -154,6 +157,10 @@ class DevelopmentTests(unittest.TestCase):
             for forbidden in ("docs/backlog", "第 15 步", "PCM", "session"):
                 self.assertNotIn(forbidden, prompts[0])
             self.assertEqual(len(decision_prompts), 1)
+            self.assertIn("docs/trd/BR-001.md", decision_prompts[0])
+            self.assertIn("TRD_CONTEXT_MARKER：必须验证账户锁定恢复。", decision_prompts[0])
+            self.assertNotIn("TRD_CONTEXT_MARKER", prompts[0])
+            self.assertNotIn("docs/backlog", decision_prompts[0])
             for required in (
                 "存在适用的已确认 Target 或有依据的默认 Target 时",
                 "决定（默认 Target 含依据与重议条件）→可观察结果→实现位置→真实浏览器和实际读取截图证据→实际结果映射",

@@ -4,14 +4,15 @@
 
 第 14 步只为当前活动需求形成一份可直接指导实现和验证的活动 TRD。它采用与第 15 步一致的薄编排方式：信任严格串行流程中已经写入 state 的活动需求和 cycle，不重新执行前序步骤的职责，也不防御流程外的人为修改。
 
-步骤只读取当前运行所需的最小状态：
+步骤只读取当前运行所需的最小状态和直接权威输入：
 
 - 运行位置为 `requirement:14_trd_design`，或已推进到 `requirement:15_development`；
 - `active_requirement` 对应注册表唯一 `active` 且尚未完成的需求；
 - `requirement_cycle` 属于同一需求，并提供统一需求分支名；
+- `requirement_registry.source.path` 提供 canonical Backlog 路径；
 - 产品工作区存在。
 
-第 14 步不重新读取或精确复验第 2、5、7、8、9、10、11、12、13 步结果，不检查上游文档是否 tracked，也不重复核验第 13 步已经建立的 Git 分支和基线。Agent 根据 `/trd-design` 能力和当前项目事实按需读取产品资料、Backlog、代码、测试、接口、数据、权限、配置与运行约定。
+第 14 步不重新读取或精确复验第 2、5、7、8、9、10、11、12、13 步结果，不检查上游文档是否 tracked，也不重复核验第 13 步已经建立的 Git 分支和基线。Python 只从注册表已记录的 canonical 来源读取完整 Backlog 正文并放入负责人的 `<project_context>`，使负责人理解当前需求在全部需求中的位置、依赖和关系；Agent 根据 `/trd-design` 能力和当前项目事实按需读取其它产品资料、代码、测试、接口、数据、权限、配置与运行约定。
 
 ## 路径 intent
 
@@ -33,7 +34,7 @@ Claude Agent 在产品根运行，使用 requirement-scoped key：
 trd_design_<requirement-id>
 ```
 
-初始 prompt 首行显式调用 `/trd-design`，只给出当前需求 ID、标题和唯一 `trd_path`，以及收敛活动 TRD 的简短职责；其它项目资料由 Agent 按需读取。prompt 只允许创建或更新该 TRD，禁止实现业务功能、修改其它文件或执行 Git 写操作。
+初始 Agent prompt 首行显式调用 `/trd-design`，只给出当前需求 ID、标题和唯一 `trd_path`，以及收敛活动 TRD 的简短职责；其它项目资料由 Agent 按需读取。负责人的 `<project_context>` 额外包含 canonical Backlog 的实际路径和完整正文，不包含尚未生成的活动 TRD 正文或其它上游文档。Agent prompt 只允许创建或更新该 TRD，禁止实现业务功能、修改其它文件或执行 Git 写操作。
 
 对本需求真正适用的体验决定，Agent 按需从任意来源发现已确认的 Target 或有依据的默认 Target，并在 TRD 记录来源、适用范围、经核验的 Current、Target 与本需求遵循或改变。默认 Target 必须包含依据与重议条件，偏离必须说明理由；改变跨需求骨架由负责人决定。没有适用决定时不虚构也不阻塞，不要求固定框架文档、资料来源或技术栈。
 
@@ -80,7 +81,7 @@ requirement:15_development
 
 当前测试覆盖：
 
-- 不依赖上游步骤结果、Git 仓库或固定项目文档的薄输入执行；
+- 不依赖上游步骤结果或 Git 仓库，只读取 state 已记录的 canonical Backlog 正文作为负责人直接权威输入；
 - 首次 `trd_path` 在 Agent 前持久化；
 - `continue` 与补全文档均恢复公共循环保存的同一 session；
 - 指定 TRD 缺失或为空时的 repair；
@@ -89,8 +90,8 @@ requirement:15_development
 - 推进到第 15 步后的无文件、无 Agent 幂等；
 - CLI scoped success、blocked、failed 与成功保护；
 - 第 14 步不导入或执行 Git `subprocess`；
-- 本轮与第 10、11、15 步合计 72 项步骤本体和 CLI 定向测试通过；
-- PCM Demo 全量 321 项 `unittest`、`compileall common steps run_step.py test_run_step_retry.py` 与 `git diff --check` 通过；未运行新的真实 Claude Agent 或负责人集成。
+- 第 14、15 步本体和 CLI 定向 29 项通过；
+- PCM Demo 全量 359 项 `unittest` 通过（50.534 秒），`compileall common steps run_step.py run_all.py test_run_step_retry.py test_run_all.py`、相关 IDE diagnostics 与 `git diff --check` 通过；未运行新的真实 Claude Agent 或负责人集成。
 
 ## 历史真实运行
 

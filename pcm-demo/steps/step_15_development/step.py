@@ -106,7 +106,7 @@ def _workspace_from_state(state: dict[str, Any]) -> Path:
     return workspace
 
 
-def _trd_file(workspace: Path, value: Any) -> str:
+def _trd_file(workspace: Path, value: Any) -> tuple[str, str]:
     if not isinstance(value, str) or not value:
         raise RuntimeError("活动 TRD 路径不符合约定")
     relative = Path(value)
@@ -124,11 +124,12 @@ def _trd_file(workspace: Path, value: Any) -> str:
     if not target.is_file() or target.is_symlink():
         raise RuntimeError("活动 TRD 必须是产品工作区内的普通文件")
     try:
-        if not target.read_text(encoding="utf-8").strip():
-            raise RuntimeError("活动 TRD 不能为空")
+        content = target.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as error:
         raise RuntimeError("活动 TRD 不可读取") from error
-    return value
+    if not content.strip():
+        raise RuntimeError("活动 TRD 不能为空")
+    return value, content
 
 
 def _session(state: dict[str, Any], key: str) -> str | None:
@@ -179,7 +180,7 @@ def _context(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
         or not active[0]["title"].strip()
     ):
         raise RuntimeError("活动需求与需求注册表不一致")
-    trd_path = _trd_file(workspace, cycle.get("trd_path"))
+    trd_path, trd_content = _trd_file(workspace, cycle.get("trd_path"))
     saved = _read_json(
         requirement_step_result_path(run_dir, requirement_id, 14), "活动 TRD 结果不可读取"
     )
@@ -205,6 +206,7 @@ def _context(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
         "requirement_id": requirement_id,
         "title": active[0]["title"],
         "trd_path": trd_path,
+        "trd_content": trd_content,
         "cycle": cycle,
         "key": key,
     }
@@ -384,8 +386,11 @@ async def run(
                 "当前需求": {
                     "id": context["requirement_id"],
                     "title": context["title"],
-                    "活动 TRD": context["trd_path"],
-                }
+                },
+                "活动 TRD": {
+                    "path": context["trd_path"],
+                    "content": context["trd_content"],
+                },
             },
         ),
     )

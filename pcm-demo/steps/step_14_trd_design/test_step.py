@@ -81,6 +81,20 @@ class TRDDesignTests(unittest.TestCase):
         workspace_root = root / "workspace-root"
         workspace = workspace_root / "project"
         workspace.mkdir(parents=True)
+        backlog_path = "docs/backlog/canonical-source.md"
+        backlog = workspace / backlog_path
+        backlog.parent.mkdir(parents=True)
+        backlog.write_text(
+            "# 正式 Backlog\n\n"
+            "BACKLOG_CONTEXT_MARKER\n\n"
+            "- BR-001 身份、角色访问与站内消息入口，依赖：无。\n"
+            "- BR-002 维修预约入口，依赖：BR-001。\n",
+            encoding="utf-8",
+        )
+        (workspace / "docs/backlog/backlog.md").write_text(
+            "HARDCODED_BACKLOG_PATH_DECOY\n",
+            encoding="utf-8",
+        )
         state = {
             "status": "running",
             "phase": PHASE,
@@ -90,6 +104,10 @@ class TRDDesignTests(unittest.TestCase):
             "workspace": {"root": str(workspace_root), "final_path": str(workspace)},
             "requirement_registry": {
                 "schema_version": 1,
+                "source": {
+                    "path": backlog_path,
+                    "sha256": "test-backlog-sha256",
+                },
                 "requirements": [
                     {
                         "id": "BR-001",
@@ -130,7 +148,7 @@ class TRDDesignTests(unittest.TestCase):
         self.assertIn("不得静默偏离", TRD_DESIGN_DECISION_RULES)
         self.assertIn("明确的下一步指令", TRD_DESIGN_DECISION_RULES)
 
-    def test_fresh_persists_path_before_agent_and_uses_only_thin_inputs(self) -> None:
+    def test_fresh_persists_path_and_gives_lead_full_backlog_context(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))
             prompts: list[str] = []
@@ -173,6 +191,12 @@ class TRDDesignTests(unittest.TestCase):
             ):
                 self.assertIn(required, prompts[0])
             self.assertEqual(len(decision_prompts), 1)
+            self.assertIn("docs/backlog/canonical-source.md", decision_prompts[0])
+            self.assertIn("BACKLOG_CONTEXT_MARKER", decision_prompts[0])
+            self.assertIn("BR-002 维修预约入口，依赖：BR-001", decision_prompts[0])
+            self.assertNotIn("HARDCODED_BACKLOG_PATH_DECOY", decision_prompts[0])
+            self.assertNotIn("BACKLOG_CONTEXT_MARKER", prompts[0])
+            self.assertNotIn("实现约束。", decision_prompts[0])
             for required in (
                 "体验决定已在 TRD 收敛",
                 "任意来源发现已确认的 Target 或有依据的默认 Target",

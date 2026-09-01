@@ -117,6 +117,26 @@ def _workspace_from_state(state: dict[str, Any]) -> Path:
     return workspace
 
 
+def _backlog_document(workspace: Path, registry: dict[str, Any]) -> tuple[str, str]:
+    source = registry.get("source")
+    path = source.get("path") if isinstance(source, dict) else None
+    if not isinstance(path, str) or not path:
+        raise RuntimeError("需求注册表缺少 canonical Backlog 来源")
+    try:
+        target = resolve_workspace_output(workspace, path)
+    except ValueError as error:
+        raise RuntimeError("canonical Backlog 路径不符合约定") from error
+    if target.is_symlink() or not target.is_file():
+        raise RuntimeError("canonical Backlog 必须是产品工作区内的普通文件")
+    try:
+        content = target.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        raise RuntimeError("canonical Backlog 不可读取") from error
+    if not content.strip():
+        raise RuntimeError("canonical Backlog 不能为空")
+    return path, content
+
+
 def _context(state: dict[str, Any]) -> dict[str, Any]:
     if state.get("phase") != PHASE or _position(state) not in {
         (STEP, STEP, CURRENT_NODE),
@@ -382,6 +402,9 @@ async def run(
         )
         write_state(run_dir, state)
 
+    backlog_path, backlog_content = _backlog_document(
+        context["workspace"], state["requirement_registry"]
+    )
     decision_spec = AgentDecisionLoopSpec(
         key=context["key"],
         state_key=context["key"],
@@ -395,7 +418,11 @@ async def run(
                     "id": context["requirement_id"],
                     "title": context["title"],
                     "活动 TRD": trd_path,
-                }
+                },
+                "正式 Backlog": {
+                    "path": backlog_path,
+                    "content": backlog_content,
+                },
             },
         ),
     )
