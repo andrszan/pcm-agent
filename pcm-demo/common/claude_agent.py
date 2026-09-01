@@ -54,6 +54,7 @@ def filtered_env() -> dict[str, str]:
     if env.get("ANTHROPIC_API_KEY"):
         env.pop("ANTHROPIC_AUTH_TOKEN", None)
     env.pop("CLAUDE_CONFIG_DIR", None)
+    env["CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"] = "0"
     return env
 
 

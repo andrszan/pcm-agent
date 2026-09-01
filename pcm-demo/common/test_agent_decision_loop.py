@@ -1069,6 +1069,9 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured_options[0].max_buffer_size, 10 * 1024 * 1024)
         self.assertEqual(captured_options[0].resume, "session-1")
         self.assertIsNone(captured_options[0].max_budget_usd)
+        self.assertEqual(
+            captured_options[0].env["CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"], "0"
+        )
         self.assertEqual(result.terminal_reason, "api_error")
         self.assertEqual(result.api_error_status, 429)
         self.assertTrue(result.has_errors)
