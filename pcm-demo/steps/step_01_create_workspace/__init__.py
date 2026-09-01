@@ -14,6 +14,7 @@ from .workspace import (
     verify_clone,
     verify_prepared,
     verify_published_content,
+    workspace_env_is_ignored,
 )
 
 __all__ = [
@@ -31,4 +32,5 @@ __all__ = [
     "verify_clone",
     "verify_prepared",
     "verify_published_content",
+    "workspace_env_is_ignored",
 ]

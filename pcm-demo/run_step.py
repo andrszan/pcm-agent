@@ -21,7 +21,13 @@ from common.state import (
     write_state,
     write_step_result,
 )
-from config import LLMConfig, load_template_repository, load_workspace_root
+from config import (
+    LLMConfig,
+    load_agent_workspace_env_file,
+    load_template_repository,
+    load_workspace_root,
+    read_agent_workspace_env_file,
+)
 from steps.step_00_product_draft import run as run_product_draft
 from steps.step_01_create_workspace import (
     WorkspaceBlocked,
@@ -35,6 +41,7 @@ from steps.step_01_create_workspace import (
     verify_clone,
     verify_prepared,
     verify_published_content,
+    workspace_env_is_ignored,
 )
 from steps.step_01_create_workspace import (
     result as workspace_result,
@@ -443,6 +450,8 @@ def complete_step_one(
 
     workspace_root, root_source = load_workspace_root(args.workspace_root)
     template_repository, template_source = load_template_repository()
+    workspace_env_file, _ = load_agent_workspace_env_file()
+    workspace_env_bytes = read_agent_workspace_env_file(workspace_env_file)
     if not workspace_root.is_dir():
         raise RuntimeError(f"产品工作区根目录不存在：{workspace_root}")
     project_name = state["project"]["project_directory_name"]
@@ -456,6 +465,7 @@ def complete_step_one(
             or Path(recorded["staging_path"]) != staging_path
             or Path(recorded["final_path"]) != final_path
             or recorded.get("template_repository") != template_repository
+            or recorded.get("agent_workspace_env_file") != str(workspace_env_file)
         ):
             raise RuntimeError("工作区或模板配置与已有运行记录不一致")
     else:
@@ -464,6 +474,7 @@ def complete_step_one(
             "root_source": root_source,
             "template_repository": template_repository,
             "template_source": template_source,
+            "agent_workspace_env_file": str(workspace_env_file),
             "staging_path": str(staging_path),
             "final_path": str(final_path),
         }
@@ -475,7 +486,7 @@ def complete_step_one(
         if (
             phase == "prepared_verified"
             and not staging_path.exists()
-            and verify_published_content(final_path, source_hash)
+            and verify_published_content(final_path, source_hash, workspace_env_bytes)
         ):
             state["publication_phase"] = "published"
             write_state(run_dir, state)
@@ -483,7 +494,7 @@ def complete_step_one(
         elif (
             phase in {"published", "git_initialized"}
             and not staging_path.exists()
-            and verify_published_content(final_path, source_hash)
+            and verify_published_content(final_path, source_hash, workspace_env_bytes)
         ):
             pass
         else:
@@ -502,15 +513,19 @@ def complete_step_one(
     if phase == "clone_verified":
         if not verify_clone(staging_path, state["template"]):
             raise RuntimeError("临时 clone 与已有运行证据不一致")
-        prepare_staging(staging_path, draft_bytes, source_hash)
+        prepare_staging(
+            staging_path, draft_bytes, source_hash, workspace_env_bytes
+        )
         if sha256(draft_path) != source_hash:
             raise RuntimeError("第 1 步执行期间源产品初稿发生变化")
+        if read_agent_workspace_env_file(workspace_env_file) != workspace_env_bytes:
+            raise RuntimeError("第 1 步执行期间 AI Agent 工作区环境配置发生变化")
         state["publication_phase"] = "prepared_verified"
         write_state(run_dir, state)
         phase = "prepared_verified"
 
     if phase == "prepared_verified" and not final_path.exists():
-        if not verify_prepared(staging_path, source_hash):
+        if not verify_prepared(staging_path, source_hash, workspace_env_bytes):
             raise RuntimeError("临时工作区与发布前证据不一致")
         publish(staging_path, final_path)
         state["publication_phase"] = "published"
@@ -518,26 +533,42 @@ def complete_step_one(
         phase = "published"
 
     if phase == "published":
-        if not verify_published_content(final_path, source_hash) or staging_path.exists():
+        if (
+            not verify_published_content(
+                final_path, source_hash, workspace_env_bytes
+            )
+            or staging_path.exists()
+        ):
             raise RuntimeError("最终项目工作区发布核验失败")
-        state["root_repository"] = initialize_root_repository(final_path)
+        root_repository = initialize_root_repository(final_path)
+        if not workspace_env_is_ignored(final_path):
+            raise RuntimeError("最终项目根 Git 必须忽略 .env")
+        state["root_repository"] = root_repository
         state["publication_phase"] = "git_initialized"
         write_state(run_dir, state)
         phase = "git_initialized"
 
     if phase != "git_initialized":
         raise RuntimeError(f"第 1 步发布阶段不符合预期：{phase}")
-    if not verify_published_content(final_path, source_hash) or staging_path.exists():
+    if (
+        not verify_published_content(final_path, source_hash, workspace_env_bytes)
+        or staging_path.exists()
+    ):
         raise RuntimeError("最终项目工作区核验失败")
     root_repository = inspect_root_repository(final_path)
+    if not workspace_env_is_ignored(final_path):
+        raise RuntimeError("最终项目根 Git 必须忽略 .env")
     if state.get("root_repository") != root_repository:
         raise RuntimeError("根 Git 仓库与已有运行证据不一致")
     if sha256(draft_path) != source_hash:
         raise RuntimeError("第 1 步发布期间源产品初稿发生变化")
+    if read_agent_workspace_env_file(workspace_env_file) != workspace_env_bytes:
+        raise RuntimeError("第 1 步发布期间 AI Agent 工作区环境配置发生变化")
     published_draft = final_path / "docs" / "产品初稿.md"
     completed = workspace_result(
         "success",
-        "已从固定模板发布独立产品项目工作区，并初始化零提交根 Git 仓库。",
+        "已从固定模板发布独立产品项目工作区，安装受保护的 Agent 工作区配置，"
+        "并初始化零提交根 Git 仓库。",
         outputs=["docs/产品初稿.md"],
     )
     write_step_result(run_dir, 1, completed)

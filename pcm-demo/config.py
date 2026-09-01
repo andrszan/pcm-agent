@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from stat import S_ISREG
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -17,6 +18,9 @@ class Settings(BaseSettings):
     pcm_workspace_root: Path | None = Field(default=None, validation_alias="PCM_WORKSPACE_ROOT")
     pcm_template_catalog: Path | None = Field(default=None, validation_alias="PCM_TEMPLATE_CATALOG")
     pcm_template_repository: str | None = Field(default=None, validation_alias="PCM_TEMPLATE_REPOSITORY")
+    pcm_agent_workspace_env_file: Path | None = Field(
+        default=None, validation_alias="PCM_AGENT_WORKSPACE_ENV_FILE"
+    )
     pcm_dev_resource_list: Path | None = Field(default=None, validation_alias="PCM_DEV_RESOURCE_LIST")
 
     model_config = SettingsConfigDict(
@@ -105,6 +109,50 @@ def load_template_repository(env_file: Path | None = None) -> tuple[str, str]:
     if settings.pcm_template_repository is None:
         raise ValueError("缺少配置：PCM_TEMPLATE_REPOSITORY")
     return settings.pcm_template_repository, source
+
+
+def read_agent_workspace_env_file(path: Path) -> bytes:
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as error:
+        raise ValueError(
+            "PCM_AGENT_WORKSPACE_ENV_FILE 必须是可读的普通文件"
+        ) from error
+    try:
+        file_stat = os.fstat(descriptor)
+        if not S_ISREG(file_stat.st_mode):
+            raise ValueError("PCM_AGENT_WORKSPACE_ENV_FILE 必须是可读的普通文件")
+        with os.fdopen(descriptor, "rb") as file:
+            descriptor = -1
+            content = file.read()
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    if not content:
+        raise ValueError("PCM_AGENT_WORKSPACE_ENV_FILE 不能为空")
+    return content
+
+
+def load_agent_workspace_env_file(
+    env_file: Path | None = None,
+) -> tuple[Path, str]:
+    settings = load_settings(env_file)
+    source = (
+        "environment"
+        if os.environ.get("PCM_AGENT_WORKSPACE_ENV_FILE")
+        else "env_file"
+    )
+    path = settings.pcm_agent_workspace_env_file
+    if path is None:
+        raise ValueError("缺少配置：PCM_AGENT_WORKSPACE_ENV_FILE")
+    if not path.is_absolute():
+        raise ValueError("PCM_AGENT_WORKSPACE_ENV_FILE 必须是绝对路径")
+    resolved = path.parent.resolve() / path.name
+    if resolved.is_symlink():
+        raise ValueError("PCM_AGENT_WORKSPACE_ENV_FILE 不能是符号链接")
+    read_agent_workspace_env_file(resolved)
+    return resolved, source
 
 
 def load_dev_resource_list(env_file: Path | None = None) -> tuple[Path, str]:

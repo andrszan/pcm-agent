@@ -317,8 +317,8 @@ Demo 和默认 PCM 流程只进行本地文件修改、测试、构建、服务�
 6. 候选分流和入池均保存证据引用。恢复时按候选的稳定事实、已有归属和正式 ID 检查，已入池的候选不得再次分配 ID；入池分支、提交或合并证据冲突时返回 `failed`，不猜测补写 Backlog。
 7. Claude Agent SDK 的多轮上下文由其 session 保存；第 9～11 步的公共循环按领域键保存、读取和解释完整 conversation，`state.json` 只记录恢复所需的 session/reference/private state。领域步骤不解析 conversation 的 schema、角色顺序、尾部 decision、session/reference 组合或完整 commit prompt，也不把它当长期成功证据。
 8. 需要显式产物交接的步骤按各自合同从前序 result 的 `outputs` 或稳定字段读取所需事实；以当前 state/cycle 为交接的薄编排步骤只读取自身运行所需的最小状态，不重复审计前序结果或固定路径。第 9～11 步对第 8 步仅接受空 `outputs`、result/state 一致的合法有序 `applicable_repositories`，并按各自现行合同核验当前现场；第 14 步只消费 active requirement、cycle 和 workspace，项目资料由 Agent 按需读取。run 目录是受控、Git 忽略的本地恢复状态，不建设防篡改日志、数据库、向量记忆或摘要系统。
-9. 第 1 步恢复时重新核对产品初稿哈希、项目目录名、独立工作区根、配置的模板来源、临时和最终目录以及根仓库事实；只有临时目录能由状态证明属于同一 run 且 clone 完整，或最终目录能由发布证据证明属于同一 run 时才允许续接。
-10. 第 1 步最终目录、发布证据和零提交根仓库证据一致时可确认既有成功；最终目录已发布但根 `.git/` 缺失时续接 `git init -b main`；根仓库已有 commit、临时和最终目录同时存在、目录归属不明或证据冲突时返回 `failed` 并保留现场。
+9. 第 1 步恢复时重新核对产品初稿哈希、项目目录名、独立工作区根、配置的模板来源、`PCM_AGENT_WORKSPACE_ENV_FILE` 绝对源路径和当前原始字节、临时与最终目录以及根仓库事实；只有临时目录能由状态证明属于同一 run 且 clone 完整，或最终目录能由发布证据证明属于同一 run 时才允许续接。
+10. 第 1 步最终目录、发布证据、根 `.env` 内容/`0600`/Git 忽略事实和零提交根仓库证据一致时可确认既有成功；最终目录已发布但根 `.git/` 缺失时续接 `git init -b main`；根环境源路径或内容漂移、根仓库已有 commit、临时和最终目录同时存在、目录归属不明或证据冲突时返回 `failed` 并保留现场。已进入第 2 步及之后的旧 run 不回退补写。
 
 ## 五、项目初始化流程
 
@@ -332,21 +332,22 @@ Demo 和默认 PCM 流程只进行本地文件修改、测试、构建、服务�
 
 ### 第 1 步：建立项目工作区
 
-- 输入：产品初稿；运行 ID；产品工作区根目录；从配置读取的模板仓库。Demo 通过 `--workspace-root`、进程环境或 `pcm-demo/.env` 的 `PCM_WORKSPACE_ROOT` 取得根目录，优先级依次降低；模板仓库由 `PCM_TEMPLATE_REPOSITORY` 读取，单次运行不能覆盖。
+- 输入：产品初稿；运行 ID；产品工作区根目录；从配置读取的模板仓库和 AI Agent 工作区受保护环境文件。Demo 通过 `--workspace-root`、进程环境或 `pcm-demo/.env` 的 `PCM_WORKSPACE_ROOT` 取得根目录，优先级依次降低；模板仓库由 `PCM_TEMPLATE_REPOSITORY` 读取，工作区环境源由 `PCM_AGENT_WORKSPACE_ENV_FILE` 读取，后二者都不提供单次运行覆盖。环境源必须是绝对、可读、非符号链接、非空普通文件，只作为工作区固定开发工具配置，不属于目标产品资源；源文件使用不跟随符号链接的同一文件描述符读取，目标从创建时即为 `0600`，该 PCM 控制键不传入 Claude Agent SDK 子进程环境。
 - AI 输出：从初稿提取 `topic_name` 和 `project_directory_name`。后者必须是单段小写 kebab-case；初稿没有明确名称时允许根据选题生成，并记录生成理由。
 - 模板：使用 `PCM_TEMPLATE_REPOSITORY` 配置的模板仓库默认分支最新内容，不由 AI 或单次运行更换来源。
 - 执行动作：
   1. 在产品工作区根目录中计算最终路径 `<root>/<project_directory_name>` 和同级临时路径 `<root>/<project_directory_name>.pcm-tmp-<run-id>`；
   2. 使用 `git clone --depth 1` 将配置的模板克隆到临时路径，记录默认分支、实际分支和 commit SHA；
-  3. 核验模板关键能力存在后，删除临时目录中的上游 `.git/`，清空并保留 `docs/`，将输入初稿按原始字节写为 `docs/产品初稿.md`；
-  4. 核验上游 `.git/` 已删除、`docs/` 只包含产品初稿、初稿哈希一致、源初稿未改变且模板关键能力仍存在；
-  5. 全部发布核验通过后，将同级临时目录原子重命名为最终路径；
-  6. 在最终项目根执行 `git init -b main`，只建立根仓库边界，不执行 `git add`、`git commit` 或 push；
-  7. 核验最终目录的 Git 根就是自身、当前分支为 `main`、尚无 commit，并记录根仓库初始化证据。
-- 输出：产品项目根由 `state.workspace.final_path` 记录；步骤结果 `outputs` 记录相对于该根的 `docs/产品初稿.md`。
-- 完成条件：最终目录独立、可操作，位于配置的独立产品工作区根中；模板来源和 commit 可追溯且未误带上游 Git 历史；最终项目根已经初始化为 `main` 分支的独立 Git 仓库但尚无 commit；初始化后的 `docs/` 只含当前产品初稿，状态和文件事实一致。
+  3. 核验模板关键能力存在、模板不包含任何形态的 `.env`，并以禁用用户级全局 excludes 的实际 Git 规则确认模板根忽略 `.env`；
+  4. 删除临时目录中的上游 `.git/`，清空并保留 `docs/`，将输入初稿按原始字节写为 `docs/产品初稿.md`，同时把配置源原始字节独占写为根 `.env` 并设置 `0600`；
+  5. 核验上游 `.git/` 已删除、`docs/` 只包含产品初稿、初稿哈希一致、源初稿未改变、模板能力仍存在，以及根 `.env` 内容和权限符合当前配置源；
+  6. 全部发布核验通过后，将同级临时目录原子重命名为最终路径；
+  7. 在最终项目根执行 `git init -b main`，只建立根仓库边界，不执行 `git add`、`git commit` 或 push；
+  8. 核验最终目录的 Git 根就是自身、当前分支为 `main`、尚无 commit，并再次确认根 Git 忽略 `.env`，记录根仓库初始化证据。
+- 输出：产品项目根由 `state.workspace.final_path` 记录；步骤结果 `outputs` 仍只记录相对于该根的 `docs/产品初稿.md`。根 `.env` 是 Git 忽略的受保护工作区配置，不进入 outputs、步骤结果、日志或后续项目资源交接。
+- 完成条件：最终目录独立、可操作，位于配置的独立产品工作区根中；模板来源和 commit 可追溯且未误带上游 Git 历史；根 `.env` 与当前配置源原始字节一致、权限为 `0600` 且被实际根 Git 忽略；最终项目根已经初始化为 `main` 分支的独立 Git 仓库但尚无 commit；初始化后的 `docs/` 只含当前产品初稿，状态和文件事实一致。
 - 自动化说明：AI-compatible 调用使用 Responses API 的严格 JSON Schema；第 1 步 prompt 明确只允许 `topic_name`、`project_directory_name`、`directory_name_source`、`reason`、`blocked_reason` 五个字段，并禁止 Markdown、代码围栏、YAML 或 JSON 之外的文本。服务不支持该协议或结构不符时明确失败，不回退到 Chat Completions、不增加宽松解析或额外模型重试。Git、路径、清理、哈希、发布和根仓库初始化由 Python 程序确定性执行。最终路径必须原先不存在，不以复制少量能力文件代替完整模板 clone。
-- 阻塞与失败：缺少不可替代的模板仓库读取权限时返回 `blocked`；初稿无法确定选题、工作区根位于当前能力仓库内部、目录归属不明、AI API、结构解析、Git 工具、网络、clone、清理、写入、核验、rename 或根仓库初始化错误返回 `failed`。失败时保留现场；若原子发布后 `git init` 中断，仅在最终目录与当前 run 发布证据一致时续接根仓库初始化，不自动删除或覆盖。
+- 阻塞与失败：缺少不可替代的模板仓库读取权限时返回 `blocked`；初稿无法确定选题、工作区根位于当前能力仓库内部、Agent 工作区环境源缺失/无效/漂移、模板包含或未忽略 `.env`、目录归属不明、AI API、结构解析、Git 工具、网络、clone、清理、写入、核验、rename 或根仓库初始化错误返回 `failed`。失败时保留现场；若原子发布后 `git init` 中断，仅在最终目录、根 `.env` 与当前 run 发布证据一致时续接根仓库初始化，不自动删除或覆盖。已经推进到后续步骤的旧 run 不回退，也不由第 4、5、6 步自动补写。
 
 ### 第 2 步：项目需求与产品定义
 

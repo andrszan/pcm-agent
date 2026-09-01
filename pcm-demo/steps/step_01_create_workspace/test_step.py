@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -21,6 +22,7 @@ from common.openai_responses import ResponsesAccessError, ResponsesFailure, pars
 from config import (
     CAPABILITY_REPOSITORY_ROOT,
     LLMConfig,
+    load_agent_workspace_env_file,
     load_template_repository,
     load_workspace_root,
 )
@@ -32,7 +34,10 @@ from steps.step_01_create_workspace.workspace import (
     inspect_root_repository,
     parse_default_branch,
     prepare_staging,
+    verify_clone,
     verify_prepared,
+    verify_workspace_env,
+    workspace_env_is_ignored,
 )
 
 
@@ -139,6 +144,67 @@ class WorkspaceStepTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "能力仓库之外"):
             load_workspace_root(CAPABILITY_REPOSITORY_ROOT / "pcm-demo/workspace")
 
+    def test_agent_workspace_env_file_environment_precedence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            file_source = root / "from-file.env"
+            file_source.write_bytes(b"FILE=value\n")
+            environment_source = root / "from-environment.env"
+            environment_source.write_bytes(b"ENVIRONMENT=value\n")
+            env_file = root / "settings.env"
+            env_file.write_text(
+                f"PCM_AGENT_WORKSPACE_ENV_FILE={file_source}\n", encoding="utf-8"
+            )
+            with patch.dict(
+                os.environ,
+                {"PCM_AGENT_WORKSPACE_ENV_FILE": str(environment_source)},
+            ):
+                value, source = load_agent_workspace_env_file(env_file)
+            self.assertEqual(value, environment_source.resolve())
+            self.assertEqual(source, "environment")
+            with patch.dict(os.environ, {"PCM_AGENT_WORKSPACE_ENV_FILE": ""}):
+                value, source = load_agent_workspace_env_file(env_file)
+            self.assertEqual(value, file_source.resolve())
+            self.assertEqual(source, "env_file")
+
+    def test_agent_workspace_env_file_rejects_invalid_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            env_file = root / "settings.env"
+            with patch.dict(os.environ, {"PCM_AGENT_WORKSPACE_ENV_FILE": ""}):
+                with self.assertRaisesRegex(ValueError, "缺少配置"):
+                    load_agent_workspace_env_file(env_file)
+
+                env_file.write_text(
+                    "PCM_AGENT_WORKSPACE_ENV_FILE=relative.env\n", encoding="utf-8"
+                )
+                with self.assertRaisesRegex(ValueError, "绝对路径"):
+                    load_agent_workspace_env_file(env_file)
+
+                empty = root / "empty.env"
+                empty.touch()
+                env_file.write_text(
+                    f"PCM_AGENT_WORKSPACE_ENV_FILE={empty}\n", encoding="utf-8"
+                )
+                with self.assertRaisesRegex(ValueError, "不能为空"):
+                    load_agent_workspace_env_file(env_file)
+
+                target = root / "target.env"
+                target.write_bytes(b"KEY=value\n")
+                link = root / "link.env"
+                link.symlink_to(target)
+                env_file.write_text(
+                    f"PCM_AGENT_WORKSPACE_ENV_FILE={link}\n", encoding="utf-8"
+                )
+                with self.assertRaisesRegex(ValueError, "符号链接"):
+                    load_agent_workspace_env_file(env_file)
+
+                env_file.write_text(
+                    f"PCM_AGENT_WORKSPACE_ENV_FILE={root}\n", encoding="utf-8"
+                )
+                with self.assertRaisesRegex(ValueError, "普通文件"):
+                    load_agent_workspace_env_file(env_file)
+
     def test_root_repository_is_unborn_main_and_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "project"
@@ -151,6 +217,22 @@ class WorkspaceStepTests(unittest.TestCase):
                 {"path": str(root.resolve()), "branch": "main", "head": None},
             )
             self.assertEqual(inspect_root_repository(root), first)
+
+    def test_root_git_ignore_contract_ignores_global_excludes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "project"
+            root.mkdir()
+            subprocess.run(["git", "init", "-b", "main"], cwd=root, check=True)
+            global_excludes = Path(directory) / "global-excludes"
+            global_excludes.write_text(".env\n", encoding="utf-8")
+            global_config = Path(directory) / "global-config"
+            global_config.write_text(
+                f"[core]\n\texcludesFile = {global_excludes}\n", encoding="utf-8"
+            )
+            with patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(global_config)}):
+                self.assertFalse(workspace_env_is_ignored(root))
+                (root / ".gitignore").write_text(".env*\n!.env.example\n", encoding="utf-8")
+                self.assertTrue(workspace_env_is_ignored(root))
 
     def test_root_repository_with_commit_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -469,6 +551,63 @@ class WorkspaceStepTests(unittest.TestCase):
         output = "ref: refs/heads/main\tHEAD\nabc\tHEAD"
         self.assertEqual(parse_default_branch(output), "main")
 
+    def test_clone_requires_absent_and_ignored_workspace_env(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            staging = Path(directory) / "staging"
+            for path in (
+                staging / ".claude/skills/project-intake",
+                staging / "frontend",
+                staging / "backend",
+            ):
+                path.mkdir(parents=True, exist_ok=True)
+            (staging / "CLAUDE.md").write_text("@AGENTS.md\n", encoding="utf-8")
+            (staging / "AGENTS.md").write_text("rules\n", encoding="utf-8")
+            (staging / ".claude/skills/project-intake/SKILL.md").write_text(
+                "skill\n", encoding="utf-8"
+            )
+            (staging / ".gitignore").write_text(
+                ".env*\n!.env.example\n", encoding="utf-8"
+            )
+            subprocess.run(["git", "init", "-b", "main"], cwd=staging, check=True)
+            subprocess.run(
+                ["git", "remote", "add", "origin", "ssh://template"],
+                cwd=staging,
+                check=True,
+            )
+            subprocess.run(["git", "add", "."], cwd=staging, check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "user.name=PCM Test",
+                    "-c",
+                    "user.email=pcm@example.invalid",
+                    "commit",
+                    "-m",
+                    "template",
+                ],
+                cwd=staging,
+                check=True,
+                capture_output=True,
+            )
+            template = {
+                "remote_url": "ssh://template",
+                "actual_branch": "main",
+                "commit_sha": subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=staging,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip(),
+            }
+            self.assertTrue(verify_clone(staging, template))
+            (staging / ".env").write_bytes(b"KEY=value\n")
+            self.assertFalse(verify_clone(staging, template))
+            (staging / ".env").unlink()
+            (staging / ".gitignore").write_text("", encoding="utf-8")
+            self.assertFalse(verify_clone(staging, template))
+
     def test_incomplete_staging_fails_and_is_preserved(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             staging = Path(directory) / "staging"
@@ -499,7 +638,7 @@ class WorkspaceStepTests(unittest.TestCase):
             target.mkdir()
             final = root / "final"
             final.symlink_to(target, target_is_directory=True)
-            self.assertFalse(verify_prepared(final, "unused"))
+            self.assertFalse(verify_prepared(final, "unused", b"KEY=value\n"))
 
     def test_prepare_staging_resets_docs_and_preserves_template(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -522,8 +661,17 @@ class WorkspaceStepTests(unittest.TestCase):
             import hashlib
 
             draft_hash = hashlib.sha256(draft).hexdigest()
-            prepare_staging(staging, draft, draft_hash)
-            self.assertTrue(verify_prepared(staging, draft_hash))
+            workspace_env = b"KEY=\x00value"
+            prepare_staging(staging, draft, draft_hash, workspace_env)
+            self.assertTrue(verify_prepared(staging, draft_hash, workspace_env))
+            self.assertTrue(verify_workspace_env(staging, workspace_env))
+            self.assertEqual((staging / ".env").read_bytes(), workspace_env)
+            self.assertEqual((staging / ".env").stat().st_mode & 0o777, 0o600)
+            (staging / ".env").chmod(0o644)
+            self.assertFalse(verify_prepared(staging, draft_hash, workspace_env))
+            (staging / ".env").chmod(0o600)
+            (staging / ".env").write_bytes(b"changed")
+            self.assertFalse(verify_prepared(staging, draft_hash, workspace_env))
             self.assertEqual(
                 [path.name for path in (staging / "docs").iterdir()], ["产品初稿.md"]
             )

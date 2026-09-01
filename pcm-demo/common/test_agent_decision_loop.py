@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -28,7 +29,7 @@ from common.agent_decision_loop import (  # noqa: E402
     persist_agent_failure,
     run_agent_decision_loop,
 )
-from common.claude_agent import ClaudeRunResult, run_claude  # noqa: E402
+from common.claude_agent import ClaudeRunResult, filtered_env, run_claude  # noqa: E402
 from common.decision import (  # noqa: E402
     LEGACY_CONTINUE_PROMPT,
     AgentDecision,
@@ -1048,6 +1049,14 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
 
 
 class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
+    async def test_pcm_workspace_env_source_is_not_passed_to_agent(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"PCM_AGENT_WORKSPACE_ENV_FILE": "/protected/agent-workspace.env"},
+        ):
+            env = filtered_env()
+        self.assertNotIn("PCM_AGENT_WORKSPACE_ENV_FILE", env)
+
     async def test_result_terminal_reason_api_status_and_errors_are_preserved(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             workspace = Path(directory)

@@ -46,7 +46,7 @@ python run_all.py \
 
 - 阶段 0 三个技术探针：Claude Agent SDK 与项目能力加载、同机跨进程 session 恢复、OpenAI-compatible 结构化决策；
 - 第 0 步：黄金输入已经是完整产品初稿时，无副作用跳过；
-- 第 1 步：从固定开发管理模板发布独立产品项目工作区，并初始化零提交根 Git 仓库；
+- 第 1 步：从固定开发管理模板发布独立产品项目工作区，安装 Git 忽略且 `0600` 的根 `.env` 工作区工具配置，并初始化零提交根 Git 仓库；
 - 第 2 步：显式调用 `project-intake`，通过公共 `AgentDecision` 循环收敛产品定义，并保存 Claude session 与完整决策历史；
 - 第 3 步：将产品定义和 catalog 构造成 Pydantic 输入，使用代码内 system prompt 调用 `responses.parse`，将 `output_parsed` 直接保存为稳定选型结果；
 - 第 4 步：只读取第 3 步结果，以浅 clone、来源核验、run-owned 临时 payload、拒绝上游 `.git`/符号链接、对每个适用 payload 执行 `git init -b main` 并核验自身 top-level、`main`、unborn HEAD、空 index、至少一个不被自身 ignore 的可提交文件后原子 `os.rename` 组装工程，保存实际来源和 Git 边界证据并推进到第 5 步；
@@ -156,7 +156,7 @@ pcm-demo/runs/<run-id>/
 边界规则：
 
 - `PCM_WORKSPACE_ROOT` 是专门承载产品项目的独立父目录，不能是当前能力仓库或其内部目录；
-- 第 1 步在最终目录同级使用 `<project_directory_name>.pcm-tmp-<run-id>` 临时 clone；
+- 第 1 步在最终目录同级使用 `<project_directory_name>.pcm-tmp-<run-id>` 临时 clone；拒绝模板已有 `.env` 并确认模板根 Git 忽略该路径后，才把 `PCM_AGENT_WORKSPACE_ENV_FILE` 原始字节写入临时根 `.env`、设置 `0600` 并随工作区原子发布；
 - 全部发布核验通过后原子发布到最终路径，再在最终项目根执行 `git init -b main`；
 - 第 4 步在 run-owned 临时 payload 中拒绝上游 `.git` 和符号链接，并只为适用端建立独立 `main` / unborn / 空 index Git 边界后原子发布；第 4 步不暂存、提交或 push；
 - 第 8 步只读取已建立的根仓和适用子仓并形成干净基线，不初始化子仓；后续仓库遍历只使用其确认的 `applicable_repositories`，不固定假设 `frontend/`、`backend/` 一定都适用；
@@ -303,7 +303,7 @@ Python 负责确定性操作和最终状态裁决：
 | 步骤 | 名称 | 核心职责 | 主要输出 |
 | --- | --- | --- | --- |
 | 0 | 形成产品初稿 | 简短选题时形成初稿；完整初稿无副作用跳过 | 产品初稿或跳过证据 |
-| 1 | 建立项目工作区 | 固定模板浅克隆、清理、发布、根仓库零提交初始化 | 独立产品工作区、`docs/产品初稿.md` |
+| 1 | 建立项目工作区 | 固定模板浅克隆、拒绝模板 `.env` 并核验忽略规则、安装受保护根 `.env`、清理、原子发布、根仓库零提交初始化 | 独立产品工作区、Git 忽略且 `0600` 的工作区工具配置、`docs/产品初稿.md` |
 | 2 | 项目需求与产品定义 | 显式调用 `project-intake` 收敛最终产品范围 | 产品定义文档、session 与决策历史 |
 | 3 | 基础工程选型 | 使用 Pydantic 输入输出和 `responses.parse` 从本次 catalog 选择适用模板 | `steps/03.json.template_selection` |
 | 4 | 组装基础工程 | 在 run-owned payload 中拒绝上游 `.git`/符号链接，建立适用子仓 `main` / unborn / 空 index 边界后原子发布 | 适用前后端独立基础工程仓 |
@@ -321,6 +321,8 @@ Python 负责确定性操作和最终状态裁决：
 | 16 | 规则复盘 | 在原 development session 中以独立负责人 conversation 调用 `/session-rule-retrospective`，允许规则变化或 no-change，不读取 Git或限制规则文件结构 | scoped `steps/requirements/<ID>/16.json` success、`outputs: []`，session alias 已持久化，state 推进 `requirement:17_commit` / step 17；不提交/合并/push |
 | 17 | 统一提交需求变更 | 在产品根 direct `run_claude()` session 中调用 `/commit-changes` 处理有序权威仓库白名单；Python 只核验分支、main/base、最终 clean 和 tips | scoped `steps/requirements/<ID>/17.json` success、`outputs: []`，cycle 保存各仓 `base_sha/tip_sha/merged:false`，state 推进 `requirement:18_merge` / step 18；不合并/push/标记完成 |
 | 18 | 程序化合并并完成需求 | 纯 Python/Git 按非 root 在前、root 最后的顺序执行或恢复 `git merge --ff-only`，全部仓到 tip 后统一安全删除需求分支 | scoped `steps/requirements/<ID>/18.json` success，注册表项写为 `completed` / `completion:{"step":18}`，清空 active requirement/cycle 并返回记录节点；不调用 Agent、不 push |
+
+本次第 1 步根 `.env` 工作区工具配置合同安全定向 24 项及当前工作树全量 359 项 `unittest`（53.340 秒），相关 IDE diagnostics 和 `compileall common steps run_step.py run_all.py test_run_step_retry.py test_run_all.py` 通过。自动化覆盖配置优先级/路径拒绝、`O_NOFOLLOW` 普通文件读取、模板已有 `.env` 或未忽略拒绝、用户级 global excludes 隔离、创建即 `0600` 的原始字节写入、内容/权限漂移，以及 PCM 源路径控制键不传入 Agent SDK；未重新调用外部模板仓库、AI-compatible 服务或 Claude Agent SDK，原有真实第 1 步运行不补造为新合同证据。当前工作树还包含未纳入本议题的其它步骤运行参数与测试改动，因此全量结果不能全部归因于本次修改。
 
 第 3 步已经按以下边界实现并验证：
 
@@ -660,6 +662,7 @@ LLM_MODEL=
 PCM_WORKSPACE_ROOT=
 PCM_TEMPLATE_CATALOG=
 PCM_TEMPLATE_REPOSITORY=
+PCM_AGENT_WORKSPACE_ENV_FILE=
 PCM_DEV_RESOURCE_LIST=
 ```
 
@@ -668,6 +671,7 @@ PCM_DEV_RESOURCE_LIST=
 - `LLM_*`：AI-compatible Responses API；
 - `PCM_WORKSPACE_ROOT`：所有产品项目的独立父目录；
 - `PCM_TEMPLATE_REPOSITORY`：第 1 步发布开发管理模板；
+- `PCM_AGENT_WORKSPACE_ENV_FILE`：第 1 步使用的 AI Agent 工作区受保护工具配置源绝对路径；Python 只通过 `O_NOFOLLOW` 文件描述符读取原始字节并写为新工作区根 `.env`、从创建时即限制为 `0600`、核验 Git 忽略，不解析或导出变量，不进入步骤 outputs、目标产品配置或第 5 步资源清单；该 PCM 控制键从 Claude Agent SDK 子进程环境移除，Agent 只读取已安装的工作区根 `.env`；
 - `PCM_TEMPLATE_CATALOG`：第 3 步基础工程候选目录；
 - `PCM_DEV_RESOURCE_LIST`：第 5 步可信开发资源清单的绝对路径；Python 只核验路径并交给 Agent，不解析资源内容；完整 Agent/决策交互保存在被 Git 忽略的 run 历史中；
 - Claude Agent SDK 的模型和认证继续使用 SDK/Claude Code 自身支持的环境或既有登录态，不与 `LLM_*` 混用。
@@ -677,6 +681,7 @@ PCM_DEV_RESOURCE_LIST=
 - 工作区根：CLI `--workspace-root`、进程环境、`pcm-demo/.env`；
 - catalog：CLI `--catalog-path`、进程环境、`pcm-demo/.env`；
 - `PCM_DEV_RESOURCE_LIST`：进程环境、`pcm-demo/.env`；必须是可读普通文件的绝对路径，不提供单次 CLI 覆盖；
+- `PCM_AGENT_WORKSPACE_ENV_FILE`：进程环境、`pcm-demo/.env`；必须是绝对、可读、非符号链接、非空普通文件，不提供单次 CLI 覆盖；
 - `PCM_TEMPLATE_REPOSITORY` 单次运行不可覆盖。
 
 安全规则：
@@ -734,7 +739,7 @@ Demo 完成需要同时满足：
 1. 第 0～18 步以及阶段二必需节点均已实现，并可由统一入口单独或串联运行；
 2. 每个步骤至少真实成功验证一次，或明确证明在修迹项目中不适用；
 3. 第 0 步已验证完整初稿的无副作用跳过；
-4. 第 1 步真实完成项目身份提取、固定模板浅克隆、模板证据记录、上游 `.git/` 清除、`docs/产品初稿.md` 写入、原子发布和零提交根仓库初始化；
+4. 第 1 步真实完成项目身份提取、固定模板浅克隆、模板证据记录、模板 `.env` 拒绝与忽略规则核验、上游 `.git/` 清除、受保护根 `.env` 原字节写入/`0600`/最终 Git 忽略核验、`docs/产品初稿.md` 写入、原子发布和零提交根仓库初始化；
 5. AI-compatible 模型能够完成流程所需语义决策，只在不可替代外部资源缺失时阻塞；
 6. Claude Agent SDK 能在指定项目工作区加载目标 Skills、plugins 和项目配置，修改文件、执行验证并恢复原 session；
 7. 每一步的真实输出由下一步从步骤结果中读取和核验，不从固定路径或历史文字猜测；

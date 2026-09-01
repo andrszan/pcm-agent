@@ -177,6 +177,8 @@ class RunStepRetryTests(unittest.TestCase):
             (final_path / "docs").mkdir(parents=True)
             (final_path / "docs/产品初稿.md").write_bytes(draft.read_bytes())
             staging_path = workspace_root / "project.pcm-tmp-test-run"
+            workspace_env_file = root / "agent-workspace.env"
+            workspace_env_file.write_bytes(b"MEDIA_KEY=test-value\n")
             repository = {"path": str(final_path.resolve()), "branch": "main", "head": None}
             state = {
                 "run_id": "test-run",
@@ -197,6 +199,7 @@ class RunStepRetryTests(unittest.TestCase):
                     "staging_path": str(staging_path.resolve()),
                     "final_path": str(final_path.resolve()),
                     "template_repository": "template.git",
+                    "agent_workspace_env_file": str(workspace_env_file.resolve()),
                 },
                 "publication_phase": "git_initialized",
                 "root_repository": repository,
@@ -215,7 +218,13 @@ class RunStepRetryTests(unittest.TestCase):
             with (
                 patch.object(run_step, "load_workspace_root", return_value=(workspace_root.resolve(), "cli")),
                 patch.object(run_step, "load_template_repository", return_value=("template.git", "env")),
+                patch.object(
+                    run_step,
+                    "load_agent_workspace_env_file",
+                    return_value=(workspace_env_file.resolve(), "env_file"),
+                ),
                 patch.object(run_step, "verify_published_content", return_value=True),
+                patch.object(run_step, "workspace_env_is_ignored", return_value=True),
                 patch.object(run_step, "inspect_root_repository", return_value=repository),
                 patch.object(run_step, "write_step_result", side_effect=record_result),
                 patch.object(run_step, "write_state", side_effect=record_state),

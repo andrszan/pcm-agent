@@ -30,7 +30,7 @@ Demo 继续采用增量实施，不一次创建完整流程空壳：
 
 - `run_step.py` 的第 0～18 步单步入口；只有本次失败显式携带运行时重试请求时，CLI 才以相同参数按 10 秒、30 秒间隔重新执行当前步骤，最多三次总执行。当前请求只由 Claude Agent SDK 通道的任意 API 状态、明确 `api_error` 终止、连接失败和未取得 Result 的 CLI 进程失败产生；业务 `blocked`、普通 `failed`、AI-compatible 裁决失败、本地合同错误、参数解析失败、未实现步骤和主动取消不重试。请求不写入 state/result/diagnostic/conversation，每次仍重新读取最新现场；第 8～12 步保留固定 result success 保护，第 13～18 步以 current `active_requirement`/cycle 定位并保护 scoped success；
 - 第 0 步完整产品初稿无副作用跳过；
-- 第 1 步项目身份提取、固定模板浅克隆、清理、原子发布和零提交根仓库初始化；
+- 第 1 步项目身份提取、固定模板浅克隆、模板 `.env` 拒绝与忽略规则核验、受保护根 `.env` 安装、原子发布和零提交根仓库初始化；
 - 第 2 步 `project-intake`、第 5 步 `project-readiness`、第 6 步顺序执行的 `project-bootstrap`/条件性 `tailwind-theme` 与第 7 步 `solution-design` 的领域输入、产物、三态结果及幂等边界；
 - 第 3 步 Pydantic 输入建模、代码内 system prompt、`responses.parse` 结构化输出和结果保存；
 - 第 4 步选型交接校验、run-owned 临时目录、模板 shallow clone 与来源核验、拒绝上游 `.git`/符号链接、适用 payload 的 `git init -b main` 与 top-level / `main` / unborn / 空 index 核验、原子发布、结果和状态持久化、失败恢复与幂等复用；
@@ -291,19 +291,19 @@ pcm-demo/
 
 `topic_name` 必须明确表达当前产品选题。`project_directory_name` 必须是单段小写 kebab-case；初稿已经给出仓库名或英文代号时优先提取，未给出时允许模型根据选题生成，并把来源和生成理由写入提取证据。初稿无法确定产品选题、API 或结构解析失败、有限重试耗尽时返回 `failed`，不能猜测字段。
 
-产品工作区根目录的优先级为 CLI `--workspace-root`、进程环境 `PCM_WORKSPACE_ROOT`、`pcm-demo/.env` 中的同名配置，并且必须位于当前能力仓库之外。模板仓库从进程环境或 `pcm-demo/.env` 的 `PCM_TEMPLATE_REPOSITORY` 读取，单次运行不能覆盖。最终项目路径为 `<root>/<project_directory_name>`。
+产品工作区根目录的优先级为 CLI `--workspace-root`、进程环境 `PCM_WORKSPACE_ROOT`、`pcm-demo/.env` 中的同名配置，并且必须位于当前能力仓库之外。模板仓库从进程环境或 `pcm-demo/.env` 的 `PCM_TEMPLATE_REPOSITORY` 读取，AI Agent 工作区受保护工具配置源从 `PCM_AGENT_WORKSPACE_ENV_FILE` 读取，后二者都不能由单次 CLI 覆盖。配置源必须是绝对、可读、非符号链接、非空普通文件；其原始内容只写入新工作区根 `.env`，不解析、不导出，也不属于目标产品资源。最终项目路径为 `<root>/<project_directory_name>`。
 
 确定性发布顺序为：
 
 1. 保存源产品初稿的绝对路径、完整 UTF-8 内容和 SHA-256；
 2. 在最终目录同级计算 `<project_directory_name>.pcm-tmp-<run-id>` 临时路径；
 3. 先用 Git 核验已配置模板仓库默认分支和读取权限，再执行 `git clone --depth 1`；
-4. 记录模板默认分支、实际分支、commit SHA 和 remote URL，并核验 `CLAUDE.md`、`AGENTS.md`、`project-intake` Skill、`frontend/` 与 `backend/` 等关键能力；
-5. 只在临时目录已证明属于当前 run 后删除其中的上游 `.git/`，删除原 `docs/` 内容后重建空 `docs/`，再按原始字节写入 `docs/产品初稿.md`；
-6. 核验上游 `.git/` 已删除、`docs/` 只含产品初稿、源和目标初稿哈希一致、源文件未变化且模板能力仍存在；
+4. 记录模板默认分支、实际分支、commit SHA 和 remote URL，核验 `CLAUDE.md`、`AGENTS.md`、`project-intake` Skill、`frontend/` 与 `backend/` 等关键能力，拒绝任何形态的模板 `.env`，并使用禁用用户级 global excludes 的实际 Git 规则确认模板根忽略 `.env`；
+5. 只在临时目录已证明属于当前 run 后删除其中的上游 `.git/`，删除原 `docs/` 内容后重建空 `docs/`，按原始字节写入 `docs/产品初稿.md`，并将工作区配置源原始字节独占写为根 `.env`、设置精确 `0600`；
+6. 核验上游 `.git/` 已删除、`docs/` 只含产品初稿、源和目标初稿哈希一致、源文件未变化、模板能力仍存在，以及根 `.env` 内容和权限与当前配置源一致；
 7. 所有发布核验通过后，将同文件系统中的临时目录原子重命名为最终项目路径；
 8. 在最终项目根执行 `git init -b main`，不执行 `git add`、`git commit` 或 push；
-9. 核验 `git rev-parse --show-toplevel` 等于最终项目根、当前分支为 `main`、`HEAD` 尚不存在，并记录根仓库初始化证据。
+9. 核验 `git rev-parse --show-toplevel` 等于最终项目根、当前分支为 `main`、`HEAD` 尚不存在，并再次确认根 Git 忽略 `.env`，记录根仓库初始化证据。
 
 第 1 步成功时 `state.json` 至少保存以下结构；完整命令结果放在步骤结果或脱敏日志中：
 
@@ -320,6 +320,7 @@ pcm-demo/
   "workspace": {
     "root": "/products",
     "root_source": "PCM_WORKSPACE_ROOT",
+    "agent_workspace_env_file": "/protected/agent-workspace.env",
     "staging_path": "/products/mendmark.pcm-tmp-<run-id>",
     "final_path": "/products/mendmark"
   },
@@ -350,7 +351,7 @@ pcm-demo/
 }
 ```
 
-失败时保留现场。恢复只续接状态能证明属于同一 run、同一模板和同一目标的完整 clone 或已发布最终目录；不完整 clone、临时与最终目录同时存在、目录归属不明或证据冲突时不自动删除或覆盖。最终目录已发布但根 `git init` 中断时，只有发布证据一致、根 `.git/` 不存在或仍是零提交 `main` 仓库，才允许续接或幂等确认根仓库初始化；已有 commit、Git 根指向其它目录或分支不一致时返回 `failed` 并保留现场。
+失败时保留现场。恢复只续接状态能证明属于同一 run、同一模板、同一工作区环境源路径和同一目标的完整 clone、prepared 临时目录或已发布最终目录；每次都以当前配置源原始字节复核根 `.env`，不在状态、结果或日志保存其内容、值或摘要。不完整 clone、环境源路径/内容漂移、根 `.env` 权限或忽略规则漂移、临时与最终目录同时存在、目录归属不明或证据冲突时不自动删除、覆盖或修补。最终目录已发布但根 `git init` 中断时，只有发布证据和根 `.env` 一致、根 `.git/` 不存在或仍是零提交 `main` 仓库，才允许续接或幂等确认根仓库初始化；已有 commit、Git 根指向其它目录或分支不一致时返回 `failed` 并保留现场。已经推进到第 2 步及之后的旧 run 不回退，也不由后续步骤补写。
 
 ### 4. Agent SDK 运行结果
 
@@ -573,14 +574,15 @@ PCM 在请求前读取该领域完整编排历史。首次保存动态 `system` 
 - AI-compatible 模型从真实产品初稿取得明确 `topic_name` 和合法 `project_directory_name`；
 - 独立工作区根按 CLI、进程环境、Demo `.env` 优先级解析，且位于当前能力仓库之外；
 - 固定模板仓库通过 `git clone --depth 1` 克隆到最终目录同级临时路径；
-- 模板默认分支、实际分支、commit SHA 和 remote URL 已记录；
+- 模板默认分支、实际分支、commit SHA 和 remote URL 已记录，模板不包含 `.env` 且根 Git 规则实际忽略 `.env`；
+- `PCM_AGENT_WORKSPACE_ENV_FILE` 的原始字节已经写入最终工作区根 `.env`，文件为非符号链接普通文件、权限 `0600`，最终根 Git 仍实际忽略；
 - 最终目录不含上游模板 Git 历史，模板关键能力仍存在，`docs/` 只包含 `产品初稿.md`；
 - 最终项目根已经初始化为 `main` 分支的独立 Git 仓库，且尚无 commit；
 - 状态记录源初稿、项目身份、临时与最终路径、模板证据、发布阶段和根仓库事实；
 - 项目内初稿与源初稿 SHA-256 一致，源初稿未变化；
 - 重复执行、归属不明目录、残留临时 clone、clone/rename/Git 初始化中断不会覆盖现场或误报成功。
 
-当前状态：已实现并真实验证。
+当前状态：原有工作区发布路径已真实验证；本次根 `.env` 工作区工具配置合同已完成代码和自动化验证，尚未重新执行 fresh 外部模板发布，不把旧 run 补造为新合同证据。
 
 ### 第 2 步：项目需求与产品定义
 
@@ -1259,6 +1261,7 @@ Git 子进程统一过滤 `GIT_*`。仓库按非 root 原顺序、root 最后的
 - JSON、Markdown、状态和 SHA-256 读写；
 - 第 0～8、12～18 步状态转换；
 - 第 5 步本体 15 项、第 6/7/9/10/11 步下游 readiness 交接 68 项，合计 83 项；第 13 步本体 20 项与 CLI 10 项、显式 SDK 通道重试 7 项均保留其专属验证语境。本轮当前工作树全量 351 项 `unittest` 通过（61.878 秒），`compileall common steps run_step.py run_all.py test_run_step_retry.py test_run_all.py` 与本次目标 `git diff --check` 通过。当前工作树还包含其它公共循环/CLI 的未提交修改，故全量结果不能全部归因于第 9 步；
+- 本次第 1 步根 `.env` 工作区工具配置合同安全定向 24 项通过；当前工作树全量 359 项 `unittest` 通过（53.340 秒），相关 IDE diagnostics 与 `compileall common steps run_step.py run_all.py test_run_step_retry.py test_run_all.py` 通过。覆盖 `O_NOFOLLOW` 普通文件读取、创建即 `0600`、PCM 源路径控制键不传入 Agent SDK等安全边界；未调用外部模板仓库、AI-compatible 服务或 Claude Agent SDK 重新制造 fresh 发布证据。当前工作树还包含未纳入本议题的其它步骤运行参数与测试改动，因此全量结果不能全部归因于本次修改；
 - 重试定向覆盖任意 API 状态、明确 `api_error`、SDK 连接/进程异常、普通失败、取消、本地合同错误、内部退出码耗尽归一和瞬时标志不落盘；本次未调用真实外部服务制造故障；
 - 第 5 步自动化覆盖当前开发资源 Prompt/决策规则、严格两类 blocked、必要能力/配额/回调/白名单、纯生产与后续内部工作不进入清单、`scope_contract` 拒绝旧语义 success、清单和产品定义漂移及幂等复用；当前真实 run `step05-readiness-v2-20260828-b` 只保留 PostgreSQL/MinIO/SMTP 三项 `ready` 开发资源，完成最终凭据持久化和真实探针、负责人 `completed`、success baseline、状态推进与字节级幂等验证；
 - 公共错误诊断覆盖精确凭据遮盖、普通 token 语义保留、异常链与 traceback 位置、稳定有界日志名、OpenAI-compatible provider code/type/message/request ID/HTTP status、Claude Agent SDK `ResultMessage.errors`、BR-002 `api_error` 结果形态，以及第 12～18 步 scoped/protected-success 失败持久化边界；
@@ -1271,7 +1274,7 @@ Git 子进程统一过滤 `GIT_*`。仓库按非 root 原顺序、root 最后的
 - Claude session ID 和 AI-compatible 决策历史分别保存与恢复；
 - 产品初稿身份提取、模板分支和 SHA 记录、固定模板浅克隆、同级临时目录、原子发布与根仓库零提交初始化；
 - 上游 `.git/` 清理、`docs/` 重置、项目内初稿写入和源文件不变；
-- 第 1 步 clone、发布或根仓库初始化中断后的现场保留、归属核验和安全恢复；
+- 第 1 步配置优先级与路径拒绝、模板已有 `.env`/未忽略拒绝、用户级 global excludes 隔离、任意原始字节写入、`0600`、内容/权限漂移拒绝，以及 clone、prepared、发布或根仓库初始化中断后的现场保留、归属核验和安全恢复；
 - 第 2 步目标 Skill、plugins、trust、输入边界、决策循环、产物和恢复；
 - 第 3 步 Pydantic 输入输出、`responses.parse` 调用参数、结构化结果直接保存、脱敏失败、真实 API 选型和成功结果复用；
 - 第 4 步严格占位保护、run-owned marker、唯一仓库浅 clone、来源 SHA、路径与符号链接边界、无可提交文件拒绝、payload 后发布、`null` 端、失败现场保留、安全重试、部分发布拒绝覆盖、成功幂等复用和普通 Git 错误脱敏；
@@ -1341,6 +1344,7 @@ LLM_MODEL=
 PCM_WORKSPACE_ROOT=
 PCM_TEMPLATE_CATALOG=
 PCM_TEMPLATE_REPOSITORY=
+PCM_AGENT_WORKSPACE_ENV_FILE=
 PCM_DEV_RESOURCE_LIST=
 ```
 
@@ -1349,6 +1353,7 @@ PCM_DEV_RESOURCE_LIST=
 - `LLM_*` 用于 OpenAI-compatible Responses API，包括 AI-compatible 决策调用和第 12 步 Backlog 静态字段结构化提取；
 - `PCM_WORKSPACE_ROOT` 是独立产品项目父目录；
 - `PCM_TEMPLATE_REPOSITORY` 只用于第 1 步开发管理模板；
+- `PCM_AGENT_WORKSPACE_ENV_FILE` 只用于第 1 步安装 AI Agent 工作区固定工具的受保护根 `.env`；Python 以 `O_NOFOLLOW` 和同一文件描述符读取原始字节，目标从创建时即为 `0600` 并核验 Git 忽略，不解析、导出、记录或传给第 5 步；该 PCM 控制键从 Claude Agent SDK 子进程环境移除；
 - `PCM_TEMPLATE_CATALOG` 只用于第 3 步基础工程候选；
 - `PCM_DEV_RESOURCE_LIST` 只用于第 5 步可信开发资源清单，必须是可读普通文件的绝对路径；Python 不读取资源内容，Agent 可按项目规则原样使用；
 - Claude Agent SDK 模型与认证继续使用 SDK/Claude Code 的环境或既有登录态，不另设 `CLAUDE_MODEL`。
@@ -1359,6 +1364,7 @@ PCM_DEV_RESOURCE_LIST=
 - 第 3 步未来的 `--catalog-path` 可覆盖 `PCM_TEMPLATE_CATALOG`；
 - 两者优先级均为 CLI、进程环境、`pcm-demo/.env`；
 - `PCM_DEV_RESOURCE_LIST` 由进程环境或 `pcm-demo/.env` 提供，不设置单次 CLI 覆盖；
+- `PCM_AGENT_WORKSPACE_ENV_FILE` 由进程环境或 `pcm-demo/.env` 提供，必须是绝对、可读、非符号链接、非空普通文件，不设置单次 CLI 覆盖；
 - `PCM_TEMPLATE_REPOSITORY` 单次运行不可覆盖。
 
 `pcm-demo/.env` 是编排器自身配置；产品工作区内的实际 `.env` 或等价配置由项目准备和项目化合同维护。两类实际配置都必须被所属仓库 Git 忽略；对应 `.env.example` 或公开示例只保存配置键、公开默认值、安全占位和不含秘密的用法说明。产品工程在项目化中允许环境变量改名和配置结构迁移，但必须保持同一资源身份、endpoint、权限范围和秘密值。

@@ -30,9 +30,12 @@ LLM_API_KEY=
 LLM_MODEL=
 PCM_WORKSPACE_ROOT=
 PCM_TEMPLATE_REPOSITORY=
+PCM_AGENT_WORKSPACE_ENV_FILE=
 ```
 
-`--workspace-root` 的优先级高于进程环境中的 `PCM_WORKSPACE_ROOT`，再高于 `.env`。无论来自哪一层，工作区根都必须位于当前 `pcm-agent-skills` 能力仓库之外。模板仓库只从进程环境或 `.env` 读取，不提供单次 CLI 覆盖。
+`--workspace-root` 的优先级高于进程环境中的 `PCM_WORKSPACE_ROOT`，再高于 `.env`。无论来自哪一层，工作区根都必须位于当前 `pcm-agent-skills` 能力仓库之外。模板仓库和 `PCM_AGENT_WORKSPACE_ENV_FILE` 只从进程环境或 Demo `.env` 读取，不提供单次 CLI 覆盖；后者必须指向绝对、可读、非符号链接、非空的普通文件。
+
+`PCM_AGENT_WORKSPACE_ENV_FILE` 是 PCM 提供给 AI Agent 工作区固定开发工具的受保护配置源。第 1 步只按原始字节把它写为新工作区根 `.env`，不解析或导出变量，不写入 `frontend/`、`backend/`，也不把它当作目标产品资源交给后续项目准备步骤；该 PCM 控制键本身会从 Claude Agent SDK 子进程环境中移除，Agent 只按既有约定在需要时读取工作区根 `.env`。
 
 ## 输入与身份提取
 
@@ -91,12 +94,13 @@ uv run python run_step.py \
 1. 保存初稿源路径、完整 UTF-8 内容和 SHA-256；
 2. 计算最终路径和同级临时路径 `<project_directory_name>.pcm-tmp-<run-id>`；
 3. `git clone --depth 1` 克隆配置模板并记录 remote、默认分支、实际分支和 commit SHA；
-4. 删除临时 clone 的 `.git/`，清空并保留 `docs/`；
-5. 写入原始初稿字节到 `docs/产品初稿.md`；
-6. 核验模板能力、上游 `.git/` 已删除、`docs/` 和三方 SHA-256；
-7. 同一文件系统内将临时目录原子重命名为最终目录；
-8. 在最终项目根执行 `git init -b main`，不暂存、不提交、不 push；
-9. 核验 Git 根等于最终目录、分支为 `main`、`HEAD` 尚不存在。
+4. 拒绝模板中任何形态的 `.env`，并以实际 Git 规则确认模板根忽略 `.env`；
+5. 删除临时 clone 的 `.git/`，清空并保留 `docs/`；
+6. 写入原始初稿字节到 `docs/产品初稿.md`，并将配置源原始字节独占写为根 `.env`、设置 `0600`；
+7. 核验模板能力、上游 `.git/` 已删除、`docs/`、初稿哈希以及根 `.env` 内容和权限；
+8. 同一文件系统内将临时目录原子重命名为最终目录；
+9. 在最终项目根执行 `git init -b main`，不暂存、不提交、不 push；
+10. 核验 Git 根等于最终目录、分支为 `main`、`HEAD` 尚不存在，并再次确认根 Git 忽略 `.env`。
 
 ## 运行证据与恢复
 
@@ -122,7 +126,7 @@ uv run python run_step.py \
   --run-id step01-mendmark
 ```
 
-程序不会覆盖已有最终项目、归属不明临时目录或符号链接。只有 SSH 读取权限缺失属于 `blocked`；工作区根位于能力仓库内部、目录冲突、初稿选题不明确、API、解析、Git、哈希、清理、发布或根仓库初始化错误属于 `failed`。原子发布后 `git init` 中断时，相同 run 只在发布证据一致的最终目录中补齐或核验零提交根仓库。
+程序不会覆盖已有最终项目、归属不明临时目录或符号链接。只有 SSH 读取权限缺失属于 `blocked`；工作区根位于能力仓库内部、目录冲突、初稿选题不明确、Agent 工作区配置缺失/无效/漂移、模板未忽略 `.env`、API、解析、Git、哈希、清理、发布或根仓库初始化错误属于 `failed`。原子发布后 `git init` 中断时，相同 run 只在发布证据、根 `.env` 和当前配置源一致的最终目录中补齐或核验零提交根仓库。已经推进到后续步骤的旧 run 不回退，也不由其它步骤自动补写根 `.env`。
 
 ## 成功验收
 
@@ -132,6 +136,7 @@ uv run python run_step.py \
 - `git rev-parse --show-toplevel` 等于最终项目根，分支为 `main`，`HEAD` 不存在且没有 commit；
 - `docs/` 只包含 `产品初稿.md`；
 - `CLAUDE.md`、`AGENTS.md`、`project-intake` Skill、`frontend/`、`backend/` 存在；
+- 根 `.env` 与当前配置源原始字节一致、权限为 `0600`，且实际根 Git 忽略该文件；
 - 源初稿和项目内初稿 SHA-256 一致；
 - `template` 中的仓库、分支和 commit 证据与真实 Git 事实一致。
 

@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from stat import S_IMODE, S_ISREG
 from typing import Any
 
 from common.files import sha256
@@ -58,17 +59,72 @@ def verify_required_paths(root: Path) -> bool:
     return all((root / path).exists() for path in REQUIRED_PATHS)
 
 
+def workspace_env_is_ignored(root: Path) -> bool:
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "-c",
+                "core.excludesFile=/dev/null",
+                "check-ignore",
+                "--quiet",
+                "--no-index",
+                "--",
+                ".env",
+            ],
+            cwd=root,
+            text=True,
+            capture_output=True,
+            timeout=120,
+        )
+    except FileNotFoundError as error:
+        raise RuntimeError("未安装 Git") from error
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError("Git 命令超时") from error
+    if result.returncode == 0:
+        return True
+    if result.returncode == 1:
+        return False
+    message = (result.stderr or result.stdout).strip()
+    raise RuntimeError(f"Git 忽略规则核验失败：{message}")
+
+
+def verify_workspace_env(root: Path, expected_bytes: bytes) -> bool:
+    path = root / ".env"
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError:
+        return False
+    try:
+        file_stat = os.fstat(descriptor)
+        if not S_ISREG(file_stat.st_mode) or S_IMODE(file_stat.st_mode) != 0o600:
+            return False
+        with os.fdopen(descriptor, "rb") as file:
+            descriptor = -1
+            return file.read() == expected_bytes
+    except OSError:
+        return False
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
 def verify_clone(staging: Path, template: dict[str, str]) -> bool:
     return (
         (staging / ".git").is_dir()
+        and not os.path.lexists(staging / ".env")
         and verify_required_paths(staging)
         and git("remote", "get-url", "origin", cwd=staging) == template["remote_url"]
         and git("branch", "--show-current", cwd=staging) == template["actual_branch"]
         and git("rev-parse", "HEAD", cwd=staging) == template["commit_sha"]
+        and workspace_env_is_ignored(staging)
     )
 
 
-def verify_published_content(root: Path, source_hash: str) -> bool:
+def verify_published_content(
+    root: Path, source_hash: str, workspace_env_bytes: bytes
+) -> bool:
     if root.is_symlink():
         return False
     docs_dir = root / "docs"
@@ -79,11 +135,15 @@ def verify_published_content(root: Path, source_hash: str) -> bool:
         and sorted(path.name for path in docs_dir.iterdir()) == ["产品初稿.md"]
         and sha256(published_draft) == source_hash
         and verify_required_paths(root)
+        and verify_workspace_env(root, workspace_env_bytes)
     )
 
 
-def verify_prepared(root: Path, source_hash: str) -> bool:
-    return verify_published_content(root, source_hash) and not (root / ".git").exists()
+def verify_prepared(root: Path, source_hash: str, workspace_env_bytes: bytes) -> bool:
+    return (
+        verify_published_content(root, source_hash, workspace_env_bytes)
+        and not (root / ".git").exists()
+    )
 
 
 def inspect_repository(
@@ -164,6 +224,10 @@ def inspect_clone(staging: Path, template_repository: str) -> dict[str, str]:
     require_real_directory(staging, "临时 clone")
     if not (staging / ".git").is_dir() or not verify_required_paths(staging):
         raise RuntimeError("临时 clone 不完整，保留现场等待处理")
+    if os.path.lexists(staging / ".env"):
+        raise RuntimeError("固定模板不得包含 .env")
+    if not workspace_env_is_ignored(staging):
+        raise RuntimeError("固定模板根 Git 必须忽略 .env")
     default_branch = parse_default_branch(
         git("ls-remote", "--symref", template_repository, "HEAD", remote_auth=True)
     )
@@ -192,23 +256,42 @@ def clone_and_verify(staging: Path, template_repository: str) -> dict[str, str]:
     return template
 
 
-def prepare_staging(staging: Path, draft_bytes: bytes, source_hash: str) -> Path:
+def prepare_staging(
+    staging: Path,
+    draft_bytes: bytes,
+    source_hash: str,
+    workspace_env_bytes: bytes,
+) -> Path:
     require_real_directory(staging, "临时工作区")
     git_dir = staging / ".git"
     docs_dir = staging / "docs"
+    workspace_env = staging / ".env"
     if not git_dir.is_dir() or not verify_required_paths(staging):
         raise RuntimeError("临时目录不是完整、可核验的模板 clone")
+    if os.path.lexists(workspace_env):
+        raise RuntimeError("固定模板不得包含 .env")
+    if not workspace_env_bytes:
+        raise RuntimeError("AI Agent 工作区环境配置不能为空")
     shutil.rmtree(git_dir)
     if docs_dir.exists():
         shutil.rmtree(docs_dir)
     docs_dir.mkdir()
     published_draft = docs_dir / "产品初稿.md"
     published_draft.write_bytes(draft_bytes)
+    descriptor = os.open(
+        workspace_env,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+        0o600,
+    )
+    with os.fdopen(descriptor, "wb") as file:
+        os.fchmod(file.fileno(), 0o600)
+        file.write(workspace_env_bytes)
     if (
         git_dir.exists()
         or sorted(path.name for path in docs_dir.iterdir()) != ["产品初稿.md"]
         or sha256(published_draft) != source_hash
         or not verify_required_paths(staging)
+        or not verify_workspace_env(staging, workspace_env_bytes)
     ):
         raise RuntimeError("临时工作区初始化核验失败")
     return published_draft
