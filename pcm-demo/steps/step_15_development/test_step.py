@@ -252,6 +252,36 @@ class DevelopmentTests(unittest.TestCase):
             )
             self.assertEqual(calls, [None, "development-session-1"])
 
+    def test_eight_continue_decisions_still_allow_completion(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory))
+            calls = 0
+            decisions = iter(
+                [decision("continue", answer=f"继续完成第 {index} 轮。") for index in range(8)]
+                + [decision("completed")]
+            )
+
+            async def agent(_prompt: str, **_kwargs: object) -> ClaudeRunResult:
+                nonlocal calls
+                calls += 1
+                value = agent_result(workspace)
+                value.text = f"第 {calls} 轮完成情况。"
+                return value
+
+            async def decide(*_: object, **__: object) -> tuple[dict, int, str]:
+                return next(decisions)
+
+            saved = self.run_step(
+                run_dir,
+                state,
+                agent_runner=agent,
+                decision_runner=decide,
+                config_loader=lambda: object(),
+            )
+
+            self.assertEqual(saved["status"], "success")
+            self.assertEqual(calls, 9)
+
     def test_saved_success_recovers_advance_and_advanced_rerun_skips_agent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))

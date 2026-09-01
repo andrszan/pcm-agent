@@ -23,7 +23,7 @@ CURRENT_NODE = "requirement:17_commit"
 NEXT_NODE = "requirement:18_merge"
 PHASE = "phase_1_requirement_development"
 SKILL_NAME = "commit-changes"
-MAX_DECISION_ROUNDS = 8
+MAX_DECISION_ROUNDS = 16
 MAX_TURNS = 48
 REPOSITORY_REPAIR_PROMPT = (
     "请只处理权威仓库清单中的未提交变更；不得修改或丢弃文件内容来让检查通过。"
