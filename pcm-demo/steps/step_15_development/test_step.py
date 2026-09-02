@@ -153,7 +153,10 @@ class DevelopmentTests(unittest.TestCase):
             self.assertTrue(prompts[0].startswith("/dev-workflow\n"))
             self.assertIn("BR-001 账户访问", prompts[0])
             self.assertIn("docs/trd/BR-001.md", prompts[0])
+            self.assertNotIn("@docs/", prompts[0])
             self.assertIn("按活动 TRD 中适用的体验决定执行", prompts[0])
+            self.assertIn("不得修改 `.claude/rules/`", prompts[0])
+            self.assertNotIn("稳定设计偏差请同步", prompts[0])
             for forbidden in ("docs/backlog", "第 15 步", "PCM", "session"):
                 self.assertNotIn(forbidden, prompts[0])
             self.assertEqual(len(decision_prompts), 1)

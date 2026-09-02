@@ -28,7 +28,7 @@ TRD_DESIGN_MAX_TURNS = 100
 
 _FORBIDDEN_TITLE_CHARACTERS = set('<>:"/\\|?*')
 
-TRD_DESIGN_DECISION_RULES = """- completed：Agent 已将当前正式需求的活动 TRD 写入唯一指定路径，范围、关键行为、技术方案、验证场景和需求级体验设计已经收敛，且没有阻碍实现的未决事项。对本需求适用的体验决定已在 TRD 收敛：按需从任意来源发现已确认的 Target 或有依据的默认 Target，并记录来源、适用范围、经核验的 Current、Target 与本需求遵循或改变；默认 Target 已说明依据与重议条件，偏离已说明理由，不得静默偏离；跨需求骨架改变已有负责人决定。不适用时不得虚构或阻塞。
+TRD_DESIGN_DECISION_RULES = """- completed：Agent 已将当前正式需求的活动 TRD 写入唯一指定路径，范围、关键行为、技术方案、验证场景和需求级体验设计已经收敛，且没有阻碍实现的未决事项。
 - continue：当前环境仍可继续补全活动 TRD或收敛会影响实现的产品与技术决定时，给出明确的下一步指令。
 - blocked：仅当缺少当前环境无法取得的不可替代外部条件时使用。"""
 

@@ -142,11 +142,11 @@ class TRDDesignTests(unittest.TestCase):
         target.write_text(content, encoding="utf-8")
         return target
 
-    def test_decision_rules_require_implementation_ready_design(self) -> None:
+    def test_decision_rules_keep_step_completion_contract_concise(self) -> None:
         self.assertIn("没有阻碍实现的未决事项", TRD_DESIGN_DECISION_RULES)
-        self.assertIn("来源、适用范围、经核验的 Current、Target", TRD_DESIGN_DECISION_RULES)
-        self.assertIn("不得静默偏离", TRD_DESIGN_DECISION_RULES)
         self.assertIn("明确的下一步指令", TRD_DESIGN_DECISION_RULES)
+        self.assertNotIn("体验决定已在 TRD 收敛", TRD_DESIGN_DECISION_RULES)
+        self.assertNotIn("不得静默偏离", TRD_DESIGN_DECISION_RULES)
 
     def test_fresh_persists_path_and_gives_lead_full_backlog_context(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -180,6 +180,7 @@ class TRDDesignTests(unittest.TestCase):
             self.assertEqual(len(prompts), 1)
             self.assertTrue(prompts[0].startswith("/trd-design\n"))
             self.assertIn(saved["trd_path"], prompts[0])
+            self.assertNotIn("@docs/", prompts[0])
             for required in (
                 "任意来源发现已确认的 Target 或有依据的默认 Target",
                 "来源、适用范围、经核验的 Current、Target",
@@ -198,15 +199,17 @@ class TRDDesignTests(unittest.TestCase):
             self.assertNotIn("BACKLOG_CONTEXT_MARKER", prompts[0])
             self.assertNotIn("实现约束。", decision_prompts[0])
             for required in (
+                "范围、关键行为、技术方案、验证场景和需求级体验设计已经收敛",
+                "没有阻碍实现的未决事项",
+            ):
+                self.assertIn(required, decision_prompts[0])
+            for duplicated in (
                 "体验决定已在 TRD 收敛",
-                "任意来源发现已确认的 Target 或有依据的默认 Target",
-                "来源、适用范围、经核验的 Current、Target",
                 "默认 Target 已说明依据与重议条件",
                 "不得静默偏离",
                 "跨需求骨架改变已有负责人决定",
-                "不适用时不得虚构或阻塞",
             ):
-                self.assertIn(required, decision_prompts[0])
+                self.assertNotIn(duplicated, decision_prompts[0])
             for content in (prompts[0], decision_prompts[0]):
                 for forbidden in (
                     "第 14 步",

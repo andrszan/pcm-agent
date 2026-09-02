@@ -218,7 +218,7 @@ def initial_prompt(context: dict[str, Any]) -> str:
 
 活动 TRD：`{context['trd_path']}`
 
-项目资料、代码、配置、测试和运行环境请按需自行读取。按活动 TRD 中适用的体验决定执行；不要求固定上游资料。必要的稳定设计偏差请同步至该 TRD。保留待提交变更；不得修改 `.claude/rules/`，不得 stage/commit、创建或切换分支、merge 或 push。"""
+项目资料、代码、配置、测试和运行环境请按需自行读取。按活动 TRD 中适用的体验决定执行；不要求固定上游资料。保留待提交变更；不得修改 `.claude/rules/`，不得 stage/commit、创建或切换分支、merge 或 push。"""
 
 
 def _saved_result(run_dir: Path, requirement_id: str) -> dict[str, Any] | None:
