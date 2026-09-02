@@ -6,7 +6,7 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from claude_agent_sdk import (
     AssistantMessage,
@@ -21,6 +21,7 @@ from claude_agent_sdk import (
 )
 
 from common.error_diagnostics import exception_diagnostics, redact_text
+from config import AgentConfig, AgentModelTier
 
 CLAUDE_AGENT_TIMEOUT_SECONDS = 10 * 60 * 60
 
@@ -49,13 +50,32 @@ class ClaudeRunResult:
     retry_requested: bool = False
 
 
-def filtered_env() -> dict[str, str]:
+def filtered_env(config: AgentConfig, model: str) -> dict[str, str]:
     env = dict(os.environ)
-    if env.get("ANTHROPIC_API_KEY"):
-        env.pop("ANTHROPIC_AUTH_TOKEN", None)
+    env.update(
+        {
+            "ANTHROPIC_BASE_URL": config.base_url,
+            "ANTHROPIC_API_KEY": config.api_key.get_secret_value(),
+            "ANTHROPIC_AUTH_TOKEN": "",
+            "CLAUDE_CODE_OAUTH_TOKEN": "",
+            "CLAUDE_CODE_SUBAGENT_MODEL": model,
+            "LLM_BASE_URL": "",
+            "LLM_API_KEY": "",
+            "LLM_MODEL": "",
+            "PCM_AGENT_BASE_URL": "",
+            "PCM_AGENT_API_KEY": "",
+            "PCM_AGENT_MODEL_LOW": "",
+            "PCM_AGENT_MODEL_MEDIUM": "",
+            "PCM_AGENT_MODEL_HIGH": "",
+            "PCM_WORKSPACE_ROOT": "",
+            "PCM_TEMPLATE_CATALOG": "",
+            "PCM_TEMPLATE_REPOSITORY": "",
+            "PCM_AGENT_WORKSPACE_ENV_FILE": "",
+            "PCM_DEV_RESOURCE_LIST": "",
+            "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS": "0",
+        }
+    )
     env.pop("CLAUDE_CONFIG_DIR", None)
-    env.pop("PCM_AGENT_WORKSPACE_ENV_FILE", None)
-    env["CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"] = "0"
     return env
 
 
@@ -130,12 +150,14 @@ def _retry_requested(
     return is_retryable_claude_sdk_error(error, has_result=has_result)
 
 
-def _anthropic_secrets() -> list[str]:
-    return [
+def _anthropic_secrets(config: AgentConfig) -> list[str]:
+    values = [config.api_key.get_secret_value()]
+    values.extend(
         value
-        for key in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+        for key in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN")
         if isinstance((value := os.environ.get(key)), str) and value
-    ]
+    )
+    return list(dict.fromkeys(values))
 
 
 def _sdk_errors(value: Any, known_secrets: list[str]) -> list[str] | None:
@@ -148,10 +170,15 @@ async def run_claude(
     prompt: str,
     *,
     cwd: Path,
+    model_tier: AgentModelTier = "medium",
+    effort: Literal["medium", "high"] = "high",
     resume_session_id: str | None = None,
     max_turns: int = 12,
     on_update: Callable[[ClaudeRunResult], None] | None = None,
+    agent_config_loader: Callable[[], AgentConfig] | None = None,
 ) -> ClaudeRunResult:
+    agent_config = (agent_config_loader or AgentConfig.load)()
+    model = agent_config.resolve_model(model_tier)
     init: dict[str, Any] | None = None
     result: ResultMessage | None = None
     texts: list[str] = []
@@ -160,7 +187,7 @@ async def run_claude(
     exception_details: dict[str, Any] | None = None
     api_error_status: int | None = None
     caught_error: BaseException | None = None
-    known_secrets = _anthropic_secrets()
+    known_secrets = _anthropic_secrets(agent_config)
     options = ClaudeAgentOptions(
         cwd=cwd,
         system_prompt={"type": "preset", "preset": "claude_code"},
@@ -169,7 +196,9 @@ async def run_claude(
         max_turns=max_turns,
         max_buffer_size=10 * 1024 * 1024,
         resume=resume_session_id,
-        env=filtered_env(),
+        model=model,
+        effort=effort,
+        env=filtered_env(agent_config, model),
     )
 
     async def guarded_messages():
@@ -279,12 +308,20 @@ async def run_claude(
         resume_session_id
         and any(session_id != resume_session_id for session_id in observed_session_ids)
     )
+    observed_model = (init or {}).get("model")
+    model_mismatch = bool(
+        isinstance(observed_model, str)
+        and observed_model.casefold() != model.casefold()
+    )
     if session_mismatch:
         exception = (
             f"恢复 session ID 不一致：期望 {resume_session_id}，实际 "
             f"{', '.join(sorted(observed_session_ids))}"
         )
         exception_type = "SessionMismatchError"
+    elif model_mismatch:
+        exception = f"Agent 实际模型不一致：期望 {model}，实际 {observed_model}"
+        exception_type = "ModelMismatchError"
     final_api_error_status = (_api_error_status(result) if result else None) or api_error_status
     final_terminal_reason = result.terminal_reason if result else None
     final_text = result.result if result and not result.is_error and result.result else "\n".join(texts)
@@ -306,7 +343,7 @@ async def run_claude(
         sdk_errors=_sdk_errors(result.errors if result else None, known_secrets),
         exception_details=exception_details,
         retry_requested=False
-        if session_mismatch
+        if session_mismatch or model_mismatch
         else _retry_requested(
             api_error_status=final_api_error_status,
             terminal_reason=final_terminal_reason,

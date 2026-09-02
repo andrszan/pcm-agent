@@ -52,6 +52,8 @@ DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     skill_name=SKILL_NAME,
     max_decision_rounds=MAX_DECISION_ROUNDS,
     max_turns=UI_UX_FRAMEWORK_MAX_TURNS,
+    model_tier="high",
+    effort="high",
     decision_system_prompt=render_decision_system_prompt(UI_UX_FRAMEWORK_DECISION_RULES, {}),
 )
 

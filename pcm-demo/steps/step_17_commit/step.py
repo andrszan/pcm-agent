@@ -350,6 +350,8 @@ def _decision_spec(context: dict[str, Any]) -> AgentDecisionLoopSpec:
         skill_name=SKILL_NAME,
         max_decision_rounds=MAX_DECISION_ROUNDS,
         max_turns=MAX_TURNS,
+        model_tier="medium",
+        effort="medium",
         decision_system_prompt=render_decision_system_prompt(
             REQUIREMENT_COMMIT_DECISION_RULES,
             {

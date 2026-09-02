@@ -56,6 +56,8 @@ DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     skill_name=SKILL_NAME,
     max_decision_rounds=MAX_DECISION_ROUNDS,
     max_turns=PROJECT_BOOTSTRAP_MAX_TURNS,
+    model_tier="medium",
+    effort="high",
     decision_system_prompt=render_decision_system_prompt(BOOTSTRAP_DECISION_RULES, {}),
     legacy_completion_messages=LEGACY_COMPLETION_MESSAGES,
 )
@@ -65,6 +67,8 @@ TAILWIND_THEME_DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     skill_name=TAILWIND_THEME_SKILL_NAME,
     max_decision_rounds=MAX_DECISION_ROUNDS,
     max_turns=TAILWIND_THEME_MAX_TURNS,
+    model_tier="medium",
+    effort="high",
     decision_system_prompt=render_decision_system_prompt(
         TAILWIND_THEME_DECISION_RULES, {}
     ),

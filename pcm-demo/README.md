@@ -59,7 +59,7 @@ pcm-demo/
 - Python 3.10 或更高版本；
 - `uv`；
 - Git；
-- 可正常使用的 Claude Code / Claude Agent SDK 认证和项目能力配置；
+- 可访问 Anthropic Messages 协议的 Claude Agent SDK 网关和受保护 API Key；
 - AI-compatible Responses API 配置；
 - 当前产品需要的模板仓库、开发资源和外部服务权限。
 
@@ -75,13 +75,27 @@ uv sync
 | 配置 | 用途 |
 | --- | --- |
 | `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL` | AI-compatible 结构化决策与提取 |
+| `PCM_AGENT_BASE_URL`、`PCM_AGENT_API_KEY` | Claude Agent SDK 使用的 Anthropic Messages 网关与受保护 API Key；Base URL 不包含 `/v1` |
+| `PCM_AGENT_MODEL_LOW`、`PCM_AGENT_MODEL_MEDIUM`、`PCM_AGENT_MODEL_HIGH` | 低、中、高语义档位对应的网关真实模型名 |
 | `PCM_WORKSPACE_ROOT` | 所有目标产品项目的外部父目录，必须位于当前能力仓库之外 |
 | `PCM_TEMPLATE_CATALOG` | 基础工程候选目录 JSON |
 | `PCM_TEMPLATE_REPOSITORY` | 建立产品工作区使用的固定开发管理模板仓库 |
 | `PCM_AGENT_WORKSPACE_ENV_FILE` | 写入目标 AI Agent 工作区的受保护工具配置来源 |
 | `PCM_DEV_RESOURCE_LIST` | 项目准备核验使用的可信开发资源清单 |
 
-进程环境变量优先于 `.env`；`--workspace-root` 和 `--catalog-path` 可以覆盖对应配置。Claude Agent SDK 使用 Claude Code 自身的认证和配置，不与 `LLM_*` 混用。
+进程环境变量优先于 `.env`；`--workspace-root` 和 `--catalog-path` 可以覆盖对应配置。AI-compatible 与 Claude Agent SDK 使用独立配置，当前即使指向同一代理服务也不相互回退。PCM 将 Agent 配置转换为 `ANTHROPIC_BASE_URL`、`ANTHROPIC_API_KEY`，压住 `LLM_*`、其它 PCM 编排控制键和冲突认证，并把 `CLAUDE_CODE_SUBAGENT_MODEL` 同步为当前主模型；项目自定义 `dev`、`reviewer` 继续使用 `model: inherit`。`PCM_AGENT_WORKSPACE_ENV_FILE` 仍只由第 1 步安装为目标产品根受保护 `.env`，不合并进 SDK 子进程环境。
+
+固定 Agent profile：
+
+| 步骤 | 模型档位 | effort |
+| --- | --- | --- |
+| 2、5、7、9、10、11 | 高 | `high` |
+| 6（bootstrap/theme）、14、15 | 中 | `high` |
+| 8、16、17 | 中 | `medium` |
+
+第 15～17 步恢复同一个 development session 时始终使用中模型；每次 Agent 首次调用和 resume 都重新显式传入 model 与 effort。当前不为 Agent 步骤使用低模型，不配置 fallback model 或 `max_budget_usd`，并保持各步骤既有最大 turn 与负责人决策轮数。
+
+网关真实 GPT 模型名可被 Claude Code 记录为 `unrecognized_model` 警告，但已验证不阻止 Agent SDK 调用；PCM 仍要求 init 返回的实际模型与配置一致。Claude Code 的 `total_cost_usd` 不代表当前订阅代理的真实分模型成本。
 
 ## 运行方式
 

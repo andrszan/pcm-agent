@@ -352,6 +352,8 @@ async def run(
         skill_name=SKILL_NAME,
         max_decision_rounds=MAX_DECISION_ROUNDS,
         max_turns=INITIALIZE_REPOSITORIES_MAX_TURNS,
+        model_tier="medium",
+        effort="medium",
         decision_system_prompt=render_decision_system_prompt(
             INITIALIZE_REPOSITORIES_DECISION_RULES,
             {

@@ -28,7 +28,7 @@ docs/trd/<YYYY-MM-DD>-<requirement-id>-<requirement-title>.md
 
 ## Agent 与负责人决策
 
-Claude Agent 在产品根运行，使用 requirement-scoped key：
+Claude Agent 在产品根运行，显式使用中模型和 `high` effort，首次调用与后续恢复保持相同 profile；使用 requirement-scoped key：
 
 ```text
 trd_design_<requirement-id>

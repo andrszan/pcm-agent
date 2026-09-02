@@ -224,6 +224,8 @@ class RequirementCommitTests(unittest.TestCase):
         )
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0]["max_turns"], MAX_TURNS)
+        self.assertEqual(calls[0]["model_tier"], "medium")
+        self.assertEqual(calls[0]["effort"], "medium")
         self.assertNotIn("max_budget_usd", calls[0])
         self.assertEqual(
             calls[0]["prompt"],

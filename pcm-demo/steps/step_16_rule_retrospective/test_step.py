@@ -118,6 +118,8 @@ class RuleRetrospectiveTests(unittest.TestCase):
                 )
                 prompts.append(prompt)
                 resumes.append(kwargs.get("resume_session_id"))
+                self.assertEqual(kwargs.get("model_tier"), "medium")
+                self.assertEqual(kwargs.get("effort"), "medium")
                 return agent_result(workspace)
 
             async def decide(*_: object, **__: object) -> tuple[dict, int, str]:

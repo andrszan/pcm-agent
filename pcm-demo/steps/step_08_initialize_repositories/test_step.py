@@ -195,6 +195,8 @@ class InitializeRepositoriesTests(unittest.TestCase):
             self.assertEqual(calls[0]["cwd"].resolve(), workspace.resolve())
             self.assertIsNone(calls[0]["resume_session_id"])
             self.assertEqual(calls[0]["max_turns"], INITIALIZE_REPOSITORIES_MAX_TURNS)
+            self.assertEqual(calls[0]["model_tier"], "medium")
+            self.assertEqual(calls[0]["effort"], "medium")
             self.assertNotIn("max_budget_usd", calls[0])
             self.assertTrue(calls[0]["prompt"].startswith("/commit-changes\n"))
             self.assertEqual(len(decision_prompts), 1)

@@ -2,7 +2,9 @@
 
 > 本文定义正式 PCM 开发前的轻量 Python 验证项目。Demo 的目的不是提前实现正式 PCM，而是用可独立运行、可串联的一组脚本，真实验证 [`PCM 程序化调度的 AI Agent 产品开发流程`](../../.claude/PCM版AI%20Agent自动化流程设计.md)。
 >
-> 第 14、15 步负责人上下文合同定向本体与 CLI 共 29 项通过；PCM Demo 当前工作树全量 359 项 `unittest` 通过（50.534 秒），`compileall common steps run_step.py run_all.py test_run_step_retry.py test_run_all.py`、相关 IDE diagnostics 与 `git diff --check` 通过。第 14 步只将注册表交接的完整 canonical Backlog 正文加入负责人 `<project_context>`，第 15 步只加入完整活动 TRD 正文；第 8、17 步和公共决策循环未修改。第 17 步继续通过公共 Agent 决策循环保存完整 conversation、处理 continue/blocked/completed和同session repair，同时不做 fingerprint 或 Git 内容取证。`run_step.py` 只对 Claude Agent SDK 执行通道故障产生的运行时请求按 10 秒、30 秒重跑当前步骤两次；任意 API 状态均可请求重试，业务 `blocked`、普通 `failed`、本地合同错误和取消不重试，且该请求不持久化。真实 `step01-mendmark` 已完成 BR-001 与 BR-002；BR-002 在旧 direct-run 期间缺少 decision conversation，该历史不能补造，未来需求按现行合同保存完整历史。
+> 本轮已完成 Claude Agent 显式网关、三级模型映射、固定 model/effort profile、子代理模型同步和 resume 传递：配置、公共循环与固定 profile 定向 49 项、模型 profile 与需求循环定向 101 项、当前工作树全量 367 项 `unittest` 通过（49.802 秒），`compileall` 与 `git diff --check` 通过；中模型 + `high` effort 的公共 `run_claude()` 首轮和同 session resume 真实成功，init 均返回配置模型。未配置 `max_budget_usd`，未修改领域 prompt、步骤业务合同或历史 run。
+>
+> 第 14、15 步负责人上下文合同定向本体与 CLI 共 29 项通过；PCM Demo 当时工作树全量 359 项 `unittest` 通过（50.534 秒），`compileall common steps run_step.py run_all.py test_run_step_retry.py test_run_all.py`、相关 IDE diagnostics 与 `git diff --check` 通过。第 14 步只将注册表交接的完整 canonical Backlog 正文加入负责人 `<project_context>`，第 15 步只加入完整活动 TRD 正文；第 8、17 步和公共决策循环未修改。第 17 步继续通过公共 Agent 决策循环保存完整 conversation、处理 continue/blocked/completed和同session repair，同时不做 fingerprint 或 Git 内容取证。`run_step.py` 只对 Claude Agent SDK 执行通道故障产生的运行时请求按 10 秒、30 秒重跑当前步骤两次；任意 API 状态均可请求重试，业务 `blocked`、普通 `failed`、本地合同错误和取消不重试，且该请求不持久化。真实 `step01-mendmark` 已完成 BR-001 与 BR-002；BR-002 在旧 direct-run 期间缺少 decision conversation，该历史不能补造，未来需求按现行合同保存完整历史。
 > 第 0～18 步均已完成代码与自动化；第 0～8、12～18 步已有适用的真实验证。第 9 步当前新版 prompt 合同仅完成自动化，尚未进行安全的 fresh 真实 Agent、负责人或 `/commit-changes` 集成；`step01-mendmark` 中保留的第 9～11 步 session、commit 与成功状态均属旧合同历史。第 12 步现行合同已用自由格式 Backlog 真实提取 `BR-AI-001`～`BR-AI-003` 并完成零模型幂等重跑；历史 `step01-mendmark` 的 14 项 BR 注册表属于旧三字段 source 合同。第 13～17 步完成 BR-001 的统一分支、活动 TRD、实现验证、规则复盘和提交；第 18 步已将 root/frontend/backend ff-only 到记录 tip、删除需求分支并把 BR-001 标记为 completed。旧 403、非 JSON、非法 completed 和旧 prompt 设计只保留为已修复的根因历史；`step08-real-20260823-a/b` 的 prompt、API、`.coverage`、授权循环和提交事实继续仅属于旧“唯一初始提交证明”合同的历史运行。
 
 ## 一、验证目标
@@ -276,12 +278,14 @@ exception
 
 - `cwd` 指向产品项目根；
 - 使用 `claude_code` system prompt preset；
-- 设置有限 `max_turns` 和 `max_budget_usd`；
+- 设置有限 `max_turns`，不配置 `max_budget_usd`；
 - 需要继续时恢复原 session；
 - 不在步骤代码中重复覆盖 `permission_mode`、`tools`、`allowed_tools` 或 `disallowed_tools`；
 - 项目 `.claude/settings.json` 和 Claude Code 默认加载语义是权限与工具配置的权威来源；
 - 从 init 消息核验实际 cwd、模型、Skills、slash commands、plugins、工具和权限模式；
 - 工作区文件与 Git 事实在恢复时重新读取，不能由 session 文字替代。
+
+Agent profile 固定为：第 2、5、7、9、10、11 步使用高模型和 `high` effort；第 6 步 bootstrap/theme、第 14、15 步使用中模型和 `high` effort；第 8、16、17 步使用中模型和 `medium` effort。第 15～17 步恢复同一 development session 时保持同一个中模型。每次首次调用和 resume 都重新显式传入 model 与 effort；当前 0～18 步不使用低模型 Agent，不配置 fallback model 或 `max_budget_usd`，也不改变既有最大 turn 和负责人决策轮数。
 
 ### 3. Python 编排器
 
@@ -426,7 +430,7 @@ conversation 共 7 条：`system → assistant 初始 → user → assistant com
 
 ### 第 11 步现行新合同与旧合同历史
 
-第 11 步固定输入为第 2 步两份 outputs、第 5 步清单、第 7 步技术方案、第 8 步严格 success 的空 `outputs`、result/state 一致的合法有序 `applicable_repositories`、第 9 步唯一工程架构，以及严格第 10 步 success。第 8 步不逐项回放旧 `repositories` path、branch、clean 字段，实际 Git 状态由本步骤当前现场只读核验。第 10 步 true 时读取唯一 `docs/ui-ux/framework.md`；false 时只能是空 outputs，既不读取也不扫描该文档。单一 key/session 是 `requirement_breakdown`，首行 `/requirement-breakdown`，上限 48 turns、`$16`、8 轮决定；固定唯一输出是 `docs/backlog/backlog.md`。
+第 11 步固定输入为第 2 步两份 outputs、第 5 步清单、第 7 步技术方案、第 8 步严格 success 的空 `outputs`、result/state 一致的合法有序 `applicable_repositories`、第 9 步唯一工程架构，以及严格第 10 步 success。第 8 步不逐项回放旧 `repositories` path、branch、clean 字段，实际 Git 状态由本步骤当前现场只读核验。第 10 步 true 时读取唯一 `docs/ui-ux/framework.md`；false 时只能是空 outputs，既不读取也不扫描该文档。单一 key/session 是 `requirement_breakdown`，首行 `/requirement-breakdown`，Agent turn 与负责人决策轮数沿用步骤代码的有限配置且不设置 `max_budget_usd`；固定唯一输出是 `docs/backlog/backlog.md`。
 
 Agent 只可生成或更新该 Backlog，不能实施需求或修改代码、测试、配置、项目规则和其它文档，初始工作不执行 Git 写操作。Backlog 说明正式需求的范围、目标、验收要点、依赖和风险，但不包含待开发、开发中、已完成、阻塞等需求开发状态；这些状态由调用方外部结构化运行状态管理，业务对象或业务流程状态仍可作为需求内容。`completed` 后先 repair 空文档，只有根仓存在且仅存在固定 Backlog 未提交变化时，才在同一 session 调用 `/commit-changes`；已 tracked 且全仓 clean 时直接满足交付条件。运行期间 root 只允许固定 Backlog dirty、子仓持续 clean；完成时固定文件非空、非符号链接、tracked 且全仓当前 `main`/clean，Python 只读 Git。不要求 exact prompt、紧邻 Agent 回复或其它历史执行锚点。
 
@@ -659,6 +663,11 @@ phase_2:audit
 LLM_BASE_URL=
 LLM_API_KEY=
 LLM_MODEL=
+PCM_AGENT_BASE_URL=
+PCM_AGENT_API_KEY=
+PCM_AGENT_MODEL_LOW=
+PCM_AGENT_MODEL_MEDIUM=
+PCM_AGENT_MODEL_HIGH=
 PCM_WORKSPACE_ROOT=
 PCM_TEMPLATE_CATALOG=
 PCM_TEMPLATE_REPOSITORY=
@@ -669,12 +678,14 @@ PCM_DEV_RESOURCE_LIST=
 职责分工：
 
 - `LLM_*`：AI-compatible Responses API；
+- `PCM_AGENT_BASE_URL`、`PCM_AGENT_API_KEY`：Claude Agent SDK 使用的 Anthropic Messages 网关和受保护 API Key；Base URL 是紧邻 `/v1/messages` 之前的 API 根，不包含 `/v1`；
+- `PCM_AGENT_MODEL_LOW`、`PCM_AGENT_MODEL_MEDIUM`、`PCM_AGENT_MODEL_HIGH`：代码中低、中、高语义档位对应的网关真实模型名；
 - `PCM_WORKSPACE_ROOT`：所有产品项目的独立父目录；
 - `PCM_TEMPLATE_REPOSITORY`：第 1 步发布开发管理模板；
 - `PCM_AGENT_WORKSPACE_ENV_FILE`：第 1 步使用的 AI Agent 工作区受保护工具配置源绝对路径；Python 只通过 `O_NOFOLLOW` 文件描述符读取原始字节并写为新工作区根 `.env`、从创建时即限制为 `0600`、核验 Git 忽略，不解析或导出变量，不进入步骤 outputs、目标产品配置或第 5 步资源清单；该 PCM 控制键从 Claude Agent SDK 子进程环境移除，Agent 只读取已安装的工作区根 `.env`；
 - `PCM_TEMPLATE_CATALOG`：第 3 步基础工程候选目录；
 - `PCM_DEV_RESOURCE_LIST`：第 5 步可信开发资源清单的绝对路径；Python 只核验路径并交给 Agent，不解析资源内容；完整 Agent/决策交互保存在被 Git 忽略的 run 历史中；
-- Claude Agent SDK 的模型和认证继续使用 SDK/Claude Code 自身支持的环境或既有登录态，不与 `LLM_*` 混用。
+- Claude Agent SDK 不再依赖宿主默认网关或认证：Python 将 `PCM_AGENT_BASE_URL`、`PCM_AGENT_API_KEY` 转为 `ANTHROPIC_BASE_URL`、`ANTHROPIC_API_KEY`，清除冲突认证，并把 `CLAUDE_CODE_SUBAGENT_MODEL` 同步为当前主模型；这些配置与 `LLM_*` 保持独立；
 
 优先级：
 

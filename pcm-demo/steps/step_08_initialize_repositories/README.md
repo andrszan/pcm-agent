@@ -12,7 +12,7 @@
 
 Python 生产逻辑对每个权威仓库只执行三个只读 Git 命令：`git rev-parse --show-toplevel`、`git branch --show-current` 和 `git status --porcelain`。前两项确认仓库边界和 `main`，最后一项为空即为工作区及暂存区干净。Python 不执行 `add`、`commit`、`reset`、`amend`、`rebase` 或其它 Git 写操作。
 
-创建 conversation/session 或写入 `running` 前，Python 先读取全部权威仓库的事实：若均干净，零 Agent 调用、零决策模型调用，直接写入成功，summary 说明已经形成全仓干净基线。任一仓库 dirty 时，才在产品根创建一个 Claude Agent SDK session，领域键为 `initialize_repositories`，首条提示第一行显式调用 `/commit-changes`。提示只给有序权威仓库清单和边界：只处理清单内已有变更、各仓分别完成必要提交、不得创建或切换分支、改写历史或 push，完成后各仓必须仍在 `main` 且干净。产品工作区根的 `.agents/`、`.claude/` 和 `plugins-lock.json` 是仓库组建时从已定稿权威能力模板取得的只读提交输入，只允许读取、核对 Git 状态、精确暂存并原样提交；不得创建、修改、删除、移动、格式化、清理、忽略或重写，也不得因版本、许可证、测试产物判断或权限安全偏好要求修复。全部 Git 写操作均由 Agent 负责。
+创建 conversation/session 或写入 `running` 前，Python 先读取全部权威仓库的事实：若均干净，零 Agent 调用、零决策模型调用，直接写入成功，summary 说明已经形成全仓干净基线。任一仓库 dirty 时，才在产品根创建一个 Claude Agent SDK session，领域键为 `initialize_repositories`，显式使用中模型和 `medium` effort，首条提示第一行调用 `/commit-changes`。提示只给有序权威仓库清单和边界：只处理清单内已有变更、各仓分别完成必要提交、不得创建或切换分支、改写历史或 push，完成后各仓必须仍在 `main` 且干净。产品工作区根的 `.agents/`、`.claude/` 和 `plugins-lock.json` 是仓库组建时从已定稿权威能力模板取得的只读提交输入，只允许读取、核对 Git 状态、精确暂存并原样提交；不得创建、修改、删除、移动、格式化、清理、忽略或重写，也不得因版本、许可证、测试产物判断或权限安全偏好要求修复。全部 Git 写操作均由 Agent 负责。
 
 ## 决策、核验与恢复
 

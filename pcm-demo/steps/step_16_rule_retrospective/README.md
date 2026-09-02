@@ -20,7 +20,7 @@
 rule_retrospective_<requirement-id>
 ```
 
-首次调用 Agent 前，程序将该 key 的 Claude session alias 绑定为第 15 步保存的 `development_session_id`。公共 `run_agent_decision_loop` 因而恢复原开发 session，而不是新建替代 session；负责人 conversation 仍保持独立。
+首次调用 Agent 前，程序将该 key 的 Claude session alias 绑定为第 15 步保存的 `development_session_id`。公共 `run_agent_decision_loop` 因而恢复原开发 session，而不是新建替代 session；负责人 conversation 仍保持独立。第 15～17 步始终使用同一中模型，本步骤将 effort 调整为 `medium` 并在恢复时重新显式传入。
 
 初始 prompt 固定为：
 

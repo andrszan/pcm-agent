@@ -236,7 +236,7 @@ class DevelopmentTests(unittest.TestCase):
     def test_continue_reuses_development_session(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))
-            calls: list[str | None] = []
+            calls: list[tuple[object, object, object]] = []
             decisions = iter(
                 [
                     decision("continue", answer="请继续完成遗漏。"),
@@ -245,7 +245,13 @@ class DevelopmentTests(unittest.TestCase):
             )
 
             async def agent(_prompt: str, **kwargs: object) -> ClaudeRunResult:
-                calls.append(kwargs.get("resume_session_id"))
+                calls.append(
+                    (
+                        kwargs.get("resume_session_id"),
+                        kwargs.get("model_tier"),
+                        kwargs.get("effort"),
+                    )
+                )
                 value = agent_result(workspace)
                 value.text = f"第 {len(calls)} 轮完成情况。"
                 return value
@@ -260,7 +266,13 @@ class DevelopmentTests(unittest.TestCase):
                 decision_runner=decide,
                 config_loader=lambda: object(),
             )
-            self.assertEqual(calls, [None, "development-session-1"])
+            self.assertEqual(
+                calls,
+                [
+                    (None, "medium", "high"),
+                    ("development-session-1", "medium", "high"),
+                ],
+            )
 
     def test_eight_continue_decisions_still_allow_completion(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

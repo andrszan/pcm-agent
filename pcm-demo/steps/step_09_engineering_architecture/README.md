@@ -20,7 +20,7 @@
 - conversation/session 领域键固定为 `engineering_architecture`；
 - 初始提示第一行固定调用 `/engineering-architecture`；
 - 固定输出为 `docs/design/工程架构设计.md`；
-- 单次 Agent 上限为 48 turns、`$16`，同一历史最多 8 轮结构化决定；
+- 显式使用高模型和 `high` effort；单次 Agent 上限与同一历史负责人决策轮数沿用步骤代码的有限配置，不设置 `max_budget_usd`；
 - 新 conversation 的动态 XML system snapshot 使用 `<role>`、`<project_context>`、`<responsibility>`、`<completion>`、`<output>` 五段；步骤规则位于 completion，output 单独约束 `AgentDecision` 字段组合；恢复时严格使用历史首条 system，不重新渲染覆盖。
 
 `AgentDecision` 的输出约束为：`completed` 时 `answer` 为空且 `required_inputs` 为空；`continue` 时 `answer` 非空且 `required_inputs` 为空；`blocked` 时 `answer` 为空且 `required_inputs` 非空；所有结果的 `reason` 均非空。公共层使用一次 `responses.parse` 和 Pydantic 输出，不手写解析、不注入决定、不格式重试。

@@ -17,6 +17,7 @@ from claude_agent_sdk import (
     ResultMessage,
     SystemMessage,
 )
+from pydantic import SecretStr
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -40,6 +41,7 @@ from common.decision import (  # noqa: E402
 )
 from common.openai_responses import ResponsesFailure  # noqa: E402
 from common.files import write_json  # noqa: E402
+from config import AgentConfig  # noqa: E402
 
 
 class FakeAgentRunner:
@@ -98,11 +100,19 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
             skill_name="test-skill",
             max_decision_rounds=3,
             max_turns=7,
+            model_tier="medium",
+            effort="high",
             decision_system_prompt="决策 system prompt",
         )
 
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
+
+    def test_spec_requires_supported_model_tier_and_effort(self) -> None:
+        with self.assertRaisesRegex(ValueError, "model_tier"):
+            AgentDecisionLoopSpec(**{**self.spec.__dict__, "model_tier": "unsupported"})
+        with self.assertRaisesRegex(ValueError, "effort"):
+            AgentDecisionLoopSpec(**{**self.spec.__dict__, "effort": "low"})
 
     def result(
         self,
@@ -186,6 +196,10 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([call[0] for call in agent.calls], ["初始 Agent 提示", "请补齐核验。"])
         self.assertIsNone(agent.calls[0][1]["resume_session_id"])
         self.assertEqual(agent.calls[1][1]["resume_session_id"], "session-1")
+        self.assertEqual(
+            [(call[1]["model_tier"], call[1]["effort"]) for call in agent.calls],
+            [("medium", "high"), ("medium", "high")],
+        )
         self.assertEqual(decisions.calls[0][0][-1], {"role": "user", "content": original})
         messages = json.loads(
             (self.run_dir / "conversations" / f"{self.spec.key}.json").read_text(encoding="utf-8")
@@ -1049,13 +1063,38 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
 
 
 class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
-    async def test_pcm_workspace_env_source_is_not_passed_to_agent(self) -> None:
-        with patch.dict(
-            os.environ,
-            {"PCM_AGENT_WORKSPACE_ENV_FILE": "/protected/agent-workspace.env"},
-        ):
-            env = filtered_env()
-        self.assertNotIn("PCM_AGENT_WORKSPACE_ENV_FILE", env)
+    def setUp(self) -> None:
+        self.agent_config = AgentConfig(
+            "http://agent.example.invalid",
+            SecretStr("agent-secret"),
+            low_model="low-model",
+            medium_model="medium-model",
+            high_model="high-model",
+        )
+        self.agent_config_patcher = patch(
+            "common.claude_agent.AgentConfig.load", return_value=self.agent_config
+        )
+        self.agent_config_patcher.start()
+
+    def tearDown(self) -> None:
+        self.agent_config_patcher.stop()
+
+    async def test_orchestrator_configuration_is_not_passed_to_agent(self) -> None:
+        inherited = {
+            "LLM_BASE_URL": "http://decision.example.invalid/v1",
+            "LLM_API_KEY": "decision-secret",
+            "LLM_MODEL": "decision-model",
+            "PCM_WORKSPACE_ROOT": "/products",
+            "PCM_TEMPLATE_CATALOG": "/catalog.json",
+            "PCM_TEMPLATE_REPOSITORY": "git@example.invalid/template.git",
+            "PCM_AGENT_WORKSPACE_ENV_FILE": "/protected/agent-workspace.env",
+            "PCM_DEV_RESOURCE_LIST": "/protected/resources.md",
+        }
+        with patch.dict(os.environ, inherited):
+            env = filtered_env(self.agent_config, "medium-model")
+        for key in inherited:
+            with self.subTest(key=key):
+                self.assertEqual(env[key], "")
 
     async def test_result_terminal_reason_api_status_and_errors_are_preserved(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1078,7 +1117,7 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
                     num_turns=1,
                     session_id="session-1",
                     result="Agent 的完整结果",
-                    errors=["tool warning"],
+                    errors=["tool warning agent-secret"],
                     api_error_status=429,
                     terminal_reason="api_error",
                 )
@@ -1093,20 +1132,27 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(captured_options[0].max_buffer_size, 10 * 1024 * 1024)
         self.assertEqual(captured_options[0].resume, "session-1")
+        self.assertEqual(captured_options[0].model, "medium-model")
+        self.assertEqual(captured_options[0].effort, "high")
         self.assertIsNone(captured_options[0].max_budget_usd)
+        self.assertEqual(captured_options[0].env["ANTHROPIC_BASE_URL"], self.agent_config.base_url)
+        self.assertEqual(captured_options[0].env["ANTHROPIC_API_KEY"], "agent-secret")
+        self.assertEqual(captured_options[0].env["ANTHROPIC_AUTH_TOKEN"], "")
+        self.assertEqual(captured_options[0].env["CLAUDE_CODE_SUBAGENT_MODEL"], "medium-model")
+        self.assertEqual(captured_options[0].env["PCM_AGENT_API_KEY"], "")
         self.assertEqual(
             captured_options[0].env["CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"], "0"
         )
         self.assertEqual(result.terminal_reason, "api_error")
         self.assertEqual(result.api_error_status, 429)
         self.assertTrue(result.has_errors)
-        self.assertEqual(result.sdk_errors, ["tool warning"])
+        self.assertEqual(result.sdk_errors, ["tool warning [REDACTED]"])
         self.assertTrue(result.retry_requested)
         self.assertTrue(updates[-1].is_error)
         self.assertEqual(updates[-1].terminal_reason, "api_error")
         self.assertEqual(updates[-1].api_error_status, 429)
         self.assertTrue(updates[-1].has_errors)
-        self.assertEqual(updates[-1].sdk_errors, ["tool warning"])
+        self.assertEqual(updates[-1].sdk_errors, ["tool warning [REDACTED]"])
         self.assertTrue(updates[-1].retry_requested)
 
     async def test_all_api_statuses_and_api_terminal_reason_request_retry(self) -> None:
@@ -1314,6 +1360,37 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
                 )
 
         self.assertEqual(result.exception_type, "SessionMismatchError")
+        self.assertFalse(result.retry_requested)
+
+    async def test_model_mismatch_is_reported_without_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            write_json(workspace / "plugins-lock.json", {"version": 1, "plugins": []})
+
+            async def fake_query(*_args: object, **_kwargs: object):
+                yield SystemMessage(
+                    subtype="init",
+                    data={
+                        "session_id": "session-1",
+                        "cwd": str(workspace),
+                        "model": "other-model",
+                    },
+                )
+                yield ResultMessage(
+                    subtype="success",
+                    duration_ms=1,
+                    duration_api_ms=1,
+                    is_error=False,
+                    num_turns=1,
+                    session_id="session-1",
+                    result="Agent 的完整结果",
+                    terminal_reason="completed",
+                )
+
+            with patch("common.claude_agent.query", new=fake_query):
+                result = await run_claude("测试提示", cwd=workspace)
+
+        self.assertEqual(result.exception_type, "ModelMismatchError")
         self.assertFalse(result.retry_requested)
 
 

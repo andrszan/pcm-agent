@@ -237,7 +237,7 @@ class TRDDesignTests(unittest.TestCase):
     def test_continue_reuses_public_loop_session(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))
-            calls: list[str | None] = []
+            calls: list[tuple[object, object, object]] = []
             decisions = iter(
                 [
                     decision("continue", answer="请补全验证场景。"),
@@ -246,7 +246,13 @@ class TRDDesignTests(unittest.TestCase):
             )
 
             async def agent(_prompt: str, **kwargs: object) -> ClaudeRunResult:
-                calls.append(kwargs.get("resume_session_id"))
+                calls.append(
+                    (
+                        kwargs.get("resume_session_id"),
+                        kwargs.get("model_tier"),
+                        kwargs.get("effort"),
+                    )
+                )
                 if len(calls) == 2:
                     self.write_trd(workspace, read_state(run_dir))
                 return agent_result(workspace, text=f"第 {len(calls)} 轮结果。")
@@ -262,7 +268,13 @@ class TRDDesignTests(unittest.TestCase):
                 config_loader=lambda: object(),
                 today_provider=lambda: date(2026, 8, 25),
             )
-            self.assertEqual(calls, [None, "trd-session-1"])
+            self.assertEqual(
+                calls,
+                [
+                    (None, "medium", "high"),
+                    ("trd-session-1", "medium", "high"),
+                ],
+            )
 
     def test_completed_missing_document_repairs_in_same_session(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

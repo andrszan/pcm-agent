@@ -7,7 +7,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import ValidationError
 
@@ -21,7 +21,7 @@ from common.error_diagnostics import exception_diagnostics, redact_text, write_d
 from common.files import write_json
 from common.openai_responses import ResponsesFailure
 from common.state import write_state
-from config import LLMConfig
+from config import AgentModelTier, LLMConfig
 
 BLOCKED_RESUME_PROMPT = (
     "此前任务因缺少外部输入而阻塞。请在所需输入已具备后重新核验当前事实并继续；"
@@ -96,6 +96,8 @@ class AgentDecisionLoopSpec:
     skill_name: str
     max_decision_rounds: int
     max_turns: int
+    model_tier: AgentModelTier
+    effort: Literal["medium", "high"]
     decision_system_prompt: str
     legacy_completion_messages: tuple[str, ...] = ()
 
@@ -122,6 +124,10 @@ class AgentDecisionLoopSpec:
             or self.max_turns <= 0
         ):
             raise ValueError("max_turns 必须是正整数")
+        if self.model_tier not in {"low", "medium", "high"}:
+            raise ValueError("model_tier 必须是 low、medium 或 high")
+        if self.effort not in {"medium", "high"}:
+            raise ValueError("effort 必须是 medium 或 high")
         if not isinstance(self.decision_system_prompt, str) or not self.decision_system_prompt:
             raise ValueError("decision_system_prompt 不能为空")
         if any(not isinstance(message, str) or not message for message in self.legacy_completion_messages):
@@ -618,6 +624,8 @@ async def _run_agent(
             cwd=workspace,
             resume_session_id=_session(state, spec),
             max_turns=spec.max_turns,
+            model_tier=spec.model_tier,
+            effort=spec.effort,
             on_update=lambda update: _save_agent_update(run_dir, state, spec, update),
         )
     except asyncio.CancelledError:

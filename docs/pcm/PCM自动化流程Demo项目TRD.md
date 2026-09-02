@@ -7,7 +7,9 @@
 > - [`PCM 自动化流程 Demo 项目设计`](./PCM自动化流程Demo项目设计.md)：定义 Demo 的目标、范围、黄金输入和最终完成标准；
 > - [`PCM 程序化调度的 AI Agent 产品开发流程`](../../.claude/PCM版AI%20Agent自动化流程设计.md)：定义第 0～18 步、阶段一、阶段二的流程语义、职责边界和停止条件。
 >
-> PCM Demo 第 14、15 步负责人上下文合同定向本体与 CLI 共 29 项通过；当前工作树全量 359 项 `unittest` 通过（50.534 秒），`compileall common steps run_step.py run_all.py test_run_step_retry.py test_run_all.py`、相关 IDE diagnostics 与 `git diff --check` 通过。第 14 步只将注册表交接的完整 canonical Backlog 正文加入负责人 `<project_context>`，第 15 步只加入完整活动 TRD 正文；第 8、17 步和公共决策循环未修改。`run_step.py` 只对显式运行时请求有界重跑当前步骤两次，间隔 10 秒和 30 秒；当前请求仅由 Claude Agent SDK 实际执行通道故障产生，任意 API 状态码均可重试，业务 `blocked`、普通 `failed`、AI-compatible 裁决失败、本地合同错误和取消不重试。一次性请求不持久化，18 个步骤不增加重试分支。
+> 本轮 Claude Agent 模型分级已落实：PCM 从自身 `.env` 显式加载 Anthropic Messages 网关、受保护 API Key 和低/中/高真实模型映射；13 条 Agent 执行路径固定 model/effort，子代理默认模型与主模型同步，resume 重传相同 profile。配置、公共循环与固定 profile 定向 49 项、模型 profile 与需求循环定向 101 项、当前工作树全量 367 项 `unittest` 通过（49.802 秒），`compileall` 与 `git diff --check` 通过；中模型 + `high` effort 的公共 runner 首轮与同 session resume 真实成功。未配置 `max_budget_usd`，领域 prompt 和步骤业务语义未变。
+>
+> PCM Demo 第 14、15 步负责人上下文合同定向本体与 CLI 共 29 项通过；当时工作树全量 359 项 `unittest` 通过（50.534 秒），`compileall common steps run_step.py run_all.py test_run_step_retry.py test_run_all.py`、相关 IDE diagnostics 与 `git diff --check` 通过。第 14 步只将注册表交接的完整 canonical Backlog 正文加入负责人 `<project_context>`，第 15 步只加入完整活动 TRD 正文；第 8、17 步和公共决策循环未修改。`run_step.py` 只对显式运行时请求有界重跑当前步骤两次，间隔 10 秒和 30 秒；当前请求仅由 Claude Agent SDK 实际执行通道故障产生，任意 API 状态码均可重试，业务 `blocked`、普通 `failed`、AI-compatible 裁决失败、本地合同错误和取消不重试。一次性请求不持久化，18 个步骤不增加重试分支。
 公共错误诊断保留经精确凭据遮盖的 Claude Agent SDK `errors`、异常链和 traceback 位置，以及 AI-compatible provider 的 code/type/message/request ID/HTTP status；完整有界快照写入 Git 忽略的 `logs/`，state/result/stderr 保存具体安全原因和引用。真实 `step01-mendmark` 已连续完成 BR-001 与 BR-002；BR-002 在旧“任意非 `success` 均重试”策略下前两次因负责人代码围栏 JSON 失败、第三次成功，第 16～18 步随后完成。该历史不定义现行重试范围。
 
 ## 一、目标、当前范围与状态
@@ -113,9 +115,12 @@ Python 编排器负责确定性操作、两类会话衔接和最终步骤状态�
 - `cwd`：本次运行的独立项目工作区根目录；
 - `system_prompt`：使用 `claude_code` preset，不能依赖 SDK 的最小默认 prompt；
 - Skills 和 plugins：按项目配置与锁定事实加载，并从 init 消息核验目标能力；
-- `max_turns` 和 `max_budget_usd`：设置有限上限，防止开放式任务无界运行；当前第 2 步单次调用预算为 `$4`，后续步骤预算在各步合同中根据真实任务单独确认；
+- `model` 与 `effort`：每次首次调用和 resume 都显式传入固定任务 profile；不依赖宿主默认模型；
+- `max_turns`：保留步骤级有限上限；不配置 `max_budget_usd`，避免金额上限在任务仍可完成时截断服务；
 - `max_buffer_size`：公共 `ClaudeAgentOptions` 固定为 10 MiB，修复 SDK 0.2.139 单条 CLI stdout JSON 默认 1 MiB 上限；不增加配置且不影响 `resume`；
 - `resume`：需要继续特定历史会话时使用已保存的 session ID。
+
+固定 profile 为：第 2、5、7、9、10、11 步高模型 + `high`；第 6 步 bootstrap/theme、第 14、15 步中模型 + `high`；第 8、16、17 步中模型 + `medium`。第 15～17 步保持同一中模型。每次首次调用和 resume 都重新传入 model 与 effort；当前不为 Agent 步骤使用低模型，不配置 fallback model 或 `max_budget_usd`。
 
 正式步骤不传入 `permission_mode`、`tools`、`allowed_tools` 或 `disallowed_tools`，也不为每一步重新定义权限档位。项目 `.claude/settings.json` 及 Claude Code 默认设置加载语义是统一权威来源。若未来某一步确有覆盖项目配置的特殊理由，必须先在该步合同中说明并单独确认，不能沿用探针限制。
 
@@ -129,7 +134,7 @@ Python 编排器负责确定性操作、两类会话衔接和最终步骤状态�
 
 ### 4. AI-compatible 配置与调用
 
-`LLMConfig` 从 `pcm-demo/.env` 加载 `LLM_BASE_URL`、`LLM_API_KEY` 和 `LLM_MODEL`，同名进程环境变量优先。实际 `.env` 由 Git 忽略，配置对象的 `repr` 不包含字段值；`.env.example` 只保存公开占位说明。Claude Agent SDK 仍使用自身的 Anthropic 认证配置，两类模型配置不混用。
+`LLMConfig` 从 `pcm-demo/.env` 加载 `LLM_BASE_URL`、`LLM_API_KEY` 和 `LLM_MODEL`；`AgentConfig` 独立加载 `PCM_AGENT_BASE_URL`、`PCM_AGENT_API_KEY` 与低、中、高三级真实模型名，同名进程环境变量优先。实际 `.env` 由 Git 忽略，配置对象的 `repr` 不包含凭据；`.env.example` 只保存公开占位说明。Python 将 Agent 配置显式转换为 Claude Code 子进程的 `ANTHROPIC_BASE_URL`、`ANTHROPIC_API_KEY`，并同步子代理默认模型；两类模型配置不混用或相互回退。
 
 SDK 不自动读取 Demo 的 `.env`。配置模块必须在创建 Agent SDK 或 OpenAI-compatible 客户端前显式加载配置，且不得把密钥写入状态或日志。探针 C 运行时发现宿主环境配置了 SOCKS 代理，但当前 OpenAI SDK 环境没有 SOCKS 依赖；探针通过 SDK 的 `DefaultAsyncHttpxClient(trust_env=False)` 明确禁用环境代理，未修改宿主代理配置，也未增加无关依赖。
 
@@ -684,7 +689,7 @@ PCM 在请求前读取该领域完整编排历史。首次保存动态 `system` 
 - 只允许两类 `blocked`：开发必需外部资源在候选池中不存在、当前环境无法安全生成且无兼容替代；或已匹配资源真实不可用、凭据无效、权限不足、隔离不合格，或缺少开发所需接口能力、可用配额、回调/白名单、沙箱范围及其它既定能力。项目准备清单只纳入当前编码、开发环境联调或开发环境真实验收所需，且必须由调用方提供或授权的外部资源。依赖安装、构建、测试、migration、Seed、业务实现、项目内测试账号、完整联调和浏览器验收属于后续开发工作；只服务生产部署或生产运行的正式域名、DNS/TLS、生产资源与凭据、生产回调与配额、监控、备份恢复、容量和发布安全属于清单准入范围外。清单正文任何位置都不得列举、命名或汇总这些事项，也不得以“未纳入清单”、范围外、未来事项、非阻塞、无状态或 `not-applicable` 章节保留它们；开发 SMTP TLS、localhost 回调、开发白名单、沙箱范围和开发配额仍按当前开发用途纳入。产品规则和隐私事项同样不写入清单；
 - 每轮从 init 核验实际 cwd、`project-readiness` Skill 和 slash command；完整真实回复先保存为 `user`，再由公共渲染器以步骤 `DECISION_RULES` 和项目上下文生成的完整 XML system snapshot 的统一 `AgentDecision` 裁决。`completed` 必须确认清单正文只包含当前开发必需外部资源，这些资源均真实可用，所有 `ready` 外部资源的最终凭据绑定已持久化到项目受保护配置并同步公开键合同，含秘密文件权限安全，且不存在两类开发资源阻塞；清单不能为自身状态作证。正文任何位置仍提及纯生产、非当前必需候选或后续内部工作时必须 `continue` 删除，不能 `completed`，即使这些内容位于“未纳入清单”、范围外说明或无状态汇总中。`completed` 后程序重新核验清单、交接和根/适用子仓 Git 边界；清单缺失或为空时追加固定修复提示，只重建开发资源清单并继续凭据持久化、公开示例、文件权限和最终运行凭据验证；
 - `blocked` 终止前也重验上述 Git 边界；只有 `status=success` 的结果可幂等复用，`failed` / `blocked` 结果不阻断原 session 恢复；
-- 单次 Agent 上限为 24 turns、`$8`，同一历史累计最多 6 轮裁决。`error_max_turns` 和 `error_max_budget_usd` 必须有 session 和非空回复才可裁决，且后续正常 `success` 前不能最终完成；对话尾部为 Agent `user` 时先裁决，为 `continue` 时恢复原 `answer`，为 `blocked` 时终止，为 `completed` 时先核验；达到上限不得额外调用；
+- Agent 单次 turn 与同一历史负责人决策轮数沿用步骤代码的有限配置，不设置 `max_budget_usd`。`error_max_turns` 和历史兼容的 `error_max_budget_usd` 必须有 session 和非空回复才可裁决，且后续正常 `success` 前不能最终完成；对话尾部为 Agent `user` 时先裁决，为 `continue` 时恢复原 `answer`，为 `blocked` 时终止，为 `completed` 时先核验；达到上限不得额外调用；
 - `blocked` 只来自决策模型确认的不可替代外部资源缺失；其它输入、路径、状态、SDK、Skill、session、文件或决策错误为 `failed`；
 - 成功先写 `steps/05.json`，其中 `outputs` 仍只含固定准备清单路径，`readiness_baseline.scope_contract` 固定当前“只允许开发必需外部资源进入清单”的准入合同版本，另外记录当前清单与两份权威产品定义的 SHA-256。合同版本使旧语义 success 不可复用，指纹防止已经完成的基线被静默替换；二者都不证明资源 `ready`，也不记录或哈希 `.env`、凭据和资源资料正文。随后推进到 `project:06_bootstrap_foundation`。若结果已成功而下一节点状态写入中断，重跑以严格成功 schema、当前合同版本、指纹、交接和 Git 边界恢复；缺少合同版本或指纹的旧 success、清单漂移或产品定义漂移均不可复用或自动升级；
 
@@ -714,7 +719,7 @@ PCM 在请求前读取该领域完整编排历史。首次保存动态 `system` 
 - `tailwind-theme` Agent 根据产品定义和当前 frontend 选择经校验的 tweakcn preset 或生成 custom；tweakcn 网络不可用时必须 custom fallback。完整 light/dark 语义颜色必须同时落实；只允许修改颜色值和必要颜色映射，不改变字体、圆角、阴影、间距、tracking、布局、组件、页面、主题切换交互或业务功能，不安装、升级或迁移 Tailwind，不执行 Git 写操作。完成前运行适用前端检查、测试和构建，并在真实浏览器中切换 light/dark、读取代表性渲染和 computed color，检查控制台和失败网络请求；
 - 两个领域的每轮完整真实 Agent 回复分别保存到 `conversations/project_bootstrap.json` 与 `conversations/tailwind_theme.json`，并交给各自由公共渲染器生成的 XML system snapshot 与 `AgentDecision` 裁决。bootstrap 工程配置读取、迁移、接线、安装、验证问题属于其 `continue`；theme 方向、light/dark、允许范围修改、构建或真实渲染证据不完整属于 theme `continue`。`blocked` 只允许当前环境无法取得的不可替代外部条件；本地版本、主题入口、dark selector、文件、工作树或状态冲突不得 blocked。两个 `completed` 都必须在自己的 completion verifier 后成立，主题未完成时不得写第 6 步 success；
 - 两个 spec 的 AI-compatible 结构化输出都要求 `request_decision` 显式接收各自完整 XML system prompt，原样调用一次 `responses.parse` 并以 Pydantic `AgentDecision` 解析；没有公共默认、隐藏追加 prompt 或格式重试。步骤分别维护 bootstrap 与 theme `DECISION_RULES`，公共循环代码和 schema 不变。持续结构或完成状态失败为 `failed`，新协议不写 Python 固定完成声明；
-- bootstrap 单次 Agent 上限保持 48 turns，theme 单次 Agent 上限为 24 turns；两个 conversation 各自累计最多 8 轮裁决。各自对话尾部为 `user` 时先裁决，为 `continue` 时恢复本领域原 `answer`，为 `blocked` 时终止，为 `completed` 时先核验。bootstrap completed/theme 未开始或 theme 中断时，重跑先零 Agent 复验 bootstrap，再新建或恢复 theme；theme blocked/failed 不重新执行 bootstrap Agent。预算/turn 上限有 session 和非空回复时可裁决，但必须恢复正常 `success` 才能最终完成；API 400/429/500、连接、CLI/进程、无 Result 或其它 SDK 错误均先形成 `failed`。公共循环自身不做 HTTP 重试；属于 Claude Agent SDK 通道故障的失败仍由外层 `run_step.py` 有界重放，取消和本地合同错误不重放；
+- bootstrap 与 theme 的单次 Agent turn、各自 conversation 的负责人决策轮数沿用步骤代码的有限配置，且不设置 `max_budget_usd`。各自对话尾部为 `user` 时先裁决，为 `continue` 时恢复本领域原 `answer`，为 `blocked` 时终止，为 `completed` 时先核验。bootstrap completed/theme 未开始或 theme 中断时，重跑先零 Agent 复验 bootstrap，再新建或恢复 theme；theme blocked/failed 不重新执行 bootstrap Agent。turn 上限有 session 和非空回复时可裁决，但必须恢复正常 `success` 才能最终完成；API 400/429/500、连接、CLI/进程、无 Result 或其它 SDK 错误均先形成 `failed`。公共循环自身不做 HTTP 重试；属于 Claude Agent SDK 通道故障的失败仍由外层 `run_step.py` 有界重放，取消和本地合同错误不重放；
 - Python 在两个 Agent 前后复用根仓和适用子仓的自身 top-level、`main`、unborn HEAD、空 index 核验，并确认适用目录仍与第 4 步一致且 `.coverage` 已删除或实际被所属仓忽略。bootstrap completion 另核验根 README；theme completion 重验 Tailwind v4 CSS-first gate。Python 不解析实际 `.env`、资源身份、准备清单语义、主题 token 或浏览器语义，不保存秘密映射，不重复执行 Agent 已完成的工程命令；
 - 成功先写 `steps/06.json`，再推进到 `project:07_solution_design`。顶层 `applicable` 和 `outputs` 保持原语义，新增真实布尔 `tailwind_theme`，严格满足 `tailwind_theme == ("frontend" in outputs)`；blocked/failed 默认 false，字段缺失、类型错误或不一致的旧 success 不可复用。没有任何适用工程时两个 Agent 都不调用并以 `applicable:false`、空 outputs、false marker 跳过；backend-only 运行 bootstrap、跳过 theme。有 frontend 时只有两个领域都完成才 success。result 已写而状态推进中断时按严格 marker、前序交接、Tailwind gate 和 Git 事实补状态；完整 success 幂等不调用两个 Agent。`failed` / `blocked` 结果不作成功锚点，也不阻止各自原 session 恢复。
 
@@ -742,7 +747,7 @@ PCM 在请求前读取该领域完整编排历史。首次保存动态 `system` 
 - Agent 必须区分当前事实、已确认决定、目标状态、假设和待确认事项，明确系统边界、主要技术选择、交付单元、跨单元协作、风险和恢复语义；不重新选型、组装模板、实现业务、修改代码或执行 Git 写操作；
 - 新 run 的每轮 Agent 完整回复、`pending_agent_text` 和决策输入均保留完整原文于 Git 忽略 run 目录，不再在保存或转发前脱敏替换；回复由公共渲染器以步骤 `DECISION_RULES` 和项目上下文生成的完整 XML system snapshot 的统一 `AgentDecision` 裁决。风险、假设和正常未来待决事项不构成阻塞，且 Agent 必须不主动披露秘密；
 - `completed` 后必须重新核验正常 Agent `success`、有效 session ID、固定技术方案文档为非空普通文件、前序交接和根/适用子仓 Git 边界；文档缺失或为空时追加固定修复提示并继续同一 session，交接或 Git 冲突为 `failed`。`blocked` 终止前同样重验 Git 边界；只有 `status=success` 的结果可幂等复用，`failed` / `blocked` 结果不作成功锚点。Python 不解析 Markdown 章节或判断技术结论；
-- 结构化输出要求 `request_decision` 接收完整 XML system prompt 并原样调用一次 `responses.parse`，以 Pydantic `AgentDecision` 解析；没有公共默认、隐藏追加 prompt 或格式重试。步骤仅维护领域 `DECISION_RULES`。单次 Agent 上限为 48 turns、`$16`，同一历史累计最多 8 轮裁决。预算或 turn 上限有 session 与非空回复时可裁决，但必须恢复正常 `success` 才能完成；400/429/500、连接、CLI/进程、无 Result、`aborted_streaming`/`aborted_tools` 或 `success` 下未知终止原因均在裁决前形成 `failed`。公共循环自身不做 HTTP 重试；只有 Claude Agent SDK 执行通道故障携带瞬时请求并由外层 `run_step.py` 有界重放，aborted 和其它本地合同错误不重放；
+- 结构化输出要求 `request_decision` 接收完整 XML system prompt 并原样调用一次 `responses.parse`，以 Pydantic `AgentDecision` 解析；没有公共默认、隐藏追加 prompt 或格式重试。步骤仅维护领域 `DECISION_RULES`。Agent turn 与同一历史负责人决策轮数沿用步骤代码的有限配置，不设置 `max_budget_usd`。turn 上限有 session 与非空回复时可裁决，但必须恢复正常 `success` 才能完成；400/429/500、连接、CLI/进程、无 Result、`aborted_streaming`/`aborted_tools` 或 `success` 下未知终止原因均在裁决前形成 `failed`。公共循环自身不做 HTTP 重试；只有 Claude Agent SDK 执行通道故障携带瞬时请求并由外层 `run_step.py` 有界重放，aborted 和其它本地合同错误不重放；
 - 成功先写 `steps/07.json`，再推进到 `project:08_initialize_repositories`。没有适用基础工程时仍需生成总体技术方案，不无副作用跳过；成功写入或状态推进中断时，按完整文档、session、历史和 Git 事实恢复或幂等复用。
 
 输出：
@@ -1341,6 +1346,11 @@ SDK 和模型调用使用真实服务完成至少一次集成验证。纯解析�
 LLM_BASE_URL=
 LLM_API_KEY=
 LLM_MODEL=
+PCM_AGENT_BASE_URL=
+PCM_AGENT_API_KEY=
+PCM_AGENT_MODEL_LOW=
+PCM_AGENT_MODEL_MEDIUM=
+PCM_AGENT_MODEL_HIGH=
 PCM_WORKSPACE_ROOT=
 PCM_TEMPLATE_CATALOG=
 PCM_TEMPLATE_REPOSITORY=
@@ -1351,12 +1361,14 @@ PCM_DEV_RESOURCE_LIST=
 配置职责：
 
 - `LLM_*` 用于 OpenAI-compatible Responses API，包括 AI-compatible 决策调用和第 12 步 Backlog 静态字段结构化提取；
+- `PCM_AGENT_BASE_URL`、`PCM_AGENT_API_KEY` 用于 Claude Agent SDK 的 Anthropic Messages 网关和受保护认证；Base URL 不包含 `/v1`；
+- `PCM_AGENT_MODEL_LOW`、`PCM_AGENT_MODEL_MEDIUM`、`PCM_AGENT_MODEL_HIGH` 将代码中的低、中、高档位映射为网关真实模型名；
 - `PCM_WORKSPACE_ROOT` 是独立产品项目父目录；
 - `PCM_TEMPLATE_REPOSITORY` 只用于第 1 步开发管理模板；
 - `PCM_AGENT_WORKSPACE_ENV_FILE` 只用于第 1 步安装 AI Agent 工作区固定工具的受保护根 `.env`；Python 以 `O_NOFOLLOW` 和同一文件描述符读取原始字节，目标从创建时即为 `0600` 并核验 Git 忽略，不解析、导出、记录或传给第 5 步；该 PCM 控制键从 Claude Agent SDK 子进程环境移除；
 - `PCM_TEMPLATE_CATALOG` 只用于第 3 步基础工程候选；
 - `PCM_DEV_RESOURCE_LIST` 只用于第 5 步可信开发资源清单，必须是可读普通文件的绝对路径；Python 不读取资源内容，Agent 可按项目规则原样使用；
-- Claude Agent SDK 模型与认证继续使用 SDK/Claude Code 的环境或既有登录态，不另设 `CLAUDE_MODEL`。
+- Claude Agent SDK 每次调用显式使用 `AgentConfig` 解析后的网关、API Key、模型和 effort；冲突的宿主认证被压住，`CLAUDE_CODE_SUBAGENT_MODEL` 与主模型同步，不再依赖既有登录态选择模型或网关。
 
 优先级：
 

@@ -40,6 +40,8 @@ DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     skill_name=SKILL_NAME,
     max_decision_rounds=MAX_DECISION_ROUNDS,
     max_turns=PROJECT_READINESS_MAX_TURNS,
+    model_tier="high",
+    effort="high",
     decision_system_prompt=render_decision_system_prompt(PROJECT_READINESS_DECISION_RULES, {}),
     legacy_completion_messages=(
         "已完成 project-readiness：项目准备清单已生成并通过文件事实核验。",

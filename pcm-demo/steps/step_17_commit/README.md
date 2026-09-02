@@ -40,7 +40,7 @@ conversation key 为：
 requirement_commit_<ID>
 ```
 
-对应 `claude_sessions.requirement_commit_<ID>` 只是别名，其值必须等于 `requirement_cycle.development_session_id`。因此开发、规则复盘和提交使用同一个 Claude Agent session ID，但各自保留独立的负责人 conversation。
+对应 `claude_sessions.requirement_commit_<ID>` 只是别名，其值必须等于 `requirement_cycle.development_session_id`。因此开发、规则复盘和提交使用同一个 Claude Agent session ID 和同一个中模型；本步骤使用 `medium` effort，并在每次 resume 时重新显式传入模型与 effort。各步骤仍保留独立的负责人 conversation。
 
 有 dirty 仓时，公共循环创建独立的负责人对话：
 
