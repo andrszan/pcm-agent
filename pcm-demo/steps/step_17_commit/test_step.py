@@ -16,9 +16,9 @@ from common.agent_decision_loop import BLOCKED_RESUME_PROMPT
 from common.claude_agent import ClaudeRunResult
 from common.state import read_state, write_requirement_step_result, write_state
 from steps.step_17_commit.step import (
+    COMMIT_MAX_TURNS,
     CURRENT_NODE,
     MAX_DECISION_ROUNDS,
-    MAX_TURNS,
     NEXT_NODE,
     PHASE,
     REPOSITORY_REPAIR_PROMPT,
@@ -223,7 +223,7 @@ class RequirementCommitTests(unittest.TestCase):
             config_loader=lambda: object(),
         )
         self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0]["max_turns"], MAX_TURNS)
+        self.assertEqual(calls[0]["max_turns"], COMMIT_MAX_TURNS)
         self.assertEqual(calls[0]["model_tier"], "medium")
         self.assertEqual(calls[0]["effort"], "medium")
         self.assertNotIn("max_budget_usd", calls[0])
@@ -238,7 +238,7 @@ class RequirementCommitTests(unittest.TestCase):
             "只 commit，不 push。",
         )
         self.assertEqual(calls[0]["resume_session_id"], "development-session-1")
-        self.assertEqual(MAX_DECISION_ROUNDS, 3)
+        self.assertEqual(MAX_DECISION_ROUNDS, 16)
         self.assertEqual(len(decision_prompts), 1)
         for required in (
             "全部白名单仓库仍在统一需求分支",

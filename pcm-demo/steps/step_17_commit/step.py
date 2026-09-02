@@ -23,8 +23,8 @@ CURRENT_NODE = "requirement:17_commit"
 NEXT_NODE = "requirement:18_merge"
 PHASE = "phase_1_requirement_development"
 SKILL_NAME = "commit-changes"
-MAX_DECISION_ROUNDS = 3
-MAX_TURNS = 48
+MAX_DECISION_ROUNDS = 16
+COMMIT_MAX_TURNS = 100
 REPOSITORY_REPAIR_PROMPT = (
     "白名单仓库仍有未提交变更。请继续使用 commit-changes 提交这些已有变更，"
     "完成后确认所有仓库的工作区和暂存区干净；只 commit，不 push。"
@@ -349,7 +349,7 @@ def _decision_spec(context: dict[str, Any]) -> AgentDecisionLoopSpec:
         state_key=context["key"],
         skill_name=SKILL_NAME,
         max_decision_rounds=MAX_DECISION_ROUNDS,
-        max_turns=MAX_TURNS,
+        max_turns=COMMIT_MAX_TURNS,
         model_tier="medium",
         effort="medium",
         decision_system_prompt=render_decision_system_prompt(
