@@ -154,7 +154,23 @@ class DevelopmentTests(unittest.TestCase):
             self.assertIn("BR-001 账户访问", prompts[0])
             self.assertIn("docs/trd/BR-001.md", prompts[0])
             self.assertNotIn("@docs/", prompts[0])
-            self.assertIn("按活动 TRD 中适用的体验决定执行", prompts[0])
+            self.assertIn("按活动 TRD 中适用的体验决定和工程架构约束执行", prompts[0])
+            for required in (
+                "每个受影响交付单元",
+                "稳定业务 owner",
+                "目录/包/模块边界",
+                "公开出口",
+                "私有禁区",
+                "依赖方向",
+                "架构约束/模块归属→改动位置与依赖关系→diff/导入/调用证据→实际结果映射",
+                "边界内部文件粒度可按真实职责调整",
+                "巨型入口/页面",
+                "通用收纳目录",
+                "同名平铺文件",
+                "架构 delta",
+                "不得静默降级",
+            ):
+                self.assertIn(required, prompts[0])
             self.assertIn("不得修改 `.claude/rules/`", prompts[0])
             self.assertNotIn("稳定设计偏差请同步", prompts[0])
             for forbidden in ("docs/backlog", "第 15 步", "PCM", "session"):
@@ -164,7 +180,22 @@ class DevelopmentTests(unittest.TestCase):
             self.assertIn("TRD_CONTEXT_MARKER：必须验证账户锁定恢复。", decision_prompts[0])
             self.assertNotIn("TRD_CONTEXT_MARKER", prompts[0])
             self.assertNotIn("docs/backlog", decision_prompts[0])
+            for content in (prompts[0], decision_prompts[0]):
+                self.assertNotIn("docs/design/工程架构设计.md", content)
             for required in (
+                "每个受影响交付单元",
+                "架构约束/模块归属→改动位置与依赖关系→diff/导入/调用证据→实际结果映射",
+                "稳定业务 owner",
+                "目录/包/模块边界",
+                "公开出口",
+                "私有禁区",
+                "依赖方向",
+                "巨型路由/页面",
+                "通用收纳目录",
+                "同名平铺文件",
+                "跨所有者合并",
+                "私有路径穿透",
+                "架构 delta 同步活动 TRD",
                 "存在适用的已确认 Target 或有依据的默认 Target 时",
                 "决定（默认 Target 含依据与重议条件）→可观察结果→实现位置→真实浏览器和实际读取截图证据→实际结果映射",
                 "不得静默偏离",

@@ -144,6 +144,11 @@ class TRDDesignTests(unittest.TestCase):
 
     def test_decision_rules_keep_step_completion_contract_concise(self) -> None:
         self.assertIn("没有阻碍实现的未决事项", TRD_DESIGN_DECISION_RULES)
+        self.assertIn("稳定业务 owner", TRD_DESIGN_DECISION_RULES)
+        self.assertIn("每个受影响交付单元", TRD_DESIGN_DECISION_RULES)
+        self.assertIn("边界内部文件粒度可调整", TRD_DESIGN_DECISION_RULES)
+        self.assertIn("架构 delta", TRD_DESIGN_DECISION_RULES)
+        self.assertIn("没有静默降级", TRD_DESIGN_DECISION_RULES)
         self.assertIn("明确的下一步指令", TRD_DESIGN_DECISION_RULES)
         self.assertNotIn("体验决定已在 TRD 收敛", TRD_DESIGN_DECISION_RULES)
         self.assertNotIn("不得静默偏离", TRD_DESIGN_DECISION_RULES)
@@ -189,6 +194,20 @@ class TRDDesignTests(unittest.TestCase):
                 "偏离须说明理由",
                 "跨需求骨架须由负责人决定",
                 "没有适用决定时不得虚构或阻塞",
+                "工程架构资料",
+                "每个受影响交付单元",
+                "稳定业务 owner",
+                "目录/包/模块边界",
+                "公开/私有边界",
+                "允许/禁止依赖",
+                "预期改动归属",
+                "边界内部文件名、数量和等价拆分",
+                "巨型入口/页面",
+                "通用收纳目录",
+                "同名平铺文件",
+                "架构 delta",
+                "最小迁移",
+                "不得静默降级",
             ):
                 self.assertIn(required, prompts[0])
             self.assertEqual(len(decision_prompts), 1)
@@ -201,6 +220,16 @@ class TRDDesignTests(unittest.TestCase):
             for required in (
                 "范围、关键行为、技术方案、验证场景和需求级体验设计已经收敛",
                 "没有阻碍实现的未决事项",
+                "每个受影响交付单元",
+                "稳定业务 owner",
+                "目录/包/模块边界",
+                "公开/私有边界",
+                "允许/禁止依赖",
+                "预期改动归属",
+                "边界内部文件粒度可调整",
+                "架构 delta",
+                "最小迁移",
+                "没有静默降级",
             ):
                 self.assertIn(required, decision_prompts[0])
             for duplicated in (
@@ -216,6 +245,7 @@ class TRDDesignTests(unittest.TestCase):
                     "PCM",
                     "session",
                     "@./docs/",
+                    "docs/design/工程架构设计.md",
                     "docs/ui-ux/framework.md",
                     "ui-ux-framework",
                     "React",
