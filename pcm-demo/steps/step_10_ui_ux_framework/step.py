@@ -32,8 +32,8 @@ CONVERSATION_KEY = "ui_ux_framework"
 SKILL_NAME = "ui-ux-framework"
 FRAMEWORK_PATH = Path("docs/ui-ux/framework.md")
 ARCHITECTURE_OUTPUT_PATH = Path("docs/design/工程架构设计.md")
-MAX_DECISION_ROUNDS = 16
-UI_UX_FRAMEWORK_MAX_TURNS = 100
+MAX_DECISION_ROUNDS = 32
+UI_UX_FRAMEWORK_MAX_TURNS = 9999
 
 FRAMEWORK_REPAIR_PROMPT = (
     "固定产品级 UI/UX 框架文档缺失或为空。请仅创建或补全 "

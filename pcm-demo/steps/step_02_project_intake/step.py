@@ -24,8 +24,8 @@ OUTPUTS = (
     Path("docs/requirements/项目需求说明.md"),
     Path("docs/requirements/产品功能说明.md"),
 )
-MAX_DECISION_ROUNDS = 16
-PROJECT_INTAKE_MAX_TURNS = 100
+MAX_DECISION_ROUNDS = 32
+PROJECT_INTAKE_MAX_TURNS = 9999
 
 PROJECT_INTAKE_DECISION_RULES = """completed 表示两份正式产品定义文档已经生成，且当前事实足以确认其非空并可用。
 continue 表示还需给出明确指令以澄清产品或完成、修复这两份文档。

@@ -38,8 +38,8 @@ CONVERSATION_KEY = "solution_design"
 SKILL_NAME = "solution-design"
 DESIGN_PATH = Path("docs/design/技术方案.md")
 CHECKLIST = Path("docs/requirements/项目准备清单.md")
-MAX_DECISION_ROUNDS = 16
-SOLUTION_DESIGN_MAX_TURNS = 100
+MAX_DECISION_ROUNDS = 32
+SOLUTION_DESIGN_MAX_TURNS = 9999
 LEGACY_COMPLETION_MESSAGES = (
     "已完成 solution-design：总体技术方案已生成并通过完成条件与工程事实核验。",
 )

@@ -21,8 +21,8 @@ CURRENT_NODE = "requirement:15_development"
 NEXT_NODE = "requirement:16_rule_retrospective"
 PHASE = "phase_1_requirement_development"
 SKILL_NAME = "dev-workflow"
-MAX_DECISION_ROUNDS = 16
-DEVELOPMENT_MAX_TURNS = 100
+MAX_DECISION_ROUNDS = 32
+DEVELOPMENT_MAX_TURNS = 9999
 
 DEVELOPMENT_DECISION_RULES = """- completed：Agent 已明确表示当前需求的全部实现完成，所有适用测试、真实验证和审查均已完成，且没有剩余工作、验证缺口或阻断项。有适用工程架构约束时，完成报告必须按每个受影响交付单元建立架构约束/模块归属→改动位置与依赖关系→diff/导入/调用证据→实际结果映射；稳定业务 owner、目录/包/模块边界、公开出口、私有禁区和依赖方向不得被巨型路由/页面、通用收纳目录、同名平铺文件、跨所有者合并或私有路径穿透静默弱化，必要偏差已作为架构 delta 同步活动 TRD。存在适用的已确认 Target 或有依据的默认 Target 时，完成报告必须建立决定（默认 Target 含依据与重议条件）→可观察结果→实现位置→真实浏览器和实际读取截图证据→实际结果映射；不得静默偏离，稳定偏差已同步活动 TRD。截图不替代动态交互、权限、失败恢复和持久化的真实验证。
 - continue：当前环境仍可继续完成实现、架构归属核验、测试、真实验证或审查时，给出明确的下一步指令。

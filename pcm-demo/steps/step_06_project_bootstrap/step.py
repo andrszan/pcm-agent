@@ -35,8 +35,8 @@ SKILL_NAME = "project-bootstrap"
 TAILWIND_THEME_CONVERSATION_KEY = "tailwind_theme"
 TAILWIND_THEME_SKILL_NAME = "tailwind-theme"
 CHECKLIST = Path("docs/requirements/项目准备清单.md")
-MAX_DECISION_ROUNDS = 16
-PROJECT_BOOTSTRAP_MAX_TURNS = 100
+MAX_DECISION_ROUNDS = 32
+PROJECT_BOOTSTRAP_MAX_TURNS = 9999
 TAILWIND_THEME_MAX_TURNS = 24
 LEGACY_COMPLETION_MESSAGES = (
     "已完成 project-bootstrap：基础工程已完成项目化并通过完成条件与工程边界核验。",

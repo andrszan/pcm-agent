@@ -34,8 +34,8 @@ SKILL_NAME = "requirement-breakdown"
 BACKLOG_PATH = Path("docs/backlog/backlog.md")
 ARCHITECTURE_OUTPUT_PATH = Path("docs/design/工程架构设计.md")
 UI_UX_FRAMEWORK_PATH = Path("docs/ui-ux/framework.md")
-MAX_DECISION_ROUNDS = 16
-REQUIREMENT_BREAKDOWN_MAX_TURNS = 100
+MAX_DECISION_ROUNDS = 32
+REQUIREMENT_BREAKDOWN_MAX_TURNS = 9999
 
 BACKLOG_REPAIR_PROMPT = (
     "固定 Backlog 文档缺失或为空。请仅创建或补全 docs/backlog/backlog.md；"

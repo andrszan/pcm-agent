@@ -32,8 +32,8 @@ NEXT_NODE = "project:10_ui_ux_framework"
 CONVERSATION_KEY = "engineering_architecture"
 SKILL_NAME = "engineering-architecture"
 ARCHITECTURE_PATH = Path("docs/design/工程架构设计.md")
-MAX_DECISION_ROUNDS = 16
-ENGINEERING_ARCHITECTURE_MAX_TURNS = 100
+MAX_DECISION_ROUNDS = 32
+ENGINEERING_ARCHITECTURE_MAX_TURNS = 9999
 
 ARCHITECTURE_REPAIR_PROMPT = (
     "固定工程架构设计文档缺失或为空。请仅创建或补全 "

@@ -23,8 +23,8 @@ CURRENT_NODE = "requirement:14_trd_design"
 NEXT_NODE = "requirement:15_development"
 PHASE = "phase_1_requirement_development"
 SKILL_NAME = "trd-design"
-MAX_DECISION_ROUNDS = 16
-TRD_DESIGN_MAX_TURNS = 100
+MAX_DECISION_ROUNDS = 32
+TRD_DESIGN_MAX_TURNS = 9999
 
 _FORBIDDEN_TITLE_CHARACTERS = set('<>:"/\\|?*')
 

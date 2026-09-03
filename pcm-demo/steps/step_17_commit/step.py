@@ -23,8 +23,8 @@ CURRENT_NODE = "requirement:17_commit"
 NEXT_NODE = "requirement:18_merge"
 PHASE = "phase_1_requirement_development"
 SKILL_NAME = "commit-changes"
-MAX_DECISION_ROUNDS = 16
-COMMIT_MAX_TURNS = 100
+MAX_DECISION_ROUNDS = 32
+COMMIT_MAX_TURNS = 9999
 REPOSITORY_REPAIR_PROMPT = (
     "白名单仓库仍有未提交变更。请继续使用 commit-changes 提交这些已有变更，"
     "完成后确认所有仓库的工作区和暂存区干净；只 commit，不 push。"

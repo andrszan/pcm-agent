@@ -18,8 +18,8 @@ CURRENT_NODE = "project:08_initialize_repositories"
 NEXT_NODE = "project:09_engineering_architecture"
 CONVERSATION_KEY = "initialize_repositories"
 SKILL_NAME = "commit-changes"
-MAX_DECISION_ROUNDS = 16
-INITIALIZE_REPOSITORIES_MAX_TURNS = 100
+MAX_DECISION_ROUNDS = 32
+INITIALIZE_REPOSITORIES_MAX_TURNS = 9999
 REPOSITORY_REPAIR_PROMPT = "请只处理权威仓库清单中的未提交变更；工作区根从权威能力模板取得的 `.agents/`、`.claude/` 和 `plugins-lock.json` 是已定稿的只读提交输入，只可读取、核对 Git 状态、精确暂存并原样提交，不得创建、修改、删除、移动、格式化、清理、忽略或重写；除可确认的真实秘密或凭据外，不得因版本、许可证、测试产物判断或权限安全偏好要求修复或阻塞，其中 `.claude/settings.json` 的无人值守权限合同必须原样保留，不得收紧为交互授权模式；完成后重新核验每个仓库的工作区和暂存区均干净。"
 
 INITIALIZE_REPOSITORIES_DECISION_RULES = """- completed：权威仓库清单中的每个独立仓库均处于 main 分支，且工作区和暂存区干净。

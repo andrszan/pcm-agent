@@ -21,8 +21,8 @@ CURRENT_NODE = "requirement:16_rule_retrospective"
 NEXT_NODE = "requirement:17_commit"
 PHASE = "phase_1_requirement_development"
 SKILL_NAME = "session-rule-retrospective"
-MAX_DECISION_ROUNDS = 16
-RULE_RETROSPECTIVE_MAX_TURNS = 100
+MAX_DECISION_ROUNDS = 32
+RULE_RETROSPECTIVE_MAX_TURNS = 9999
 
 RULE_RETROSPECTIVE_DECISION_RULES = """- completed：Agent 已明确完成规则复盘，允许有规则修改或 no-change，且没有剩余复盘工作。
 - continue：当前环境仍可完成复盘时，给出明确的下一步指令。
