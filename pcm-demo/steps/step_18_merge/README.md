@@ -15,6 +15,7 @@
 - `main == tip_sha` 表示已经合并；若 cycle 尚未标记，原子补写 `merged: true`，不重复 merge；
 - `base_sha == tip_sha` 是合法 no-op；
 - 只有 `main == base_sha` 且 `merged == false` 时才允许 `git switch main` 与 `git merge --ff-only <branch>`；
+- 需求分支初始必须 clean；切回旧 `main` 后仅允许因需求分支新增忽略规则而暂时显现的纯 untracked 路径，合并完成后仍必须恢复为完全 clean；
 - `main` 位于其它 SHA、已标记 merged 却仍在 base，或任何 Git 事实不一致时失败并保留现场；
 - 所有仓库已合并后才清理分支。partial cleanup 恢复仅在所有仓库均已合并时允许某仓需求分支已不存在；
 - 写命令白名单仅包含 `git switch main`、`git merge --ff-only <branch>` 与 `git branch -d <branch>`，不执行 reset、rebase、push、强制删除、自动解冲突或回滚。

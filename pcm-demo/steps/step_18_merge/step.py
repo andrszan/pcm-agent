@@ -371,13 +371,15 @@ def _facts(repository: dict[str, Any], branch: str) -> dict[str, Any]:
         "Git 仓库顶层目录与白名单路径不一致",
     )
     _require(not _has_in_progress_operation(path), "Git 仓库存在未完成的合并、变基、拣选、还原或二分操作")
+    status = _git_read(path, "status", "--porcelain=v1", "--untracked-files=all")
     facts = {
         "path": path,
         "current": _git_read(path, "branch", "--show-current"),
         "head": _git_read(path, "rev-parse", "HEAD"),
         "main": _ref(path, "refs/heads/main"),
         "target": _ref(path, f"refs/heads/{branch}"),
-        "clean": _git_read(path, "status", "--porcelain=v1", "--untracked-files=all") == "",
+        "status": status,
+        "clean": status == "",
     }
     _require(
         _is_sha(facts["head"])
@@ -386,6 +388,12 @@ def _facts(repository: dict[str, Any], branch: str) -> dict[str, Any]:
         "Git 仓库引用不符合约定",
     )
     return facts
+
+
+def _only_untracked(status: Any) -> bool:
+    return isinstance(status, str) and bool(status) and all(
+        line.startswith("?? ") for line in status.splitlines()
+    )
 
 
 def _merge_facts(context: dict[str, Any], repository: dict[str, Any]) -> dict[str, Any]:
@@ -422,12 +430,13 @@ def _merge_repository(run_dir: Path, state: dict[str, Any], context: dict[str, A
     _require(merged is False, "Git 仓库记录为已合并但 main 仍在基线")
     if facts["current"] != "main":
         _git_write(repository["path"], "switch", "main")
-    facts = _merge_facts(context, repository)
+    facts = _facts(repository, context["branch"])
     _require(
         facts["current"] == "main"
         and facts["head"] == base
         and facts["main"] == base
-        and facts["target"] == tip,
+        and facts["target"] == tip
+        and (facts["clean"] or _only_untracked(facts["status"])),
         "Git 仓库 fast-forward 合并前状态不符合约定",
     )
     _git_write(repository["path"], "merge", "--ff-only", context["branch"])

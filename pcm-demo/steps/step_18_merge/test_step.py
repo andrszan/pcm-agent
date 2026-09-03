@@ -229,6 +229,34 @@ class RequirementMergeTests(unittest.TestCase):
         self.assertIsNone(failure_scope(run_dir, final))
         self.assertFalse(has_complete_success(run_dir, final))
 
+    def test_target_ignore_rule_allows_hidden_artifacts_across_switch(self) -> None:
+        run_dir, _workspace, state, repositories, _bases, tips = self.make_run(["web"])
+        repository = repositories["web"]
+        (repository / ".gitignore").write_text("/.generated/\n", encoding="utf-8")
+        tip = commit_all(repository, "ignore generated artifacts")
+        generated = repository / ".generated/result.yml"
+        generated.parent.mkdir()
+        generated.write_text("temporary\n", encoding="utf-8")
+        self.assertEqual(
+            command("status", "--porcelain=v1", "--untracked-files=all", cwd=repository),
+            "",
+        )
+
+        tips["web"] = tip
+        state["requirement_cycle"]["repositories"]["web"]["tip_sha"] = tip
+        commit_path = run_dir / "steps/requirements/BR-001/17.json"
+        commit_result = json.loads(commit_path.read_text(encoding="utf-8"))
+        next(item for item in commit_result["repositories"] if item["name"] == "web")[
+            "tip_sha"
+        ] = tip
+        write_requirement_step_result(run_dir, "BR-001", 17, commit_result)
+        write_state(run_dir, state)
+
+        run(run_dir, state)
+
+        self.assert_final(repositories, tips)
+        self.assertTrue(generated.exists())
+
     def test_base_equal_tip_is_a_legal_no_op(self) -> None:
         run_dir, _workspace, state, repositories, bases, tips = self.make_run(["web"], changes=False)
         writes: list[tuple[str, ...]] = []
