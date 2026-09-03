@@ -26,14 +26,19 @@ from steps.step_15_development.step import (
 import steps.step_15_development.step as development_step
 
 
-def agent_result(workspace: Path, *, session: str = "development-session-1") -> ClaudeRunResult:
+def agent_result(
+    workspace: Path,
+    *,
+    session: str = "development-session-1",
+    text: str = "已完成实现、适用测试、真实验证和审查，没有剩余工作、验证缺口或阻断项。",
+) -> ClaudeRunResult:
     return ClaudeRunResult(
         init={
             "cwd": str(workspace),
             "skills": ["dev-workflow"],
             "slash_commands": ["dev-workflow"],
         },
-        text="已完成实现、适用测试、真实验证和审查，没有剩余工作、验证缺口或阻断项。",
+        text=text,
         result_subtype="success",
         is_error=False,
         session_id=session,
@@ -183,26 +188,21 @@ class DevelopmentTests(unittest.TestCase):
             for content in (prompts[0], decision_prompts[0]):
                 self.assertNotIn("docs/design/工程架构设计.md", content)
             for required in (
-                "每个受影响交付单元",
-                "架构约束/模块归属→改动位置与依赖关系→diff/导入/调用证据→实际结果映射",
-                "稳定业务 owner",
-                "目录/包/模块边界",
-                "公开出口",
-                "私有禁区",
-                "依赖方向",
-                "巨型路由/页面",
-                "通用收纳目录",
-                "同名平铺文件",
-                "跨所有者合并",
-                "私有路径穿透",
-                "架构 delta 同步活动 TRD",
-                "存在适用的已确认 Target 或有依据的默认 Target 时",
-                "决定（默认 Target 含依据与重议条件）→可观察结果→实现位置→真实浏览器和实际读取截图证据→实际结果映射",
-                "不得静默偏离",
-                "稳定偏差已同步活动 TRD",
-                "截图不替代动态交互、权限、失败恢复和持久化的真实验证",
+                "Agent 最新回复没有明确自报未完成项、验证缺口或阻断时完成",
+                "不得因 Agent 未逐项复述证据而自行增加验收门槛",
+                "仅当 Agent 明确自报仍有未完成工作、失败项、验证缺口",
+                "不得扩大 Agent 已报告的范围",
+                "仅当 Agent 明确报告缺少当前环境无法取得的不可替代外部条件",
             ):
                 self.assertIn(required, decision_prompts[0])
+            for forbidden in (
+                "每个受影响交付单元",
+                "架构约束/模块归属→改动位置与依赖关系→diff/导入/调用证据→实际结果映射",
+                "真实浏览器和实际读取截图证据",
+                "截图不替代动态交互、权限、失败恢复和持久化的真实验证",
+                "存在适用的已确认 Target 或有依据的默认 Target 时",
+            ):
+                self.assertNotIn(forbidden, decision_prompts[0])
             self.assertEqual(saved["outputs"], [])
             self.assertEqual(saved["development_session_id"], "development-session-1")
             self.assertEqual(
@@ -226,6 +226,31 @@ class DevelopmentTests(unittest.TestCase):
             self.assertEqual(
                 completed["requirement_cycle"]["development_session_id"], "development-session-1"
             )
+            self.assertEqual(
+                (completed["step"], completed["current_step"], completed["current_node"]),
+                (16, 16, NEXT_NODE),
+            )
+
+    def test_short_completed_report_does_not_require_extra_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory))
+
+            async def agent(*_: object, **__: object) -> ClaudeRunResult:
+                return agent_result(workspace, text="当前需求已完成，没有我报告的剩余项。")
+
+            async def decide(*_: object, **__: object) -> tuple[dict, int, str]:
+                return decision("completed")
+
+            saved = self.run_step(
+                run_dir,
+                state,
+                agent_runner=agent,
+                decision_runner=decide,
+                config_loader=lambda: object(),
+            )
+
+            self.assertEqual(saved["status"], "success")
+            completed = read_state(run_dir)
             self.assertEqual(
                 (completed["step"], completed["current_step"], completed["current_node"]),
                 (16, 16, NEXT_NODE),
