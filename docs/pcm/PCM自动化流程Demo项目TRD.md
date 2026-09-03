@@ -7,7 +7,9 @@
 > - [`PCM 自动化流程 Demo 项目设计`](./PCM自动化流程Demo项目设计.md)：定义 Demo 的目标、范围、黄金输入和最终完成标准；
 > - [`PCM 程序化调度的 AI Agent 产品开发流程`](../../.claude/PCM版AI%20Agent自动化流程设计.md)：定义第 0～18 步、阶段一、阶段二的流程语义、职责边界和停止条件。
 >
-> PCM Demo 当前工作树全量 351 项 `unittest`、`compileall common steps run_step.py run_all.py test_run_step_retry.py test_run_all.py` 与 `git diff --check` 通过（全量耗时 61.878 秒）。当前工作树还包含其它公共循环/CLI 的未提交修改，故该全量结果不能全部归因于第 9 步。`run_step.py` 只对显式运行时请求有界重跑当前步骤两次，间隔 10 秒和 30 秒；当前请求仅由 Claude Agent SDK 实际执行通道故障产生，任意 API 状态码均可重试，业务 `blocked`、普通 `failed`、AI-compatible 裁决失败、本地合同错误和取消不重试。一次性请求不持久化，18 个步骤不增加重试分支。
+> 本轮 Claude Agent 模型分级已落实：PCM 从自身 `.env` 显式加载 Anthropic Messages 网关、受保护 API Key 和低/中/高真实模型映射；13 条 Agent 执行路径固定 model/effort，子代理默认模型与主模型同步，resume 重传相同 profile。配置、公共循环与固定 profile 定向 49 项、模型 profile 与需求循环定向 101 项、当前工作树全量 367 项 `unittest` 通过（49.802 秒），`compileall` 与 `git diff --check` 通过；中模型 + `high` effort 的公共 runner 首轮与同 session resume 真实成功。未配置 `max_budget_usd`，领域 prompt 和步骤业务语义未变。
+>
+> 本轮已完成第 9、14、15 步的工程架构约束传递修正：第 9 步明确稳定业务 owner、目录/包/模块边界、公开出口、私有禁区和依赖方向不可被巨型路由/页面、通用收纳目录或同名平铺文件静默替代；第 14 步按每个受影响交付单元把适用工程归属合同和架构 delta 写入活动 TRD；第 15 步负责人要求“架构约束/模块归属→改动位置与依赖关系→diff/导入/调用证据→实际结果”映射。边界内部文件粒度仍可按真实职责调整。第 9/14/15 步本体 35 项、公共循环与三步 CLI 相关回归 91 项、当前工作树全量 367 项 `unittest`（49.013 秒）通过；完整 `compileall`、修改 Python 文件 IDE diagnostics、两个 eval JSON 解析和 `git diff --check` 通过。第 14/15 步负责人上下文仍分别只增加完整 Backlog 与活动 TRD，没有新增工程架构全文注入、Markdown 解析、JSON 架构 DSL、Git verifier、公共循环或状态字段。真实 Agent 集成留给 BR-003 的第 14/15 步自然验证及下一 fresh 项目的第 9 步验证。
 公共错误诊断保留经精确凭据遮盖的 Claude Agent SDK `errors`、异常链和 traceback 位置，以及 AI-compatible provider 的 code/type/message/request ID/HTTP status；完整有界快照写入 Git 忽略的 `logs/`，state/result/stderr 保存具体安全原因和引用。真实 `step01-mendmark` 已连续完成 BR-001 与 BR-002；BR-002 在旧“任意非 `success` 均重试”策略下前两次因负责人代码围栏 JSON 失败、第三次成功，第 16～18 步随后完成。该历史不定义现行重试范围。
 
 ## 一、目标、当前范围与状态
@@ -30,19 +32,19 @@ Demo 继续采用增量实施，不一次创建完整流程空壳：
 
 - `run_step.py` 的第 0～18 步单步入口；只有本次失败显式携带运行时重试请求时，CLI 才以相同参数按 10 秒、30 秒间隔重新执行当前步骤，最多三次总执行。当前请求只由 Claude Agent SDK 通道的任意 API 状态、明确 `api_error` 终止、连接失败和未取得 Result 的 CLI 进程失败产生；业务 `blocked`、普通 `failed`、AI-compatible 裁决失败、本地合同错误、参数解析失败、未实现步骤和主动取消不重试。请求不写入 state/result/diagnostic/conversation，每次仍重新读取最新现场；第 8～12 步保留固定 result success 保护，第 13～18 步以 current `active_requirement`/cycle 定位并保护 scoped success；
 - 第 0 步完整产品初稿无副作用跳过；
-- 第 1 步项目身份提取、固定模板浅克隆、清理、原子发布和零提交根仓库初始化；
+- 第 1 步项目身份提取、固定模板浅克隆、模板 `.env` 拒绝与忽略规则核验、受保护根 `.env` 安装、原子发布和零提交根仓库初始化；
 - 第 2 步 `project-intake`、第 5 步 `project-readiness`、第 6 步顺序执行的 `project-bootstrap`/条件性 `tailwind-theme` 与第 7 步 `solution-design` 的领域输入、产物、三态结果及幂等边界；
 - 第 3 步 Pydantic 输入建模、代码内 system prompt、`responses.parse` 结构化输出和结果保存；
 - 第 4 步选型交接校验、run-owned 临时目录、模板 shallow clone 与来源核验、拒绝上游 `.git`/符号链接、适用 payload 的 `git init -b main` 与 top-level / `main` / unborn / 空 index 核验、原子发布、结果和状态持久化、失败恢复与幂等复用；
 - 第 5～7 步接受适用子仓边界，在 `completed` 与 `blocked` 终止前复核；只有 `status=success` 的步骤结果可复用，`failed` / `blocked` 结果不阻断原 session 恢复；
 - 第 8 步严格使用 `['root', *steps/04.json.outputs]` 权威仓库清单，并只读核验每仓自身 top-level、`main` 与 `status --porcelain`；全部干净时零 Agent、零决策调用直接成功，dirty 时才由一个产品根 `commit-changes` session 处理必要提交，结果/state 支持幂等恢复；
-- 第 9 步始终 `applicable: true`，固定读取第 2 步两份产品定义、第 5 步准备清单、第 7 步总体技术方案和第 8 步严格 success 的空 `outputs`、result/state 一致的合法有序 `applicable_repositories`，在单一 `engineering_architecture` session 中形成单份根仓 `docs/design/工程架构设计.md`。Agent 必须以 `[当前]`、`[目标]`、`[按需]`、`[迁移]` 为每个包含业务代码且相关的适用交付单元分别建立有限地图，并以有证据的架构决策矩阵收敛职责、语义所有权、公开/私有边界、依赖与共享准入、代表性文件放置、最小迁移、可观察演进和当前下游所需的高影响决定：前端闭合装配/路由页面、功能、远程/局部/跨页状态、模型映射和共享 UI；后端闭合入口、编排规则、持久化适配、事务、授权、错误与副作用恢复；每单元至少一个文件放置演练。不得固定框架目录、以行数阈值拆分，或为 MVC、分层、六边形或 DDD 预建无当前消费者的层、服务、队列、接口或共享结构。repair 后仅在根仓存在且仅存在固定文档未提交变化时才在原 session 调用 `/commit-changes`，否则已 tracked 且全仓 clean 即完成。Python 仍不解析这些 Markdown 语义，只核验该固定文档与当前 Git 边界；
+- 第 9 步始终 `applicable: true`，固定读取第 2 步两份产品定义、第 5 步准备清单、第 7 步总体技术方案和第 8 步严格 success 的空 `outputs`、result/state 一致的合法有序 `applicable_repositories`，在单一 `engineering_architecture` session 中形成单份根仓 `docs/design/工程架构设计.md`。Agent 必须以 `[当前]`、`[目标]`、`[按需]`、`[迁移]` 为每个包含业务代码且相关的适用交付单元分别建立有限地图，并以有证据的架构决策矩阵收敛职责、语义所有权、公开/私有边界、依赖与共享准入、代表性文件放置、最小迁移、可观察演进和当前下游所需的高影响决定：前端闭合装配/路由页面、功能、远程/局部/跨页状态、模型映射和共享 UI；后端闭合入口、编排规则、持久化适配、事务、授权、错误与副作用恢复；每单元至少一个文件放置演练。稳定业务 owner、目录/包/模块边界、公开出口、私有禁区和依赖方向属于约束，代表性文件只验证归属，边界内部文件粒度可按真实职责调整；前端不得把稳定职责静默打平到巨型路由/页面或通用收纳目录，后端不得把稳定业务包静默降级为同名平铺文件，跨所有者合并、出口绕过和私有路径引用等 Current 偏差须设计最小迁移。不得固定框架目录、以行数阈值拆分，或为 MVC、分层、六边形或 DDD 预建无当前消费者的层、服务、队列、接口或共享结构。repair 后仅在根仓存在且仅存在固定文档未提交变化时才在原 session 调用 `/commit-changes`，否则已 tracked 且全仓 clean 即完成。Python 仍不解析这些 Markdown 语义，只核验该固定文档与当前 Git 边界；
 - 第 10 步仅以第 8 步严格交接的 `applicable_repositories` 是否含 `frontend` 判断 Demo v1 适用性；不适用时按执行产物存在性拒绝并保持零执行副作用，适用时在单一 `ui_ux_framework` session 中生成 `docs/ui-ux/framework.md`，按与第 9 步相同的按需提交条件核验。负责人按新版框架合同要求适用的 App Shell Contract 闭合，区分 Current、已确认 Target、带依据和重议条件的默认 Target、具体待确认、偏差与非目标，不接受整份框架泛化待确认；
 - 第 11 步严格读取第 2/5/7/8/9/10 步交接，在单一 `requirement_breakdown` session 中生成唯一 `docs/backlog/backlog.md`；负责人只在已确认 Target 的迁移同时满足既有表面演进、独立可观察用户结果和严格开始前条件时创建迁移 BR/依赖，默认 Target 只进入相关 BR 的体验约束并保留依据/重议条件；repair 后仅在固定 Backlog 是唯一根仓未提交变化时调用 `/commit-changes`。Backlog 不记录需求开发状态，Python 只读 Git，success 进入第 12 步初始化入口；
 - 第 12 步严格消费第 11 步完整 success；Responses/Pydantic 是自由格式 Backlog 的唯一语义提取路径，只输出 `id`、`title`、`order`、`depends_on`；Python 不解析 Markdown 排版，只校验非空 catalog、合法且忽略大小写唯一的 ID、数组物理顺序对应连续 `order`、依赖存在/不重复/不自依赖/无环，从同一字节快照记录 Backlog SHA 并在模型调用后检查漂移，再先写 result、后写全 pending 注册表；不调用 Claude Agent、`AgentDecision` 或 Skill，不写产品或执行 Git；
 - 第 13 步消费第 8 步仓库交接和当前 `state.requirement_registry`，零 AI/Agent/Skill 确定性选择 ready pending 需求；不读取或按现行第 12 步 schema 复验历史 `steps/12.json` / `source`。fresh 全局预检后先写 active intent/cycle，再仅以 `git switch -c` 在全部适用仓建立 `req/<lowercase-id>`，写 scoped result 并推进第 14 步；
-- 第 14 步采用与第 15 步一致的薄编排，只消费 current active/cycle/workspace，首次持久化 exact `trd_path`，再通过 requirement-scoped 公共循环显式调用或恢复 `/trd-design`；Agent 按需读取项目事实和本需求适用的任意来源体验决定，在 TRD 中记录来源、范围、Current/Target、遵循或改变关系，默认 Target 还记录依据和重议条件；Python只核验指定 TRD 非空，不读取 Git或重复复验前序步骤，success 推进第 15 步；
-- 第 15 步只消费当前 active requirement/cycle/workspace、当前 requirement 的第 14 步 scoped success 与非空活动 TRD，在 `development_<ID>` session 中调用 `/dev-workflow`；适用体验决定映射到可观察结果、实现位置、真实浏览器和实际读取截图证据及实际结果，稳定偏差同步 TRD，截图不替代动态行为验证；负责人 completed 后写 scoped result、同步 `development_session_id` 并推进第 16 步；
+- 第 14 步采用与第 15 步一致的薄编排，只消费 current active/cycle/workspace 和需求注册表已记录的 canonical Backlog 来源，首次持久化 exact `trd_path`，再通过 requirement-scoped 公共循环显式调用或恢复 `/trd-design`；Python 读取完整 Backlog 正文放入负责人的 `<project_context>`，不加入尚未生成的 TRD 正文、工程架构全文或其它上游文档；Agent 按需读取其它项目事实、本需求适用的体验决定和可核验工程架构资料。TRD 按每个受影响交付单元记录稳定 owner、目录/包/模块边界、公开/私有边界、允许/禁止依赖和预期改动归属；边界内部文件粒度可调整，跨所有者合并、边界打平、出口绕过、私有路径引用或以巨型入口/页面、通用收纳目录、同名平铺文件替代已确认边界时，须作为架构 delta 记录影响、理由和最小迁移。体验决定仍记录来源、范围、Current/Target、遵循或改变关系，默认 Target 还记录依据和重议条件；Python只核验指定 TRD 非空，不读取 Git或重复复验前序步骤，success 推进第 15 步；
+- 第 15 步只消费当前 active requirement/cycle/workspace、当前 requirement 的第 14 步 scoped success 与非空活动 TRD，在 `development_<ID>` session 中调用 `/dev-workflow`；Python 将完整活动 TRD 正文放入负责人的 `<project_context>`，不重复加入 Backlog、工程架构全文或其它上游文档；Agent 按活动 TRD 与适用工程架构约束实施。有适用工程架构约束时，完成报告按每个受影响交付单元建立“架构约束/模块归属→改动位置与依赖关系→diff/导入/调用证据→实际结果”映射，稳定边界不得被巨型路由/页面、通用收纳目录、同名平铺文件、跨所有者合并或私有路径穿透静默弱化，必要架构 delta 同步活动 TRD；适用体验决定仍映射到可观察结果、实现位置、真实浏览器和实际读取截图证据及实际结果，截图不替代动态行为验证；负责人 completed 后写 scoped result、同步 `development_session_id` 并推进第 16 步；
 - 第 16 步采用薄编排，只消费当前 active requirement/cycle/workspace 与 `development_session_id`，建立 `rule_retrospective_<ID>` 独立负责人 conversation、预注册原 development session alias并调用 `/session-rule-retrospective`；允许规则变化或 no-change，success 写 scoped result、`outputs: []` 并推进第 17 步，不读取 Git或建立 baseline；
 - 第 17 步只消费当前 active requirement/cycle/workspace、完整 scoped 第 16 步 success、统一需求分支与各仓 base，在产品根通过公共 Agent 决策循环调用 `/commit-changes`；保存完整 conversation，负责人处理 `continue/blocked/completed`，Python只核验白名单、分支、main/base、最终 clean 和 tips并推进第 18 步；
 - 第 18 步只读取当前 active requirement/cycle、权威仓库路径和 scoped 第 17 步 success 的必要字段；以确定性 Python/Git 按非 root 在前、root 最后的顺序执行或恢复 ff-only，逐仓持久化 merged，全仓到 tip 后统一安全删除需求分支，写 scoped `18.json` 并完成注册表生命周期；
@@ -113,9 +115,12 @@ Python 编排器负责确定性操作、两类会话衔接和最终步骤状态�
 - `cwd`：本次运行的独立项目工作区根目录；
 - `system_prompt`：使用 `claude_code` preset，不能依赖 SDK 的最小默认 prompt；
 - Skills 和 plugins：按项目配置与锁定事实加载，并从 init 消息核验目标能力；
-- `max_turns` 和 `max_budget_usd`：设置有限上限，防止开放式任务无界运行；当前第 2 步单次调用预算为 `$4`，后续步骤预算在各步合同中根据真实任务单独确认；
+- `model` 与 `effort`：每次首次调用和 resume 都显式传入固定任务 profile；不依赖宿主默认模型；
+- `max_turns`：保留步骤级有限上限；不配置 `max_budget_usd`，避免金额上限在任务仍可完成时截断服务；
 - `max_buffer_size`：公共 `ClaudeAgentOptions` 固定为 10 MiB，修复 SDK 0.2.139 单条 CLI stdout JSON 默认 1 MiB 上限；不增加配置且不影响 `resume`；
 - `resume`：需要继续特定历史会话时使用已保存的 session ID。
+
+固定 profile 为：第 2、5、7、9、10、11 步高模型 + `high`；第 6 步 bootstrap/theme、第 14、15 步中模型 + `high`；第 8、16、17 步中模型 + `medium`。第 15～17 步保持同一中模型。每次首次调用和 resume 都重新传入 model 与 effort；当前不为 Agent 步骤使用低模型，不配置 fallback model 或 `max_budget_usd`。
 
 正式步骤不传入 `permission_mode`、`tools`、`allowed_tools` 或 `disallowed_tools`，也不为每一步重新定义权限档位。项目 `.claude/settings.json` 及 Claude Code 默认设置加载语义是统一权威来源。若未来某一步确有覆盖项目配置的特殊理由，必须先在该步合同中说明并单独确认，不能沿用探针限制。
 
@@ -129,7 +134,7 @@ Python 编排器负责确定性操作、两类会话衔接和最终步骤状态�
 
 ### 4. AI-compatible 配置与调用
 
-`LLMConfig` 从 `pcm-demo/.env` 加载 `LLM_BASE_URL`、`LLM_API_KEY` 和 `LLM_MODEL`，同名进程环境变量优先。实际 `.env` 由 Git 忽略，配置对象的 `repr` 不包含字段值；`.env.example` 只保存公开占位说明。Claude Agent SDK 仍使用自身的 Anthropic 认证配置，两类模型配置不混用。
+`LLMConfig` 从 `pcm-demo/.env` 加载 `LLM_BASE_URL`、`LLM_API_KEY` 和 `LLM_MODEL`；`AgentConfig` 独立加载 `PCM_AGENT_BASE_URL`、`PCM_AGENT_API_KEY` 与低、中、高三级真实模型名，同名进程环境变量优先。实际 `.env` 由 Git 忽略，配置对象的 `repr` 不包含凭据；`.env.example` 只保存公开占位说明。Python 将 Agent 配置显式转换为 Claude Code 子进程的 `ANTHROPIC_BASE_URL`、`ANTHROPIC_API_KEY`，并同步子代理默认模型；两类模型配置不混用或相互回退。
 
 SDK 不自动读取 Demo 的 `.env`。配置模块必须在创建 Agent SDK 或 OpenAI-compatible 客户端前显式加载配置，且不得把密钥写入状态或日志。探针 C 运行时发现宿主环境配置了 SOCKS 代理，但当前 OpenAI SDK 环境没有 SOCKS 依赖；探针通过 SDK 的 `DefaultAsyncHttpxClient(trust_env=False)` 明确禁用环境代理，未修改宿主代理配置，也未增加无关依赖。
 
@@ -291,19 +296,19 @@ pcm-demo/
 
 `topic_name` 必须明确表达当前产品选题。`project_directory_name` 必须是单段小写 kebab-case；初稿已经给出仓库名或英文代号时优先提取，未给出时允许模型根据选题生成，并把来源和生成理由写入提取证据。初稿无法确定产品选题、API 或结构解析失败、有限重试耗尽时返回 `failed`，不能猜测字段。
 
-产品工作区根目录的优先级为 CLI `--workspace-root`、进程环境 `PCM_WORKSPACE_ROOT`、`pcm-demo/.env` 中的同名配置，并且必须位于当前能力仓库之外。模板仓库从进程环境或 `pcm-demo/.env` 的 `PCM_TEMPLATE_REPOSITORY` 读取，单次运行不能覆盖。最终项目路径为 `<root>/<project_directory_name>`。
+产品工作区根目录的优先级为 CLI `--workspace-root`、进程环境 `PCM_WORKSPACE_ROOT`、`pcm-demo/.env` 中的同名配置，并且必须位于当前能力仓库之外。模板仓库从进程环境或 `pcm-demo/.env` 的 `PCM_TEMPLATE_REPOSITORY` 读取，AI Agent 工作区受保护工具配置源从 `PCM_AGENT_WORKSPACE_ENV_FILE` 读取，后二者都不能由单次 CLI 覆盖。配置源必须是绝对、可读、非符号链接、非空普通文件；其原始内容只写入新工作区根 `.env`，不解析、不导出，也不属于目标产品资源。最终项目路径为 `<root>/<project_directory_name>`。
 
 确定性发布顺序为：
 
 1. 保存源产品初稿的绝对路径、完整 UTF-8 内容和 SHA-256；
 2. 在最终目录同级计算 `<project_directory_name>.pcm-tmp-<run-id>` 临时路径；
 3. 先用 Git 核验已配置模板仓库默认分支和读取权限，再执行 `git clone --depth 1`；
-4. 记录模板默认分支、实际分支、commit SHA 和 remote URL，并核验 `CLAUDE.md`、`AGENTS.md`、`project-intake` Skill、`frontend/` 与 `backend/` 等关键能力；
-5. 只在临时目录已证明属于当前 run 后删除其中的上游 `.git/`，删除原 `docs/` 内容后重建空 `docs/`，再按原始字节写入 `docs/产品初稿.md`；
-6. 核验上游 `.git/` 已删除、`docs/` 只含产品初稿、源和目标初稿哈希一致、源文件未变化且模板能力仍存在；
+4. 记录模板默认分支、实际分支、commit SHA 和 remote URL，核验 `CLAUDE.md`、`AGENTS.md`、`project-intake` Skill、`frontend/` 与 `backend/` 等关键能力，拒绝任何形态的模板 `.env`，并使用禁用用户级 global excludes 的实际 Git 规则确认模板根忽略 `.env`；
+5. 只在临时目录已证明属于当前 run 后删除其中的上游 `.git/`，删除原 `docs/` 内容后重建空 `docs/`，按原始字节写入 `docs/产品初稿.md`，并将工作区配置源原始字节独占写为根 `.env`、设置精确 `0600`；
+6. 核验上游 `.git/` 已删除、`docs/` 只含产品初稿、源和目标初稿哈希一致、源文件未变化、模板能力仍存在，以及根 `.env` 内容和权限与当前配置源一致；
 7. 所有发布核验通过后，将同文件系统中的临时目录原子重命名为最终项目路径；
 8. 在最终项目根执行 `git init -b main`，不执行 `git add`、`git commit` 或 push；
-9. 核验 `git rev-parse --show-toplevel` 等于最终项目根、当前分支为 `main`、`HEAD` 尚不存在，并记录根仓库初始化证据。
+9. 核验 `git rev-parse --show-toplevel` 等于最终项目根、当前分支为 `main`、`HEAD` 尚不存在，并再次确认根 Git 忽略 `.env`，记录根仓库初始化证据。
 
 第 1 步成功时 `state.json` 至少保存以下结构；完整命令结果放在步骤结果或脱敏日志中：
 
@@ -320,6 +325,7 @@ pcm-demo/
   "workspace": {
     "root": "/products",
     "root_source": "PCM_WORKSPACE_ROOT",
+    "agent_workspace_env_file": "/protected/agent-workspace.env",
     "staging_path": "/products/mendmark.pcm-tmp-<run-id>",
     "final_path": "/products/mendmark"
   },
@@ -350,7 +356,7 @@ pcm-demo/
 }
 ```
 
-失败时保留现场。恢复只续接状态能证明属于同一 run、同一模板和同一目标的完整 clone 或已发布最终目录；不完整 clone、临时与最终目录同时存在、目录归属不明或证据冲突时不自动删除或覆盖。最终目录已发布但根 `git init` 中断时，只有发布证据一致、根 `.git/` 不存在或仍是零提交 `main` 仓库，才允许续接或幂等确认根仓库初始化；已有 commit、Git 根指向其它目录或分支不一致时返回 `failed` 并保留现场。
+失败时保留现场。恢复只续接状态能证明属于同一 run、同一模板、同一工作区环境源路径和同一目标的完整 clone、prepared 临时目录或已发布最终目录；每次都以当前配置源原始字节复核根 `.env`，不在状态、结果或日志保存其内容、值或摘要。不完整 clone、环境源路径/内容漂移、根 `.env` 权限或忽略规则漂移、临时与最终目录同时存在、目录归属不明或证据冲突时不自动删除、覆盖或修补。最终目录已发布但根 `git init` 中断时，只有发布证据和根 `.env` 一致、根 `.git/` 不存在或仍是零提交 `main` 仓库，才允许续接或幂等确认根仓库初始化；已有 commit、Git 根指向其它目录或分支不一致时返回 `failed` 并保留现场。已经推进到第 2 步及之后的旧 run 不回退，也不由后续步骤补写。
 
 ### 4. Agent SDK 运行结果
 
@@ -573,14 +579,15 @@ PCM 在请求前读取该领域完整编排历史。首次保存动态 `system` 
 - AI-compatible 模型从真实产品初稿取得明确 `topic_name` 和合法 `project_directory_name`；
 - 独立工作区根按 CLI、进程环境、Demo `.env` 优先级解析，且位于当前能力仓库之外；
 - 固定模板仓库通过 `git clone --depth 1` 克隆到最终目录同级临时路径；
-- 模板默认分支、实际分支、commit SHA 和 remote URL 已记录；
+- 模板默认分支、实际分支、commit SHA 和 remote URL 已记录，模板不包含 `.env` 且根 Git 规则实际忽略 `.env`；
+- `PCM_AGENT_WORKSPACE_ENV_FILE` 的原始字节已经写入最终工作区根 `.env`，文件为非符号链接普通文件、权限 `0600`，最终根 Git 仍实际忽略；
 - 最终目录不含上游模板 Git 历史，模板关键能力仍存在，`docs/` 只包含 `产品初稿.md`；
 - 最终项目根已经初始化为 `main` 分支的独立 Git 仓库，且尚无 commit；
 - 状态记录源初稿、项目身份、临时与最终路径、模板证据、发布阶段和根仓库事实；
 - 项目内初稿与源初稿 SHA-256 一致，源初稿未变化；
 - 重复执行、归属不明目录、残留临时 clone、clone/rename/Git 初始化中断不会覆盖现场或误报成功。
 
-当前状态：已实现并真实验证。
+当前状态：原有工作区发布路径已真实验证；本次根 `.env` 工作区工具配置合同已完成代码和自动化验证，尚未重新执行 fresh 外部模板发布，不把旧 run 补造为新合同证据。
 
 ### 第 2 步：项目需求与产品定义
 
@@ -682,7 +689,7 @@ PCM 在请求前读取该领域完整编排历史。首次保存动态 `system` 
 - 只允许两类 `blocked`：开发必需外部资源在候选池中不存在、当前环境无法安全生成且无兼容替代；或已匹配资源真实不可用、凭据无效、权限不足、隔离不合格，或缺少开发所需接口能力、可用配额、回调/白名单、沙箱范围及其它既定能力。项目准备清单只纳入当前编码、开发环境联调或开发环境真实验收所需，且必须由调用方提供或授权的外部资源。依赖安装、构建、测试、migration、Seed、业务实现、项目内测试账号、完整联调和浏览器验收属于后续开发工作；只服务生产部署或生产运行的正式域名、DNS/TLS、生产资源与凭据、生产回调与配额、监控、备份恢复、容量和发布安全属于清单准入范围外。清单正文任何位置都不得列举、命名或汇总这些事项，也不得以“未纳入清单”、范围外、未来事项、非阻塞、无状态或 `not-applicable` 章节保留它们；开发 SMTP TLS、localhost 回调、开发白名单、沙箱范围和开发配额仍按当前开发用途纳入。产品规则和隐私事项同样不写入清单；
 - 每轮从 init 核验实际 cwd、`project-readiness` Skill 和 slash command；完整真实回复先保存为 `user`，再由公共渲染器以步骤 `DECISION_RULES` 和项目上下文生成的完整 XML system snapshot 的统一 `AgentDecision` 裁决。`completed` 必须确认清单正文只包含当前开发必需外部资源，这些资源均真实可用，所有 `ready` 外部资源的最终凭据绑定已持久化到项目受保护配置并同步公开键合同，含秘密文件权限安全，且不存在两类开发资源阻塞；清单不能为自身状态作证。正文任何位置仍提及纯生产、非当前必需候选或后续内部工作时必须 `continue` 删除，不能 `completed`，即使这些内容位于“未纳入清单”、范围外说明或无状态汇总中。`completed` 后程序重新核验清单、交接和根/适用子仓 Git 边界；清单缺失或为空时追加固定修复提示，只重建开发资源清单并继续凭据持久化、公开示例、文件权限和最终运行凭据验证；
 - `blocked` 终止前也重验上述 Git 边界；只有 `status=success` 的结果可幂等复用，`failed` / `blocked` 结果不阻断原 session 恢复；
-- 单次 Agent 上限为 24 turns、`$8`，同一历史累计最多 6 轮裁决。`error_max_turns` 和 `error_max_budget_usd` 必须有 session 和非空回复才可裁决，且后续正常 `success` 前不能最终完成；对话尾部为 Agent `user` 时先裁决，为 `continue` 时恢复原 `answer`，为 `blocked` 时终止，为 `completed` 时先核验；达到上限不得额外调用；
+- Agent 单次 turn 与同一历史负责人决策轮数沿用步骤代码的有限配置，不设置 `max_budget_usd`。`error_max_turns` 和历史兼容的 `error_max_budget_usd` 必须有 session 和非空回复才可裁决，且后续正常 `success` 前不能最终完成；对话尾部为 Agent `user` 时先裁决，为 `continue` 时恢复原 `answer`，为 `blocked` 时终止，为 `completed` 时先核验；达到上限不得额外调用；
 - `blocked` 只来自决策模型确认的不可替代外部资源缺失；其它输入、路径、状态、SDK、Skill、session、文件或决策错误为 `failed`；
 - 成功先写 `steps/05.json`，其中 `outputs` 仍只含固定准备清单路径，`readiness_baseline.scope_contract` 固定当前“只允许开发必需外部资源进入清单”的准入合同版本，另外记录当前清单与两份权威产品定义的 SHA-256。合同版本使旧语义 success 不可复用，指纹防止已经完成的基线被静默替换；二者都不证明资源 `ready`，也不记录或哈希 `.env`、凭据和资源资料正文。随后推进到 `project:06_bootstrap_foundation`。若结果已成功而下一节点状态写入中断，重跑以严格成功 schema、当前合同版本、指纹、交接和 Git 边界恢复；缺少合同版本或指纹的旧 success、清单漂移或产品定义漂移均不可复用或自动升级；
 
@@ -712,7 +719,7 @@ PCM 在请求前读取该领域完整编排历史。首次保存动态 `system` 
 - `tailwind-theme` Agent 根据产品定义和当前 frontend 选择经校验的 tweakcn preset 或生成 custom；tweakcn 网络不可用时必须 custom fallback。完整 light/dark 语义颜色必须同时落实；只允许修改颜色值和必要颜色映射，不改变字体、圆角、阴影、间距、tracking、布局、组件、页面、主题切换交互或业务功能，不安装、升级或迁移 Tailwind，不执行 Git 写操作。完成前运行适用前端检查、测试和构建，并在真实浏览器中切换 light/dark、读取代表性渲染和 computed color，检查控制台和失败网络请求；
 - 两个领域的每轮完整真实 Agent 回复分别保存到 `conversations/project_bootstrap.json` 与 `conversations/tailwind_theme.json`，并交给各自由公共渲染器生成的 XML system snapshot 与 `AgentDecision` 裁决。bootstrap 工程配置读取、迁移、接线、安装、验证问题属于其 `continue`；theme 方向、light/dark、允许范围修改、构建或真实渲染证据不完整属于 theme `continue`。`blocked` 只允许当前环境无法取得的不可替代外部条件；本地版本、主题入口、dark selector、文件、工作树或状态冲突不得 blocked。两个 `completed` 都必须在自己的 completion verifier 后成立，主题未完成时不得写第 6 步 success；
 - 两个 spec 的 AI-compatible 结构化输出都要求 `request_decision` 显式接收各自完整 XML system prompt，原样调用一次 `responses.parse` 并以 Pydantic `AgentDecision` 解析；没有公共默认、隐藏追加 prompt 或格式重试。步骤分别维护 bootstrap 与 theme `DECISION_RULES`，公共循环代码和 schema 不变。持续结构或完成状态失败为 `failed`，新协议不写 Python 固定完成声明；
-- bootstrap 单次 Agent 上限保持 48 turns，theme 单次 Agent 上限为 24 turns；两个 conversation 各自累计最多 8 轮裁决。各自对话尾部为 `user` 时先裁决，为 `continue` 时恢复本领域原 `answer`，为 `blocked` 时终止，为 `completed` 时先核验。bootstrap completed/theme 未开始或 theme 中断时，重跑先零 Agent 复验 bootstrap，再新建或恢复 theme；theme blocked/failed 不重新执行 bootstrap Agent。预算/turn 上限有 session 和非空回复时可裁决，但必须恢复正常 `success` 才能最终完成；API 400/429/500、连接、CLI/进程、无 Result 或其它 SDK 错误均先形成 `failed`。公共循环自身不做 HTTP 重试；属于 Claude Agent SDK 通道故障的失败仍由外层 `run_step.py` 有界重放，取消和本地合同错误不重放；
+- bootstrap 与 theme 的单次 Agent turn、各自 conversation 的负责人决策轮数沿用步骤代码的有限配置，且不设置 `max_budget_usd`。各自对话尾部为 `user` 时先裁决，为 `continue` 时恢复本领域原 `answer`，为 `blocked` 时终止，为 `completed` 时先核验。bootstrap completed/theme 未开始或 theme 中断时，重跑先零 Agent 复验 bootstrap，再新建或恢复 theme；theme blocked/failed 不重新执行 bootstrap Agent。turn 上限有 session 和非空回复时可裁决，但必须恢复正常 `success` 才能最终完成；API 400/429/500、连接、CLI/进程、无 Result 或其它 SDK 错误均先形成 `failed`。公共循环自身不做 HTTP 重试；属于 Claude Agent SDK 通道故障的失败仍由外层 `run_step.py` 有界重放，取消和本地合同错误不重放；
 - Python 在两个 Agent 前后复用根仓和适用子仓的自身 top-level、`main`、unborn HEAD、空 index 核验，并确认适用目录仍与第 4 步一致且 `.coverage` 已删除或实际被所属仓忽略。bootstrap completion 另核验根 README；theme completion 重验 Tailwind v4 CSS-first gate。Python 不解析实际 `.env`、资源身份、准备清单语义、主题 token 或浏览器语义，不保存秘密映射，不重复执行 Agent 已完成的工程命令；
 - 成功先写 `steps/06.json`，再推进到 `project:07_solution_design`。顶层 `applicable` 和 `outputs` 保持原语义，新增真实布尔 `tailwind_theme`，严格满足 `tailwind_theme == ("frontend" in outputs)`；blocked/failed 默认 false，字段缺失、类型错误或不一致的旧 success 不可复用。没有任何适用工程时两个 Agent 都不调用并以 `applicable:false`、空 outputs、false marker 跳过；backend-only 运行 bootstrap、跳过 theme。有 frontend 时只有两个领域都完成才 success。result 已写而状态推进中断时按严格 marker、前序交接、Tailwind gate 和 Git 事实补状态；完整 success 幂等不调用两个 Agent。`failed` / `blocked` 结果不作成功锚点，也不阻止各自原 session 恢复。
 
@@ -740,7 +747,7 @@ PCM 在请求前读取该领域完整编排历史。首次保存动态 `system` 
 - Agent 必须区分当前事实、已确认决定、目标状态、假设和待确认事项，明确系统边界、主要技术选择、交付单元、跨单元协作、风险和恢复语义；不重新选型、组装模板、实现业务、修改代码或执行 Git 写操作；
 - 新 run 的每轮 Agent 完整回复、`pending_agent_text` 和决策输入均保留完整原文于 Git 忽略 run 目录，不再在保存或转发前脱敏替换；回复由公共渲染器以步骤 `DECISION_RULES` 和项目上下文生成的完整 XML system snapshot 的统一 `AgentDecision` 裁决。风险、假设和正常未来待决事项不构成阻塞，且 Agent 必须不主动披露秘密；
 - `completed` 后必须重新核验正常 Agent `success`、有效 session ID、固定技术方案文档为非空普通文件、前序交接和根/适用子仓 Git 边界；文档缺失或为空时追加固定修复提示并继续同一 session，交接或 Git 冲突为 `failed`。`blocked` 终止前同样重验 Git 边界；只有 `status=success` 的结果可幂等复用，`failed` / `blocked` 结果不作成功锚点。Python 不解析 Markdown 章节或判断技术结论；
-- 结构化输出要求 `request_decision` 接收完整 XML system prompt 并原样调用一次 `responses.parse`，以 Pydantic `AgentDecision` 解析；没有公共默认、隐藏追加 prompt 或格式重试。步骤仅维护领域 `DECISION_RULES`。单次 Agent 上限为 48 turns、`$16`，同一历史累计最多 8 轮裁决。预算或 turn 上限有 session 与非空回复时可裁决，但必须恢复正常 `success` 才能完成；400/429/500、连接、CLI/进程、无 Result、`aborted_streaming`/`aborted_tools` 或 `success` 下未知终止原因均在裁决前形成 `failed`。公共循环自身不做 HTTP 重试；只有 Claude Agent SDK 执行通道故障携带瞬时请求并由外层 `run_step.py` 有界重放，aborted 和其它本地合同错误不重放；
+- 结构化输出要求 `request_decision` 接收完整 XML system prompt 并原样调用一次 `responses.parse`，以 Pydantic `AgentDecision` 解析；没有公共默认、隐藏追加 prompt 或格式重试。步骤仅维护领域 `DECISION_RULES`。Agent turn 与同一历史负责人决策轮数沿用步骤代码的有限配置，不设置 `max_budget_usd`。turn 上限有 session 与非空回复时可裁决，但必须恢复正常 `success` 才能完成；400/429/500、连接、CLI/进程、无 Result、`aborted_streaming`/`aborted_tools` 或 `success` 下未知终止原因均在裁决前形成 `failed`。公共循环自身不做 HTTP 重试；只有 Claude Agent SDK 执行通道故障携带瞬时请求并由外层 `run_step.py` 有界重放，aborted 和其它本地合同错误不重放；
 - 成功先写 `steps/07.json`，再推进到 `project:08_initialize_repositories`。没有适用基础工程时仍需生成总体技术方案，不无副作用跳过；成功写入或状态推进中断时，按完整文档、session、历史和 Git 事实恢复或幂等复用。
 
 输出：
@@ -791,7 +798,7 @@ PCM 在请求前读取该领域完整编排历史。首次保存动态 `system` 
 
 第 9 步是必要步骤，固定输入为第 2 步两份产品定义、第 5 步准备清单、第 7 步总体技术方案，以及第 8 步 strict success 的空 `outputs`、result/state 一致的合法有序 `applicable_repositories`；不逐项回放旧 `repositories` path、branch、clean 字段。每次实际 Git top-level、`main` 和工作树状态均由当前步骤现场只读核验。
 
-现行 initial prompt 与 `ENGINEERING_ARCHITECTURE_DECISION_RULES` 要求 Agent 在单份根仓固定文档中为每个包含业务代码且相关的适用交付单元给出有限 Current/Target 地图，并以 `[当前]`、`[目标]`、`[按需]`、`[迁移]` 标注。完成裁决必须按每个单元的有证据架构决策矩阵闭合目录/模块职责、语义所有权、稳定公开能力、私有禁区、允许/禁止依赖和共享准入：前端还须覆盖装配/路由页面、功能、远程/局部/跨页状态、模型映射和共享 UI；后端还须覆盖入口、编排规则、持久化适配、事务、授权、错误与副作用恢复；每单元至少一个代表性文件放置演练，并给出最小迁移、可观察演进和当前下游所需的高影响决定。不固定框架目录或以行数阈值拆分。MVC、分层、六边形和 DDD 不是互斥四选一，不得为任一范式预建 `domain`、`application`、`infrastructure`、`shared`，或预建没有当前消费者的服务、队列、接口或其它结构。配置、运行、数据、测试和安全只按当前证据展开，禁止虚构 `[当前]`。
+现行 initial prompt 与 `ENGINEERING_ARCHITECTURE_DECISION_RULES` 要求 Agent 在单份根仓固定文档中为每个包含业务代码且相关的适用交付单元给出有限 Current/Target 地图，并以 `[当前]`、`[目标]`、`[按需]`、`[迁移]` 标注。完成裁决必须按每个单元的有证据架构决策矩阵闭合目录/模块职责、语义所有权、稳定公开能力、私有禁区、允许/禁止依赖和共享准入：前端还须覆盖装配/路由页面、功能、远程/局部/跨页状态、模型映射和共享 UI；后端还须覆盖入口、编排规则、持久化适配、事务、授权、错误与副作用恢复；每单元至少一个代表性文件放置演练，并给出最小迁移、可观察演进和当前下游所需的高影响决定。稳定业务 owner、目录/包/模块边界、公开出口、私有禁区和依赖方向属于约束，代表性文件只验证归属，边界内部文件名、数量和等价拆分可按真实职责调整；前端稳定职责不得静默打平到巨型路由/页面或通用收纳目录，后端稳定业务包不得静默降级为同名平铺文件，跨所有者合并、出口绕过和私有路径引用等 Current 偏差须设计最小迁移。不固定框架目录或以行数阈值拆分。MVC、分层、六边形和 DDD 不是互斥四选一，不得为任一范式预建 `domain`、`application`、`infrastructure`、`shared`，或预建没有当前消费者的服务、队列、接口或其它结构。配置、运行、数据、测试和安全只按当前证据展开，禁止虚构 `[当前]`。
 领域步骤继续使用公共 `run_agent_decision_loop` 保存、读取和解释完整 conversation，不解析消息 schema、角色顺序、尾部 decision、session/reference 组合或完整 commit prompt，也不把 conversation 当长期成功证据。fresh 仅因本步骤 session、conversation reference、私有状态或 conversation 路径等执行产物存在而拒绝；resume 交由公共循环。run 目录是受控、Git 忽略的本地恢复状态，不建设防篡改日志。
 
 `completed` 后 completion verifier 先 repair 缺失或空文档；只有根仓存在未提交变化且边界确认只有固定文档时，才在原 session 发送 `/commit-changes`。文档已 tracked 且全仓 clean 时直接满足交付条件，不制造无变化调用。success 只要求固定文档非空、非符号链接普通文件、已 tracked，及根和适用子仓当前均为自身 top-level、`main`、clean；不要求 exact commit prompt、紧邻 Agent 回复或历史执行锚点。Python 只核验这些文件和当前 Git-visible 工作树/index，不解析 Markdown 的 Current/Target 地图、决策矩阵、目录归属或架构结论；其语义完成由 Skill、Agent 和 AI-compatible 负责人负责。结果已 success 而 state 推进中断，或完整 success 重跑时，仅按严格 result schema、当前文档/Git事实补状态或确认成功。`blocked` 始终保存并停在当前节点，不因文档 tracked+clean 改判 success。
@@ -872,27 +879,27 @@ conversation 共 7 条：`system → assistant 初始 → user → assistant com
 | 步骤 | 名称 | 核心边界与成功锚点 |
 | --- | --- | --- |
 | 13 | 选择需求并建立统一需求分支（已实现） | Python 从 ready pending 中选 `order` 最小需求；fresh 全局预检全部适用仓后先持久化 `active_requirement`（仅 ID）和 cycle（`req/<lowercase-id>`、按仓名 `base_sha`、返回节点），再以 `git switch -c` 建立同名分支。Git 子进程过滤 `GIT_*`。success 只写 `steps/requirements/<ID>/13.json` 并推进 `requirement:14_trd_design`；后续保护只验证第 13 步拥有的核心投影，允许其它步骤追加 cycle 字段；无 pending 的阶段二转场当前延期，有 pending 无候选失败 |
-| 14 | 形成活动 TRD（已实现） | 只消费当前 active requirement、cycle 和 workspace，首次持久化 `docs/trd/<YYYY-MM-DD>-<ID>-<标题>.md`，再通过 requirement-scoped 公共循环显式调用或恢复 `/trd-design`；Agent 按需记录本需求适用体验决定的来源、范围、Current/Target、遵循/改变关系及默认 Target 的依据/重议条件，Python只核验指定 TRD 非空，不读取 Git或重复复验前序步骤 |
-| 15 | 实现与验证（已实现） | 调用 `dev-workflow` 完成实现、测试、构建、运行、联调、真实浏览器与渲染验收和独立审查；适用体验决定映射到可观察结果、实现位置、浏览器/截图与动态证据，稳定设计偏差同步活动 TRD；保存 `development_session_id`，不提交、不合并 |
+| 14 | 形成活动 TRD（已实现） | 只消费当前 active requirement、cycle、workspace 和注册表已记录的 canonical Backlog 来源，首次持久化 `docs/trd/<YYYY-MM-DD>-<ID>-<标题>.md`；完整 Backlog 正文进入负责人 `<project_context>`，再通过 requirement-scoped 公共循环显式调用或恢复 `/trd-design`；Agent 按需承接本需求适用的体验决定和每个受影响交付单元的稳定工程 owner/边界/依赖/预期改动归属，跨边界变化显式记录架构 delta；Python只核验指定 TRD 非空，不读取 Git或重复复验前序步骤 |
+| 15 | 实现与验证（已实现） | 调用 `dev-workflow` 完成实现、测试、构建、运行、联调、真实浏览器与渲染验收和独立审查；完整活动 TRD 正文进入负责人 `<project_context>`，不重复加入 Backlog 或工程架构全文；完成报告按每个受影响交付单元提供架构归属→改动/依赖→diff/导入/调用证据→结果映射，并保留适用体验决定的浏览器/截图和动态证据；稳定边界与体验决定均不得静默偏离，保存 `development_session_id`，不提交、不合并 |
 | 16 | 原开发 session 规则复盘（已实现） | 只消费 active requirement/cycle/workspace 与 `development_session_id`；以独立 `rule_retrospective_<ID>` conversation 预注册 alias 后恢复原 session，允许规则变化或 no-change，不读取 Git或限制规则文件结构，`outputs: []`，不提交 |
 | 17 | 统一提交需求变更（已实现） | 在产品根 direct `run_claude()` session 中调用 `commit-changes`，仅处理有序 `applicable_repositories` 白名单；Python 只核验分支、main/base、最终 clean 和 tips；不合并、不标记完成 |
 | 18 | 程序化合并并完成需求（已实现） | 只使用 Python/Git；非 root 代码仓先、root 最后执行或恢复 `git merge --ff-only`。逐仓保存 merged，全仓 `main==tip` 后统一安全删除需求分支，先写 scoped `18.json` 再由 Python 写 `completed` |
 
 #### 第 14 步实现与真实运行
 
-第 14 步采用与第 15 步一致的薄编排，只消费当前 state 的 active requirement、注册表唯一 active 项、cycle 和 workspace。严格串行流程中的前序 success 与产物被视为可信交接；第 14 步不重新读取或精确复验第 2/5/7/8/9/10/11/12/13 步结果、固定文档、仓库 descriptor 或 Git 基线，Agent 在 `/trd-design` 中按需读取当前项目资料和代码。
+第 14 步采用与第 15 步一致的薄编排，只消费当前 state 的 active requirement、注册表唯一 active 项、cycle、workspace 和注册表已记录的 canonical Backlog 来源。严格串行流程中的前序 success 与产物被视为可信交接；第 14 步不重新读取或精确复验第 2/5/7/8/9/10/11/12/13 步结果、其它固定文档、仓库 descriptor 或 Git 基线。Python 从 `requirement_registry.source.path` 读取完整 Backlog 正文并放入负责人的 `<project_context>`，使负责人理解当前需求在全部需求中的位置、依赖和关系；Agent 在 `/trd-design` 中按需读取其它当前项目资料和代码。
 
 Python 使用首次本地日期、ID 和标题生成 exact `trd_path`，对直接用于文件名的标题做最小合法性检查，并在首次 Agent 调用前写入 cycle intent；后续恢复只沿用该值。Agent/session/conversation key 为 `trd_design_<ID>`。步骤直接复用公共 `run_agent_decision_loop` 保存和恢复 session、conversation 与待裁决回复，不解析公共 conversation 内部结构，也不覆盖 `permission_mode`、`tools`、`allowed_tools`、`disallowed_tools` 或增加私有 tool hook。
 
-负责人规则要求范围、关键行为、技术方案、验证、需求级体验和阻碍实现的决定已经收敛，不能把“实现前必须确认”列表误作完成。存在本需求真正适用的已确认 Target 或有依据的默认 Target 时，TRD 须记录其来源、适用范围、经核验 Current、Target 以及本需求遵循或改变的关系；默认 Target 还须记录依据和重议条件，偏离时说明理由，改变跨需求体验骨架时由负责人决定。没有适用决定时不虚构、不阻塞，也不固定要求 `docs/ui-ux/framework.md`、`ui-ux-framework` 或任何 UI 技术栈。Python completion verifier 只核验指定活动 TRD 是产品工作区内的非空文件；缺失或为空时同 session repair，不调用 `/commit-changes`。success 先写 `steps/requirements/<ID>/14.json`，再推进 `requirement:15_development`；blocked 保留路径和同一 session，result→state 中断只补状态，推进后不再读取文件或调用 Agent。第 14 步不读取 Git，不重复检查第 13 步建立的分支/base，也不监管第 17、18 步负责的提交和合并。
+负责人规则要求范围、关键行为、技术方案、验证、需求级体验、适用工程归属合同和阻碍实现的决定已经收敛，不能把“实现前必须确认”列表误作完成。存在本需求真正适用的已确认 Target 或有依据的默认 Target 时，TRD 须记录其来源、适用范围、经核验 Current、Target 以及本需求遵循或改变的关系；默认 Target 还须记录依据和重议条件，偏离时说明理由，改变跨需求体验骨架时由负责人决定。存在可核验且适用的工程架构资料时，TRD 还须按每个受影响交付单元记录稳定 owner、目录/包/模块边界、公开/私有边界、允许/禁止依赖和预期改动归属；边界内部文件粒度可调整，跨所有者合并、边界打平、出口绕过、私有路径引用或用巨型入口/页面、通用收纳目录、同名平铺文件替代已确认边界时，须作为架构 delta 记录影响、理由和最小迁移。没有适用决定或工程约束时不虚构、不阻塞，也不固定要求 `docs/ui-ux/framework.md`、`docs/design/工程架构设计.md`、对应 Skill 或任何技术栈。Python completion verifier 只核验指定活动 TRD 是产品工作区内的非空文件；缺失或为空时同 session repair，不调用 `/commit-changes`。success 先写 `steps/requirements/<ID>/14.json`，再推进 `requirement:15_development`；blocked 保留路径和同一 session，result→state 中断只补状态，推进后不再读取文件或调用 Agent。第 14 步不读取 Git，不重复检查第 13 步建立的分支/base，也不监管第 17、18 步负责的提交和合并。
 
 真实 run 中，第 14 步使用 session `b9ed4756-0acf-4666-b3f9-c8f3628c03f1` 生成 `docs/trd/2026-08-25-BR-001-身份、角色访问与站内消息入口.md`。首次负责人错误接受 8 项实现门槛，随后在同一 session 收敛决定；负责人服务 free quota 403 后也从原 conversation 尾部恢复完成。最终 conversation 7 条且无 `/commit-changes`。当时 root 只有唯一未跟踪 TRD、frontend/backend clean、三仓无 staged、提交、merge 或 push，是旧实现结束时的历史现场，不再是现行 success 条件，也不会由现行代码重复核验；既有产物、session、result、state 和 Git 现场不因本次精简而改写。
 
 #### 第 15 步已实现合同与真实验证
 
-第 15 步只消费当前 state 的 active requirement/cycle/workspace、当前需求 scoped 第 14 步 `success` 和非空活动 TRD；不读取第 2/5/7/8/9/10/11/13 步文档，不执行 Git 命令或 Git verifier。requirement-scoped key 为 `development_<ID>`，复用公共 `run_agent_decision_loop`。prompt 只包含 `/dev-workflow`、需求 ID/标题和活动 TRD 路径；Agent 按需自行读取项目资料、代码、配置、测试和环境，允许把稳定设计偏差同步活动 TRD。活动 TRD 存在适用的已确认 Target 或默认 Target 时，负责人只在 Agent 已建立“体验决定（默认 Target 含依据与重议条件）→可观察结果→实现位置→真实浏览器和实际读取截图证据→实际结果”映射、没有静默偏离且截图未替代动态交互、权限、失败恢复和持久化验证后返回 `completed`。Agent 不得修改 `.claude/rules/`，也不得 stage、commit、创建或切换分支、merge 或 push。
+第 15 步只消费当前 state 的 active requirement/cycle/workspace、当前需求 scoped 第 14 步 `success` 和非空活动 TRD；不读取第 2/5/7/8/9/10/11/13 步文档，不执行 Git 命令或 Git verifier。requirement-scoped key 为 `development_<ID>`，复用公共 `run_agent_decision_loop`。初始 Agent prompt 只包含 `/dev-workflow`、需求 ID/标题和活动 TRD 路径，负责人的 `<project_context>` 包含同一路径和完整活动 TRD 正文，不重复加入 Backlog、工程架构全文或其它上游文档。Agent 按需自行读取项目资料、代码、配置、测试和环境，按活动 TRD 中的适用体验决定与工程架构约束实施，必要稳定设计偏差和架构 delta 同步活动 TRD。有适用工程架构约束时，负责人只在 Agent 已按每个受影响交付单元建立“架构约束/模块归属→改动位置与依赖关系→diff/导入/调用证据→实际结果”映射，且稳定业务 owner、目录/包/模块边界、公开出口、私有禁区和依赖方向没有被巨型路由/页面、通用收纳目录、同名平铺文件、跨所有者合并或私有路径穿透静默弱化后返回 `completed`。活动 TRD 存在适用的已确认 Target 或默认 Target 时，负责人还要求 Agent 建立“体验决定（默认 Target 含依据与重议条件）→可观察结果→实现位置→真实浏览器和实际读取截图证据→实际结果”映射、没有静默偏离且截图未替代动态交互、权限、失败恢复和持久化验证。Agent 不得修改 `.claude/rules/`，也不得 stage、commit、创建或切换分支、merge 或 push。
 
-completion verifier 保持为空，体验决定与其它实现语义由 Skill、Agent 和负责人裁决；`continue` 和 `blocked` 沿用公共语义。首次从 Agent 取得 session 后立即同步 `requirement_cycle.development_session_id`。success scoped result 写入 `steps/requirements/<ID>/15.json`，`outputs: []`，保存 requirement ID、TRD 路径和 development session ID，随后推进 `requirement:16_rule_retrospective` / step 16；blocked 保留 step 15 和同一 session。success result→state 中断恢复及推进后幂等已实现，CLI 只保护当前活动需求完整 scoped success。
+completion verifier 保持为空，架构归属、体验决定与其它实现语义由 Skill、Agent 和负责人裁决；`continue` 和 `blocked` 沿用公共语义。首次从 Agent 取得 session 后立即同步 `requirement_cycle.development_session_id`。success scoped result 写入 `steps/requirements/<ID>/15.json`，`outputs: []`，保存 requirement ID、TRD 路径和 development session ID，随后推进 `requirement:16_rule_retrospective` / step 16；blocked 保留 step 15 和同一 session。success result→state 中断恢复及推进后幂等已实现，CLI 只保护当前活动需求完整 scoped success。
 
 真实 run 为 `pcm-demo/runs/step01-mendmark`，产品为 `/Users/zhou/resource/fireworks/ANDRSZAN/pcm-products/mendmark`。development session `e6bd1b82-39f9-41b2-9cc9-a69b281015dc` 的 init 确认 Fable 5、Claude Code 2.1.233、`bypassPermissions`，最终 normal success 23 turns、约 `$9.784016`。首次调用在 init/session 保存后因 `claude-agent-sdk` 0.2.139 默认单条 CLI stdout JSON 1 MiB 缓冲出现 `JSON message exceeded maximum buffer size`；仅将公共 `ClaudeAgentOptions.max_buffer_size` 固定为 `10 * 1024 * 1024`，不增配置、不影响 resume，随后恢复同一 session 并保留既有产品改动。自定义 dev/reviewer 子代理出现未识别 model 警告和一个子进程退出，但主 Agent 继续完成，生产 prompt 未改。
 
@@ -1259,6 +1266,7 @@ Git 子进程统一过滤 `GIT_*`。仓库按非 root 原顺序、root 最后的
 - JSON、Markdown、状态和 SHA-256 读写；
 - 第 0～8、12～18 步状态转换；
 - 第 5 步本体 15 项、第 6/7/9/10/11 步下游 readiness 交接 68 项，合计 83 项；第 13 步本体 20 项与 CLI 10 项、显式 SDK 通道重试 7 项均保留其专属验证语境。本轮当前工作树全量 351 项 `unittest` 通过（61.878 秒），`compileall common steps run_step.py run_all.py test_run_step_retry.py test_run_all.py` 与本次目标 `git diff --check` 通过。当前工作树还包含其它公共循环/CLI 的未提交修改，故全量结果不能全部归因于第 9 步；
+- 本次第 1 步根 `.env` 工作区工具配置合同安全定向 24 项通过；当前工作树全量 359 项 `unittest` 通过（53.340 秒），相关 IDE diagnostics 与 `compileall common steps run_step.py run_all.py test_run_step_retry.py test_run_all.py` 通过。覆盖 `O_NOFOLLOW` 普通文件读取、创建即 `0600`、PCM 源路径控制键不传入 Agent SDK等安全边界；未调用外部模板仓库、AI-compatible 服务或 Claude Agent SDK 重新制造 fresh 发布证据。当前工作树还包含未纳入本议题的其它步骤运行参数与测试改动，因此全量结果不能全部归因于本次修改；
 - 重试定向覆盖任意 API 状态、明确 `api_error`、SDK 连接/进程异常、普通失败、取消、本地合同错误、内部退出码耗尽归一和瞬时标志不落盘；本次未调用真实外部服务制造故障；
 - 第 5 步自动化覆盖当前开发资源 Prompt/决策规则、严格两类 blocked、必要能力/配额/回调/白名单、纯生产与后续内部工作不进入清单、`scope_contract` 拒绝旧语义 success、清单和产品定义漂移及幂等复用；当前真实 run `step05-readiness-v2-20260828-b` 只保留 PostgreSQL/MinIO/SMTP 三项 `ready` 开发资源，完成最终凭据持久化和真实探针、负责人 `completed`、success baseline、状态推进与字节级幂等验证；
 - 公共错误诊断覆盖精确凭据遮盖、普通 token 语义保留、异常链与 traceback 位置、稳定有界日志名、OpenAI-compatible provider code/type/message/request ID/HTTP status、Claude Agent SDK `ResultMessage.errors`、BR-002 `api_error` 结果形态，以及第 12～18 步 scoped/protected-success 失败持久化边界；
@@ -1271,7 +1279,7 @@ Git 子进程统一过滤 `GIT_*`。仓库按非 root 原顺序、root 最后的
 - Claude session ID 和 AI-compatible 决策历史分别保存与恢复；
 - 产品初稿身份提取、模板分支和 SHA 记录、固定模板浅克隆、同级临时目录、原子发布与根仓库零提交初始化；
 - 上游 `.git/` 清理、`docs/` 重置、项目内初稿写入和源文件不变；
-- 第 1 步 clone、发布或根仓库初始化中断后的现场保留、归属核验和安全恢复；
+- 第 1 步配置优先级与路径拒绝、模板已有 `.env`/未忽略拒绝、用户级 global excludes 隔离、任意原始字节写入、`0600`、内容/权限漂移拒绝，以及 clone、prepared、发布或根仓库初始化中断后的现场保留、归属核验和安全恢复；
 - 第 2 步目标 Skill、plugins、trust、输入边界、决策循环、产物和恢复；
 - 第 3 步 Pydantic 输入输出、`responses.parse` 调用参数、结构化结果直接保存、脱敏失败、真实 API 选型和成功结果复用；
 - 第 4 步严格占位保护、run-owned marker、唯一仓库浅 clone、来源 SHA、路径与符号链接边界、无可提交文件拒绝、payload 后发布、`null` 端、失败现场保留、安全重试、部分发布拒绝覆盖、成功幂等复用和普通 Git 错误脱敏；
@@ -1338,20 +1346,29 @@ SDK 和模型调用使用真实服务完成至少一次集成验证。纯解析�
 LLM_BASE_URL=
 LLM_API_KEY=
 LLM_MODEL=
+PCM_AGENT_BASE_URL=
+PCM_AGENT_API_KEY=
+PCM_AGENT_MODEL_LOW=
+PCM_AGENT_MODEL_MEDIUM=
+PCM_AGENT_MODEL_HIGH=
 PCM_WORKSPACE_ROOT=
 PCM_TEMPLATE_CATALOG=
 PCM_TEMPLATE_REPOSITORY=
+PCM_AGENT_WORKSPACE_ENV_FILE=
 PCM_DEV_RESOURCE_LIST=
 ```
 
 配置职责：
 
 - `LLM_*` 用于 OpenAI-compatible Responses API，包括 AI-compatible 决策调用和第 12 步 Backlog 静态字段结构化提取；
+- `PCM_AGENT_BASE_URL`、`PCM_AGENT_API_KEY` 用于 Claude Agent SDK 的 Anthropic Messages 网关和受保护认证；Base URL 不包含 `/v1`；
+- `PCM_AGENT_MODEL_LOW`、`PCM_AGENT_MODEL_MEDIUM`、`PCM_AGENT_MODEL_HIGH` 将代码中的低、中、高档位映射为网关真实模型名；
 - `PCM_WORKSPACE_ROOT` 是独立产品项目父目录；
 - `PCM_TEMPLATE_REPOSITORY` 只用于第 1 步开发管理模板；
+- `PCM_AGENT_WORKSPACE_ENV_FILE` 只用于第 1 步安装 AI Agent 工作区固定工具的受保护根 `.env`；Python 以 `O_NOFOLLOW` 和同一文件描述符读取原始字节，目标从创建时即为 `0600` 并核验 Git 忽略，不解析、导出、记录或传给第 5 步；该 PCM 控制键从 Claude Agent SDK 子进程环境移除；
 - `PCM_TEMPLATE_CATALOG` 只用于第 3 步基础工程候选；
 - `PCM_DEV_RESOURCE_LIST` 只用于第 5 步可信开发资源清单，必须是可读普通文件的绝对路径；Python 不读取资源内容，Agent 可按项目规则原样使用；
-- Claude Agent SDK 模型与认证继续使用 SDK/Claude Code 的环境或既有登录态，不另设 `CLAUDE_MODEL`。
+- Claude Agent SDK 每次调用显式使用 `AgentConfig` 解析后的网关、API Key、模型和 effort；冲突的宿主认证被压住，`CLAUDE_CODE_SUBAGENT_MODEL` 与主模型同步，不再依赖既有登录态选择模型或网关。
 
 优先级：
 
@@ -1359,6 +1376,7 @@ PCM_DEV_RESOURCE_LIST=
 - 第 3 步未来的 `--catalog-path` 可覆盖 `PCM_TEMPLATE_CATALOG`；
 - 两者优先级均为 CLI、进程环境、`pcm-demo/.env`；
 - `PCM_DEV_RESOURCE_LIST` 由进程环境或 `pcm-demo/.env` 提供，不设置单次 CLI 覆盖；
+- `PCM_AGENT_WORKSPACE_ENV_FILE` 由进程环境或 `pcm-demo/.env` 提供，必须是绝对、可读、非符号链接、非空普通文件，不设置单次 CLI 覆盖；
 - `PCM_TEMPLATE_REPOSITORY` 单次运行不可覆盖。
 
 `pcm-demo/.env` 是编排器自身配置；产品工作区内的实际 `.env` 或等价配置由项目准备和项目化合同维护。两类实际配置都必须被所属仓库 Git 忽略；对应 `.env.example` 或公开示例只保存配置键、公开默认值、安全占位和不含秘密的用法说明。产品工程在项目化中允许环境变量改名和配置结构迁移，但必须保持同一资源身份、endpoint、权限范围和秘密值。
