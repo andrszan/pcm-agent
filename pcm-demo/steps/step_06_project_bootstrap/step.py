@@ -356,10 +356,16 @@ def initial_prompt(
     product_outputs: list[str],
     assembly: dict[str, Any],
     checklist: str,
+    runtime_path: str | None = None,
 ) -> str:
     product_references = "\n".join(f"- @./{output}" for output in product_outputs)
     project_references = "\n".join(
         f"- @./{output}" for output in assembly.get("outputs", [])
+    )
+    runtime_reference = (
+        f"\n当前产品本机运行配置：\n- @./{runtime_path}\n"
+        if runtime_path is not None
+        else ""
     )
     assembly_json = json.dumps(prompt_assembly(assembly), ensure_ascii=False, indent=2)
     return f"""/project-bootstrap
@@ -373,13 +379,13 @@ def initial_prompt(
 
 实际适用工程：
 {project_references}
-
+{runtime_reference}
 组装白名单事实：
 ```json
 {assembly_json}
 ```
 
-请依据这些输入和当前工程事实完成产品根 README、适用工程身份、基础配置、必要运行说明及可安全确认的模板残留收口。保持或建立可替换的 Tailwind 语义颜色基础设施，但不要选择或生成项目专属主题配色，也不要把模板默认主题认定为最终产品主题。按锁文件和工程说明完成所有适用的依赖安装、静态或类型检查、测试、构建、启动；验证后端健康与就绪入口，存在前端时用真实浏览器读取代表性页面并检查阻断性控制台和失败网络请求，前后端同时适用时完成最小真实联调。失败时先修复项目化范围内的配置读取、变量迁移、脚本、代码、代理、服务启动、健康入口、前后端连接、测试或浏览器入口问题并重跑。完成前删除本轮测试或模板遗留的未忽略 `.coverage` 覆盖率数据库，或将这类可再生产物加入所属仓库的 `.gitignore`；不得把覆盖率数据库作为项目文件保留。
+请依据这些输入和当前工程事实完成产品根 README、适用工程身份、基础配置、必要运行说明及可安全确认的模板残留收口。已提供本机运行配置时，使用其中已分配的 host、port 和 endpoint 完成启动、前后端连接、CORS、健康检查和浏览器入口接线；不得自行递增、随机选择或依赖框架静默切换端口，端口被未知进程占用时报告冲突且不终止未知进程。保持或建立可替换的 Tailwind 语义颜色基础设施，但不要选择或生成项目专属主题配色，也不要把模板默认主题认定为最终产品主题。按锁文件和工程说明完成所有适用的依赖安装、静态或类型检查、测试、构建、启动；验证后端健康与就绪入口，存在前端时用真实浏览器读取代表性页面并检查阻断性控制台和失败网络请求，前后端同时适用时完成最小真实联调。失败时先修复项目化范围内的配置读取、变量迁移、脚本、代码、代理、服务启动、健康入口、前后端连接、测试或浏览器入口问题并重跑。完成前删除本轮测试或模板遗留的未忽略 `.coverage` 覆盖率数据库，或将这类可再生产物加入所属仓库的 `.gitignore`；不得把覆盖率数据库作为项目文件保留。
 
 已提供的准备基线、受保护运行配置和资源身份是项目化的既定输入。可以按工程实际加载合同维护每个适用仓库被 Git 忽略的实际 `.env` 或等价本地配置，以及对应 `.env.example` 或既有公开配置示例；必要时允许环境变量改名和配置结构迁移。迁移只能复用同一既有资源绑定和真实值，必须保留资源身份、endpoint 与权限范围；不得重新选择、创建、派生、轮换或替换外部资源或凭据，公开示例不得包含秘密。
 
@@ -480,20 +486,33 @@ async def run(
     checklist_content = checklist_contents(workspace)
     if checklist_content is None:
         raise RuntimeError("第 5 步项目准备清单不存在或不可读取")
+    runtime_path: str | None = None
+    coordination = state.get("coordination")
+    if isinstance(coordination, dict):
+        candidate = coordination.get("runtime_path")
+        if candidate != ".pcm/runtime.json" or not (workspace / candidate).is_file():
+            raise RuntimeError("产品本机运行配置不存在或与协调状态不一致")
+        runtime_path = candidate
+    bootstrap_context: dict[str, Any] = {
+        "产品定义": product_output_contents(workspace, product_outputs),
+        "已完成的项目准备基线": checklist_content,
+        "配置迁移与既有资源边界": (
+            "可以调整实际本地配置的变量名称和结构并同步公开示例，但必须复用同一既有资源绑定、endpoint、权限范围和秘密值；"
+            "不得重新选择、创建、派生、轮换或替换外部资源或凭据。"
+        ),
+        "适用工程": outputs,
+        "组装白名单事实": prompt_assembly(assembly),
+    }
+    if runtime_path is not None:
+        bootstrap_context["产品本机运行配置"] = {
+            "path": runtime_path,
+            "要求": "使用已分配 endpoint；不得静默换端口或终止未知进程。",
+        }
     bootstrap_spec = replace(
         DECISION_LOOP_SPEC,
         decision_system_prompt=render_decision_system_prompt(
             BOOTSTRAP_DECISION_RULES,
-            {
-                "产品定义": product_output_contents(workspace, product_outputs),
-                "已完成的项目准备基线": checklist_content,
-                "配置迁移与既有资源边界": (
-                    "可以调整实际本地配置的变量名称和结构并同步公开示例，但必须复用同一既有资源绑定、endpoint、权限范围和秘密值；"
-                    "不得重新选择、创建、派生、轮换或替换外部资源或凭据。"
-                ),
-                "适用工程": outputs,
-                "组装白名单事实": prompt_assembly(assembly),
-            },
+            bootstrap_context,
         ),
     )
     bootstrap_decision = await run_agent_decision_loop(
@@ -501,7 +520,7 @@ async def run(
         state,
         workspace,
         bootstrap_spec,
-        initial_prompt(product_outputs, assembly, checklist),
+        initial_prompt(product_outputs, assembly, checklist, runtime_path),
         bootstrap_completion_verifier,
         agent_runner=agent_runner,
         decision_runner=decision_runner,

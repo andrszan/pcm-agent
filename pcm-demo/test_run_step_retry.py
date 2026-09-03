@@ -216,6 +216,7 @@ class RunStepRetryTests(unittest.TestCase):
 
             args = Mock(workspace_root=workspace_root)
             with (
+                patch.object(run_step, "DEMO_ROOT", root),
                 patch.object(run_step, "load_workspace_root", return_value=(workspace_root.resolve(), "cli")),
                 patch.object(run_step, "load_template_repository", return_value=("template.git", "env")),
                 patch.object(

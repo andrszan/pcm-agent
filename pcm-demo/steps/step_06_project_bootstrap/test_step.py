@@ -205,6 +205,17 @@ class ProjectBootstrapTests(unittest.TestCase):
     def test_completed_repair_resumes_same_session_and_is_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))
+            runtime = workspace / ".pcm/runtime.json"
+            runtime.parent.mkdir()
+            runtime.write_text(
+                '{"services":{"frontend":{"port":3137},"backend":{"port":8137}}}\n',
+                encoding="utf-8",
+            )
+            state["coordination"] = {
+                "runtime_path": ".pcm/runtime.json",
+                "ports": {"frontend": 3137, "backend": 8137},
+            }
+            write_state(run_dir, state)
             calls: list[dict] = []
             system_prompts: list[str] = []
 
@@ -247,6 +258,8 @@ class ProjectBootstrapTests(unittest.TestCase):
             self.assertIn("产品根 README", bootstrap_prompt)
             self.assertIn("真实浏览器", bootstrap_prompt)
             self.assertIn("实际 `.env`", bootstrap_prompt)
+            self.assertIn("@./.pcm/runtime.json", bootstrap_prompt)
+            self.assertIn("不得自行递增、随机选择", bootstrap_prompt)
             self.assertIn("环境变量改名", bootstrap_prompt)
             self.assertIn("配置结构迁移", bootstrap_prompt)
             self.assertIn("同一既有资源绑定和真实值", bootstrap_prompt)

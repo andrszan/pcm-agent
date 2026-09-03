@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from common.agent_decision_loop import AgentDecisionLoopSpec, run_agent_decision_loop
 from common.claude_agent import run_claude
+from common.coordination import acquire_lock
 from common.decision import render_decision_system_prompt, request_decision
 from common.files import resolve_workspace_output, sha256, write_json
 from common.state import write_state, write_step_result
@@ -74,13 +76,19 @@ def result(
 
 def trust_project(workspace: Path) -> None:
     claude_json = Path.home() / ".claude.json"
-    data: dict[str, Any] = {}
-    if claude_json.is_file():
-        data = json.loads(claude_json.read_text(encoding="utf-8"))
-    projects = data.setdefault("projects", {})
-    project = projects.setdefault(str(workspace), {})
-    project["hasTrustDialogAccepted"] = True
-    write_json(claude_json, data)
+    lock_path = Path.home() / ".claude" / ".pcm-config.lock"
+    with acquire_lock(
+        lock_path,
+        name="Claude 用户配置锁",
+        metadata={"kind": "claude-user-config", "pid": os.getpid()},
+    ):
+        data: dict[str, Any] = {}
+        if claude_json.is_file():
+            data = json.loads(claude_json.read_text(encoding="utf-8"))
+        projects = data.setdefault("projects", {})
+        project = projects.setdefault(str(workspace), {})
+        project["hasTrustDialogAccepted"] = True
+        write_json(claude_json, data)
 
 
 def _has_valid_entry_position(state: dict[str, Any]) -> bool:

@@ -4,7 +4,7 @@ PCM Demo 是正式 PCM 开发前的本地验证工具。它使用 Python 串联�
 
 当前已实现第 0～18 步及阶段一需求循环；`run_all.py` 会持续处理需求注册表，直到当前正式需求全部完成。阶段二全项目体验审计与迭代尚未实现。
 
-本项目只验证流程可行性，不建设正式 PCM 的 Web 管理界面、数据库、分布式调度、多项目并发、部署或生产运维能力。
+本项目只验证流程可行性，不建设正式 PCM 的 Web 管理界面、数据库、分布式调度、部署或生产运维能力；当前支持单个 Demo checkout 在有限容量内并发执行不同产品，同一产品仍严格互斥。
 
 ## 流程概览
 
@@ -78,6 +78,7 @@ uv sync
 | `PCM_AGENT_BASE_URL`、`PCM_AGENT_API_KEY` | Claude Agent SDK 使用的 Anthropic Messages 网关与受保护 API Key；Base URL 不包含 `/v1` |
 | `PCM_AGENT_MODEL_LOW`、`PCM_AGENT_MODEL_MEDIUM`、`PCM_AGENT_MODEL_HIGH` | 低、中、高语义档位对应的网关真实模型名 |
 | `PCM_WORKSPACE_ROOT` | 所有目标产品项目的外部父目录，必须位于当前能力仓库之外 |
+| `PCM_MAX_CONCURRENT_PROJECTS` | 当前 Demo checkout 同时执行的产品项目上限，默认 `2` |
 | `PCM_TEMPLATE_CATALOG` | 基础工程候选目录 JSON |
 | `PCM_TEMPLATE_REPOSITORY` | 建立产品工作区使用的固定开发管理模板仓库 |
 | `PCM_AGENT_WORKSPACE_ENV_FILE` | 写入目标 AI Agent 工作区的受保护工具配置来源 |
@@ -120,7 +121,18 @@ uv run python run_all.py \
 uv run python run_all.py --resume <run-id>
 ```
 
-恢复只重新进入 `state.json` 指向的当前节点；不会从头重跑已经完成的流程。
+恢复只重新进入 `state.json` 指向的当前节点；不会从头重跑已经完成的流程。进程中断会由操作系统释放执行锁，但产品登记的配对端口会继续保留。
+
+### 查看与释放产品端口
+
+```bash
+uv run python run_all.py --product-status /absolute/path/to/product
+uv run python run_all.py --release-product /absolute/path/to/product
+```
+
+`--product-status` 展示产品 owner run、生命周期、前后端端口和实时 Product Lock 状态。只有操作人员确认产品不再继续开发时才使用 `--release-product`；运行锁或产品锁仍被持有、端口仍在监听、注册记录冲突时都会拒绝释放。释放不会删除产品目录或 run 历史。
+
+锁文件长期存在是正常现象。不要通过删除 `.lock` 文件解锁；应先查看产品状态并确认相关进程退出。
 
 ### 单独运行当前步骤
 
@@ -134,7 +146,13 @@ uv run python run_step.py --step <0-18> --run-id <run-id>
 
 ```text
 runs/
-├── .run_all.lock
+├── .coordination/
+│   ├── registry.lock
+│   ├── products.json
+│   └── locks/
+│       ├── capacity/
+│       ├── runs/
+│       └── products/
 └── <run-id>/
     ├── state.json
     ├── steps/
@@ -174,9 +192,13 @@ runs/
 
 `run_all.py` 和 `run_step.py` 不会在 `runs/` 根目录创建 `.log` 文本文件；此类文件通常来自外部 Shell 的 stdout/stderr 重定向，不属于恢复状态或正式结果。
 
-### 全局锁
+### 并发协调
 
-`runs/.run_all.lock` 是当前 Demo 的全局 `run_all.py` 互斥锁，同一时间只允许一个完整编排运行。锁由操作系统持有，空文件长期存在是正常现象，不能根据文件是否存在判断编排是否仍在运行。
+`runs/.coordination/` 保存当前 Demo checkout 的本机协调事实：Capacity Slot 限制同时执行数量，Run Lock 防止同一 run 重复恢复，Product Lock 防止同一产品并发修改，`products.json` 长期保存产品 owner 与 `3xxx/8xxx` 配对端口。
+
+实时互斥由操作系统 `flock` 持有，进程退出后自动释放；产品记录和端口不会随进程退出释放。锁文件内容只用于诊断，文件存在不表示仍被持有，也不能通过删除文件解锁。
+
+`run_all.py` 会把已持有锁传给步骤子进程；独立 `run_step.py` 也会自行取得相同锁，因此不能绕过并发边界。
 
 ## 状态、停止与恢复
 

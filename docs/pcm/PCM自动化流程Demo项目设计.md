@@ -2,6 +2,8 @@
 
 > 本文定义正式 PCM 开发前的轻量 Python 验证项目。Demo 的目的不是提前实现正式 PCM，而是用可独立运行、可串联的一组脚本，真实验证 [`PCM 程序化调度的 AI Agent 产品开发流程`](../../.claude/PCM版AI%20Agent自动化流程设计.md)。
 >
+> 本轮已实现单机多产品并发执行：全局长锁已替换为 Capacity Slot、Run Lock 和按 canonical 产品路径的 Product Lock；Product Registry 从产品创建起长期保留 `3xxx/8xxx` 配对端口，进程中断不释放，只有人工 release 才回收。`run_all.py` 通过受控 FD 继承把锁交给 `run_step.py`，独立单步入口不能绕过；第 1 步形成可恢复 claim 和 `.pcm/runtime.json`，第 2 步串行化共享 Claude trust 写入，第 6 步把 endpoint 交给 `project-bootstrap`。当前全量 381 项 `unittest`、完整 `compileall`、修改 Python 文件 IDE diagnostics 和 `git diff --check` 通过；尚未执行真实双产品 Claude Agent 与前后端同时启动验证。详细合同见 [`PCM Demo 单机多产品并发执行技术设计`](../../pcm-demo/docs/trd/20260903-PCM%20Demo%20单机多产品并发执行%20TRD.md)。
+>
 > 本轮已建立待决策事项的自包含交接与多轮沟通兜底：模板项目规则要求 Agent 在确实请求负责人决定时完整说明问题、已核验事实与约束、实质可行选项、主要影响及推荐理由，文件引用只作辅助；统一 AI-compatible 负责人收到已经提出待决策事项但只给引用或缺少必要详情的交接时必须 `continue`，要求原 Claude session 重新读取并补齐，不得在缺少关键信息时猜测决定，也不得把交接信息不足本身判为 `blocked`。没有修改各步骤既有 `completed/continue/blocked` 判断规则、公共循环、`AgentDecision` schema、conversation/state、项目上下文范围或历史 run，也没有注入产物全文。fresh Probe C 使用当前配置模型一次确认引用式待决策交接为 `continue`，一次确认自包含不可替代外部资源缺口为 `blocked`。新负责人合同只进入新 decision conversation，既有 conversation 与外部产品工作区不迁移。
 >
 > 本轮已完成 Claude Agent 显式网关、三级模型映射、固定 model/effort profile、子代理模型同步和 resume 传递：配置、公共循环与固定 profile 定向 49 项、模型 profile 与需求循环定向 101 项、当前工作树全量 367 项 `unittest` 通过（49.802 秒），`compileall` 与 `git diff --check` 通过；中模型 + `high` effort 的公共 `run_claude()` 首轮和同 session resume 真实成功，init 均返回配置模型。未配置 `max_budget_usd`，未修改领域 prompt、步骤业务合同或历史 run。
@@ -104,7 +106,7 @@ Demo 不建设：
 - 数据库或正式状态存储；
 - 工作流引擎或 DSL；
 - 复杂状态机和外层步骤回退；
-- 分布式队列、并发任务或多机调度；
+- 分布式队列、同一产品内部并发任务或多机调度；
 - 多用户、多租户和多项目管理；
 - 容器调度和正式安全隔离；
 - 向量记忆、知识库或复杂上下文压缩；
@@ -217,7 +219,7 @@ pcm-demo/
 
 - 已实现步骤的业务代码、测试和详细说明同置于 `steps/step_xx_<name>/`；
 - `common/` 只放两个及以上步骤已经出现的真实复用能力；
-- `run_all.py` 在需要串联多个已实现步骤时再建立，不为目录图提前创建；
+- `run_all.py` 已建立并串联第 0～18 步和阶段一需求循环；当前通过 Capacity Slot 限制宿主机执行数量，并以 Run Lock、Product Lock 和 Product Registry 支持不同产品并发、同一产品互斥及长期配对端口；阶段二具名节点仍在对应能力实现时增量接入，不为目录图提前创建空壳；
 - 阶段二使用具名节点，但不强行伪装成新的业务步骤编号；
 - 目录可以按实际代码量合并，不为未来步骤创建空模块。
 
@@ -671,6 +673,7 @@ PCM_AGENT_MODEL_LOW=
 PCM_AGENT_MODEL_MEDIUM=
 PCM_AGENT_MODEL_HIGH=
 PCM_WORKSPACE_ROOT=
+PCM_MAX_CONCURRENT_PROJECTS=
 PCM_TEMPLATE_CATALOG=
 PCM_TEMPLATE_REPOSITORY=
 PCM_AGENT_WORKSPACE_ENV_FILE=
@@ -683,6 +686,7 @@ PCM_DEV_RESOURCE_LIST=
 - `PCM_AGENT_BASE_URL`、`PCM_AGENT_API_KEY`：Claude Agent SDK 使用的 Anthropic Messages 网关和受保护 API Key；Base URL 是紧邻 `/v1/messages` 之前的 API 根，不包含 `/v1`；
 - `PCM_AGENT_MODEL_LOW`、`PCM_AGENT_MODEL_MEDIUM`、`PCM_AGENT_MODEL_HIGH`：代码中低、中、高语义档位对应的网关真实模型名；
 - `PCM_WORKSPACE_ROOT`：所有产品项目的独立父目录；
+- `PCM_MAX_CONCURRENT_PROJECTS`：当前 Demo checkout 同时执行的产品项目上限，正整数，默认 `2`；
 - `PCM_TEMPLATE_REPOSITORY`：第 1 步发布开发管理模板；
 - `PCM_AGENT_WORKSPACE_ENV_FILE`：第 1 步使用的 AI Agent 工作区受保护工具配置源绝对路径；Python 只通过 `O_NOFOLLOW` 文件描述符读取原始字节并写为新工作区根 `.env`、从创建时即限制为 `0600`、核验 Git 忽略，不解析或导出变量，不进入步骤 outputs、目标产品配置或第 5 步资源清单；该 PCM 控制键从 Claude Agent SDK 子进程环境移除，Agent 只读取已安装的工作区根 `.env`；
 - `PCM_TEMPLATE_CATALOG`：第 3 步基础工程候选目录；
@@ -692,6 +696,7 @@ PCM_DEV_RESOURCE_LIST=
 优先级：
 
 - 工作区根：CLI `--workspace-root`、进程环境、`pcm-demo/.env`；
+- `PCM_MAX_CONCURRENT_PROJECTS`：进程环境、`pcm-demo/.env`，未配置时为 `2`，不提供单次 CLI 覆盖；
 - catalog：CLI `--catalog-path`、进程环境、`pcm-demo/.env`；
 - `PCM_DEV_RESOURCE_LIST`：进程环境、`pcm-demo/.env`；必须是可读普通文件的绝对路径，不提供单次 CLI 覆盖；
 - `PCM_AGENT_WORKSPACE_ENV_FILE`：进程环境、`pcm-demo/.env`；必须是绝对、可读、非符号链接、非空普通文件，不提供单次 CLI 覆盖；

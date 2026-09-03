@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     )
     pcm_agent_model_high: str | None = Field(default=None, validation_alias="PCM_AGENT_MODEL_HIGH")
     pcm_workspace_root: Path | None = Field(default=None, validation_alias="PCM_WORKSPACE_ROOT")
+    pcm_max_concurrent_projects: int = Field(
+        default=2, validation_alias="PCM_MAX_CONCURRENT_PROJECTS", ge=1
+    )
     pcm_template_catalog: Path | None = Field(default=None, validation_alias="PCM_TEMPLATE_CATALOG")
     pcm_template_repository: str | None = Field(default=None, validation_alias="PCM_TEMPLATE_REPOSITORY")
     pcm_agent_workspace_env_file: Path | None = Field(

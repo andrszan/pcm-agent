@@ -7,6 +7,8 @@
 > - [`PCM 自动化流程 Demo 项目设计`](./PCM自动化流程Demo项目设计.md)：定义 Demo 的目标、范围、黄金输入和最终完成标准；
 > - [`PCM 程序化调度的 AI Agent 产品开发流程`](../../.claude/PCM版AI%20Agent自动化流程设计.md)：定义第 0～18 步、阶段一、阶段二的流程语义、职责边界和停止条件。
 >
+> 本轮已实现单机多产品并发执行：Capacity Slot 限制宿主机同时执行数量，Run Lock 与 Product Lock 分别保护 run 状态和产品工作区；Product Registry 从产品创建起长期保留 `3xxx/8xxx` 配对端口，进程退出不释放，只有人工 release 才回收。`run_all.py` 以受控 FD 继承向 `run_step.py` 传锁，独立单步入口遵循同一协议；第 1 步形成可恢复 claim 和 `.pcm/runtime.json`，第 2 步为共享 Claude trust 写入加短锁，第 6 步向 `project-bootstrap` 交接 endpoint。当前全量 381 项 `unittest`、完整 `compileall`、修改 Python 文件 IDE diagnostics 和 `git diff --check` 通过；真实双产品 Agent 与前后端并发启动尚待验证。详细合同见 [`PCM Demo 单机多产品并发执行技术设计`](../../pcm-demo/docs/trd/20260903-PCM%20Demo%20单机多产品并发执行%20TRD.md)。
+>
 > 本轮已建立待决策事项的自包含交接与多轮 `continue` 兜底：模板根 `AGENTS.md` 约束 Agent 在确实请求负责人决定时完整说明准确问题、已核验事实与约束、实质可行选项、主要影响及推荐理由，引用只辅助定位；`common/decision.py` 的统一负责人职责在新 conversation 中发现 Agent 已提出待决策事项但只给引用或缺少必要详情时，要求原 Claude session 重新读取并补齐，不在缺少关键信息时猜测决定，也不把交接信息不足本身判为 `blocked`。各步骤既有 `completed/continue/blocked` 判断规则、公共循环、`AgentDecision`、conversation/state、completion verifier、项目上下文范围、历史 run 和外部产品工作区均未修改，也未引入产物全文注入、动态快照、文件读取工具或自然语言解析。fresh Probe C 一次确认引用式待决策交接为 `continue`，一次确认自包含不可替代外部资源缺口为 `blocked`。新规则不迁移既有 decision conversation，Agent 侧模板规则只随未来新建工作区生效。
 >
 > 本轮 Claude Agent 模型分级已落实：PCM 从自身 `.env` 显式加载 Anthropic Messages 网关、受保护 API Key 和低/中/高真实模型映射；13 条 Agent 执行路径固定 model/effort，子代理默认模型与主模型同步，resume 重传相同 profile。配置、公共循环与固定 profile 定向 49 项、模型 profile 与需求循环定向 101 项、当前工作树全量 367 项 `unittest` 通过（49.802 秒），`compileall` 与 `git diff --check` 通过；中模型 + `high` effort 的公共 runner 首轮与同 session resume 真实成功。未配置 `max_budget_usd`，领域 prompt 和步骤业务语义未变。
@@ -56,7 +58,8 @@ Demo 继续采用增量实施，不一次创建完整流程空壳：
 
 当前尚未实现：
 
-- `run_all.py` 完整串联入口。
+- 阶段二完整审计、候选分流、入池、回归和复审节点；
+- `run_all.py` 对上述阶段二具名节点的串联。
 
 第 9 步当前 prompt 合同已完成代码与自动化，但尚未执行安全的 fresh 真实 Claude Agent、AI-compatible 负责人或 `/commit-changes` 集成；第 10、11、14、15 步已按新版 UI/UX 决定传递合同同步 Prompt、负责人完成规则与定向自动化，尚未据此改写旧合同真实运行事实。第 0～8、12～18 步已完成代码、自动化和适用真实验证；未实现能力必须返回明确程序错误，不得以空脚本、固定 JSON、旧实现或口头结论冒充成功。
 
@@ -179,7 +182,7 @@ SDK session 保存 Agent 对话、工具调用和结果；工作区文件与 Git
 ### 1. 命令行入口
 
 - `run_step.py`：当前运行已经实现的第 0～18 步；实际命令和配置说明以 `pcm-demo/README.md` 及各步骤 README 为准；
-- `run_all.py`：尚未实现；需要串联已实现步骤和节点时再建立；
+- `run_all.py`：已串联第 0～18 步和阶段一需求循环，并以 Capacity Slot、Run Lock、Product Lock 与 Product Registry 支持单机有限容量内的不同产品并发；阶段二具名节点尚未接入；
 - 未实现步骤必须明确返回“步骤尚未实现”的程序错误，不得返回业务 `success`；
 - 单步、区间、完整运行和恢复最终必须复用相同步骤或节点函数；
 - 阶段二使用 `--from-node phase_2:*` 一类具名入口，不新增虚假业务步骤编号。
@@ -1356,6 +1359,7 @@ PCM_AGENT_MODEL_LOW=
 PCM_AGENT_MODEL_MEDIUM=
 PCM_AGENT_MODEL_HIGH=
 PCM_WORKSPACE_ROOT=
+PCM_MAX_CONCURRENT_PROJECTS=
 PCM_TEMPLATE_CATALOG=
 PCM_TEMPLATE_REPOSITORY=
 PCM_AGENT_WORKSPACE_ENV_FILE=
@@ -1368,6 +1372,7 @@ PCM_DEV_RESOURCE_LIST=
 - `PCM_AGENT_BASE_URL`、`PCM_AGENT_API_KEY` 用于 Claude Agent SDK 的 Anthropic Messages 网关和受保护认证；Base URL 不包含 `/v1`；
 - `PCM_AGENT_MODEL_LOW`、`PCM_AGENT_MODEL_MEDIUM`、`PCM_AGENT_MODEL_HIGH` 将代码中的低、中、高档位映射为网关真实模型名；
 - `PCM_WORKSPACE_ROOT` 是独立产品项目父目录；
+- `PCM_MAX_CONCURRENT_PROJECTS` 是当前 Demo checkout 同时执行的产品项目上限，正整数，默认 `2`；
 - `PCM_TEMPLATE_REPOSITORY` 只用于第 1 步开发管理模板；
 - `PCM_AGENT_WORKSPACE_ENV_FILE` 只用于第 1 步安装 AI Agent 工作区固定工具的受保护根 `.env`；Python 以 `O_NOFOLLOW` 和同一文件描述符读取原始字节，目标从创建时即为 `0600` 并核验 Git 忽略，不解析、导出、记录或传给第 5 步；该 PCM 控制键从 Claude Agent SDK 子进程环境移除；
 - `PCM_TEMPLATE_CATALOG` 只用于第 3 步基础工程候选；
@@ -1377,6 +1382,7 @@ PCM_DEV_RESOURCE_LIST=
 优先级：
 
 - `--workspace-root` 可覆盖 `PCM_WORKSPACE_ROOT`；
+- `PCM_MAX_CONCURRENT_PROJECTS` 由进程环境或 `pcm-demo/.env` 提供，未配置时为 `2`，不设置单次 CLI 覆盖；
 - 第 3 步未来的 `--catalog-path` 可覆盖 `PCM_TEMPLATE_CATALOG`；
 - 两者优先级均为 CLI、进程环境、`pcm-demo/.env`；
 - `PCM_DEV_RESOURCE_LIST` 由进程环境或 `pcm-demo/.env` 提供，不设置单次 CLI 覆盖；
@@ -1399,7 +1405,7 @@ PCM_DEV_RESOURCE_LIST=
 
 1. Agent SDK、捆绑 Claude Code 或模型版本变化时，需重新记录并复核相关探针；
 2. `/project-intake`、`/project-readiness`、`/project-bootstrap` 和 `/solution-design` 已有真实调用证据；第 6 步新增的独立 `/tailwind-theme` session、init 发现、真实 light/dark 修改和浏览器验证仍需在隔离 fresh run 中验证；其它目标 Skill 的实际调用名、参数、plugin namespace 和 init 发现结果继续逐步验证；
-3. `run_all.py` 在何时建立，以及第 0～18 步现有入口如何复用统一节点函数；
+3. 单机多产品并发实现尚需用两个独立产品真实验证 Claude Agent、配对端口、前后端启动和浏览器 session 隔离；
 4. 第二个真实需求复用第 13～18 步时是否暴露新的最小恢复边界；
 5. 阶段二真实浏览器通道、测试身份、可复位数据、截图读取、辅助技术路径和外部审查能力；
 6. 阶段二审计结果、候选分流、入池和原发现回归证据的最小持久化格式；

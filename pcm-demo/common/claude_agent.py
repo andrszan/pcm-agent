@@ -68,6 +68,7 @@ def filtered_env(config: AgentConfig, model: str) -> dict[str, str]:
             "PCM_AGENT_MODEL_MEDIUM": "",
             "PCM_AGENT_MODEL_HIGH": "",
             "PCM_WORKSPACE_ROOT": "",
+            "PCM_MAX_CONCURRENT_PROJECTS": "",
             "PCM_TEMPLATE_CATALOG": "",
             "PCM_TEMPLATE_REPOSITORY": "",
             "PCM_AGENT_WORKSPACE_ENV_FILE": "",

@@ -22,7 +22,7 @@ class RunAllTests(unittest.TestCase):
         self.runs.mkdir()
         self.patchers = [
             patch.object(run_all, "RUNS_DIR", self.runs),
-            patch.object(run_all, "LOCK_PATH", self.runs / ".run_all.lock"),
+            patch.object(run_all, "COORDINATION_ROOT", self.runs / ".coordination"),
         ]
         for patcher in self.patchers:
             patcher.start()
@@ -47,6 +47,8 @@ class RunAllTests(unittest.TestCase):
             run_id=run_id,
             workspace_root=workspace_root,
             catalog_path=catalog_path,
+            product_status=None,
+            release_product=None,
         )
 
     def make_run(self, state: dict[str, object], run_id: str = "test-run") -> Path:
@@ -211,7 +213,7 @@ class RunAllTests(unittest.TestCase):
         calls: list[int] = []
         nodes = {step: node for node, step in run_all.NODE_TO_STEP.items()}
 
-        def fake_run_child(command: list[str]) -> int:
+        def fake_run_child(command: list[str], _pass_fds: tuple[int, ...] = ()) -> int:
             step = int(command[command.index("--step") + 1])
             calls.append(step)
             (run_dir / "steps").mkdir(parents=True, exist_ok=True)
@@ -328,7 +330,7 @@ class RunAllTests(unittest.TestCase):
         calls: list[list[str]] = []
         stderr = io.StringIO()
 
-        def failed(command: list[str]) -> int:
+        def failed(command: list[str], _pass_fds: tuple[int, ...] = ()) -> int:
             calls.append(command)
             return 1
 
@@ -383,10 +385,42 @@ class RunAllTests(unittest.TestCase):
         self.assertIn("运行状态不可读取", stderr.getvalue())
         self.assertIn("--resume test-run", stderr.getvalue())
 
-    def test_lock_conflict_is_reported_without_waiting(self) -> None:
-        with patch.object(run_all.fcntl, "flock", side_effect=BlockingIOError):
-            with self.assertRaisesRegex(RuntimeError, "完整编排正在运行"):
-                run_all.acquire_global_lock()
+    def test_same_run_conflict_is_reported_without_waiting(self) -> None:
+        first = run_all.acquire_execution_locks(
+            run_all.COORDINATION_ROOT, "test-run", 2
+        )
+        try:
+            with self.assertRaisesRegex(RuntimeError, "运行锁已被占用"):
+                run_all.acquire_execution_locks(
+                    run_all.COORDINATION_ROOT, "test-run", 2
+                )
+        finally:
+            first.close()
+
+    def test_product_status_and_release_commands(self) -> None:
+        product = self.root / "products" / "alpha"
+        key, canonical = run_all.product_key(product)
+        with run_all.acquire_product_lock(
+            run_all.COORDINATION_ROOT, "run-a", key, canonical
+        ):
+            record = run_all.claim_product(
+                run_all.COORDINATION_ROOT, "run-a", key, canonical
+            )
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            self.assertEqual(run_all._product_status(product), 0)
+        status = json.loads(stdout.getvalue())
+        self.assertEqual(status["ports"], record["ports"])
+        self.assertFalse(status["product_lock_held"])
+
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            self.assertEqual(run_all._release_product(product), 0)
+        self.assertIn("产品端口已释放", stdout.getvalue())
+        self.assertEqual(
+            run_all.get_product(run_all.COORDINATION_ROOT, key)["lifecycle"],
+            "released",
+        )
 
     def test_negative_signal_return_code_is_normalized(self) -> None:
         child = Mock(pid=1234)

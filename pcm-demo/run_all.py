@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-import fcntl
+import json
 import os
 import shlex
 import signal
@@ -10,15 +10,30 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from secrets import token_hex
-from typing import Any, TextIO
+from typing import Any
 
-from common.state import read_state, step_result_status
+from common.coordination import (
+    ExecutionLocks,
+    acquire_execution_locks,
+    acquire_product_lock,
+    claim_product,
+    coordination_root,
+    ensure_runtime,
+    get_product,
+    inherited_lock_argument,
+    lock_status,
+    product_key,
+    release_product,
+    run_lock_path,
+)
+from common.state import read_state, step_result_status, write_state
+from config import load_settings
 from steps.step_13_select_requirement.step import registry_handoff
 
 DEMO_ROOT = Path(__file__).resolve().parent
 RUNS_DIR = DEMO_ROOT / "runs"
 RUN_STEP_PATH = DEMO_ROOT / "run_step.py"
-LOCK_PATH = RUNS_DIR / ".run_all.lock"
+COORDINATION_ROOT = coordination_root(DEMO_ROOT)
 
 NODE_TO_STEP = {
     "project:00_product_draft": 0,
@@ -48,6 +63,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--product-draft", type=Path)
     source.add_argument("--resume")
+    source.add_argument("--product-status", type=Path)
+    source.add_argument("--release-product", type=Path)
     parser.add_argument("--run-id")
     parser.add_argument("--workspace-root", type=Path)
     parser.add_argument("--catalog-path", type=Path)
@@ -74,18 +91,119 @@ def run_dir_for(run_id: str) -> Path:
     return run_dir
 
 
-def acquire_global_lock() -> TextIO:
-    RUNS_DIR.mkdir(parents=True, exist_ok=True)
-    handle = LOCK_PATH.open("a+", encoding="utf-8")
+def _attach_product_lock(
+    locks: ExecutionLocks,
+    state: dict[str, Any] | None,
+    run_dir: Path,
+    execution_run_id: str,
+) -> None:
+    if locks.product is not None or state is None:
+        return
+    coordination = state.get("coordination")
+    if isinstance(coordination, dict):
+        key = coordination.get("product_key")
+        path = coordination.get("product_path")
+        run_id = coordination.get("execution_run_id")
+        if not all(isinstance(value, str) and value for value in (key, path, run_id)):
+            raise RuntimeError("运行状态中的产品协调身份无效")
+        if run_id != execution_run_id:
+            raise RuntimeError("运行状态中的 execution run 与运行目录不一致")
+        locks.product = locks.stack.enter_context(
+            acquire_product_lock(COORDINATION_ROOT, run_id, key, Path(path))
+        )
+        return
+
+    workspace = state.get("workspace")
+    final_path = workspace.get("final_path") if isinstance(workspace, dict) else None
+    if not isinstance(final_path, str) or not final_path:
+        return
+    key, canonical = product_key(Path(final_path))
+    locks.product = locks.stack.enter_context(
+        acquire_product_lock(COORDINATION_ROOT, execution_run_id, key, canonical)
+    )
+    record = claim_product(
+        COORDINATION_ROOT, execution_run_id, key, canonical
+    )
+    state["coordination"] = {
+        "schema_version": 1,
+        "execution_run_id": execution_run_id,
+        "claim_phase": "claimed",
+        "product_key": key,
+        "product_path": str(canonical),
+        "port_slot": record["port_slot"],
+        "ports": record["ports"],
+        "runtime_path": ".pcm/runtime.json",
+    }
+    write_state(run_dir, state)
+    if canonical.is_dir():
+        ensure_runtime(canonical, key, execution_run_id, record)
+
+
+def _product_status(path: Path) -> int:
+    key, canonical = product_key(path)
     try:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        handle.close()
-        raise RuntimeError("已有 PCM 完整编排正在运行") from None
-    except OSError:
-        handle.close()
-        raise
-    return handle
+        record = get_product(COORDINATION_ROOT, key)
+    except RuntimeError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+    if record.get("product_path") != str(canonical):
+        print("产品注册记录与路径不一致", file=sys.stderr)
+        return 1
+    try:
+        held, lock_metadata = lock_status(
+            COORDINATION_ROOT / "locks" / "products" / f"{key}.lock"
+        )
+        owner_run = record.get("owner_run_id")
+        if not isinstance(owner_run, str) or not owner_run:
+            raise RuntimeError("产品 owner run 无效")
+        run_held, run_lock_metadata = lock_status(
+            run_lock_path(COORDINATION_ROOT, owner_run)
+        )
+    except RuntimeError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+    state_path = run_dir_for(owner_run) / "state.json"
+    owner_state: dict[str, Any] | None = None
+    if state_path is not None and state_path.is_file():
+        try:
+            current = read_state(state_path.parent)
+            owner_state = {
+                "status": current.get("status"),
+                "current_node": current.get("current_node"),
+                "current_step": current.get("current_step"),
+            }
+        except Exception:
+            owner_state = {"error": "state 不可读取"}
+    print(
+        json.dumps(
+            {
+                "product_key": key,
+                **record,
+                "product_lock_held": held,
+                "lock_metadata": lock_metadata,
+                "run_lock_held": run_held,
+                "run_lock_metadata": run_lock_metadata,
+                "state_path": str(state_path) if state_path is not None else None,
+                "owner_state": owner_state,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    return 0
+
+
+def _release_product(path: Path) -> int:
+    try:
+        record = release_product(COORDINATION_ROOT, path)
+    except (OSError, RuntimeError, ValueError) as error:
+        print(f"产品释放失败：{error}", file=sys.stderr)
+        return 1
+    print(
+        f"产品端口已释放：{record['product_path']} "
+        f"frontend={record['ports']['frontend']} backend={record['ports']['backend']}"
+    )
+    return 0
 
 
 def _legacy_step(run_dir: Path, state: dict[str, Any]) -> int:
@@ -143,6 +261,7 @@ def build_step_command(
     run_id: str,
     args: argparse.Namespace,
     state: dict[str, Any] | None,
+    locks: ExecutionLocks | None = None,
 ) -> list[str]:
     command = [
         sys.executable,
@@ -165,6 +284,8 @@ def build_step_command(
         command.extend(["--workspace-root", str(args.workspace_root.resolve())])
     if step == 3 and args.catalog_path is not None:
         command.extend(["--catalog-path", str(args.catalog_path.resolve())])
+    if locks is not None:
+        command.extend(["--coordination-locks", inherited_lock_argument(locks)])
     return command
 
 
@@ -193,8 +314,13 @@ def fresh_command(run_id: str, args: argparse.Namespace) -> str:
     return shlex.join(command)
 
 
-def run_child(command: list[str]) -> int:
-    child = subprocess.Popen(command, cwd=DEMO_ROOT, start_new_session=True)
+def run_child(command: list[str], pass_fds: tuple[int, ...] = ()) -> int:
+    child = subprocess.Popen(
+        command,
+        cwd=DEMO_ROOT,
+        start_new_session=True,
+        pass_fds=pass_fds,
+    )
     received_signal: int | None = None
     previous_handlers: dict[int, Any] = {}
 
@@ -237,9 +363,12 @@ def _print_stop(run_id: str, run_dir: Path, args: argparse.Namespace) -> None:
     print(f"恢复命令：{recovery_command(run_id, args)}", file=sys.stderr)
 
 
-def orchestrate(args: argparse.Namespace) -> int:
-    run_id = args.resume or args.run_id or new_run_id()
-    run_dir = run_dir_for(run_id)
+def _orchestrate_locked(
+    args: argparse.Namespace,
+    run_id: str,
+    run_dir: Path,
+    locks: ExecutionLocks,
+) -> int:
     if args.resume:
         if not run_dir.is_dir():
             print(f"运行记录不存在：{run_id}", file=sys.stderr)
@@ -259,8 +388,9 @@ def orchestrate(args: argparse.Namespace) -> int:
             print(f"阶段一已完成：{run_dir / 'state.json'}")
             return 0
         try:
+            _attach_product_lock(locks, state, run_dir, run_id)
             step = 0 if state is None else step_for_state(run_dir, state)
-            command = build_step_command(step, run_id, args, state)
+            command = build_step_command(step, run_id, args, state, locks)
         except Exception as error:  # noqa: BLE001 - 编排器必须给出稳定停止摘要。
             print(f"无法确定下一执行步骤：{error}", file=sys.stderr)
             if run_dir.is_dir():
@@ -268,7 +398,7 @@ def orchestrate(args: argparse.Namespace) -> int:
             return 1
 
         try:
-            return_code = run_child(command)
+            return_code = run_child(command, locks.file_descriptors())
         except OSError as error:
             print(f"无法启动步骤进程：{error}", file=sys.stderr)
             if run_dir.is_dir():
@@ -287,17 +417,25 @@ def orchestrate(args: argparse.Namespace) -> int:
             return 1
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
+def orchestrate(args: argparse.Namespace) -> int:
+    run_id = args.resume or args.run_id or new_run_id()
+    run_dir = run_dir_for(run_id)
     try:
-        lock = acquire_global_lock()
-    except (OSError, RuntimeError) as error:
+        maximum = load_settings().pcm_max_concurrent_projects
+        with acquire_execution_locks(COORDINATION_ROOT, run_id, maximum) as locks:
+            return _orchestrate_locked(args, run_id, run_dir, locks)
+    except (OSError, RuntimeError, ValueError) as error:
         print(str(error), file=sys.stderr)
         return 2
-    try:
-        return orchestrate(args)
-    finally:
-        lock.close()
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    if args.product_status is not None:
+        return _product_status(args.product_status)
+    if args.release_product is not None:
+        return _release_product(args.release_product)
+    return orchestrate(args)
 
 
 if __name__ == "__main__":

@@ -11,6 +11,20 @@ from secrets import token_hex
 from typing import Any
 
 from common.agent_decision_loop import AIDecisionFailure, AgentExecutionFailure
+from common.coordination import (
+    ExecutionLocks,
+    HeldLock,
+    acquire_execution_locks,
+    acquire_product_lock,
+    adopt_execution_locks,
+    claim_product,
+    coordination_root,
+    ensure_runtime,
+    product_key,
+    product_lock_path,
+    run_lock_path,
+    validate_product_record,
+)
 from common.error_diagnostics import exception_projection, write_diagnostic
 from common.files import sha256
 from common.state import (
@@ -24,6 +38,7 @@ from common.state import (
 from config import (
     LLMConfig,
     load_agent_workspace_env_file,
+    load_settings,
     load_template_repository,
     load_workspace_root,
     read_agent_workspace_env_file,
@@ -174,6 +189,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--workspace-root", type=Path)
     parser.add_argument("--catalog-path", type=Path)
     parser.add_argument("--run-id")
+    parser.add_argument("--coordination-locks", help=argparse.SUPPRESS)
     return parser.parse_args()
 
 
@@ -411,7 +427,11 @@ def load_or_create_step_one_run(args: argparse.Namespace) -> tuple[Path, dict[st
 
 
 def complete_step_one(
-    args: argparse.Namespace, run_dir: Path, state: dict[str, Any], draft_path: Path
+    args: argparse.Namespace,
+    run_dir: Path,
+    state: dict[str, Any],
+    draft_path: Path,
+    execution_locks: ExecutionLocks | None = None,
 ) -> tuple[Path, dict[str, Any]]:
     run_id = state["run_id"]
     source_hash = state["input"]["source_sha256"]
@@ -479,8 +499,15 @@ def complete_step_one(
             "final_path": str(final_path),
         }
         state["publication_phase"] = "intent_recorded"
-        write_state(run_dir, state)
 
+    record, standalone_product_lock = _ensure_product_claim(
+        run_dir, state, run_id, final_path, execution_locks
+    )
+    if standalone_product_lock is not None:
+        standalone_product_lock.close()
+    coordination = state["coordination"]
+    if final_path.is_dir():
+        ensure_runtime(final_path, coordination["product_key"], run_id, record)
     phase = state["publication_phase"]
     if final_path.exists():
         if (
@@ -515,6 +542,9 @@ def complete_step_one(
             raise RuntimeError("临时 clone 与已有运行证据不一致")
         prepare_staging(
             staging_path, draft_bytes, source_hash, workspace_env_bytes
+        )
+        ensure_runtime(
+            staging_path, coordination["product_key"], run_id, record
         )
         if sha256(draft_path) != source_hash:
             raise RuntimeError("第 1 步执行期间源产品初稿发生变化")
@@ -764,6 +794,128 @@ def run_step_eighteen(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
     return run_dir, run_requirement_merge(run_dir, read_state(run_dir))
 
 
+def _coordination_state(
+    run_dir: Path,
+    state: dict[str, Any],
+    execution_run_id: str,
+    final_path: Path,
+) -> dict[str, Any]:
+    key, canonical = product_key(final_path)
+    existing = state.get("coordination")
+    if existing is None:
+        state["coordination"] = {
+            "schema_version": 1,
+            "execution_run_id": execution_run_id,
+            "claim_phase": "claim_pending",
+            "product_key": key,
+            "product_path": str(canonical),
+        }
+        write_state(run_dir, state)
+        return state["coordination"]
+    if (
+        not isinstance(existing, dict)
+        or existing.get("schema_version") != 1
+        or existing.get("execution_run_id") != execution_run_id
+        or existing.get("product_key") != key
+        or existing.get("product_path") != str(canonical)
+        or existing.get("claim_phase") not in {"claim_pending", "claimed"}
+    ):
+        raise RuntimeError("运行状态中的产品协调身份不一致")
+    return existing
+
+
+def _ensure_product_claim(
+    run_dir: Path,
+    state: dict[str, Any],
+    execution_run_id: str,
+    final_path: Path,
+    locks: ExecutionLocks | None,
+) -> tuple[dict[str, Any], HeldLock | None]:
+    coordination = _coordination_state(run_dir, state, execution_run_id, final_path)
+    key = coordination["product_key"]
+    canonical = Path(coordination["product_path"])
+    owned_lock: HeldLock | None = None
+    if locks is not None and locks.product is not None:
+        if locks.product.path != product_lock_path(coordination_root(DEMO_ROOT), key):
+            raise RuntimeError("继承的产品锁与运行状态不一致")
+    else:
+        owned_lock = acquire_product_lock(
+            coordination_root(DEMO_ROOT), execution_run_id, key, canonical
+        )
+        if locks is not None:
+            locks.product = locks.stack.enter_context(owned_lock)
+            owned_lock = None
+
+    try:
+        if coordination["claim_phase"] == "claim_pending":
+            record = claim_product(
+                coordination_root(DEMO_ROOT), execution_run_id, key, canonical
+            )
+            coordination.update(
+                {
+                    "claim_phase": "claimed",
+                    "port_slot": record["port_slot"],
+                    "ports": record["ports"],
+                    "runtime_path": ".pcm/runtime.json",
+                }
+            )
+            write_state(run_dir, state)
+        else:
+            record = validate_product_record(
+                coordination_root(DEMO_ROOT), execution_run_id, key, canonical
+            )
+            if (
+                coordination.get("port_slot") != record["port_slot"]
+                or coordination.get("ports") != record["ports"]
+                or coordination.get("runtime_path") != ".pcm/runtime.json"
+            ):
+                raise RuntimeError("运行状态与产品端口注册记录不一致")
+        return record, owned_lock
+    except BaseException:
+        if owned_lock is not None:
+            owned_lock.close()
+        raise
+
+
+def _prepare_execution_locks(args: argparse.Namespace) -> ExecutionLocks:
+    run_id = args.run_id
+    if not isinstance(run_id, str) or not run_id:
+        run_id = new_run_id()
+        args.run_id = run_id
+    root = coordination_root(DEMO_ROOT)
+    inherited = getattr(args, "coordination_locks", None)
+    maximum = load_settings().pcm_max_concurrent_projects
+    if isinstance(inherited, str) and inherited:
+        locks = adopt_execution_locks(root, run_id, inherited, maximum)
+    else:
+        locks = acquire_execution_locks(root, run_id, maximum)
+
+    run_dir = run_dir_for(run_id)
+    if run_dir.is_dir():
+        try:
+            state = read_state(run_dir)
+        except Exception:  # 由步骤现有错误路径保存损坏状态诊断。
+            return locks
+        coordination = state.get("coordination")
+        if isinstance(coordination, dict):
+            product_path = coordination.get("product_path")
+            if isinstance(product_path, str) and product_path:
+                record, _ = _ensure_product_claim(
+                    run_dir, state, run_id, Path(product_path), locks
+                )
+                final_path = state.get("workspace", {}).get("final_path")
+                if isinstance(final_path, str) and Path(final_path).is_dir():
+                    ensure_runtime(Path(final_path), coordination["product_key"], run_id, record)
+        elif isinstance(state.get("workspace"), dict):
+            final_path = state["workspace"].get("final_path")
+            if isinstance(final_path, str) and final_path:
+                key, canonical = product_key(Path(final_path))
+                locks.product = locks.stack.enter_context(
+                    acquire_product_lock(root, run_id, key, canonical)
+                )
+    return locks
+
+
 def sha256_bytes(data: bytes) -> str:
     import hashlib
 
@@ -835,8 +987,7 @@ def run_step_zero(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
     return run_dir, result
 
 
-def main() -> int:
-    args = parse_args()
+def _execute(args: argparse.Namespace, execution_locks: ExecutionLocks) -> int:
     if args.step not in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18}:
         print(f"步骤尚未实现：{args.step}", file=sys.stderr)
         return 2
@@ -851,7 +1002,9 @@ def main() -> int:
             run_dir, result = run_step_zero(args)
         elif args.step == 1:
             run_dir, state, draft_path = load_or_create_step_one_run(args)
-            run_dir, result = complete_step_one(args, run_dir, state, draft_path)
+            run_dir, result = complete_step_one(
+                args, run_dir, state, draft_path, execution_locks
+            )
         else:
             if args.step == 2:
                 if not args.run_id:
@@ -1568,6 +1721,16 @@ def main() -> int:
     if result["status"] == "success":
         return 0
     return _RETRY_REQUESTED_EXIT_CODE if retry_requested else 1
+
+
+def main() -> int:
+    args = parse_args()
+    try:
+        with _prepare_execution_locks(args) as locks:
+            return _execute(args, locks)
+    except (OSError, RuntimeError, ValueError) as error:
+        print(f"步骤协调失败：{error}", file=sys.stderr)
+        return 2
 
 
 def retrying_main() -> int:
