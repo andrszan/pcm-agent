@@ -32,6 +32,7 @@ _SAFE_EXCEPTION_TYPE = re.compile(r"[A-Za-z_][A-Za-z0-9_.]{0,127}\Z")
 _RECOVERABLE_SUBTYPES = {"error_max_turns", "error_max_budget_usd"}
 _NORMAL_TERMINAL_REASONS = {None, "completed"}
 _ABORTED_TERMINAL_REASONS = {"aborted_streaming", "aborted_tools"}
+_RETRYABLE_TERMINAL_REASONS = {"api_error", "blocking_limit"}
 _DECISION_FAILURE_MESSAGES = {
     "configuration": "AI-compatible 裁决配置不可用",
     "transport": "AI-compatible 裁决服务连接或请求超时",
@@ -581,7 +582,8 @@ def _validate_agent_result(
         fail(
             "Agent SDK 正常结果包含不支持的终止原因",
             retry_requested=(
-                value.retry_requested and value.terminal_reason == "api_error"
+                value.retry_requested
+                and value.terminal_reason in _RETRYABLE_TERMINAL_REASONS
             ),
         )
     if value.result_subtype not in {"success", *_RECOVERABLE_SUBTYPES}:

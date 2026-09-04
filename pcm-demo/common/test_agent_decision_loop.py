@@ -705,6 +705,25 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
                 conversation = self.run_dir / "conversations" / f"{self.spec.key}.json"
                 conversation.unlink(missing_ok=True)
 
+    async def test_blocking_limit_fails_before_decision_and_requests_retry(self) -> None:
+        agent = FakeAgentRunner(
+            [
+                self.result(
+                    "达到本次调用限制前的部分回复",
+                    terminal_reason="blocking_limit",
+                    is_error=True,
+                    retry_requested=True,
+                )
+            ]
+        )
+        decisions = FakeDecisionRunner([])
+
+        with self.assertRaises(AgentExecutionFailure) as raised:
+            await self.run_loop(agent, decisions)
+
+        self.assertTrue(raised.exception.retry_requested)
+        self.assertEqual(decisions.calls, [])
+
     async def test_max_turns_and_budget_results_require_normal_completion(self) -> None:
         for subtype in ("error_max_turns", "error_max_budget_usd"):
             with self.subTest(subtype):
@@ -1194,6 +1213,37 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
                     )
 
                 self.assertTrue(result.retry_requested)
+
+    async def test_blocking_limit_requests_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            write_json(workspace / "plugins-lock.json", {"version": 1, "plugins": []})
+
+            async def fake_query(*_args: object, **_kwargs: object):
+                yield SystemMessage(
+                    subtype="init",
+                    data={"session_id": "session-1", "cwd": str(workspace)},
+                )
+                yield ResultMessage(
+                    subtype="success",
+                    duration_ms=1,
+                    duration_api_ms=1,
+                    is_error=True,
+                    num_turns=101,
+                    session_id="session-1",
+                    result=None,
+                    terminal_reason="blocking_limit",
+                )
+
+            with patch("common.claude_agent.query", new=fake_query):
+                result = await run_claude(
+                    "测试提示",
+                    cwd=workspace,
+                    resume_session_id="session-1",
+                )
+
+        self.assertEqual(result.terminal_reason, "blocking_limit")
+        self.assertTrue(result.retry_requested)
 
     async def test_sdk_exception_retry_classification(self) -> None:
         cases = [

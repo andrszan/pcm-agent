@@ -145,7 +145,7 @@ def _retry_requested(
 ) -> bool:
     if terminal_reason in {"aborted_streaming", "aborted_tools"}:
         return False
-    if api_error_status is not None or terminal_reason == "api_error":
+    if api_error_status is not None or terminal_reason in {"api_error", "blocking_limit"}:
         return True
     return is_retryable_claude_sdk_error(error, has_result=has_result)
 
