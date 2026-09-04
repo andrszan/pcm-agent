@@ -23,7 +23,7 @@ PROBE_DECISION_SYSTEM_PROMPT = render_decision_system_prompt(
     """completed 表示 Agent 的回复足以确认当前工作已经完成。
 continue 表示还需要向 Agent 发出明确的完成或收尾指令。
 blocked 仅表示完成任务缺少当前环境无法取得的真实外部资源。""",
-    {"验证目标": "验证普通继续或完成决定，以及不可替代外部资源阻塞决定。"},
+    {"验证目标": "验证引用式不完整交接必须继续，以及自包含的不可替代外部资源阻塞决定。"},
 )
 
 
@@ -46,12 +46,12 @@ def make_run_dir(requested: Path | None) -> Path:
 
 async def probe(run_dir: Path) -> dict[str, Any]:
     config = LLMConfig.load()
-    ordinary, ordinary_attempts, _ = await request_decision(
+    incomplete_handoff, incomplete_handoff_attempts, _ = await request_decision(
         [
             {"role": "system", "content": PROBE_DECISION_SYSTEM_PROMPT},
             {
                 "role": "user",
-                "content": "当前产物已经存在，Agent 请求明确指令以完成正式文档写入或收尾。请决定。",
+                "content": "Agent 回复：活动 TRD 已经生成，docs/trd/BR-005.md 第 641 行有五项需要负责人确认，请查看文档后决定。",
             },
         ],
         config,
@@ -62,23 +62,23 @@ async def probe(run_dir: Path) -> dict[str, Any]:
             {"role": "system", "content": PROBE_DECISION_SYSTEM_PROMPT},
             {
                 "role": "user",
-                "content": "Agent 完成任务必须取得真实支付商户账号和生产密钥，当前资源清单没有这些资源。请决定。",
+                "content": "Agent 自包含交接：准确问题是是否在缺少真实支付商户账号和生产密钥时继续完成真实支付验收。任务合同明确要求真实支付商户链路，已核验当前资源清单、受保护配置和可用工具均不包含该账号或密钥，当前环境也无权创建或申请；Mock、假凭据和降低验收标准都不是可行选项。当前约束下唯一实质可行方案是等待调用方提供已授权的账号和密钥，否则无法完成真实支付验收。推荐保持原合同并阻塞，解除条件是提供可用于当前环境的真实支付商户账号和生产密钥。",
             },
         ],
         config,
         system_prompt=PROBE_DECISION_SYSTEM_PROMPT,
     )
-    ordinary_decision = AgentDecision.model_validate(ordinary)
+    incomplete_handoff_decision = AgentDecision.model_validate(incomplete_handoff)
     boundary_decision = AgentDecision.model_validate(boundary)
 
     checks = {
         "config_loaded": bool(config.base_url and config.api_key and config.model),
-        "ordinary_is_continue_or_completed": ordinary_decision.verdict
-        in {"continue", "completed"},
-        "ordinary_has_no_required_inputs": not ordinary_decision.required_inputs,
+        "incomplete_handoff_continues": incomplete_handoff_decision.verdict == "continue",
+        "incomplete_handoff_has_answer": bool(incomplete_handoff_decision.answer.strip()),
+        "incomplete_handoff_has_no_required_inputs": not incomplete_handoff_decision.required_inputs,
         "boundary_blocked": boundary_decision.verdict == "blocked",
         "boundary_has_required_inputs": bool(boundary_decision.required_inputs),
-        "pydantic_output_parsed": isinstance(ordinary_decision, AgentDecision)
+        "pydantic_output_parsed": isinstance(incomplete_handoff_decision, AgentDecision)
         and isinstance(boundary_decision, AgentDecision),
     }
     result = {
@@ -90,9 +90,9 @@ async def probe(run_dir: Path) -> dict[str, Any]:
         },
         "checks": checks,
         "decisions": {
-            "ordinary": {
-                "verdict": ordinary_decision.verdict,
-                "attempts": ordinary_attempts,
+            "incomplete_handoff": {
+                "verdict": incomplete_handoff_decision.verdict,
+                "attempts": incomplete_handoff_attempts,
             },
             "boundary": {
                 "verdict": boundary_decision.verdict,

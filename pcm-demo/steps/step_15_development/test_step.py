@@ -30,7 +30,7 @@ def agent_result(
     workspace: Path,
     *,
     session: str = "development-session-1",
-    text: str = "已完成实现、适用测试、真实验证和审查，没有剩余工作、验证缺口或阻断项。",
+    text: str = "结束状态：已完成。当前需求没有剩余工作、失败项、验证缺口或阻断项。",
 ) -> ClaudeRunResult:
     return ClaudeRunResult(
         init={
@@ -188,11 +188,14 @@ class DevelopmentTests(unittest.TestCase):
             for content in (prompts[0], decision_prompts[0]):
                 self.assertNotIn("docs/design/工程架构设计.md", content)
             for required in (
-                "Agent 最新回复没有明确自报未完成项、验证缺口或阻断时完成",
-                "不得因 Agent 未逐项复述证据而自行增加验收门槛",
-                "仅当 Agent 明确自报仍有未完成工作、失败项、验证缺口",
-                "不得扩大 Agent 已报告的范围",
-                "仅当 Agent 明确报告缺少当前环境无法取得的不可替代外部条件",
+                "仅当 Agent 最新回复明确声明当前需求已完成",
+                "没有剩余工作、失败项、验证缺口或阻断项",
+                "不得因回复没有提及未完成内容而推定完成",
+                "不得因 Agent 未逐项复述此前已经报告的证据而自行增加验收门槛",
+                "Agent 未明确声明结束状态",
+                "决策交接不完整时按统一职责要求其在原会话重新读取并补齐",
+                "仅当 Agent 自包含地明确报告缺少当前环境无法取得的不可替代外部条件",
+                "不完整决策交接判为阻塞",
             ):
                 self.assertIn(required, decision_prompts[0])
             for forbidden in (
@@ -231,12 +234,15 @@ class DevelopmentTests(unittest.TestCase):
                 (16, 16, NEXT_NODE),
             )
 
-    def test_short_completed_report_does_not_require_extra_evidence(self) -> None:
+    def test_explicit_short_completed_report_does_not_require_extra_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))
 
             async def agent(*_: object, **__: object) -> ClaudeRunResult:
-                return agent_result(workspace, text="当前需求已完成，没有我报告的剩余项。")
+                return agent_result(
+                    workspace,
+                    text="结束状态：已完成。当前需求没有剩余工作、失败项、验证缺口或阻断项。",
+                )
 
             async def decide(*_: object, **__: object) -> tuple[dict, int, str]:
                 return decision("completed")
@@ -295,7 +301,10 @@ class DevelopmentTests(unittest.TestCase):
             calls: list[tuple[object, object, object]] = []
             decisions = iter(
                 [
-                    decision("continue", answer="请继续完成遗漏。"),
+                    decision(
+                        "continue",
+                        answer="请重新读取引用内容，补齐自包含决策交接并明确结束状态。",
+                    ),
                     decision("completed"),
                 ]
             )

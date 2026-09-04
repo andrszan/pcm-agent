@@ -185,7 +185,7 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
         agent = FakeAgentRunner([self.result(original), self.result(continued)])
         decisions = FakeDecisionRunner(
             [
-                decision("continue", answer="请补齐核验。", reason="产物还不完整"),
+                decision("continue", answer="请重新读取相关资料并补齐自包含决策交接。", reason="决策交接不完整"),
                 decision("completed", reason="产物已完成"),
             ]
         )
@@ -193,7 +193,10 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
         outcome = await self.run_loop(agent, decisions)
 
         self.assertEqual(outcome.verdict, "completed")
-        self.assertEqual([call[0] for call in agent.calls], ["初始 Agent 提示", "请补齐核验。"])
+        self.assertEqual(
+            [call[0] for call in agent.calls],
+            ["初始 Agent 提示", "请重新读取相关资料并补齐自包含决策交接。"],
+        )
         self.assertIsNone(agent.calls[0][1]["resume_session_id"])
         self.assertEqual(agent.calls[1][1]["resume_session_id"], "session-1")
         self.assertEqual(
@@ -213,7 +216,9 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
                 {
                     "role": "assistant",
                     "content": decision(
-                        "continue", answer="请补齐核验。", reason="产物还不完整"
+                        "continue",
+                        answer="请重新读取相关资料并补齐自包含决策交接。",
+                        reason="决策交接不完整",
                     ).model_dump_json(),
                 },
                 {"role": "user", "content": continued},
@@ -1420,6 +1425,15 @@ class AgentDecisionTest(unittest.IsolatedAsyncioTestCase):
             "最高项目负责人、工程负责人、专业开发者和 Agent 专家",
             "assistant 是你此前发给 Agent 的指令或结构化回复",
             "user 是 Agent 返回给你的完整执行结果",
+            "准确问题、已核验的当前事实与约束",
+            "当前约束下实质可行的选项",
+            "各选项主要影响",
+            "Agent 的推荐与理由",
+            "只能作为辅助引用",
+            "要求 Agent 在原会话中重新读取必要资料并补齐自包含交接",
+            "不得猜测答案，不得 completed",
+            "不得把信息不足本身判为 blocked",
+            "Agent 的决策交接不完整时，只能使用该 verdict",
             "completed 表示领域工作已完成",
             '"verdict": "completed | continue | blocked"',
             "首字符必须是 {，末字符必须是 }",
