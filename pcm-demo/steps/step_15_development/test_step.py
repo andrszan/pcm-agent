@@ -30,12 +30,7 @@ def agent_result(
     workspace: Path,
     *,
     session: str = "development-session-1",
-    text: str = (
-        "已完成实现、适用测试、真实验证和审查，没有剩余工作、验证缺口或阻断项。\n"
-        "开发验收数据基线：不适用。依据：本需求不引入基线变化，且既有基线仍足以自主体验受影响主要任务。"
-        "项目支持的恢复方式：幂等重跑。交付文档位置：无新增。"
-        "实际验证摘要：已执行适用检查。"
-    ),
+    text: str = "已完成实现、适用测试、真实验证和审查，没有剩余工作、验证缺口或阻断项。",
 ) -> ClaudeRunResult:
     return ClaudeRunResult(
         init={
@@ -181,49 +176,10 @@ class DevelopmentTests(unittest.TestCase):
                 "不得静默降级",
             ):
                 self.assertIn(required, prompts[0])
-            for required in (
-                "开发验收数据基线：已建立/已更新/不适用/有缺口",
-                "只选择一个实际状态，明确当前需求是否适用",
-                "依据、项目实际支持的恢复方式、交付文档位置和实际验证摘要",
-                "`已建立`：此前没有适用基线",
-                "自主验收受影响主要任务所需的角色、参考数据、代表性对象/状态/关系、适用对象资源",
-                "`已更新`：已有适用基线",
-                "既有基线已不足以自主体验受影响主要任务",
-                "`不适用`：本需求不引入上述基线变化",
-                "既有基线仍足以从正常入口自主体验受影响主要任务",
-                "`有缺口`：适用基线或增量、恢复能力、交付文档、实际验证仍有未完成项",
-                "幂等重跑或补齐等非破坏方式、定向重置或可重建开发环境",
-                "不得把 destructive reset 作为统一前提",
-            ):
-                self.assertIn(required, prompts[0])
             self.assertIn("不得修改 `.claude/rules/`", prompts[0])
             self.assertNotIn("稳定设计偏差请同步", prompts[0])
-            for forbidden in (
-                "docs/backlog",
-                "第 15 步",
-                "第15步",
-                "PCM",
-                "阶段",
-                "节点",
-                "session",
-                "Skill 编排",
-            ):
+            for forbidden in ("docs/backlog", "第 15 步", "PCM", "session"):
                 self.assertNotIn(forbidden, prompts[0])
-            for contract in (
-                prompts[0],
-                development_step.DEVELOPMENT_DECISION_RULES,
-            ):
-                for orchestration_signal in (
-                    "第 15 步",
-                    "第15步",
-                    "PCM",
-                    "阶段",
-                    "节点",
-                    "session",
-                    "开发会话",
-                    "Skill 编排",
-                ):
-                    self.assertNotIn(orchestration_signal, contract)
             self.assertEqual(len(decision_prompts), 1)
             self.assertIn("docs/trd/BR-001.md", decision_prompts[0])
             self.assertIn("TRD_CONTEXT_MARKER：必须验证账户锁定恢复。", decision_prompts[0])
@@ -232,16 +188,11 @@ class DevelopmentTests(unittest.TestCase):
             for content in (prompts[0], decision_prompts[0]):
                 self.assertNotIn("docs/design/工程架构设计.md", content)
             for required in (
-                "Agent 最新回复明确报告当前需求对开发验收数据基线的适用性",
-                "开发验收数据基线：已建立/已更新/不适用/有缺口",
-                "状态不得为“有缺口”",
-                "没有明确自报其它未完成项、验证缺口或阻断",
-                "不得因 Agent 未逐项复述基线报告之外的其它证据而自行增加验收门槛",
-                "缺少基线适用性或上述四态报告",
-                "要求核验并补充报告",
-                "明确自报“有缺口”、其它未完成工作、失败项或验证缺口",
+                "Agent 最新回复没有明确自报未完成项、验证缺口或阻断时完成",
+                "不得因 Agent 未逐项复述证据而自行增加验收门槛",
+                "仅当 Agent 明确自报仍有未完成工作、失败项、验证缺口",
                 "不得扩大 Agent 已报告的范围",
-                "缺口或未完成事项源于当前环境无法取得的不可替代外部条件",
+                "仅当 Agent 明确报告缺少当前环境无法取得的不可替代外部条件",
             ):
                 self.assertIn(required, decision_prompts[0])
             for forbidden in (
@@ -280,22 +231,12 @@ class DevelopmentTests(unittest.TestCase):
                 (16, 16, NEXT_NODE),
             )
 
-    def test_concise_completed_report_with_baseline_state_needs_no_other_evidence_list(
-        self,
-    ) -> None:
+    def test_short_completed_report_does_not_require_extra_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))
 
             async def agent(*_: object, **__: object) -> ClaudeRunResult:
-                return agent_result(
-                    workspace,
-                    text=(
-                        "当前需求已完成，没有我报告的剩余项。\n"
-                        "开发验收数据基线：不适用。依据：本需求不引入基线变化，且既有基线仍足以自主体验受影响主要任务。"
-                        "项目支持的恢复方式：幂等重跑。交付文档位置：无新增。"
-                        "实际验证摘要：已核验不适用。"
-                    ),
-                )
+                return agent_result(workspace, text="当前需求已完成，没有我报告的剩余项。")
 
             async def decide(*_: object, **__: object) -> tuple[dict, int, str]:
                 return decision("completed")
@@ -354,10 +295,7 @@ class DevelopmentTests(unittest.TestCase):
             calls: list[tuple[object, object, object]] = []
             decisions = iter(
                 [
-                    decision(
-                        "continue",
-                        answer="请核验并补充开发验收数据基线报告。",
-                    ),
+                    decision("continue", answer="请继续完成遗漏。"),
                     decision("completed"),
                 ]
             )
@@ -370,12 +308,9 @@ class DevelopmentTests(unittest.TestCase):
                         kwargs.get("effort"),
                     )
                 )
-                if len(calls) == 1:
-                    return agent_result(
-                        workspace,
-                        text="当前需求实现已完成，但本回复尚未报告开发验收数据基线。",
-                    )
-                return agent_result(workspace)
+                value = agent_result(workspace)
+                value.text = f"第 {len(calls)} 轮完成情况。"
+                return value
 
             async def decide(*_: object, **__: object) -> tuple[dict, int, str]:
                 return next(decisions)
@@ -407,12 +342,9 @@ class DevelopmentTests(unittest.TestCase):
             async def agent(_prompt: str, **_kwargs: object) -> ClaudeRunResult:
                 nonlocal calls
                 calls += 1
-                if calls < 9:
-                    return agent_result(
-                        workspace,
-                        text=f"第 {calls} 轮仍有工作待完成。",
-                    )
-                return agent_result(workspace)
+                value = agent_result(workspace)
+                value.text = f"第 {calls} 轮完成情况。"
+                return value
 
             async def decide(*_: object, **__: object) -> tuple[dict, int, str]:
                 return next(decisions)

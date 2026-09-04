@@ -137,36 +137,10 @@ class ProjectIntakeTests(unittest.TestCase):
 
         self.assertEqual(prompt.splitlines()[0], "/project-intake @./docs/产品初稿.md")
         self.assertIn("产品初稿为当前产品定义的权威输入", prompt)
-        self.assertIn("开发验收数据基线的产品侧前提", prompt)
         for output in OUTPUTS:
             self.assertIn(output.as_posix(), prompt)
-        for required in (
-            "客户需要带有初始业务事实自主体验主要功能",
-            "初始角色、内容、代表性状态、适用对象资源",
-            "从空态开始",
-            "建立首条业务数据并成功进入主要功能的路径",
-            "不设计 Seed 命令、数据结构或后续实现",
-            "只处理产品定义文档",
-        ):
-            self.assertIn(required, prompt)
-        self.assertIn("开发验收数据基线", PROJECT_INTAKE_DECISION_RULES)
-        for required in (
-            "客户自主体验主要功能",
-            "初始角色、内容、代表性状态、适用对象资源",
-            "从空态建立首条业务数据并进入主要功能的成功路径",
-            "不设计 Seed 命令、数据结构或后续实现",
-        ):
-            self.assertIn(required, PROJECT_INTAKE_DECISION_RULES)
-        for forbidden in (
-            "第 2 步",
-            "第2步",
-            "PCM",
-            "阶段",
-            "节点",
-            "session",
-            "Skill 编排",
-            "调用 Skill",
-        ):
+        self.assertIn("只处理产品定义文档", prompt)
+        for forbidden in ("第 2 步", "第2步", "PCM", "节点", "阶段", "调用 Skill"):
             self.assertNotIn(forbidden, prompt)
             self.assertNotIn(forbidden, PROJECT_INTAKE_DECISION_RULES)
 

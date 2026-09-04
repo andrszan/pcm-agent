@@ -1,6 +1,6 @@
 # 第 2 步：项目需求与产品定义
 
-在第 1 步发布并初始化为零提交根 Git 仓库的独立产品工作区中，显式调用 `project-intake`，形成两份正式产品定义文档。产品定义同时建立开发验收数据基线的产品侧前提：明确客户自主体验主要功能所需的初始角色、内容、代表性状态、适用对象资源，或明确产品从空态建立首条业务数据并进入主要功能的成功路径。这里只定义产品体验事实和适用范围，不设计 Seed 命令、数据结构或后续实现。写入 Claude Code trust 前，会重新核验最终路径、根 Git、`main` 分支、空 `HEAD`、初稿哈希和第 1 步发布证据。
+在第 1 步发布并初始化为零提交根 Git 仓库的独立产品工作区中，显式调用 `project-intake`，形成两份正式产品定义文档。写入 Claude Code trust 前，会重新核验最终路径、根 Git、`main` 分支、空 `HEAD`、初稿哈希和第 1 步发布证据。
 
 ## 输入与提示
 
@@ -10,7 +10,7 @@
 - `CLAUDE.md`、`AGENTS.md`、`.claude/settings.json` 和锁定 plugins；
 - 当前 `project-intake` session 及该 Skill 生成的产物。
 
-技术方案、Backlog、TRD、代码和其它无关文档不进入当前产品定义判断，也不构成阻塞。首条提示第一行固定为 `/project-intake @./docs/产品初稿.md`；正文只说明产品定义的权威输入、两份目标文档、开发验收数据基线的产品侧前提和“不处理后续工程实现”的边界，不包含步骤号、PCM 节点或外层编排语义。负责人只有在两份文档非空可用，并已明确“带有初始业务事实的自主体验”或“从空态建立首条业务数据”的一种产品合同时才可判断完成。
+技术方案、Backlog、TRD、代码和其它无关文档不进入当前产品定义判断，也不构成阻塞。首条提示第一行固定为 `/project-intake @./docs/产品初稿.md`；正文只说明产品定义的权威输入、两份目标文档和“不处理后续工程实现”的边界，不包含步骤号、PCM 节点或外层编排语义。
 
 步骤使用默认 Claude Code 用户配置目录，不设置 `CLAUDE_CONFIG_DIR`、`permission_mode`、`tools`、`allowed_tools`、`disallowed_tools` 或 `setting_sources`。项目 `.claude/settings.json` 和 Claude Code 默认加载语义是权限与工具配置的权威来源。PCM 通过自身 Agent 配置显式传入高模型和 `high` effort，并在每次恢复原 session 时重复传入同一 profile。
 

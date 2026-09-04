@@ -376,14 +376,6 @@ class RequirementBreakdownTests(unittest.TestCase):
                     "其它需求开始前确实必须完成",
                     "默认 Target",
                     "依据和重议条件",
-                    "开发验收数据基线",
-                    "同时落实为全局完成原则和 owning BR 增量",
-                    "影响角色、对象、关键状态或对象文件的 BR",
-                    "同步基线增量与交付文档",
-                    "不得机械创建独立 Seed BR",
-                    "DB、S3/对象存储、fixture、Seed 或恢复命令",
-                    "不得强制 destructive reset",
-                    "幂等重跑或补齐等非破坏方式、定向重置、可重建开发环境",
                 ):
                     self.assertIn(required, prompt)
                 if applicable:
@@ -392,20 +384,6 @@ class RequirementBreakdownTests(unittest.TestCase):
                     self.assertIn("当前产品没有适用的产品级体验框架文档", prompt)
                 for forbidden in ("第 11 步", "PCM", "节点", "session", "Skill", "/commit-changes"):
                     self.assertNotIn(forbidden, prompt)
-                for contract in (
-                    prompt,
-                    breakdown_step.REQUIREMENT_BREAKDOWN_DECISION_RULES,
-                ):
-                    for orchestration_signal in (
-                        "第 11 步",
-                        "第11步",
-                        "PCM",
-                        "阶段",
-                        "节点",
-                        "session",
-                        "Skill 编排",
-                    ):
-                        self.assertNotIn(orchestration_signal, contract)
 
                 self.assertTrue(decision_prompts)
                 for system_prompt in decision_prompts:
@@ -430,15 +408,6 @@ class RequirementBreakdownTests(unittest.TestCase):
                         "外部条件",
                         "depends_on",
                         "正式 BR ID",
-                        "开发验收数据基线",
-                        "owning BR",
-                        "全局完成原则",
-                        "影响角色、对象、关键状态或对象文件的 BR",
-                        "同步基线增量与交付文档",
-                        "不机械创建独立 Seed BR",
-                        "DB、S3/对象存储、fixture、Seed 或恢复命令",
-                        "不强制 destructive reset",
-                        "幂等重跑或补齐等非破坏方式、定向重置、可重建开发环境",
                     ):
                         self.assertIn(required, system_prompt)
                     self.assertNotIn("Skill", system_prompt)

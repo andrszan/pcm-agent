@@ -6,9 +6,9 @@
 
 ## Agent、session 与边界
 
-Claude Agent 在产品根以 requirement-scoped key `development_<requirement-id>` 复用公共 `run_agent_decision_loop` 调用，显式使用中模型和 `high` effort。初始 Agent prompt 首行固定为 `/dev-workflow`，正文包含需求 ID/标题、活动 TRD 路径、实现边界，以及最终回复必须给出的开发验收数据基线四态报告；负责人的项目上下文包含同一路径和完整活动 TRD 正文。Agent 按活动 TRD 中适用的体验决定执行，并按需自行读取项目资料、代码、配置、测试和运行环境，不要求固定上游资料。稳定设计偏差可同步至活动 TRD。prompt 正文不包含步骤号、PCM、阶段、节点、session 或 Skill 编排等外层背景。
+Claude Agent 在产品根以 requirement-scoped key `development_<requirement-id>` 复用公共 `run_agent_decision_loop` 调用，显式使用中模型和 `high` effort。初始 Agent prompt 只包含 `/dev-workflow`、需求 ID/标题和活动 TRD 路径；负责人的项目上下文包含同一路径和完整活动 TRD 正文。Agent 按活动 TRD 中适用的体验决定执行，并按需自行读取项目资料、代码、配置、测试和运行环境，不要求固定上游资料。稳定设计偏差可同步至活动 TRD。
 
-Agent 不得修改 `.claude/rules/`，也不得 stage、commit、创建或切换分支、merge 或 push。Python completion verifier 继续为空；不解析 Manifest、Markdown 或四态报告，也不增加公共 helper 或状态字段。负责人保持薄裁决：除开发验收数据基线适用性与四态报告外，不要求 Agent 逐项复述其它证据。最新回复缺少基线报告且当前环境可继续时，`continue` 要求核验并补充；报告“有缺口”时按现有语义在可继续处理时 `continue`，只有缺少不可替代外部条件时 `blocked`。只有最新回复明确报告基线适用性，四态为“已建立”“已更新”或“不适用”，且未自报其它缺口、未完成项或阻断时，才可 `completed`。
+Agent 不得修改 `.claude/rules/`，也不得 stage、commit、创建或切换分支、merge 或 push。完成 verifier 为空；负责人 `AgentDecision.completed` 即为本步骤领域完成，`continue` 和 `blocked` 沿用公共循环语义。
 
 首次从 Agent 取得 session 后，程序立即同步 `requirement_cycle.development_session_id`。success result 写入：
 
@@ -27,17 +27,6 @@ steps/requirements/<requirement-id>/15.json
 ```
 
 不得静默偏离适用决定；稳定偏差必须同步活动 TRD。截图只是其中一项证据，不能替代动态交互、权限、失败恢复和持久化的真实验证。
-
-## 开发验收数据基线报告
-
-最终完整回复必须以 `开发验收数据基线：已建立/已更新/不适用/有缺口` 四态之一报告当前需求的实际结果，明确当前需求是否适用，并给出依据、项目实际支持的恢复方式、交付文档位置和实际验证摘要：
-
-- **已建立**：此前没有适用基线，本需求首次建立自主验收受影响主要任务所需的角色、参考数据、代表性对象/状态/关系、适用对象资源及恢复/核验与交付说明；
-- **已更新**：已有适用基线，本需求新增或改变上述内容、时间语义、恢复/核验或交付说明，或既有基线已不足以自主体验受影响主要任务，并已完成对应增量；
-- **不适用**：本需求不引入上述基线变化，且既有基线仍足以从正常入口自主体验受影响主要任务；
-- **有缺口**：适用基线或增量、恢复能力、交付文档或实际验证仍有未完成项。
-
-恢复方式按项目事实选择，可以是幂等重跑或补齐等非破坏方式、定向重置或可重建开发环境；不强制 destructive reset，也不得声称项目支持尚未实现的恢复方式。Python 不对这段自然语言做确定性解析，适用性与四态由负责人基于 Agent 最新完整回复判断。
 
 ## 真实验证
 

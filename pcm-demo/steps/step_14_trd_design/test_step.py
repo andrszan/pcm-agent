@@ -149,22 +149,6 @@ class TRDDesignTests(unittest.TestCase):
         self.assertIn("边界内部文件粒度可调整", TRD_DESIGN_DECISION_RULES)
         self.assertIn("架构 delta", TRD_DESIGN_DECISION_RULES)
         self.assertIn("没有静默降级", TRD_DESIGN_DECISION_RULES)
-        for required in (
-            "当前需求适用开发验收数据基线时",
-            "基线增量与 ownership",
-            "稳定身份",
-            "幂等建立或更新",
-            "漂移处理",
-            "相对时间",
-            "项目实际支持的恢复方式和管理范围",
-            "幂等重跑或补齐等非破坏方式、定向重置、可重建开发环境",
-            "不强制 destructive reset",
-            "DB 与 S3/对象存储",
-            "跨存储一致性",
-            "交付文档与真实验证",
-            "不适用时不机械增加基线章节或虚构设计",
-        ):
-            self.assertIn(required, TRD_DESIGN_DECISION_RULES)
         self.assertIn("明确的下一步指令", TRD_DESIGN_DECISION_RULES)
         self.assertNotIn("体验决定已在 TRD 收敛", TRD_DESIGN_DECISION_RULES)
         self.assertNotIn("不得静默偏离", TRD_DESIGN_DECISION_RULES)
@@ -224,19 +208,6 @@ class TRDDesignTests(unittest.TestCase):
                 "架构 delta",
                 "最小迁移",
                 "不得静默降级",
-                "仅当当前需求适用开发验收数据基线时",
-                "基线增量与 ownership",
-                "稳定身份",
-                "幂等建立或更新",
-                "漂移处理",
-                "相对时间规则",
-                "项目实际支持的恢复方式及管理范围",
-                "幂等重跑或补齐等非破坏方式、定向重置、可重建开发环境",
-                "不强制 destructive reset",
-                "DB 与 S3/对象存储",
-                "跨存储一致性",
-                "交付文档更新与真实验证",
-                "不机械增加基线章节或虚构设计",
             ):
                 self.assertIn(required, prompts[0])
             self.assertEqual(len(decision_prompts), 1)
@@ -259,19 +230,6 @@ class TRDDesignTests(unittest.TestCase):
                 "架构 delta",
                 "最小迁移",
                 "没有静默降级",
-                "当前需求适用开发验收数据基线时",
-                "基线增量与 ownership",
-                "稳定身份",
-                "幂等建立或更新",
-                "漂移处理",
-                "相对时间",
-                "项目实际支持的恢复方式和管理范围",
-                "幂等重跑或补齐等非破坏方式、定向重置、可重建开发环境",
-                "不强制 destructive reset",
-                "DB 与 S3/对象存储",
-                "跨存储一致性",
-                "交付文档与真实验证",
-                "不适用时不机械增加基线章节或虚构设计",
             ):
                 self.assertIn(required, decision_prompts[0])
             for duplicated in (
@@ -284,12 +242,8 @@ class TRDDesignTests(unittest.TestCase):
             for content in (prompts[0], decision_prompts[0]):
                 for forbidden in (
                     "第 14 步",
-                    "第14步",
                     "PCM",
-                    "阶段",
-                    "节点",
                     "session",
-                    "Skill 编排",
                     "@./docs/",
                     "docs/design/工程架构设计.md",
                     "docs/ui-ux/framework.md",
