@@ -213,6 +213,8 @@ async def run_claude(
         system_prompt={"type": "preset", "preset": "claude_code"},
         skills="all",
         setting_sources=["project", "local"],
+        # 当前兼容基线：Agent SDK 0.2.139 / Claude Code 2.1.233。
+        # 升级 SDK 或实际 CLI 后复验三档识别、出站模型与 resume，再确认是否调整这些标准 ID。
         settings=json.dumps({"modelOverrides": {
             "claude-haiku-4-5-20251001": agent_config.resolve_model("low"),
             "claude-sonnet-4-6": agent_config.resolve_model("medium"),
