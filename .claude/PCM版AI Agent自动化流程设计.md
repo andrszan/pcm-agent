@@ -101,7 +101,7 @@ Python 程序直接负责：
 
 AI 不能用口头结论代替真实文件、Git、测试、构建、服务或浏览器证据。
 
-PCM 为 Claude Agent SDK 显式配置独立 Anthropic Messages 网关、受保护 API Key、低/中/高三级真实模型映射和任务 `effort`，不依赖宿主默认网关或模型。第 2、5、7、9、10、11 步使用高模型 + `high`；第 6 步 bootstrap/theme、第 14、15 步使用中模型 + `high`；第 8、16、17 步使用中模型 + `medium`。第 15～17 步恢复同一 development session 时保持同一中模型。每次首次调用和 resume 都重新显式传入 model 与 effort，并将子代理默认模型同步为主模型；当前 Agent 步骤不使用低模型，不配置 fallback model 或 `max_budget_usd`，既有最大 turn 与负责人决策轮数保持不变。模型档位属于外层调度配置，不进入领域 prompt。
+PCM 为 Claude Agent SDK 显式配置独立 Anthropic Messages 网关、受保护 Bearer token、低/中/高三级真实模型映射和任务 `effort`。公共 runner 只加载 `project/local` settings，不加载用户级 settings，并置空继承的模型别名、显示元数据与冲突认证；三档真实模型名通过会话级 `modelOverrides` 注册，不依赖 CC Switch 的用户配置或默认模型兜底。第 2、5、7、9、10、11 步使用高模型 + `high`；第 6 步 bootstrap/theme、第 14、15 步使用中模型 + `high`；第 8、16、17 步使用中模型 + `medium`。第 15～17 步恢复同一 development session 时保持同一中模型。每次首次调用和 resume 都重新显式传入 model、effort 与同一映射，并将子代理默认模型同步为主模型；当前 Agent 步骤不使用低模型，不配置 fallback model 或 `max_budget_usd`，既有最大 turn 与负责人决策轮数保持不变。模型档位属于外层调度配置，不进入领域 prompt。
 
 ### 5. 活动内容允许直接修正，历史内容保持不可变
 

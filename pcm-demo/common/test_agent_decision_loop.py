@@ -1108,6 +1108,8 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
             "LLM_BASE_URL": "http://decision.example.invalid/v1",
             "LLM_API_KEY": "decision-secret",
             "LLM_MODEL": "decision-model",
+            "PCM_AGENT_AUTH_TOKEN": "private-pcm-token",
+            "PCM_AGENT_API_KEY": "legacy-private-key",
             "PCM_WORKSPACE_ROOT": "/products",
             "PCM_TEMPLATE_CATALOG": "/catalog.json",
             "PCM_TEMPLATE_REPOSITORY": "git@example.invalid/template.git",
@@ -1119,6 +1121,82 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
         for key in inherited:
             with self.subTest(key=key):
                 self.assertEqual(env[key], "")
+
+    def test_agent_auth_and_model_routing_do_not_inherit_parent_settings(self) -> None:
+        inherited = {
+            "ANTHROPIC_BASE_URL": "http://parent.example.invalid",
+            "ANTHROPIC_API_KEY": "parent-key",
+            "ANTHROPIC_AUTH_TOKEN": "parent-token",
+            "CLAUDE_CODE_OAUTH_TOKEN": "parent-oauth",
+            "CLAUDE_CODE_OAUTH_REFRESH_TOKEN": "parent-refresh",
+            "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR": "9",
+            "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR": "10",
+            "CLAUDE_CODE_SUBAGENT_MODEL": "parent-subagent",
+            "CLAUDE_CODE_USE_BEDROCK": "1",
+            "CLAUDE_CODE_USE_VERTEX": "1",
+            "CLAUDE_CODE_USE_FOUNDRY": "1",
+            "CLAUDE_CODE_USE_ANTHROPIC_AWS": "1",
+            "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD": "1",
+            "CLAUDE_CODE_USE_MANTLE": "1",
+            "CLAUDE_CODE_USE_GATEWAY": "1",
+            "ANTHROPIC_MODEL": "parent-model",
+            "ANTHROPIC_DEFAULT_MODEL": "parent-default",
+            "ANTHROPIC_SMALL_FAST_MODEL": "parent-small",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "parent-haiku",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": "parent-sonnet",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": "parent-opus",
+            "ANTHROPIC_DEFAULT_FABLE_MODEL": "parent-fable",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME": "parent-label",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES": "thinking",
+            "ANTHROPIC_CUSTOM_MODEL_OPTION": "parent-custom",
+            "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": "parent-custom-label",
+            "PATH": "/preserved-path",
+        }
+        with patch.dict(os.environ, inherited, clear=True):
+            env = filtered_env(self.agent_config, "medium-model")
+        self.assertEqual(env["ANTHROPIC_BASE_URL"], self.agent_config.base_url)
+        self.assertEqual(env["ANTHROPIC_AUTH_TOKEN"], "agent-secret")
+        self.assertEqual(env["CLAUDE_CODE_SUBAGENT_MODEL"], "medium-model")
+        self.assertEqual(env["PATH"], "/preserved-path")
+        for key in inherited.keys() - {"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_SUBAGENT_MODEL", "PATH"}:
+            with self.subTest(key=key):
+                self.assertEqual(env[key], "")
+
+    async def test_model_overrides_apply_to_all_tiers_and_resume(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            write_json(workspace / "plugins-lock.json", {"version": 1, "plugins": []})
+            captured = []
+
+            async def fake_query(*_args: object, **kwargs: object):
+                options = kwargs["options"]
+                captured.append(options)
+                yield SystemMessage(subtype="init", data={"session_id": "session-1", "model": options.model})
+                yield ResultMessage(
+                    subtype="success", duration_ms=1, duration_api_ms=1,
+                    is_error=False, num_turns=1, session_id="session-1",
+                    result="测试回复", terminal_reason="completed",
+                )
+
+            with patch("common.claude_agent.query", new=fake_query):
+                for tier in ("low", "medium", "high"):
+                    for session in (None, "session-1"):
+                        outcome = await run_claude("测试提示", cwd=workspace, model_tier=tier, resume_session_id=session)
+                        self.assertIsNone(outcome.exception)
+                        options = captured[-1]
+                        self.assertEqual(options.model, self.agent_config.resolve_model(tier))
+                        self.assertEqual(options.resume, session)
+                        self.assertEqual(options.setting_sources, ["project", "local"])
+                        self.assertEqual(options.env["CLAUDE_CODE_SUBAGENT_MODEL"], options.model)
+                        self.assertEqual(
+                            json.loads(options.settings)["modelOverrides"],
+                            {
+                                "claude-haiku-4-5-20251001": "low-model",
+                                "claude-sonnet-4-6": "medium-model",
+                                "claude-opus-4-8": "high-model",
+                            },
+                        )
+            self.assertEqual(len(captured), 6)
 
     async def test_result_terminal_reason_api_status_and_errors_are_preserved(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1160,9 +1238,21 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured_options[0].effort, "high")
         self.assertIsNone(captured_options[0].max_budget_usd)
         self.assertEqual(captured_options[0].env["ANTHROPIC_BASE_URL"], self.agent_config.base_url)
-        self.assertEqual(captured_options[0].env["ANTHROPIC_API_KEY"], "agent-secret")
-        self.assertEqual(captured_options[0].env["ANTHROPIC_AUTH_TOKEN"], "")
+        self.assertEqual(captured_options[0].env["ANTHROPIC_API_KEY"], "")
+        self.assertEqual(captured_options[0].env["ANTHROPIC_AUTH_TOKEN"], "agent-secret")
+        self.assertEqual(captured_options[0].env["CLAUDE_CODE_OAUTH_TOKEN"], "")
+        self.assertEqual(captured_options[0].setting_sources, ["project", "local"])
+        self.assertEqual(
+            json.loads(captured_options[0].settings),
+            {"modelOverrides": {
+                "claude-haiku-4-5-20251001": "low-model",
+                "claude-sonnet-4-6": "medium-model",
+                "claude-opus-4-8": "high-model",
+            }},
+        )
+        self.assertNotIn("agent-secret", captured_options[0].settings)
         self.assertEqual(captured_options[0].env["CLAUDE_CODE_SUBAGENT_MODEL"], "medium-model")
+        self.assertEqual(captured_options[0].env["PCM_AGENT_AUTH_TOKEN"], "")
         self.assertEqual(captured_options[0].env["PCM_AGENT_API_KEY"], "")
         self.assertEqual(
             captured_options[0].env["CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"], "0"

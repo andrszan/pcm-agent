@@ -12,7 +12,7 @@
 
 技术方案、Backlog、TRD、代码和其它无关文档不进入当前产品定义判断，也不构成阻塞。首条提示第一行固定为 `/project-intake @./docs/产品初稿.md`；正文只说明产品定义的权威输入、两份目标文档和“不处理后续工程实现”的边界，不包含步骤号、PCM 节点或外层编排语义。
 
-步骤使用默认 Claude Code 用户配置目录，不设置 `CLAUDE_CONFIG_DIR`、`permission_mode`、`tools`、`allowed_tools`、`disallowed_tools` 或 `setting_sources`。项目 `.claude/settings.json` 和 Claude Code 默认加载语义是权限与工具配置的权威来源。PCM 通过自身 Agent 配置显式传入高模型和 `high` effort，并在每次恢复原 session 时重复传入同一 profile。
+步骤继续使用原 Claude Code session 存储位置，不设置 `permission_mode`、`tools`、`allowed_tools` 或 `disallowed_tools`。公共 runner 显式使用 `setting_sources=["project", "local"]`，只加载产品项目的 `.claude/settings.json`、`.claude/settings.local.json` 和项目规则，不加载用户级 settings。PCM 通过自身 Agent 配置传入 Bearer token、高档实际模型名和 `high` effort，以及三档 `modelOverrides`；每次恢复原 session 时重复传入同一 profile，不改变步骤业务规则。
 
 ## 统一决策循环
 

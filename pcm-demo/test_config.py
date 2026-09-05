@@ -22,7 +22,7 @@ class AgentConfigTest(unittest.TestCase):
                 "\n".join(
                     [
                         "PCM_AGENT_BASE_URL=http://localhost:8317/",
-                        "PCM_AGENT_API_KEY=agent-secret",
+                        "PCM_AGENT_AUTH_TOKEN=agent-secret",
                         "PCM_AGENT_MODEL_LOW=low-model",
                         "PCM_AGENT_MODEL_MEDIUM=medium-model",
                         "PCM_AGENT_MODEL_HIGH=high-model",
@@ -32,6 +32,8 @@ class AgentConfigTest(unittest.TestCase):
             config = AgentConfig.load(env_file)
 
         self.assertEqual(config.base_url, "http://localhost:8317")
+        self.assertEqual(config.auth_token.get_secret_value(), "agent-secret")
+        self.assertIn("auth_token=", repr(config))
         self.assertEqual(config.resolve_model("low"), "low-model")
         self.assertEqual(config.resolve_model("medium"), "medium-model")
         self.assertEqual(config.resolve_model("high"), "high-model")
@@ -44,7 +46,7 @@ class AgentConfigTest(unittest.TestCase):
                 "\n".join(
                     [
                         "PCM_AGENT_BASE_URL=http://from-file",
-                        "PCM_AGENT_API_KEY=file-secret",
+                        "PCM_AGENT_AUTH_TOKEN=file-secret",
                         "PCM_AGENT_MODEL_LOW=file-low",
                         "PCM_AGENT_MODEL_MEDIUM=file-medium",
                         "PCM_AGENT_MODEL_HIGH=file-high",
@@ -53,12 +55,26 @@ class AgentConfigTest(unittest.TestCase):
             )
             with patch.dict(
                 os.environ,
-                {"PCM_AGENT_MODEL_MEDIUM": "environment-medium"},
+                {"PCM_AGENT_MODEL_MEDIUM": "environment-medium", "PCM_AGENT_AUTH_TOKEN": "environment-secret"},
                 clear=False,
             ):
                 config = AgentConfig.load(env_file)
 
         self.assertEqual(config.resolve_model("medium"), "environment-medium")
+        self.assertEqual(config.auth_token.get_secret_value(), "environment-secret")
+
+    def test_legacy_api_key_does_not_replace_required_auth_token(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = self.write_env(directory, "\n".join([
+                "PCM_AGENT_BASE_URL=http://localhost:8317",
+                "PCM_AGENT_API_KEY=legacy-secret",
+                "PCM_AGENT_MODEL_LOW=low-model",
+                "PCM_AGENT_MODEL_MEDIUM=medium-model",
+                "PCM_AGENT_MODEL_HIGH=high-model",
+            ]))
+            with patch.dict(os.environ, {}, clear=True):
+                with self.assertRaisesRegex(ValueError, "PCM_AGENT_AUTH_TOKEN"):
+                    AgentConfig.load(env_file)
 
     def test_reports_all_missing_agent_configuration(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -67,7 +83,7 @@ class AgentConfigTest(unittest.TestCase):
                 os.environ,
                 {
                     "PCM_AGENT_BASE_URL": "",
-                    "PCM_AGENT_API_KEY": "",
+                    "PCM_AGENT_AUTH_TOKEN": "",
                     "PCM_AGENT_MODEL_LOW": "",
                     "PCM_AGENT_MODEL_MEDIUM": "",
                     "PCM_AGENT_MODEL_HIGH": "",
@@ -77,7 +93,7 @@ class AgentConfigTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "PCM_AGENT_BASE_URL") as raised:
                     AgentConfig.load(env_file)
 
-        self.assertIn("PCM_AGENT_API_KEY", str(raised.exception))
+        self.assertIn("PCM_AGENT_AUTH_TOKEN", str(raised.exception))
         self.assertIn("PCM_AGENT_MODEL_HIGH", str(raised.exception))
 
     def test_rejects_base_url_with_v1_suffix(self) -> None:
@@ -87,7 +103,7 @@ class AgentConfigTest(unittest.TestCase):
                 "\n".join(
                     [
                         "PCM_AGENT_BASE_URL=http://localhost:8317/v1",
-                        "PCM_AGENT_API_KEY=agent-secret",
+                        "PCM_AGENT_AUTH_TOKEN=agent-secret",
                         "PCM_AGENT_MODEL_LOW=low-model",
                         "PCM_AGENT_MODEL_MEDIUM=medium-model",
                         "PCM_AGENT_MODEL_HIGH=high-model",

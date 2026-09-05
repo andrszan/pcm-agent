@@ -124,11 +124,11 @@ Python 编排器负责确定性操作、两类会话衔接和最终步骤状态�
 
 固定 profile 为：第 2、5、7、9、10、11 步高模型 + `high`；第 6 步 bootstrap/theme、第 14、15 步中模型 + `high`；第 8、16、17 步中模型 + `medium`。第 15～17 步保持同一中模型。每次首次调用和 resume 都重新传入 model 与 effort；当前不为 Agent 步骤使用低模型，不配置 fallback model 或 `max_budget_usd`。
 
-正式步骤不传入 `permission_mode`、`tools`、`allowed_tools` 或 `disallowed_tools`，也不为每一步重新定义权限档位。项目 `.claude/settings.json` 及 Claude Code 默认设置加载语义是统一权威来源。若未来某一步确有覆盖项目配置的特殊理由，必须先在该步合同中说明并单独确认，不能沿用探针限制。
+正式步骤不传入 `permission_mode`、`tools`、`allowed_tools` 或 `disallowed_tools`，也不为每一步重新定义权限档位。公共 runner 固定 `setting_sources=["project", "local"]`，产品项目的 `.claude/settings.json`、`.claude/settings.local.json` 按 Claude Code 优先级生效；不加载用户级 settings 或用户级 Skills。若未来某一步确有覆盖项目配置的特殊理由，必须先在该步合同中说明并单独确认，不能沿用探针限制。
 
-第 2 步真实运行确认：Claude Code 对未信任的新路径会忽略项目 `permissions.allow`。PCM 采用默认 Claude Code 用户配置目录、认证、插件、Skill 和 session；在 `~/.claude.json` 中为已由第 1 步发布证据确认的最终产品路径写入 `hasTrustDialogAccepted: true`，使项目 settings 生效。该用户级配置共享所有 PCM run，符合单租户本地 Demo 的预期；不得把 run-local `CLAUDE_CONFIG_DIR` 作为默认隔离层。
+早期第 2 步真实运行确认：Claude Code 对未信任的新路径会忽略项目 `permissions.allow`；当时使用默认用户配置、认证和 session，并在 `~/.claude.json` 中为已由发布证据确认的产品路径写入 `hasTrustDialogAccepted: true`。该运行保留为历史，不作为现行认证隔离的证据。
 
-普通终端执行第 0→2 步时，默认用户级 Claude 配置、认证、项目 plugins/Skills 和 session 均可用；第 2 步完成后 run 目录不创建 `claude-config/`，同一 run 重跑第 2 步可以恢复原会话或幂等确认成功。
+现行认证与模型路由不读取用户级 settings，但 session 存储位置与既有 trust 处理保持不变，不创建 run-local `claude-config/` 或迁移历史。新代码与配置在重新启动 PCM 进程后生效，仍可恢复原会话。
 
 项目 Skills 来自工作区 `.claude/skills/` 和项目锁定 plugins。核心流程 Skills 多数设置了 `disable-model-invocation: true`，因此步骤脚本应显式调用目标 Skill，不能只依赖模型自主选择。探针 A 已确认 `/project-intake` 可以显式调用，且目标 Skill 同时出现在 init 消息的 `skills` 和 `slash_commands` 中。
 
@@ -136,7 +136,7 @@ Python 编排器负责确定性操作、两类会话衔接和最终步骤状态�
 
 ### 4. AI-compatible 配置与调用
 
-`LLMConfig` 从 `pcm-demo/.env` 加载 `LLM_BASE_URL`、`LLM_API_KEY` 和 `LLM_MODEL`；`AgentConfig` 独立加载 `PCM_AGENT_BASE_URL`、`PCM_AGENT_API_KEY` 与低、中、高三级真实模型名，同名进程环境变量优先。实际 `.env` 由 Git 忽略，配置对象的 `repr` 不包含凭据；`.env.example` 只保存公开占位说明。Python 将 Agent 配置显式转换为 Claude Code 子进程的 `ANTHROPIC_BASE_URL`、`ANTHROPIC_API_KEY`，并同步子代理默认模型；两类模型配置不混用或相互回退。
+`LLMConfig` 从 `pcm-demo/.env` 加载 `LLM_BASE_URL`、`LLM_API_KEY` 和 `LLM_MODEL`，其认证不变；`AgentConfig` 独立加载 `PCM_AGENT_BASE_URL`、`PCM_AGENT_AUTH_TOKEN` 与低、中、高三级真实模型名，同名进程环境变量优先。实际 `.env` 由 Git 忽略，配置对象的 `repr` 不包含凭据；`.env.example` 只保存公开占位说明。Python 将 Agent 配置转换为 `ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`，置空继承的 API Key、OAuth、云 Provider 选择开关和模型选择/别名/显示配置，并同步子代理默认模型。SDK 只加载 `project/local` settings，不加载用户级 settings；项目设置仍遵循 Claude Code 优先级，不在产品设置中另配 PCM 网关、认证或模型路由。两类模型配置不混用或相互回退。
 
 SDK 不自动读取 Demo 的 `.env`。配置模块必须在创建 Agent SDK 或 OpenAI-compatible 客户端前显式加载配置，且不得把密钥写入状态或日志。探针 C 运行时发现宿主环境配置了 SOCKS 代理，但当前 OpenAI SDK 环境没有 SOCKS 依赖；探针通过 SDK 的 `DefaultAsyncHttpxClient(trust_env=False)` 明确禁用环境代理，未修改宿主代理配置，也未增加无关依赖。
 
@@ -1287,6 +1287,7 @@ Git 子进程统一过滤 `GIT_*`。仓库按非 root 原顺序、root 最后的
 
 当前测试和真实验证覆盖：
 
+- Bearer 认证与模型隔离：配置、公共 runner 和脱敏定向 56 项、当前工作树全量 404 项通过；真实 SDK 会话在存在冲突父环境时，三档分别向配置中转发送 `gpt-5.6-luna`、`gpt-5.6-terra`、`gpt-5.6-sol`，均携带 PCM Bearer token、返回 `200` 和预期回复，无 `unrecognized_model`；低档同 session resume 通过，项目 Skill 与 slash command 仍加载。错误 token 负对照观测到 `401` 后主动取消；核验未只依赖 init 模型名。未重跑完整产品开发流程，未修改历史 run；
 - 配置和敏感信息不泄露；
 - JSON、Markdown、状态和 SHA-256 读写；
 - 第 0～8、12～18 步状态转换；
@@ -1373,7 +1374,7 @@ LLM_BASE_URL=
 LLM_API_KEY=
 LLM_MODEL=
 PCM_AGENT_BASE_URL=
-PCM_AGENT_API_KEY=
+PCM_AGENT_AUTH_TOKEN=
 PCM_AGENT_MODEL_LOW=
 PCM_AGENT_MODEL_MEDIUM=
 PCM_AGENT_MODEL_HIGH=
@@ -1387,14 +1388,14 @@ PCM_DEV_RESOURCE_LIST=
 配置职责：
 
 - `LLM_*` 用于 OpenAI-compatible Responses API，包括 AI-compatible 决策调用和第 12 步 Backlog 静态字段结构化提取；
-- `PCM_AGENT_BASE_URL`、`PCM_AGENT_API_KEY` 用于 Claude Agent SDK 的 Anthropic Messages 网关和受保护认证；Base URL 不包含 `/v1`；
+- `PCM_AGENT_BASE_URL`、`PCM_AGENT_AUTH_TOKEN` 用于 Claude Agent SDK 的 Anthropic Messages 网关和受保护 Bearer 认证；Base URL 不包含 `/v1`；旧 `PCM_AGENT_API_KEY` 的有效值需迁移到新键，不保留旧键读取兼容；
 - `PCM_AGENT_MODEL_LOW`、`PCM_AGENT_MODEL_MEDIUM`、`PCM_AGENT_MODEL_HIGH` 将代码中的低、中、高档位映射为网关真实模型名；
 - `PCM_WORKSPACE_ROOT` 是独立产品项目父目录；
 - `PCM_TEMPLATE_REPOSITORY` 只用于第 1 步开发管理模板；
 - `PCM_AGENT_WORKSPACE_ENV_FILE` 只用于第 1 步安装 AI Agent 工作区固定工具的受保护根 `.env`；Python 以 `O_NOFOLLOW` 和同一文件描述符读取原始字节，目标从创建时即为 `0600` 并核验 Git 忽略，不解析、导出、记录或传给第 5 步；该 PCM 控制键从 Claude Agent SDK 子进程环境移除；
 - `PCM_TEMPLATE_CATALOG` 只用于第 3 步基础工程候选；
 - `PCM_DEV_RESOURCE_LIST` 只用于第 5 步可信开发资源清单，必须是可读普通文件的绝对路径；Python 不读取资源内容，Agent 可按项目规则原样使用；
-- Claude Agent SDK 每次调用显式使用 `AgentConfig` 解析后的网关、API Key、模型和 effort；冲突的宿主认证被压住，`CLAUDE_CODE_SUBAGENT_MODEL` 与主模型同步，不再依赖既有登录态选择模型或网关。
+- Claude Agent SDK 每次调用显式使用 `AgentConfig` 的网关、Bearer token、模型和 effort，仅加载 `project/local` settings，置空继承的冲突认证与模型路由配置。会话级 `modelOverrides` 将 `claude-haiku-4-5-20251001`、`claude-sonnet-4-6`、`claude-opus-4-8` 分别注册到 LOW、MEDIUM、HIGH 实际模型 ID；主模型仍直接传实际 ID，`CLAUDE_CODE_SUBAGENT_MODEL` 仍同步为主模型。映射不含凭据、不新增配置文件，首次和 resume 一致；不改变公共循环、业务步骤或状态 schema。
 
 优先级：
 

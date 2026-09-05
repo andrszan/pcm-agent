@@ -668,7 +668,7 @@ LLM_BASE_URL=
 LLM_API_KEY=
 LLM_MODEL=
 PCM_AGENT_BASE_URL=
-PCM_AGENT_API_KEY=
+PCM_AGENT_AUTH_TOKEN=
 PCM_AGENT_MODEL_LOW=
 PCM_AGENT_MODEL_MEDIUM=
 PCM_AGENT_MODEL_HIGH=
@@ -682,14 +682,14 @@ PCM_DEV_RESOURCE_LIST=
 职责分工：
 
 - `LLM_*`：AI-compatible Responses API；
-- `PCM_AGENT_BASE_URL`、`PCM_AGENT_API_KEY`：Claude Agent SDK 使用的 Anthropic Messages 网关和受保护 API Key；Base URL 是紧邻 `/v1/messages` 之前的 API 根，不包含 `/v1`；
+- `PCM_AGENT_BASE_URL`、`PCM_AGENT_AUTH_TOKEN`：Claude Agent SDK 使用的 Anthropic Messages 网关和受保护 Bearer token；Base URL 是紧邻 `/v1/messages` 之前的 API 根，不包含 `/v1`；旧 `PCM_AGENT_API_KEY` 的有效值需迁移到新键，旧键不再作为认证输入接受；
 - `PCM_AGENT_MODEL_LOW`、`PCM_AGENT_MODEL_MEDIUM`、`PCM_AGENT_MODEL_HIGH`：代码中低、中、高语义档位对应的网关真实模型名；
 - `PCM_WORKSPACE_ROOT`：所有产品项目的独立父目录；
 - `PCM_TEMPLATE_REPOSITORY`：第 1 步发布开发管理模板；
 - `PCM_AGENT_WORKSPACE_ENV_FILE`：第 1 步使用的 AI Agent 工作区受保护工具配置源绝对路径；Python 只通过 `O_NOFOLLOW` 文件描述符读取原始字节并写为新工作区根 `.env`、从创建时即限制为 `0600`、核验 Git 忽略，不解析或导出变量，不进入步骤 outputs、目标产品配置或第 5 步资源清单；该 PCM 控制键从 Claude Agent SDK 子进程环境移除，Agent 只读取已安装的工作区根 `.env`；
 - `PCM_TEMPLATE_CATALOG`：第 3 步基础工程候选目录；
 - `PCM_DEV_RESOURCE_LIST`：第 5 步可信开发资源清单的绝对路径；Python 只核验路径并交给 Agent，不解析资源内容；完整 Agent/决策交互保存在被 Git 忽略的 run 历史中；
-- Claude Agent SDK 不再依赖宿主默认网关或认证：Python 将 `PCM_AGENT_BASE_URL`、`PCM_AGENT_API_KEY` 转为 `ANTHROPIC_BASE_URL`、`ANTHROPIC_API_KEY`，清除冲突认证，并把 `CLAUDE_CODE_SUBAGENT_MODEL` 同步为当前主模型；这些配置与 `LLM_*` 保持独立；
+- Claude Agent SDK 使用 `setting_sources=["project", "local"]` 保留产品项目设置、权限、Skills 与显式 Plugin，不加载用户级 settings；Python 将网关与 token 注入 `ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`，置空继承的 API Key、OAuth、云 Provider 开关及模型选择/别名/显示配置。项目设置仍遵循 Claude Code 优先级，不应另配 PCM 网关、认证或模型路由。每次首次调用和 resume 都通过非秘密会话级 `modelOverrides`，将 `claude-haiku-4-5-20251001`、`claude-sonnet-4-6`、`claude-opus-4-8` 分别注册到 LOW、MEDIUM、HIGH 实际模型 ID；主调用仍直接使用实际 ID，`CLAUDE_CODE_SUBAGENT_MODEL` 仍同步为主模型。不增加显示名配置或自动追加 `[1m]`，不迁移 session 目录、历史 conversation 或状态；与 `LLM_*` 的职责保持独立；
 
 优先级：
 
