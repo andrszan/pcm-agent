@@ -3,10 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import math
-import os
 import signal
 import sys
-import tempfile
 import time
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -28,7 +26,6 @@ STEP_NAMES = (
 STATUSES = {"success", "blocked", "failed"}
 BEIJING = timezone(timedelta(hours=8))
 MISSING_AGENT_NOTE = "历史 Claude Code 执行区间未记录；Agent 累计仅含已记录区间。"
-LEGACY_NOTE = "旧版只记录步骤命令耗时，历史 Claude Code 执行区间未记录；Agent 累计仅含新记录区间。"
 MISSING_START_NOTE = "步骤早期起点未记录，无法计算完整总历时。"
 MISSING_END_NOTE = "步骤此前已成功，但首次完成时间未记录，无法计算完整总历时。"
 OPEN_CALL_NOTE = "存在未闭合的历史 Agent 区间，无法确定其中断时刻；Agent 累计仅含已知耗时。"
@@ -121,53 +118,15 @@ def _update_totals(record: dict[str, Any]) -> None:
         record["wall_elapsed_seconds"] = None
 
 
-def _legacy_timings(data: dict[str, Any]) -> dict[str, Any]:
-    records: dict[tuple[int, str | None], dict[str, Any]] = {}
-    for entry in data["executions"]:
-        step = entry["step"]
-        if type(step) is not int or step not in range(len(STEP_NAMES)):
-            raise ValueError("旧计时步骤编号无效")
-        requirement_id = entry["requirement_id"]
-        if requirement_id is not None and not is_valid_requirement_id(requirement_id):
-            raise ValueError("旧计时需求 ID 无效")
-        key = (step, requirement_id)
-        reused = entry["reused_success"]
-        missing = entry["history_missing"]
-        if type(reused) is not bool or type(missing) is not bool or entry["status"] not in STATUSES | {None}:
-            raise ValueError("旧计时记录不符合约定")
-        _duration(entry["elapsed_seconds"])
-        start, end = _beijing(entry["started_at"]), _beijing(entry["finished_at"])
-        if key not in records:
-            record = _new_step(step, requirement_id, None if reused or missing else start)
-            record["agent_elapsed_seconds"] = None
-            _note(record, LEGACY_NOTE)
-            if record["started_at"] is None:
-                _note(record, MISSING_START_NOTE)
-            records[key] = record
-        record = records[key]
-        if record["status"] == "success":
-            continue
-        record["status"] = entry["status"]
-        if entry["status"] == "success":
-            record["finished_at"] = None if reused else end
-            if record["finished_at"] is None:
-                _note(record, MISSING_END_NOTE)
-        _update_totals(record)
-    return {"schema_version": 2, "steps": list(records.values())}
-
-
-def _read_timings(run_dir: Path) -> tuple[dict[str, Any], bytes | None]:
+def _read_timings(run_dir: Path) -> dict[str, Any]:
     path = run_dir / "timings.json"
     if path.is_symlink():
         raise ValueError("计时文件不能是符号链接")
     if not path.exists():
-        return {"schema_version": 2, "steps": []}, None
-    raw = path.read_bytes()
-    data = json.loads(raw)
+        return {"schema_version": 2, "steps": []}
+    data = json.loads(path.read_bytes())
     if not isinstance(data, dict):
         raise ValueError("计时文件必须是 JSON 对象")
-    if data.get("schema_version") == 1 and isinstance(data.get("executions"), list):
-        return _legacy_timings(data), raw
     if data.get("schema_version") != 2 or not isinstance(data.get("steps"), list):
         raise ValueError("计时文件版本或步骤列表无效")
     for record in data["steps"]:
@@ -194,7 +153,7 @@ def _read_timings(run_dir: Path) -> tuple[dict[str, Any], bytes | None]:
                 raise ValueError("Agent 执行区间格式无效")
             _duration(call["elapsed_seconds"])
         _update_totals(record)
-    return data, None
+    return data
 
 
 def _read_result(run_dir: Path, step: int, requirement_id: str | None) -> dict[str, Any] | None:
@@ -210,33 +169,11 @@ def _read_result(run_dir: Path, step: int, requirement_id: str | None) -> dict[s
     return data if isinstance(data, dict) else None
 
 
-def _archive_legacy(run_dir: Path, raw: bytes) -> None:
-    archive = run_dir / "timings.v1.json"
-    descriptor, name = tempfile.mkstemp(prefix=".timings.v1.", suffix=".tmp", dir=run_dir)
-    temporary = Path(name)
-    try:
-        with os.fdopen(descriptor, "wb") as output:
-            output.write(raw)
-        try:
-            os.link(temporary, archive)
-        except FileExistsError:
-            if archive.is_symlink() or archive.read_bytes() != raw:
-                raise ValueError("已有旧计时归档与源记录不一致") from None
-    finally:
-        preserve_error = sys.exc_info()[0] is not None
-        try:
-            temporary.unlink(missing_ok=True)
-        except OSError:
-            if not preserve_error:
-                raise
-
-
 class StepTiming:
     def __init__(self) -> None:
         self.run_dir: Path | None = None
         self.record: dict[str, Any] | None = None
         self.history: dict[str, Any] | None = None
-        self.legacy_bytes: bytes | None = None
         self.started_at: str | None = None
         self.step: int | None = None
         self.attempts = 0
@@ -291,7 +228,7 @@ class StepTiming:
             if not run_dir.is_dir():
                 return
             self.run_dir = run_dir
-            self.history, self.legacy_bytes = _read_timings(run_dir)
+            self.history = _read_timings(run_dir)
             state = read_state(run_dir) if existing else {}
             requirement_id = state.get("active_requirement") if self.step >= 13 else None
             if not is_valid_requirement_id(requirement_id):
@@ -435,10 +372,7 @@ class StepTiming:
         try:
             for record in self.history["steps"]:
                 _update_totals(record)
-            if self.legacy_bytes is not None:
-                _archive_legacy(self.run_dir, self.legacy_bytes)
             write_json(self.run_dir / "timings.json", self.history)
-            self.legacy_bytes = None
         except Exception:  # noqa: BLE001 - 计时持久化不可改变业务退出结果。
             self._disable()
 
@@ -485,7 +419,7 @@ def print_timing_summary(run_dir: Path) -> None:
     try:
         if not run_dir.is_dir():
             return
-        data, _ = _read_timings(run_dir)
+        data = _read_timings(run_dir)
         records = data["steps"]
         known = {(record["step"], record["requirement_id"]) for record in records}
         paths = list((run_dir / "steps").glob("*.json"))

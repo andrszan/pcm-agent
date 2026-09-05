@@ -119,28 +119,6 @@ def make_step_record(
     }
 
 
-def make_legacy_record(
-    step: int,
-    status: str,
-    elapsed_seconds: float,
-    *,
-    requirement_id: str | None = None,
-) -> dict[str, object]:
-    return {
-        "step": step,
-        "name": timing_module.STEP_NAMES[step],
-        "requirement_id": requirement_id,
-        "started_at": "2026-01-01T00:00:00+00:00",
-        "finished_at": "2026-01-01T00:00:10+00:00",
-        "elapsed_seconds": elapsed_seconds,
-        "attempt_count": 1,
-        "status": status,
-        "applicable": True,
-        "reused_success": False,
-        "history_missing": False,
-    }
-
-
 def fake_now(clock: list[float]) -> str:
     start = datetime(2026, 1, 1, 9, 0, 0, tzinfo=timing_module.BEIJING)
     return (start + timedelta(seconds=clock[0])).isoformat()
@@ -708,45 +686,6 @@ class StepTimingIntegrationTests(unittest.TestCase):
             self.assertNotIn("timing", json.dumps(state, ensure_ascii=False).lower())
             self.assertNotIn("timing", json.dumps(result, ensure_ascii=False).lower())
 
-    def test_v1_is_read_only_until_write_then_archived_without_agent_projection(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            run_dir = Path(directory) / "run"
-            run_dir.mkdir()
-            write_json(
-                run_dir / "state.json",
-                {"status": "success", "current_step": 0},
-            )
-            raw = json.dumps(
-                {
-                    "schema_version": 1,
-                    "executions": [make_legacy_record(0, "failed", 91.5)],
-                },
-                ensure_ascii=False,
-                indent=2,
-            ).encode("utf-8")
-            path = run_dir / "timings.json"
-            path.write_bytes(raw)
-
-            with contextlib.redirect_stderr(io.StringIO()):
-                timing_module.print_timing_summary(run_dir)
-            self.assertEqual(path.read_bytes(), raw)
-            self.assertFalse((run_dir / "timings.v1.json").exists())
-
-            timing = timing_module.StepTiming()
-            with contextlib.redirect_stderr(io.StringIO()):
-                timing.begin_attempt(0)
-                timing.bind_run(run_dir, existing=True)
-
-            self.assertEqual((run_dir / "timings.v1.json").read_bytes(), raw)
-            converted = json.loads(path.read_text(encoding="utf-8"))
-            self.assertEqual(converted["schema_version"], 2)
-            record = converted["steps"][0]
-            self.assertIsNone(record["agent_elapsed_seconds"])
-            self.assertEqual(record["agent_executions"], [])
-            self.assertNotEqual(record["agent_elapsed_seconds"], 91.5)
-            self.assertTrue(record["started_at"].endswith("+08:00"))
-            self.assertIn("旧版只记录步骤命令耗时", record["note"])
-
     def _start_signal_child(self, run_dir: Path) -> subprocess.Popen[str]:
         child_code = (
             "import asyncio, signal, sys\n"
@@ -900,6 +839,27 @@ class StepTimingIntegrationTests(unittest.TestCase):
             self.assertIsNone(recovered_call["elapsed_seconds"])
             self.assertEqual(recovered_call["end_reason"], "unknown")
             self.assertIn("未闭合", recovered["note"])
+
+    def test_old_format_is_not_rewritten_and_business_exit_is_unchanged(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            run_dir = root / "runs" / "old-format"
+            run_dir.mkdir(parents=True)
+            path = run_dir / "timings.json"
+            raw = b'{"schema_version":1,"executions":[{"opaque":"keep"}]}'
+            path.write_bytes(raw)
+            stderr = io.StringIO()
+            with (
+                patch.object(run_step, "DEMO_ROOT", root),
+                patch.object(run_step, "parse_args", return_value=Namespace(step=0, run_id="old-format")),
+                patch.object(run_step, "run_step_zero", return_value=(run_dir, make_result(0, "success"))),
+                contextlib.redirect_stdout(io.StringIO()),
+                contextlib.redirect_stderr(stderr),
+            ):
+                self.assertEqual(run_step.retrying_main(), 0)
+            self.assertEqual(path.read_bytes(), raw)
+            self.assertFalse((run_dir / "timings.v1.json").exists())
+            self.assertIn("计时记录不可读写", stderr.getvalue())
 
     def test_damaged_timing_file_does_not_change_success_exit_code(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

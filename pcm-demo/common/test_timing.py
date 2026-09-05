@@ -25,17 +25,6 @@ def agent_result(**changes):
     )
 
 
-def legacy_execution(**changes):
-    return {
-        "step": 15, "name": "实现与验证", "requirement_id": "BR-001",
-        "started_at": "2026-09-05T06:00:00+00:00",
-        "finished_at": "2026-09-05T06:10:00+00:00",
-        "elapsed_seconds": 600, "attempt_count": 1, "status": "success",
-        "applicable": True, "reused_success": False, "history_missing": False,
-        **changes,
-    }
-
-
 class TimingTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -218,57 +207,6 @@ class TimingTests(unittest.TestCase):
         self.assertIsNotNone(entry["wall_elapsed_seconds"])
         self.assertIsNotNone(measurement)
 
-    def test_legacy_projection_is_read_only_and_never_converts_command_duration_to_agent(self):
-        path = self.run_dir / "timings.json"
-        write_json(path, {"schema_version": 1, "executions": [legacy_execution()]})
-        before = path.read_bytes()
-        data, legacy = timing._read_timings(self.run_dir)
-        entry, = data["steps"]
-        self.assertEqual(legacy, before)
-        self.assertEqual(path.read_bytes(), before)
-        self.assertFalse((self.run_dir / "timings.v1.json").exists())
-        self.assertEqual(entry["started_at"], "2026-09-05T14:00:00+08:00")
-        self.assertEqual(entry["finished_at"], "2026-09-05T14:10:00+08:00")
-        self.assertEqual(entry["wall_elapsed_seconds"], 600)
-        self.assertIsNone(entry["agent_elapsed_seconds"])
-        self.assertEqual(entry["agent_executions"], [])
-        self.assertIn("旧版", entry["note"])
-        self.assertFalse({"applicable", "reused_success", "history_missing"} & entry.keys())
-
-    def test_upgrade_archives_original_bytes_only_when_new_writer_binds(self):
-        path = self.run_dir / "timings.json"
-        write_json(path, {"schema_version": 1, "executions": [legacy_execution()]})
-        before = path.read_bytes()
-        clock = self.start(16)
-        self.complete(clock)
-        self.assertEqual((self.run_dir / "timings.v1.json").read_bytes(), before)
-        self.assertEqual(self.data()["schema_version"], 2)
-        self.assertEqual(len(self.data()["steps"]), 2)
-        self.assertIsNone(self.data()["steps"][0]["agent_elapsed_seconds"])
-
-    def test_conflicting_legacy_archive_does_not_overwrite_either_file(self):
-        path = self.run_dir / "timings.json"
-        write_json(path, {"schema_version": 1, "executions": [legacy_execution()]})
-        before = path.read_bytes()
-        archive = self.run_dir / "timings.v1.json"
-        archive.write_bytes(b"keep this archive")
-        clock = self.start(16)
-        self.complete(clock)
-        self.assertEqual(path.read_bytes(), before)
-        self.assertEqual(archive.read_bytes(), b"keep this archive")
-        self.assertIn("警告", self.stderr.getvalue())
-
-    def test_legacy_resume_with_missing_agent_end_can_still_have_known_wall_span(self):
-        entries = [
-            legacy_execution(status=None, finished_at=None, elapsed_seconds=None),
-            legacy_execution(started_at="2026-09-05T07:00:00+00:00", finished_at="2026-09-05T07:10:00+00:00"),
-        ]
-        write_json(self.run_dir / "timings.json", {"schema_version": 1, "executions": entries})
-        data, _ = timing._read_timings(self.run_dir)
-        entry, = data["steps"]
-        self.assertEqual(entry["wall_elapsed_seconds"], 4200)
-        self.assertIsNone(entry["agent_elapsed_seconds"])
-
     def test_previously_successful_step_without_timing_does_not_invent_completion(self):
         target = self.run_dir / "steps" / "requirements" / "BR-001" / "15.json"
         target.parent.mkdir(parents=True)
@@ -317,16 +255,6 @@ class TimingTests(unittest.TestCase):
             self.complete(clock)
         self.assertFalse(path.exists())
 
-    def test_summary_keeps_historical_data_read_only_and_shows_both_metrics(self):
-        path = self.run_dir / "timings.json"
-        write_json(path, {"schema_version": 1, "executions": [legacy_execution()]})
-        before = path.read_bytes()
-        timing.print_timing_summary(self.run_dir)
-        self.assertEqual(path.read_bytes(), before)
-        self.assertIn("Claude Code 累计 未记录", self.stderr.getvalue())
-        self.assertIn("总历时 10 分", self.stderr.getvalue())
-        self.assertFalse((self.run_dir / "timings.v1.json").exists())
-
     def test_agent_duration_excludes_timing_writes_and_result_classification(self):
         now = [0.0]
         with patch.object(timing.time, "monotonic", side_effect=lambda: now[0]):
@@ -365,37 +293,6 @@ class TimingTests(unittest.TestCase):
         self.complete(resumed)
         self.assertEqual(self.data()["steps"][0], before)
 
-    def test_failed_archive_write_never_publishes_partial_final_file(self):
-        path = self.run_dir / "timings.json"
-        write_json(path, {"schema_version": 1, "executions": [legacy_execution()]})
-        before = path.read_bytes()
-        fdopen = timing.os.fdopen
-        for failure in (OSError("写入中断"), KeyboardInterrupt()):
-            with self.subTest(error=type(failure).__name__):
-                @contextlib.contextmanager
-                def partial_writer(*args, **kwargs):
-                    with fdopen(*args, **kwargs) as output:
-                        def write(raw):
-                            output.write(raw[:3])
-                            output.flush()
-                            raise failure
-                        yield SimpleNamespace(write=write)
-
-                with patch.object(timing.os, "fdopen", side_effect=partial_writer):
-                    if isinstance(failure, KeyboardInterrupt):
-                        with self.assertRaises(KeyboardInterrupt):
-                            self.start(16)
-                    else:
-                        clock = self.start(16)
-                        self.complete(clock)
-                self.assertEqual(path.read_bytes(), before)
-                self.assertFalse((self.run_dir / "timings.v1.json").exists())
-                self.assertEqual(list(self.run_dir.glob(".timings.v1.*.tmp")), [])
-        recovered = self.start(16)
-        self.complete(recovered)
-        self.assertEqual((self.run_dir / "timings.v1.json").read_bytes(), before)
-        self.assertEqual(self.data()["schema_version"], 2)
-
     def test_new_selection_after_unassigned_failure_has_its_own_known_start(self):
         write_json(self.run_dir / "state.json", {
             "status": "success", "current_step": 13, "active_requirement": None,
@@ -424,35 +321,6 @@ class TimingTests(unittest.TestCase):
         self.assertEqual(selected["wall_elapsed_seconds"], 60)
         self.assertNotIn("note", selected)
 
-    def test_archive_cleanup_failure_does_not_replace_cancellation(self):
-        path = self.run_dir / "timings.json"
-        write_json(path, {"schema_version": 1, "executions": [legacy_execution()]})
-        before = path.read_bytes()
-        fdopen = timing.os.fdopen
-        for failure in (KeyboardInterrupt(), SystemExit(143)):
-            with self.subTest(error=type(failure).__name__):
-                @contextlib.contextmanager
-                def interrupted_writer(*args, **kwargs):
-                    with fdopen(*args, **kwargs) as output:
-                        def write(raw):
-                            output.write(raw[:3])
-                            output.flush()
-                            raise failure
-                        yield SimpleNamespace(write=write)
-
-                with (
-                    patch.object(timing.os, "fdopen", side_effect=interrupted_writer),
-                    patch.object(Path, "unlink", side_effect=OSError("清理失败")),
-                    self.assertRaises(type(failure)) as caught,
-                ):
-                    self.start(16)
-                self.assertIs(caught.exception, failure)
-                self.assertEqual(path.read_bytes(), before)
-                self.assertFalse((self.run_dir / "timings.v1.json").exists())
-        recovered = self.start(16)
-        self.complete(recovered)
-        self.assertEqual((self.run_dir / "timings.v1.json").read_bytes(), before)
-
     def test_atomic_json_cleanup_failure_does_not_replace_cancellation(self):
         path = self.run_dir / "original.json"
         path.write_bytes(b"original")
@@ -466,6 +334,52 @@ class TimingTests(unittest.TestCase):
                 files.write_json(path, {"value": "new"})
             self.assertIs(caught.exception, failure)
             self.assertEqual(path.read_bytes(), b"original")
+
+    def test_unsupported_formats_are_rejected_without_conversion_or_deletion(self):
+        path = self.run_dir / "timings.json"
+        for version in (0, 1, 3):
+            with self.subTest(version=version):
+                raw = json.dumps({"schema_version": version, "executions": [{"opaque": "原样保留"}]}).encode()
+                path.write_bytes(raw)
+                with self.assertRaisesRegex(ValueError, "版本或步骤列表无效"):
+                    timing._read_timings(self.run_dir)
+                clock = self.start()
+                self.complete(clock)
+                timing.print_timing_summary(self.run_dir)
+                self.assertEqual(path.read_bytes(), raw)
+                self.assertFalse((self.run_dir / "timings.v1.json").exists())
+        self.assertIn("警告", self.stderr.getvalue())
+        path.unlink()
+        clock = self.start()
+        self.complete(clock)
+        self.assertEqual(self.data()["schema_version"], 2)
+
+    def test_nonconflicting_old_files_are_left_untouched(self):
+        old_run = self.run_dir / "other-run"
+        old_run.mkdir()
+        old_file = old_run / "timings.json"
+        raw = b'{"schema_version":1,"executions":[]}'
+        old_file.write_bytes(raw)
+        old_archive = self.run_dir / "timings.v1.json"
+        old_archive.write_bytes(b"unrelated original bytes")
+        clock = self.start()
+        self.complete(clock)
+        self.assertEqual(old_file.read_bytes(), raw)
+        self.assertEqual(old_archive.read_bytes(), b"unrelated original bytes")
+        self.assertEqual(self.data()["schema_version"], 2)
+
+    def test_current_summary_is_read_only_and_keeps_both_metrics(self):
+        clock = self.start()
+        self.complete(clock)
+        path = self.run_dir / "timings.json"
+        before = path.read_bytes()
+        current = timing._read_timings(self.run_dir)
+        self.assertIsInstance(current, dict)
+        timing.print_timing_summary(self.run_dir)
+        self.assertEqual(path.read_bytes(), before)
+        self.assertIn("Claude Code 累计", self.stderr.getvalue())
+        self.assertIn("总历时", self.stderr.getvalue())
+        self.assertFalse((self.run_dir / "timings.v1.json").exists())
 
     def test_duration_format_and_overflow_rejection(self):
         self.assertEqual(timing.format_duration(None), "未记录")

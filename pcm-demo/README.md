@@ -144,9 +144,9 @@ uv run python run_step.py --step <0-18> --run-id <run-id>
 - 第 0～12 步按项目、第 13～18 步按需求 ID 和步骤编号区分。新记录不复制适用性和复用布尔值；有历史缺口时才出现步骤级 `note`。
 - 默认 SIGINT/SIGTERM 记录可观测的信号接收时刻并保持取消退出；SIGKILL、断电等没有结束证据时保持未知，不用恢复时间或文件 mtime 补算。
 
-数据仍位于 `runs/<run-id>/timings.json`，采用 v2 的 `steps` 数组，所有新时间戳为北京时间 `+08:00`。旧 v1 文件只读查看时不变，后续新进程首次写入时先原样归档为 `timings.v1.json`，再保存新结构；旧命令耗时不会被转换成 Agent 耗时。已运行进程不热加载，不为了计时中断它。计时不可用只警告，不改变业务 result/state、三态、模型 prompt、重试或退出码。
+数据仍位于 `runs/<run-id>/timings.json`，程序只读取和写入 `schema_version: 2` 的 `steps` 结构，所有时间戳为北京时间 `+08:00`。程序不转换旧计时文件，不自动迁移、归档或删除旧数据；不在当前 run 计时读写路径上的旧数据原样保留。若旧格式 `timings.json` 实际阻碍所需新版记录，先确认没有旧进程正在写入该 run，再只移除这一份冲突文件，不动 `state.json`、步骤 result 或 `conversations/`。计时不可用只警告，不改变业务 result/state、三态、模型 prompt、重试或退出码。
 
-**完整字段字典、结束原因、可空值、读取示例和旧版对照见 [计时记录与字段说明](docs/timing.md)。**
+**完整字段字典、结束原因、可空值、读取示例和存储策略见 [计时记录与字段说明](docs/timing.md)。**
 
 ## Run 目录与产物
 
@@ -156,7 +156,6 @@ runs/
 └── <run-id>/
     ├── state.json
     ├── timings.json
-    ├── timings.v1.json       # 仅从 v1 升级时创建的原始归档
     ├── steps/
     │   ├── 00.json
     │   ├── ...
@@ -179,8 +178,7 @@ runs/
 - `steps/requirements/<ID>/XX.json`：第 13～18 步按需求隔离的业务结果；
 - `conversations/*.json`：Claude Agent 回复与 AI-compatible 负责人决定组成的完整编排历史；
 - `logs/*.json`：结构化故障诊断快照，不是普通执行流水。
-- `timings.json`：v2 按步骤保存 Claude Code 累计执行时间、步骤总历时及每次主调用区间；北京时间起止和中断时刻，不作为业务恢复真源。字段定义见 [计时说明](docs/timing.md)。
-- `timings.v1.json`：从 v1 升级时保存的原始字节，保留旧命令级记录，不覆盖已有不同归档。
+- `timings.json`：`schema_version: 2` 按步骤保存 Claude Code 累计执行时间、步骤总历时及每次主调用区间；北京时间起止和中断时刻，不作为业务恢复真源。字段定义见 [计时说明](docs/timing.md)。
 
 ### `logs/*.json` 命名
 

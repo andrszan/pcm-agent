@@ -741,7 +741,7 @@ python run_all.py --run-id <run-id> --from-node phase_2:audit
 
 `agent_elapsed_seconds` 累计各次主调用的已知耗时，包括调用内的工具和子代理等待，但排除负责人决策、调用外的 Python 核验、自动重试退避和停机等待；`wall_elapsed_seconds` 是整个步骤首次开始到首次成功完成的时间跨度，包含上述等待。第 0～12 步按项目、第 13～18 步按需求区分；每次 continue、修复、通道重试或恢复的真实 Agent 调用都单独保留起止、中断时间与结束原因。成功复用不新增虚假调用区间，不重置首次完成数据；新计时结构不复制 `applicable`、`reused_success`、`history_missing`，只在有缺口时保留步骤级提示。
 
-v2 记录独立位于 Git 忽略的 `runs/<run-id>/timings.json`，所有时间戳为北京时间 `+08:00`。旧 v1 文件只读投影不改写，后续新进程首次写入时将原始字节保存在 `timings.v1.json` 后升级；旧命令耗时不能转换成 Agent 耗时。不可捕获的中断时刻保持未知，不用恢复时间、文件 mtime 或 run ID 补造。计时失败只警告，不改变业务状态和退出码；不为计时中断已有进程。详细字段、结束原因和示例见 [计时记录与字段说明](../../pcm-demo/docs/timing.md)。
+`schema_version: 2` 记录独立位于 Git 忽略的 `runs/<run-id>/timings.json`，程序只读取和写入这一格式，所有时间戳为北京时间 `+08:00`。程序不转换旧计时文件，不自动迁移、归档或删除旧数据；不在当前 run 计时读写路径上的旧数据原样保留。若旧格式 `timings.json` 实际阻碍所需新版记录，必须先确认没有旧进程正在写入该 run，再精确移除这一份冲突文件，不批量清理，也不动 `state.json`、步骤 result 或 `conversations/`。不可捕获的中断时刻保持未知，不用恢复时间、文件 mtime 或 run ID 补造。计时失败只警告，不改变业务状态和退出码。详细字段、结束原因、示例和存储策略见 [计时记录与字段说明](../../pcm-demo/docs/timing.md)。
 
 ## 十二、后续实现顺序
 
