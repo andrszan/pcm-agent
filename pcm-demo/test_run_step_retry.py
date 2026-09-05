@@ -7,7 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 
 DEMO_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(DEMO_ROOT))
@@ -16,15 +16,25 @@ import run_step
 
 
 class RunStepRetryTests(unittest.TestCase):
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        for patcher in (
+            patch.object(run_step, "DEMO_ROOT", Path(temporary.name)),
+            patch.object(run_step, "parse_args", return_value=Mock(step=0, run_id="test-run")),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
     def test_success_does_not_retry(self) -> None:
         runner = Mock(return_value=0)
         sleeper = Mock()
         with (
-            patch.object(run_step, "main", runner),
+            patch.object(run_step, "_execute", runner),
             patch.object(run_step.time, "sleep", sleeper),
         ):
             self.assertEqual(run_step.retrying_main(), 0)
-        runner.assert_called_once_with()
+        runner.assert_called_once_with(ANY, ANY, ANY)
         sleeper.assert_not_called()
 
     def test_retry_requested_retries_twice(self) -> None:
@@ -38,7 +48,7 @@ class RunStepRetryTests(unittest.TestCase):
         sleeper = Mock()
         stderr = io.StringIO()
         with (
-            patch.object(run_step, "main", runner),
+            patch.object(run_step, "_execute", runner),
             patch.object(run_step.time, "sleep", sleeper),
             contextlib.redirect_stderr(stderr),
         ):
@@ -51,7 +61,7 @@ class RunStepRetryTests(unittest.TestCase):
     def test_retry_exhaustion_returns_public_failure(self) -> None:
         runner = Mock(return_value=run_step._RETRY_REQUESTED_EXIT_CODE)
         with (
-            patch.object(run_step, "main", runner),
+            patch.object(run_step, "_execute", runner),
             patch.object(run_step.time, "sleep"),
         ):
             self.assertEqual(run_step.retrying_main(), 1)
@@ -61,22 +71,22 @@ class RunStepRetryTests(unittest.TestCase):
         runner = Mock(return_value=1)
         sleeper = Mock()
         with (
-            patch.object(run_step, "main", runner),
+            patch.object(run_step, "_execute", runner),
             patch.object(run_step.time, "sleep", sleeper),
         ):
             self.assertEqual(run_step.retrying_main(), 1)
-        runner.assert_called_once_with()
+        runner.assert_called_once_with(ANY, ANY, ANY)
         sleeper.assert_not_called()
 
     def test_cli_error_does_not_retry(self) -> None:
         runner = Mock(return_value=2)
         sleeper = Mock()
         with (
-            patch.object(run_step, "main", runner),
+            patch.object(run_step, "_execute", runner),
             patch.object(run_step.time, "sleep", sleeper),
         ):
             self.assertEqual(run_step.retrying_main(), 2)
-        runner.assert_called_once_with()
+        runner.assert_called_once_with(ANY, ANY, ANY)
         sleeper.assert_not_called()
 
     def test_main_maps_only_explicit_retry_request_to_internal_exit(self) -> None:
@@ -332,12 +342,12 @@ class RunStepRetryTests(unittest.TestCase):
     def test_cancellation_is_not_retried(self) -> None:
         runner = Mock(side_effect=KeyboardInterrupt)
         with (
-            patch.object(run_step, "main", runner),
+            patch.object(run_step, "_execute", runner),
             patch.object(run_step.time, "sleep") as sleeper,
             self.assertRaises(KeyboardInterrupt),
         ):
             run_step.retrying_main()
-        runner.assert_called_once_with()
+        runner.assert_called_once_with(ANY, ANY, ANY)
         sleeper.assert_not_called()
 
 

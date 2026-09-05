@@ -18,8 +18,8 @@ class Settings(BaseSettings):
     llm_api_key: SecretStr | None = Field(default=None, validation_alias="LLM_API_KEY", repr=False)
     llm_model: str | None = Field(default=None, validation_alias="LLM_MODEL")
     pcm_agent_base_url: str | None = Field(default=None, validation_alias="PCM_AGENT_BASE_URL")
-    pcm_agent_api_key: SecretStr | None = Field(
-        default=None, validation_alias="PCM_AGENT_API_KEY", repr=False
+    pcm_agent_auth_token: SecretStr | None = Field(
+        default=None, validation_alias="PCM_AGENT_AUTH_TOKEN", repr=False
     )
     pcm_agent_model_low: str | None = Field(default=None, validation_alias="PCM_AGENT_MODEL_LOW")
     pcm_agent_model_medium: str | None = Field(
@@ -52,14 +52,14 @@ class AgentConfig:
     def __init__(
         self,
         base_url: str,
-        api_key: SecretStr,
+        auth_token: SecretStr,
         *,
         low_model: str,
         medium_model: str,
         high_model: str,
     ) -> None:
         self.base_url = base_url.rstrip("/")
-        self.api_key = api_key
+        self.auth_token = auth_token
         self.models = {
             "low": low_model,
             "medium": medium_model,
@@ -68,7 +68,7 @@ class AgentConfig:
 
     def __repr__(self) -> str:
         return (
-            f"AgentConfig(base_url={self.base_url!r}, api_key=SecretStr('**********'), "
+            f"AgentConfig(base_url={self.base_url!r}, auth_token=SecretStr('**********'), "
             f"models={self.models!r})"
         )
 
@@ -83,7 +83,7 @@ class AgentConfig:
         settings = load_settings(env_file)
         values = {
             "PCM_AGENT_BASE_URL": settings.pcm_agent_base_url,
-            "PCM_AGENT_API_KEY": settings.pcm_agent_api_key,
+            "PCM_AGENT_AUTH_TOKEN": settings.pcm_agent_auth_token,
             "PCM_AGENT_MODEL_LOW": settings.pcm_agent_model_low,
             "PCM_AGENT_MODEL_MEDIUM": settings.pcm_agent_model_medium,
             "PCM_AGENT_MODEL_HIGH": settings.pcm_agent_model_high,
@@ -96,7 +96,7 @@ class AgentConfig:
             raise ValueError("PCM_AGENT_BASE_URL 不得包含 /v1")
         return cls(
             base_url,
-            settings.pcm_agent_api_key,
+            settings.pcm_agent_auth_token,
             low_model=settings.pcm_agent_model_low,
             medium_model=settings.pcm_agent_model_medium,
             high_model=settings.pcm_agent_model_high,

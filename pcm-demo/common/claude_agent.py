@@ -52,17 +52,37 @@ class ClaudeRunResult:
 
 def filtered_env(config: AgentConfig, model: str) -> dict[str, str]:
     env = dict(os.environ)
+    for name in env:
+        if name in {"ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_MODEL", "ANTHROPIC_SMALL_FAST_MODEL"} or name.startswith((
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL",
+            "ANTHROPIC_DEFAULT_FABLE_MODEL",
+            "ANTHROPIC_CUSTOM_MODEL_OPTION",
+        )):
+            env[name] = ""
     env.update(
         {
             "ANTHROPIC_BASE_URL": config.base_url,
-            "ANTHROPIC_API_KEY": config.api_key.get_secret_value(),
-            "ANTHROPIC_AUTH_TOKEN": "",
+            "ANTHROPIC_API_KEY": "",
+            "ANTHROPIC_AUTH_TOKEN": config.auth_token.get_secret_value(),
             "CLAUDE_CODE_OAUTH_TOKEN": "",
+            "CLAUDE_CODE_OAUTH_REFRESH_TOKEN": "",
+            "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR": "",
+            "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR": "",
+            "CLAUDE_CODE_USE_BEDROCK": "",
+            "CLAUDE_CODE_USE_VERTEX": "",
+            "CLAUDE_CODE_USE_FOUNDRY": "",
+            "CLAUDE_CODE_USE_ANTHROPIC_AWS": "",
+            "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD": "",
+            "CLAUDE_CODE_USE_MANTLE": "",
+            "CLAUDE_CODE_USE_GATEWAY": "",
             "CLAUDE_CODE_SUBAGENT_MODEL": model,
             "LLM_BASE_URL": "",
             "LLM_API_KEY": "",
             "LLM_MODEL": "",
             "PCM_AGENT_BASE_URL": "",
+            "PCM_AGENT_AUTH_TOKEN": "",
             "PCM_AGENT_API_KEY": "",
             "PCM_AGENT_MODEL_LOW": "",
             "PCM_AGENT_MODEL_MEDIUM": "",
@@ -152,10 +172,10 @@ def _retry_requested(
 
 
 def _anthropic_secrets(config: AgentConfig) -> list[str]:
-    values = [config.api_key.get_secret_value()]
+    values = [config.auth_token.get_secret_value()]
     values.extend(
         value
-        for key in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN")
+        for key in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_REFRESH_TOKEN")
         if isinstance((value := os.environ.get(key)), str) and value
     )
     return list(dict.fromkeys(values))
@@ -193,6 +213,14 @@ async def run_claude(
         cwd=cwd,
         system_prompt={"type": "preset", "preset": "claude_code"},
         skills="all",
+        setting_sources=["project", "local"],
+        # 当前兼容基线：Agent SDK 0.2.139 / Claude Code 2.1.233。
+        # 升级 SDK 或实际 CLI 后复验三档识别、出站模型与 resume，再确认是否调整这些标准 ID。
+        settings=json.dumps({"modelOverrides": {
+            "claude-haiku-4-5-20251001": agent_config.resolve_model("low"),
+            "claude-sonnet-4-6": agent_config.resolve_model("medium"),
+            "claude-opus-4-8": agent_config.resolve_model("high"),
+        }}),
         plugins=load_plugins(cwd),
         max_turns=max_turns,
         max_buffer_size=10 * 1024 * 1024,

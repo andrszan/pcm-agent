@@ -187,7 +187,8 @@ pcm-demo/
 │   ├── decision.py
 │   ├── files.py
 │   ├── openai_responses.py
-│   └── state.py
+│   ├── state.py
+│   └── timing.py
 ├── probes/
 │   ├── probe_a_agent.py
 │   ├── probe_b_session.py
@@ -212,14 +213,15 @@ pcm-demo/
 │   ├── step_16_rule_retrospective/
 │   ├── step_17_commit/
 │   └── step_18_merge/
-└── run_step.py
+├── run_step.py
+└── run_all.py
 ```
 
 后续原则：
 
 - 已实现步骤的业务代码、测试和详细说明同置于 `steps/step_xx_<name>/`；
 - `common/` 只放两个及以上步骤已经出现的真实复用能力；
-- `run_all.py` 已建立并串联第 0～18 步和阶段一需求循环；当前通过 Capacity Slot 限制宿主机执行数量，并以 Run Lock、Product Lock 和 Product Registry 支持不同产品并发、同一产品互斥及长期配对端口；阶段二具名节点仍在对应能力实现时增量接入，不为目录图提前创建空壳；
+- `run_all.py` 已按 state 顺序启动 `run_step.py` 单步子进程，串联并复用第 0～18 步和阶段一需求循环；当前通过 Capacity Slot 限制宿主机执行数量，并以 Run Lock、Product Lock 和 Product Registry 支持不同产品并发、同一产品互斥及长期配对端口；阶段一完成或失败停止时展示独立计时汇总；阶段二具名节点仍在对应能力实现时增量接入，不为目录图提前创建空壳；
 - 阶段二使用具名节点，但不强行伪装成新的业务步骤编号；
 - 目录可以按实际代码量合并，不为未来步骤创建空模块。
 
@@ -668,7 +670,7 @@ LLM_BASE_URL=
 LLM_API_KEY=
 LLM_MODEL=
 PCM_AGENT_BASE_URL=
-PCM_AGENT_API_KEY=
+PCM_AGENT_AUTH_TOKEN=
 PCM_AGENT_MODEL_LOW=
 PCM_AGENT_MODEL_MEDIUM=
 PCM_AGENT_MODEL_HIGH=
@@ -683,7 +685,7 @@ PCM_DEV_RESOURCE_LIST=
 职责分工：
 
 - `LLM_*`：AI-compatible Responses API；
-- `PCM_AGENT_BASE_URL`、`PCM_AGENT_API_KEY`：Claude Agent SDK 使用的 Anthropic Messages 网关和受保护 API Key；Base URL 是紧邻 `/v1/messages` 之前的 API 根，不包含 `/v1`；
+- `PCM_AGENT_BASE_URL`、`PCM_AGENT_AUTH_TOKEN`：Claude Agent SDK 使用的 Anthropic Messages 网关和受保护 Bearer token；Base URL 是紧邻 `/v1/messages` 之前的 API 根，不包含 `/v1`；旧 `PCM_AGENT_API_KEY` 的有效值需迁移到新键，旧键不再作为认证输入接受；
 - `PCM_AGENT_MODEL_LOW`、`PCM_AGENT_MODEL_MEDIUM`、`PCM_AGENT_MODEL_HIGH`：代码中低、中、高语义档位对应的网关真实模型名；
 - `PCM_WORKSPACE_ROOT`：所有产品项目的独立父目录；
 - `PCM_MAX_CONCURRENT_PROJECTS`：当前 Demo checkout 同时执行的产品项目上限，正整数，默认 `2`；
@@ -691,7 +693,7 @@ PCM_DEV_RESOURCE_LIST=
 - `PCM_AGENT_WORKSPACE_ENV_FILE`：第 1 步使用的 AI Agent 工作区受保护工具配置源绝对路径；Python 只通过 `O_NOFOLLOW` 文件描述符读取原始字节并写为新工作区根 `.env`、从创建时即限制为 `0600`、核验 Git 忽略，不解析或导出变量，不进入步骤 outputs、目标产品配置或第 5 步资源清单；该 PCM 控制键从 Claude Agent SDK 子进程环境移除，Agent 只读取已安装的工作区根 `.env`；
 - `PCM_TEMPLATE_CATALOG`：第 3 步基础工程候选目录；
 - `PCM_DEV_RESOURCE_LIST`：第 5 步可信开发资源清单的绝对路径；Python 只核验路径并交给 Agent，不解析资源内容；完整 Agent/决策交互保存在被 Git 忽略的 run 历史中；
-- Claude Agent SDK 不再依赖宿主默认网关或认证：Python 将 `PCM_AGENT_BASE_URL`、`PCM_AGENT_API_KEY` 转为 `ANTHROPIC_BASE_URL`、`ANTHROPIC_API_KEY`，清除冲突认证，并把 `CLAUDE_CODE_SUBAGENT_MODEL` 同步为当前主模型；这些配置与 `LLM_*` 保持独立；
+- Claude Agent SDK 使用 `setting_sources=["project", "local"]` 保留产品项目设置、权限、Skills 与显式 Plugin，不加载用户级 settings；Python 将网关与 token 注入 `ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`，置空继承的 API Key、OAuth、云 Provider 开关及模型选择/别名/显示配置。项目设置仍遵循 Claude Code 优先级，不应另配 PCM 网关、认证或模型路由。每次首次调用和 resume 都通过非秘密会话级 `modelOverrides`，将 `claude-haiku-4-5-20251001`、`claude-sonnet-4-6`、`claude-opus-4-8` 分别注册到 LOW、MEDIUM、HIGH 实际模型 ID；主调用仍直接使用实际 ID，`CLAUDE_CODE_SUBAGENT_MODEL` 仍同步为主模型。不增加显示名配置或自动追加 `[1m]`，不迁移 session 目录、历史 conversation 或状态；与 `LLM_*` 的职责保持独立；
 
 优先级：
 
@@ -737,6 +739,14 @@ python run_all.py --run-id <run-id> --from-node phase_2:audit
 ```
 
 单步、区间、完整运行和恢复必须复用相同节点函数，不维护两套流程语义。
+
+### 步骤耗时观测
+
+当前 `run_all.py` 已串联第 0～18 步并持续处理阶段一需求，阶段二仍未实现。步骤生命周期由 `run_step.py` 观测，公共 Agent 调用边界逐次记录主 Claude Code 执行区间；stderr 展示北京时间与两个指标，完整编排完成或停止时只读汇总，原 stdout 结果路径不变。
+
+`agent_elapsed_seconds` 累计各次主调用的已知耗时，包括调用内的工具和子代理等待，但排除负责人决策、调用外的 Python 核验、自动重试退避和停机等待；`wall_elapsed_seconds` 是整个步骤首次开始到首次成功完成的时间跨度，包含上述等待。第 0～12 步按项目、第 13～18 步按需求区分；每次 continue、修复、通道重试或恢复的真实 Agent 调用都单独保留起止、中断时间与结束原因。成功复用不新增虚假调用区间，不重置首次完成数据；新计时结构不复制 `applicable`、`reused_success`、`history_missing`，只在有缺口时保留步骤级提示。
+
+`schema_version: 2` 记录独立位于 Git 忽略的 `runs/<run-id>/timings.json`，程序只读取和写入这一格式，所有时间戳为北京时间 `+08:00`。程序不转换旧计时文件，不自动迁移、归档或删除旧数据；不在当前 run 计时读写路径上的旧数据原样保留。若旧格式 `timings.json` 实际阻碍所需新版记录，必须先确认没有旧进程正在写入该 run，再精确移除这一份冲突文件，不批量清理，也不动 `state.json`、步骤 result 或 `conversations/`。不可捕获的中断时刻保持未知，不用恢复时间、文件 mtime 或 run ID 补造。计时失败只警告，不改变业务状态和退出码。详细字段、结束原因、示例和存储策略见 [计时记录与字段说明](../../pcm-demo/docs/timing.md)。
 
 ## 十二、后续实现顺序
 

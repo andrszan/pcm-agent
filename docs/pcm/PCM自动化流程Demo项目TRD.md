@@ -58,8 +58,8 @@ Demo 继续采用增量实施，不一次创建完整流程空壳：
 
 当前尚未实现：
 
-- 阶段二完整审计、候选分流、入池、回归和复审节点；
-- `run_all.py` 对上述阶段二具名节点的串联。
+- 阶段二全项目体验审计、候选分流、入池、回归和复审节点；
+- `run_all.py` 对上述阶段二具名节点的串联；现有入口已实现第 0～18 步的阶段一串联与恢复，当前正式需求全部完成后停止。
 
 第 9 步当前 prompt 合同已完成代码与自动化，但尚未执行安全的 fresh 真实 Claude Agent、AI-compatible 负责人或 `/commit-changes` 集成；第 10、11、14、15 步已按新版 UI/UX 决定传递合同同步 Prompt、负责人完成规则与定向自动化，尚未据此改写旧合同真实运行事实。第 0～8、12～18 步已完成代码、自动化和适用真实验证；未实现能力必须返回明确程序错误，不得以空脚本、固定 JSON、旧实现或口头结论冒充成功。
 
@@ -127,11 +127,11 @@ Python 编排器负责确定性操作、两类会话衔接和最终步骤状态�
 
 固定 profile 为：第 2、5、7、9、10、11 步高模型 + `high`；第 6 步 bootstrap/theme、第 14、15 步中模型 + `high`；第 8、16、17 步中模型 + `medium`。第 15～17 步保持同一中模型。每次首次调用和 resume 都重新传入 model 与 effort；当前不为 Agent 步骤使用低模型，不配置 fallback model 或 `max_budget_usd`。
 
-正式步骤不传入 `permission_mode`、`tools`、`allowed_tools` 或 `disallowed_tools`，也不为每一步重新定义权限档位。项目 `.claude/settings.json` 及 Claude Code 默认设置加载语义是统一权威来源。若未来某一步确有覆盖项目配置的特殊理由，必须先在该步合同中说明并单独确认，不能沿用探针限制。
+正式步骤不传入 `permission_mode`、`tools`、`allowed_tools` 或 `disallowed_tools`，也不为每一步重新定义权限档位。公共 runner 固定 `setting_sources=["project", "local"]`，产品项目的 `.claude/settings.json`、`.claude/settings.local.json` 按 Claude Code 优先级生效；不加载用户级 settings 或用户级 Skills。若未来某一步确有覆盖项目配置的特殊理由，必须先在该步合同中说明并单独确认，不能沿用探针限制。
 
-第 2 步真实运行确认：Claude Code 对未信任的新路径会忽略项目 `permissions.allow`。PCM 采用默认 Claude Code 用户配置目录、认证、插件、Skill 和 session；在 `~/.claude.json` 中为已由第 1 步发布证据确认的最终产品路径写入 `hasTrustDialogAccepted: true`，使项目 settings 生效。该用户级配置共享所有 PCM run，符合单租户本地 Demo 的预期；不得把 run-local `CLAUDE_CONFIG_DIR` 作为默认隔离层。
+早期第 2 步真实运行确认：Claude Code 对未信任的新路径会忽略项目 `permissions.allow`；当时使用默认用户配置、认证和 session，并在 `~/.claude.json` 中为已由发布证据确认的产品路径写入 `hasTrustDialogAccepted: true`。该运行保留为历史，不作为现行认证隔离的证据。
 
-普通终端执行第 0→2 步时，默认用户级 Claude 配置、认证、项目 plugins/Skills 和 session 均可用；第 2 步完成后 run 目录不创建 `claude-config/`，同一 run 重跑第 2 步可以恢复原会话或幂等确认成功。
+现行认证与模型路由不读取用户级 settings，但 session 存储位置与既有 trust 处理保持不变，不创建 run-local `claude-config/` 或迁移历史。新代码与配置在重新启动 PCM 进程后生效，仍可恢复原会话。
 
 项目 Skills 来自工作区 `.claude/skills/` 和项目锁定 plugins。核心流程 Skills 多数设置了 `disable-model-invocation: true`，因此步骤脚本应显式调用目标 Skill，不能只依赖模型自主选择。探针 A 已确认 `/project-intake` 可以显式调用，且目标 Skill 同时出现在 init 消息的 `skills` 和 `slash_commands` 中。
 
@@ -139,7 +139,7 @@ Python 编排器负责确定性操作、两类会话衔接和最终步骤状态�
 
 ### 4. AI-compatible 配置与调用
 
-`LLMConfig` 从 `pcm-demo/.env` 加载 `LLM_BASE_URL`、`LLM_API_KEY` 和 `LLM_MODEL`；`AgentConfig` 独立加载 `PCM_AGENT_BASE_URL`、`PCM_AGENT_API_KEY` 与低、中、高三级真实模型名，同名进程环境变量优先。实际 `.env` 由 Git 忽略，配置对象的 `repr` 不包含凭据；`.env.example` 只保存公开占位说明。Python 将 Agent 配置显式转换为 Claude Code 子进程的 `ANTHROPIC_BASE_URL`、`ANTHROPIC_API_KEY`，并同步子代理默认模型；两类模型配置不混用或相互回退。
+`LLMConfig` 从 `pcm-demo/.env` 加载 `LLM_BASE_URL`、`LLM_API_KEY` 和 `LLM_MODEL`，其认证不变；`AgentConfig` 独立加载 `PCM_AGENT_BASE_URL`、`PCM_AGENT_AUTH_TOKEN` 与低、中、高三级真实模型名，同名进程环境变量优先。实际 `.env` 由 Git 忽略，配置对象的 `repr` 不包含凭据；`.env.example` 只保存公开占位说明。Python 将 Agent 配置转换为 `ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`，置空继承的 API Key、OAuth、云 Provider 选择开关和模型选择/别名/显示配置，并同步子代理默认模型。SDK 只加载 `project/local` settings，不加载用户级 settings；项目设置仍遵循 Claude Code 优先级，不在产品设置中另配 PCM 网关、认证或模型路由。两类模型配置不混用或相互回退。
 
 SDK 不自动读取 Demo 的 `.env`。配置模块必须在创建 Agent SDK 或 OpenAI-compatible 客户端前显式加载配置，且不得把密钥写入状态或日志。探针 C 运行时发现宿主环境配置了 SOCKS 代理，但当前 OpenAI SDK 环境没有 SOCKS 依赖；探针通过 SDK 的 `DefaultAsyncHttpxClient(trust_env=False)` 明确禁用环境代理，未修改宿主代理配置，也未增加无关依赖。
 
@@ -182,7 +182,7 @@ SDK session 保存 Agent 对话、工具调用和结果；工作区文件与 Git
 ### 1. 命令行入口
 
 - `run_step.py`：当前运行已经实现的第 0～18 步；实际命令和配置说明以 `pcm-demo/README.md` 及各步骤 README 为准；
-- `run_all.py`：已串联第 0～18 步和阶段一需求循环，并以 Capacity Slot、Run Lock、Product Lock 与 Product Registry 支持单机有限容量内的不同产品并发；阶段二具名节点尚未接入；
+- `run_all.py`：已实现第 0～18 步和阶段一需求循环的串联与恢复，每轮根据 state 启动新的 `run_step.py` 子进程；以 Capacity Slot、Run Lock、Product Lock 与 Product Registry 支持单机有限容量内的不同产品并发、同一产品互斥及长期配对端口；阶段一全部正式需求完成或子步骤非零退出时停止，并显示独立计时汇总；阶段二具名节点尚未接入；
 - 未实现步骤必须明确返回“步骤尚未实现”的程序错误，不得返回业务 `success`；
 - 单步、区间、完整运行和恢复最终必须复用相同步骤或节点函数；
 - 阶段二使用 `--from-node phase_2:*` 一类具名入口，不新增虚假业务步骤编号。
@@ -198,7 +198,8 @@ pcm-demo/
 │   ├── decision.py
 │   ├── files.py
 │   ├── openai_responses.py
-│   └── state.py
+│   ├── state.py
+│   └── timing.py
 ├── probes/
 ├── steps/
 │   ├── step_00_product_draft/
@@ -220,7 +221,8 @@ pcm-demo/
 │   ├── step_16_rule_retrospective/
 │   ├── step_17_commit/
 │   └── step_18_merge/
-└── run_step.py
+├── run_step.py
+└── run_all.py
 ```
 
 只有出现两个及以上步骤的真实复用时才合并或新增公共模块，不为保持目录图创建空文件。
@@ -235,6 +237,33 @@ pcm-demo/
 - 工作区文件和 Git 仓库保存实际交付事实；
 - Claude session 保存 Agent 对话上下文；
 - 不把完整历史事件重复写入 `state.json`。
+- `timings.json` 独立保存步骤和 Agent 调用计时，不参与任何业务成功、失败、恢复或生命周期裁决。
+
+### 4. 步骤计时合同
+
+`common/timing.py` 同时负责步骤生命周期和真实主 Claude Code 调用区间。`run_step.retrying_main()` 经 `main(retry=True)` 只解析一次参数并取得执行锁，再在 `_retry_locked()` 激活当前进程计时上下文；`_execute()` 传入 run 目录与业务结果；公共决策循环只在 `await agent_runner(...)` 的原调用位置使用薄计时包装，原样传递 prompt、session、model、effort 和回调，不追加模型背景，不修改 Agent 结果或异常传播。调用外的负责人决策、核验与退避不进入 Agent 区间。CLI 开始、结束及汇总使用 stderr，原 stdout 结果路径不变。
+
+独立文件仍是 `runs/<run-id>/timings.json`，当前 `schema_version: 2`，顶层 `steps` 按步骤与需求聚合，明确持久化 `agent_elapsed_seconds` 与 `wall_elapsed_seconds`。每次真正发起主 Agent 调用时，追加 `agent_executions` 中的起止、中断时间、单调时钟耗时和结束原因；正常 continue、完成核验后修复、通道自动重试及跨命令恢复均分别记录。主调用内工具与子代理等待计入，但不拆分子代理独立区间或重复相加。所有新时间戳均使用固定 UTC+8 的北京时间，不依赖系统时区配置。
+
+完成、恢复和未知边界：
+
+- 单次命令固定 run ID，全部 attempts、10/30 秒退避及 `timing.finish()` 均在同一组执行锁内；退避期间不释放 Capacity Slot 或已取得的 Product Lock。锁准备中断释放已经取得的锁，锁冲突不进入步骤或计时；`run_all.py` 在释放 Run Lock 前读取汇总，避免同一 run 的计时覆盖或跨文件读取竞争。
+
+- 第 0～12 步归属项目；第 13～18 步按需求 ID 和步骤编号区分。第 13 步可在实际选择后补充本次归属，之前没有选定需求的独立失败记录不猜测分配；第 18 步沿用开始时的归属，不受完成后 active/cycle 清空影响。
+- Agent 累计只相加已测出的主调用区间，不包含调用外的负责人决策、Python 收口、10/30 秒退避或停机等待。步骤总历时为首次开始至首次成功完成的时间差，包含所有间隔；成功前或缺少可信起止时刻时为空。
+- 业务已成功后的正常幂等复用没有真实 Agent 调用就不新增区间，也不重置首次完成数据。计时不再复制 `applicable`、`reused_success`、`history_missing` 或步骤重试次数，有历史缺口时只附必要的步骤级 `note`；未知时间不伪装成 0。
+- 默认 SIGINT/SIGTERM 记录首次收到信号的时间并维持取消、130/143 退出，不重试；已有自定义或忽略处理器不覆盖。SDK 取消清理后记录调用结束时间，因此中断时刻可以早于结束时刻。SIGKILL、断电等没有结束证据时保留空值，后续恢复标为 unknown，不按恢复时间补算。
+- Agent 区间缺失不自动抹去可信的步骤首次开始与最终完成时间；两个指标的完整性分开表达。系统时钟回拨不改变单调时钟耗时，起止倒置时总历时为空并提示。
+- 当前计时读写器只接受 `schema_version: 2`，不读取、投影或转换旧计时格式，也不自动迁移、归档或删除旧数据。不在当前 run 计时读写路径上的旧数据原样保留，不批量扫描或清理。若旧格式 `timings.json` 实际阻碍所需新版记录，必须先确认没有旧进程仍在写入该 run，再精确移除这一份冲突文件；不得修改或删除 `state.json`、步骤 result、`conversations/` 或其它业务运行数据。
+- 计时读写、数据解析或输出异常只警告，不改变业务三态、state/result schema、生命周期、完成条件、模型参数、session、恢复或重试策略；不保存 prompt、模型回复、错误正文或凭据。
+
+完整字段类型、空值含义、结束原因、示例和存储策略以 [计时记录与字段说明](../../pcm-demo/docs/timing.md) 为唯一详细入口。本功能不增加心跳、预计剩余时间、成本统计、子代理时间轴或外部监控服务。
+
+**合并集成验证（2026-09-06）：** 并发与计时交叉回归新增 7 项并通过，PCM Demo 全量 439 项 `unittest` 通过（52.167 秒），`compileall`、两个运行入口 IDE diagnostics 与 `git diff --check` 通过。覆盖全部计时写入和退避持锁、自动生成 run ID 在重试间不变、取消时先收口计时再解锁、锁冲突零计时副作用、锁准备失败释放，以及父进程向真实第 0 步子进程传递 FD 后的计时落盘。没有调用真实模型、重跑完整产品流程或修改既有产品工作区与 run；历史集成验证不转写为本轮结果。
+
+**历史 v2 验证（不是本轮验证）：** 计时、公共决策循环及入口定向 118 项当时通过，当时工作树全量 420 项 `unittest` 通过（58.631 秒），`compileall`、`git diff --check`、字段文档 JSON 示例与入口链接核验通过。其中归档相关覆盖仅对应当时已删除的旧格式兼容实现，不代表现行能力。独立审查当时已关闭全部发现，覆盖计时自身 I/O 与结果分类排除、成功观测后 SIGTERM 不撤销首次完成、第 13 步独立选择重试起点、归档原子独占发布，以及归档/JSON 清理错误不吞原取消。隔离临时工作区当时使用实际 `run_claude()` 完成首次调用和同 session 恢复，两个区间分别为 6.000514458 秒和 8.954342417 秒，Agent 累计 14.954856875 秒、步骤观测跨度 15.158352 秒；两条均正常返回、中断时间为空、时间戳为北京时间。该探针只验证当时的真实 SDK 调用计时，不代表第 2 步产品定义验收；当时未重跑完整产品流程，未手工修改或迁移正在使用的真实 run。SIGINT/SIGTERM/SIGKILL 仅在测试自建子进程中验证。
+
+**v1 历史验证（对应当时的旧实现，不代表现行兼容能力，也不是本轮验证）：** 计时与入口定向 54 项当时通过，PCM Demo 当时全量 401 项 `unittest` 通过（57.350 秒），`compileall` 与 `git diff --check` 通过。覆盖当时实际第 12 步的零模型成功复用与摘要变化、异常累计数值不改变退出码、自动重试等待、失败/阻塞恢复累计、需求归属、幂等冻结、旧历史缺失、真实临时子进程第 0 步及仅针对测试子进程的 SIGTERM。另以黄金初稿执行独立真实 CLI run `timing-smoke-20260905` 的第 0 步，无副作用跳过并记录 0.012473792 秒，实际读取计时文件与终端汇总，确认运行数据被 Git 忽略。当时未调用外部模型或重跑真实产品的完整阶段一，未中断、迁移或修改已有运行数据；Ruff 与 Pyright 未安装，未执行这些检查。
 
 ## 四、公共技术合同
 
@@ -1268,6 +1297,7 @@ Git 子进程统一过滤 `GIT_*`。仓库按非 root 原顺序、root 最后的
 
 当前测试和真实验证覆盖：
 
+- Bearer 认证与模型隔离：配置、公共 runner 和脱敏定向 56 项、当前工作树全量 404 项通过；真实 SDK 会话在存在冲突父环境时，三档分别向配置中转发送 `gpt-5.6-luna`、`gpt-5.6-terra`、`gpt-5.6-sol`，均携带 PCM Bearer token、返回 `200` 和预期回复，无 `unrecognized_model`；低档同 session resume 通过，项目 Skill 与 slash command 仍加载。错误 token 负对照观测到 `401` 后主动取消；核验未只依赖 init 模型名。未重跑完整产品开发流程，未修改历史 run；
 - 配置和敏感信息不泄露；
 - JSON、Markdown、状态和 SHA-256 读写；
 - 第 0～8、12～18 步状态转换；
@@ -1354,7 +1384,7 @@ LLM_BASE_URL=
 LLM_API_KEY=
 LLM_MODEL=
 PCM_AGENT_BASE_URL=
-PCM_AGENT_API_KEY=
+PCM_AGENT_AUTH_TOKEN=
 PCM_AGENT_MODEL_LOW=
 PCM_AGENT_MODEL_MEDIUM=
 PCM_AGENT_MODEL_HIGH=
@@ -1369,7 +1399,7 @@ PCM_DEV_RESOURCE_LIST=
 配置职责：
 
 - `LLM_*` 用于 OpenAI-compatible Responses API，包括 AI-compatible 决策调用和第 12 步 Backlog 静态字段结构化提取；
-- `PCM_AGENT_BASE_URL`、`PCM_AGENT_API_KEY` 用于 Claude Agent SDK 的 Anthropic Messages 网关和受保护认证；Base URL 不包含 `/v1`；
+- `PCM_AGENT_BASE_URL`、`PCM_AGENT_AUTH_TOKEN` 用于 Claude Agent SDK 的 Anthropic Messages 网关和受保护 Bearer 认证；Base URL 不包含 `/v1`；旧 `PCM_AGENT_API_KEY` 的有效值需迁移到新键，不保留旧键读取兼容；
 - `PCM_AGENT_MODEL_LOW`、`PCM_AGENT_MODEL_MEDIUM`、`PCM_AGENT_MODEL_HIGH` 将代码中的低、中、高档位映射为网关真实模型名；
 - `PCM_WORKSPACE_ROOT` 是独立产品项目父目录；
 - `PCM_MAX_CONCURRENT_PROJECTS` 是当前 Demo checkout 同时执行的产品项目上限，正整数，默认 `2`；
@@ -1377,7 +1407,7 @@ PCM_DEV_RESOURCE_LIST=
 - `PCM_AGENT_WORKSPACE_ENV_FILE` 只用于第 1 步安装 AI Agent 工作区固定工具的受保护根 `.env`；Python 以 `O_NOFOLLOW` 和同一文件描述符读取原始字节，目标从创建时即为 `0600` 并核验 Git 忽略，不解析、导出、记录或传给第 5 步；该 PCM 控制键从 Claude Agent SDK 子进程环境移除；
 - `PCM_TEMPLATE_CATALOG` 只用于第 3 步基础工程候选；
 - `PCM_DEV_RESOURCE_LIST` 只用于第 5 步可信开发资源清单，必须是可读普通文件的绝对路径；Python 不读取资源内容，Agent 可按项目规则原样使用；
-- Claude Agent SDK 每次调用显式使用 `AgentConfig` 解析后的网关、API Key、模型和 effort；冲突的宿主认证被压住，`CLAUDE_CODE_SUBAGENT_MODEL` 与主模型同步，不再依赖既有登录态选择模型或网关。
+- Claude Agent SDK 每次调用显式使用 `AgentConfig` 的网关、Bearer token、模型和 effort，仅加载 `project/local` settings，置空继承的冲突认证与模型路由配置。会话级 `modelOverrides` 将 `claude-haiku-4-5-20251001`、`claude-sonnet-4-6`、`claude-opus-4-8` 分别注册到 LOW、MEDIUM、HIGH 实际模型 ID；主模型仍直接传实际 ID，`CLAUDE_CODE_SUBAGENT_MODEL` 仍同步为主模型。映射不含凭据、不新增配置文件，首次和 resume 一致；不改变公共循环、业务步骤或状态 schema。
 
 优先级：
 
@@ -1406,9 +1436,10 @@ PCM_DEV_RESOURCE_LIST=
 1. Agent SDK、捆绑 Claude Code 或模型版本变化时，需重新记录并复核相关探针；
 2. `/project-intake`、`/project-readiness`、`/project-bootstrap` 和 `/solution-design` 已有真实调用证据；第 6 步新增的独立 `/tailwind-theme` session、init 发现、真实 light/dark 修改和浏览器验证仍需在隔离 fresh run 中验证；其它目标 Skill 的实际调用名、参数、plugin namespace 和 init 发现结果继续逐步验证；
 3. 单机多产品并发实现尚需用两个独立产品真实验证 Claude Agent、配对端口、前后端启动和浏览器 session 隔离；
-4. 第二个真实需求复用第 13～18 步时是否暴露新的最小恢复边界；
-5. 阶段二真实浏览器通道、测试身份、可复位数据、截图读取、辅助技术路径和外部审查能力；
-6. 阶段二审计结果、候选分流、入池和原发现回归证据的最小持久化格式；
-7. 相同 `version_fingerprint` 的恢复、不同指纹的完整复审以及避免无穷循环的确定性边界。
+4. 阶段二具名节点如何增量接入已实现的 `run_all.py` 阶段一入口；
+5. 第二个真实需求复用第 13～18 步时是否暴露新的最小恢复边界；
+6. 阶段二真实浏览器通道、测试身份、可复位数据、截图读取、辅助技术路径和外部审查能力；
+7. 阶段二审计结果、候选分流、入池和原发现回归证据的最小持久化格式；
+8. 相同 `version_fingerprint` 的恢复、不同指纹的完整复审以及避免无穷循环的确定性边界。
 
 这些未决事项不改变第 0～18 步已经完成的真实事实，也不重新打开本轮已实现的第 12～18 步合同。后续需求继续以当前流程设计、当前活动 TRD、对应实现和测试事实确认实现级输入、输出、失败、阻塞和恢复细节，随后先实现代码并通过测试和真实验证，再将实际实现同步到设计文档并提交。

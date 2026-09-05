@@ -15,7 +15,7 @@ _TEXT_LIMIT = 4_000
 _LIST_LIMIT = 32
 _TRACEBACK_LIMIT = 24
 _SAFE_LOG_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\.json\Z")
-_SENSITIVE_KEY = r"(?:[A-Za-z][A-Za-z0-9]*[_-])*(?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|secret)|(?:proxy-)?authorization|(?:set-)?cookie"
+_SENSITIVE_KEY = r"(?:[A-Za-z][A-Za-z0-9]*[_-])*(?:api[_-]?key|auth[_-]?token|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|secret)|(?:proxy-)?authorization|(?:set-)?cookie"
 _QUOTED_VALUE = re.compile(
     rf"(?P<key>\b(?:{_SENSITIVE_KEY})\b)(?P<key_quote>[\"']?)(?P<separator>\s*[:=]\s*)(?P<quote>[\"'])(?P<value>.*?)(?P=quote)",
     re.IGNORECASE,

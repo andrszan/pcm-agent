@@ -21,6 +21,7 @@ from common.error_diagnostics import exception_diagnostics, redact_text, write_d
 from common.files import write_json
 from common.openai_responses import ResponsesFailure
 from common.state import write_state
+from common.timing import run_timed_agent
 from config import AgentModelTier, LLMConfig
 
 BLOCKED_RESUME_PROMPT = (
@@ -621,7 +622,8 @@ async def _run_agent(
 ) -> list[dict[str, str]]:
     _require_decision_capacity(_load_conversation(run_dir, state, spec), spec)
     try:
-        value = await agent_runner(
+        value = await run_timed_agent(
+            agent_runner,
             prompt,
             cwd=workspace,
             resume_session_id=_session(state, spec),

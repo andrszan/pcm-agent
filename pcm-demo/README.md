@@ -32,13 +32,13 @@ PCM Demo 是正式 PCM 开发前的本地验证工具。它使用 Python 串联�
 <PCM_WORKSPACE_ROOT>/<project_directory_name>/
 ```
 
-`pcm-demo/runs/<run-id>/` 只保存本次编排的状态、结果、对话和诊断，不是产品项目目录。
+`pcm-demo/runs/<run-id>/` 只保存本次编排的状态、结果、对话、诊断和计时，不是产品项目目录。
 
 ## 项目结构
 
 ```text
 pcm-demo/
-├── common/                 # 多个步骤真实复用的状态、Agent、决策和诊断能力
+├── common/                 # 多个步骤真实复用的状态、Agent、决策、诊断和计时能力
 ├── probes/                 # Claude Agent SDK、session 和结构化决策探针
 ├── steps/                  # 第 0～18 步实现、测试和步骤说明
 ├── docs/                   # PCM Demo 内部活动技术设计
@@ -59,7 +59,7 @@ pcm-demo/
 - Python 3.10 或更高版本；
 - `uv`；
 - Git；
-- 可访问 Anthropic Messages 协议的 Claude Agent SDK 网关和受保护 API Key；
+- 可访问 Anthropic Messages 协议的 Claude Agent SDK 网关和受保护 Bearer token；
 - AI-compatible Responses API 配置；
 - 当前产品需要的模板仓库、开发资源和外部服务权限。
 
@@ -75,7 +75,7 @@ uv sync
 | 配置 | 用途 |
 | --- | --- |
 | `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL` | AI-compatible 结构化决策与提取 |
-| `PCM_AGENT_BASE_URL`、`PCM_AGENT_API_KEY` | Claude Agent SDK 使用的 Anthropic Messages 网关与受保护 API Key；Base URL 不包含 `/v1` |
+| `PCM_AGENT_BASE_URL`、`PCM_AGENT_AUTH_TOKEN` | Claude Agent SDK 使用的 Anthropic Messages 网关与受保护 Bearer token；Base URL 不包含 `/v1` |
 | `PCM_AGENT_MODEL_LOW`、`PCM_AGENT_MODEL_MEDIUM`、`PCM_AGENT_MODEL_HIGH` | 低、中、高语义档位对应的网关真实模型名 |
 | `PCM_WORKSPACE_ROOT` | 所有目标产品项目的外部父目录，必须位于当前能力仓库之外 |
 | `PCM_MAX_CONCURRENT_PROJECTS` | 当前 Demo checkout 同时执行的产品项目上限，默认 `2` |
@@ -84,7 +84,11 @@ uv sync
 | `PCM_AGENT_WORKSPACE_ENV_FILE` | 写入目标 AI Agent 工作区的受保护工具配置来源 |
 | `PCM_DEV_RESOURCE_LIST` | 项目准备核验使用的可信开发资源清单 |
 
-进程环境变量优先于 `.env`；`--workspace-root` 和 `--catalog-path` 可以覆盖对应配置。AI-compatible 与 Claude Agent SDK 使用独立配置，当前即使指向同一代理服务也不相互回退。PCM 将 Agent 配置转换为 `ANTHROPIC_BASE_URL`、`ANTHROPIC_API_KEY`，压住 `LLM_*`、其它 PCM 编排控制键和冲突认证，并把 `CLAUDE_CODE_SUBAGENT_MODEL` 同步为当前主模型；项目自定义 `dev`、`reviewer` 继续使用 `model: inherit`。`PCM_AGENT_WORKSPACE_ENV_FILE` 仍只由第 1 步安装为目标产品根受保护 `.env`，不合并进 SDK 子进程环境。
+进程环境变量优先于 `.env`；`--workspace-root` 和 `--catalog-path` 可以覆盖对应配置。AI-compatible 与 Claude Agent SDK 使用独立配置，不相互回退；`LLM_API_KEY` 保持不变。PCM 将 Agent 配置转换为 `ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`，置空继承的 API Key、OAuth、云 Provider 选择开关及模型选择/别名/显示配置，并压住 `LLM_*` 与 PCM 编排控制键。`CLAUDE_CODE_SUBAGENT_MODEL` 仍同步为当前主模型；项目自定义 `dev`、`reviewer` 继续使用 `model: inherit`。`PCM_AGENT_WORKSPACE_ENV_FILE` 仍只由第 1 步安装为目标产品根受保护 `.env`，不合并进 SDK 子进程环境。
+
+公共 runner 使用 `setting_sources=["project", "local"]`，保留产品项目的 settings、权限、Skills 和显式 Plugin 加载，不加载用户级 settings 或用户级 Skills。原 session 存储位置不变。项目的 `settings.env` 仍遵循 Claude Code 的优先级，不应在产品设置中另配 PCM 网关、认证或模型路由。
+
+已有开发配置需把 `PCM_AGENT_API_KEY` 的有效值迁移到 `PCM_AGENT_AUTH_TOKEN`，旧键不再作为认证输入接受；真实凭据继续保持 Git 忽略，POSIX 下使用 `0600`。修改后重新启动 PCM 进程加载新代码与配置，不修改已有 conversation 或运行状态。
 
 固定 Agent profile：
 
@@ -96,7 +100,7 @@ uv sync
 
 第 15～17 步恢复同一个 development session 时始终使用中模型；每次 Agent 首次调用和 resume 都重新显式传入 model 与 effort。当前不为 Agent 步骤使用低模型，不配置 fallback model 或 `max_budget_usd`，并保持各步骤既有最大 turn 与负责人决策轮数。
 
-网关真实 GPT 模型名可被 Claude Code 记录为 `unrecognized_model` 警告，但已验证不阻止 Agent SDK 调用；PCM 仍要求 init 返回的实际模型与配置一致。Claude Code 的 `total_cost_usd` 不代表当前订阅代理的真实分模型成本。
+公共 runner 在会话级 `settings` 中生成 `modelOverrides`：`claude-haiku-4-5-20251001`、`claude-sonnet-4-6`、`claude-opus-4-8` 分别注册为 LOW、MEDIUM、HIGH 配置的实际模型 ID。`options.model` 仍直接使用实际 ID，不另设一套模型配置、不自动加 `[1m]`，也不引入 `*_MODEL_NAME` 显示项。该映射用于 Claude Code 识别自定义模型名并避免 `unrecognized_model`，不把底层 GPT 变成 Claude；SDK 升级后需复验识别和出站模型。PCM 仍核验 init 模型与配置一致，但真实路由验证以发往配置中转的请求为准。Claude Code 的 `total_cost_usd` 不代表当前订阅代理的真实分模型成本。
 
 ## 运行方式
 
@@ -140,7 +144,21 @@ uv run python run_all.py --release-product /absolute/path/to/product
 uv run python run_step.py --step <0-18> --run-id <run-id>
 ```
 
-第 0 步首次运行还需要 `--product-draft`。`run_step.py` 主要用于定向开发、验证和恢复；完整流程优先使用 `run_all.py`。
+第 0 步首次运行还需要 `--product-draft`。`run_step.py` 主要用于定向开发、验证和恢复；完整流程优先使用 `run_all.py`。单次命令固定 run ID，自动重试、10/30 秒退避和最终计时写入期间持续持有同一组执行锁，退避期间不释放执行名额或已取得的产品锁。锁准备失败会释放已取得的锁，且不进入步骤或计时；完整编排在释放 Run Lock 前读取汇总。
+
+### 步骤耗时
+
+计时默认启用，无需新增参数或环境变量。`run_step.py` 在 stderr 显示北京时间的步骤开始提示，以及 Claude Code 累计执行时间和步骤总历时；原 stdout 结果路径不变。`run_all.py` 完成或停止时只读汇总。
+
+- **`agent_elapsed_seconds`**：各次主 Claude Code 调用的已知执行时间之和，包含调用内的工具、测试和子代理等待；不包含调用外的负责人决策、Python 核验、10/30 秒退避或停机等待。
+- **`wall_elapsed_seconds`**：步骤首次开始至首次成功完成的自然时间跨度，包含上述等待。成功前或起止时刻未知时为空。
+- **`agent_executions`**：每次实际调用或恢复 Claude Code 单独保留开始、结束、中断时刻、耗时和结束原因；正常 `continue`、修复及自动重试也分别记录。成功复用没有真实调用就不新增区间，不重置首次完成数据。
+- 第 0～12 步按项目、第 13～18 步按需求 ID 和步骤编号区分。新记录不复制适用性和复用布尔值；有历史缺口时才出现步骤级 `note`。
+- 默认 SIGINT/SIGTERM 记录可观测的信号接收时刻并保持取消退出；SIGKILL、断电等没有结束证据时保持未知，不用恢复时间或文件 mtime 补算。
+
+数据仍位于 `runs/<run-id>/timings.json`，程序只读取和写入 `schema_version: 2` 的 `steps` 结构，所有时间戳为北京时间 `+08:00`。程序不转换旧计时文件，不自动迁移、归档或删除旧数据；不在当前 run 计时读写路径上的旧数据原样保留。若旧格式 `timings.json` 实际阻碍所需新版记录，先确认没有旧进程正在写入该 run，再只移除这一份冲突文件，不动 `state.json`、步骤 result 或 `conversations/`。计时不可用只警告，不改变业务 result/state、三态、模型 prompt、重试或退出码。
+
+**完整字段字典、结束原因、可空值、读取示例和存储策略见 [计时记录与字段说明](docs/timing.md)。**
 
 ## Run 目录与产物
 
@@ -155,6 +173,7 @@ runs/
 │       └── products/
 └── <run-id>/
     ├── state.json
+    ├── timings.json
     ├── steps/
     │   ├── 00.json
     │   ├── ...
@@ -177,6 +196,7 @@ runs/
 - `steps/requirements/<ID>/XX.json`：第 13～18 步按需求隔离的业务结果；
 - `conversations/*.json`：Claude Agent 回复与 AI-compatible 负责人决定组成的完整编排历史；
 - `logs/*.json`：结构化故障诊断快照，不是普通执行流水。
+- `timings.json`：`schema_version: 2` 按步骤保存 Claude Code 累计执行时间、步骤总历时及每次主调用区间；北京时间起止和中断时刻，不作为业务恢复真源。字段定义见 [计时说明](docs/timing.md)。
 
 ### `logs/*.json` 命名
 

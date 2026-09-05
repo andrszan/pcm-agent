@@ -27,6 +27,7 @@ from common.coordination import (
     run_lock_path,
 )
 from common.state import read_state, step_result_status, write_state
+from common.timing import print_timing_summary
 from config import load_settings
 from steps.step_13_select_requirement.step import registry_handoff
 
@@ -369,14 +370,25 @@ def _orchestrate_locked(
     run_dir: Path,
     locks: ExecutionLocks,
 ) -> int:
-    if args.resume:
-        if not run_dir.is_dir():
-            print(f"运行记录不存在：{run_id}", file=sys.stderr)
+    try:
+        if args.resume:
+            if not run_dir.is_dir():
+                print(f"运行记录不存在：{run_id}", file=sys.stderr)
+                return 2
+        elif run_dir.exists():
+            print(f"运行目录已存在，拒绝覆盖：{run_dir}", file=sys.stderr)
             return 2
-    elif run_dir.exists():
-        print(f"运行目录已存在，拒绝覆盖：{run_dir}", file=sys.stderr)
-        return 2
+        return _run_steps(args, run_id, run_dir, locks)
+    finally:
+        print_timing_summary(run_dir)
 
+
+def _run_steps(
+    args: argparse.Namespace,
+    run_id: str,
+    run_dir: Path,
+    locks: ExecutionLocks,
+) -> int:
     while True:
         try:
             state = read_state(run_dir) if run_dir.is_dir() else None

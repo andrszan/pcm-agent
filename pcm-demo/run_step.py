@@ -35,6 +35,7 @@ from common.state import (
     write_state,
     write_step_result,
 )
+from common.timing import StepTiming
 from config import (
     LLMConfig,
     load_agent_workspace_env_file,
@@ -890,30 +891,34 @@ def _prepare_execution_locks(args: argparse.Namespace) -> ExecutionLocks:
     else:
         locks = acquire_execution_locks(root, run_id, maximum)
 
-    run_dir = run_dir_for(run_id)
-    if run_dir.is_dir():
-        try:
-            state = read_state(run_dir)
-        except Exception:  # 由步骤现有错误路径保存损坏状态诊断。
-            return locks
-        coordination = state.get("coordination")
-        if isinstance(coordination, dict):
-            product_path = coordination.get("product_path")
-            if isinstance(product_path, str) and product_path:
-                record, _ = _ensure_product_claim(
-                    run_dir, state, run_id, Path(product_path), locks
-                )
-                final_path = state.get("workspace", {}).get("final_path")
-                if isinstance(final_path, str) and Path(final_path).is_dir():
-                    ensure_runtime(Path(final_path), coordination["product_key"], run_id, record)
-        elif isinstance(state.get("workspace"), dict):
-            final_path = state["workspace"].get("final_path")
-            if isinstance(final_path, str) and final_path:
-                key, canonical = product_key(Path(final_path))
-                locks.product = locks.stack.enter_context(
-                    acquire_product_lock(root, run_id, key, canonical)
-                )
-    return locks
+    try:
+        run_dir = run_dir_for(run_id)
+        if run_dir.is_dir():
+            try:
+                state = read_state(run_dir)
+            except Exception:  # 由步骤现有错误路径保存损坏状态诊断。
+                return locks
+            coordination = state.get("coordination")
+            if isinstance(coordination, dict):
+                product_path = coordination.get("product_path")
+                if isinstance(product_path, str) and product_path:
+                    record, _ = _ensure_product_claim(
+                        run_dir, state, run_id, Path(product_path), locks
+                    )
+                    final_path = state.get("workspace", {}).get("final_path")
+                    if isinstance(final_path, str) and Path(final_path).is_dir():
+                        ensure_runtime(Path(final_path), coordination["product_key"], run_id, record)
+            elif isinstance(state.get("workspace"), dict):
+                final_path = state["workspace"].get("final_path")
+                if isinstance(final_path, str) and final_path:
+                    key, canonical = product_key(Path(final_path))
+                    locks.product = locks.stack.enter_context(
+                        acquire_product_lock(root, run_id, key, canonical)
+                    )
+        return locks
+    except BaseException:
+        locks.close()
+        raise
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -987,10 +992,23 @@ def run_step_zero(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
     return run_dir, result
 
 
-def _execute(args: argparse.Namespace, execution_locks: ExecutionLocks) -> int:
+def _execute(
+    args: argparse.Namespace,
+    execution_locks: ExecutionLocks,
+    timing: StepTiming | None = None,
+) -> int:
     if args.step not in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18}:
         print(f"步骤尚未实现：{args.step}", file=sys.stderr)
         return 2
+
+    if timing is not None:
+        timing.begin_attempt(args.step)
+        if args.run_id:
+            try:
+                timing.bind_run(run_dir_for(args.run_id), existing=True)
+            except ValueError:
+                pass
+        timing.announce()
 
     run_dir: Path | None = None
     error_message = ""
@@ -1002,6 +1020,8 @@ def _execute(args: argparse.Namespace, execution_locks: ExecutionLocks) -> int:
             run_dir, result = run_step_zero(args)
         elif args.step == 1:
             run_dir, state, draft_path = load_or_create_step_one_run(args)
+            if timing is not None:
+                timing.bind_run(run_dir)
             run_dir, result = complete_step_one(
                 args, run_dir, state, draft_path, execution_locks
             )
@@ -1694,6 +1714,8 @@ def _execute(args: argparse.Namespace, execution_locks: ExecutionLocks) -> int:
         elif result["status"] == "success" and not protected_success:
             write_step_result(run_dir, args.step, result)
 
+    if timing is not None:
+        timing.observe_result(run_dir, result)
     if run_dir is not None:
         scoped_path: Path | None = None
         if args.step in {13, 14, 15, 16, 17, 18}:
@@ -1723,25 +1745,38 @@ def _execute(args: argparse.Namespace, execution_locks: ExecutionLocks) -> int:
     return _RETRY_REQUESTED_EXIT_CODE if retry_requested else 1
 
 
-def main() -> int:
+def main(*, retry: bool = False) -> int:
     args = parse_args()
     try:
         with _prepare_execution_locks(args) as locks:
+            if retry:
+                return _retry_locked(args, locks)
             return _execute(args, locks)
     except (OSError, RuntimeError, ValueError) as error:
         print(f"步骤协调失败：{error}", file=sys.stderr)
         return 2
 
 
+def _retry_locked(args: argparse.Namespace, locks: ExecutionLocks) -> int:
+    timing = StepTiming()
+    returned = False
+    with timing.activate():
+        try:
+            exit_code = _execute(args, locks, timing)
+            for delay in STEP_RETRY_DELAYS:
+                if exit_code != _RETRY_REQUESTED_EXIT_CODE:
+                    break
+                print(f"Claude Agent SDK 执行异常，{delay} 秒后重试。", file=sys.stderr)
+                time.sleep(delay)
+                exit_code = _execute(args, locks, timing)
+            returned = True
+            return 1 if exit_code == _RETRY_REQUESTED_EXIT_CODE else exit_code
+        finally:
+            timing.finish(returned=returned)
+
+
 def retrying_main() -> int:
-    exit_code = main()
-    for delay in STEP_RETRY_DELAYS:
-        if exit_code != _RETRY_REQUESTED_EXIT_CODE:
-            return exit_code
-        print(f"Claude Agent SDK 执行异常，{delay} 秒后重试。", file=sys.stderr)
-        time.sleep(delay)
-        exit_code = main()
-    return 1 if exit_code == _RETRY_REQUESTED_EXIT_CODE else exit_code
+    return main(retry=True)
 
 
 if __name__ == "__main__":

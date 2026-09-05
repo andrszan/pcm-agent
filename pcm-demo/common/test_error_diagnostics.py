@@ -24,13 +24,14 @@ class ErrorDiagnosticsTests(unittest.TestCase):
             "Authorization: Bearer header-secret\n"
             "Cookie: session=cookie-secret\n"
             "api_key=api-secret access_token=access-secret password=pass-secret "
+            "auth_token=auth-secret PCM_AGENT_AUTH_TOKEN=pcm-auth-secret "
             "postgres://user:dsn-secret@example.invalid/db?client_secret=query-secret&token_count=8; "
             "token budget exhausted; secret=hidden"
         )
 
         redacted = redact_text(text, known_secrets=[secret])
 
-        for value in (secret, "real%20secret%2B%2F%3D", "header-secret", "cookie-secret", "api-secret", "access-secret", "pass-secret", "dsn-secret", "query-secret", "hidden"):
+        for value in (secret, "real%20secret%2B%2F%3D", "header-secret", "cookie-secret", "api-secret", "access-secret", "auth-secret", "pcm-auth-secret", "pass-secret", "dsn-secret", "query-secret", "hidden"):
             self.assertNotIn(value, redacted)
         self.assertIn("token_count=8", redacted)
         self.assertIn("token budget exhausted", redacted)
