@@ -639,12 +639,19 @@ class ProjectReadinessTests(unittest.TestCase):
             self.assertFalse(checklist_present(workspace))
 
     def test_cli_requires_run_id_with_step_five_schema(self) -> None:
-        completed = subprocess.run(
-            [sys.executable, str(DEMO_ROOT / "run_step.py"), "--step", "5"],
-            cwd=DEMO_ROOT,
-            text=True,
-            capture_output=True,
-        )
+        with tempfile.TemporaryDirectory() as directory:
+            script = f"""
+from pathlib import Path
+import run_step
+run_step.DEMO_ROOT = Path({directory!r})
+raise SystemExit(run_step.retrying_main())
+"""
+            completed = subprocess.run(
+                [sys.executable, "-c", script, "--step", "5"],
+                cwd=DEMO_ROOT,
+                text=True,
+                capture_output=True,
+            )
         self.assertEqual(completed.returncode, 1)
         self.assertIn("第 5 步执行失败", completed.stderr)
         self.assertNotIn("TypeError", completed.stderr)

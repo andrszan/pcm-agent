@@ -81,7 +81,7 @@ def _ensure_directory(path: Path) -> None:
     if current.is_symlink() or not current.is_dir():
         raise RuntimeError(f"协调目录无效：{current}")
     for directory in reversed(missing):
-        directory.mkdir()
+        directory.mkdir(exist_ok=True)
         if directory.is_symlink() or not directory.is_dir():
             raise RuntimeError(f"协调目录无效：{directory}")
 

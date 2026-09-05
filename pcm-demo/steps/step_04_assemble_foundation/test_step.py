@@ -40,6 +40,21 @@ def command(*args: str, cwd: Path | None = None) -> str:
     ).stdout.strip()
 
 
+def run_cli(demo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    script = f"""
+from pathlib import Path
+import run_step
+run_step.DEMO_ROOT = Path({str(demo_root)!r})
+raise SystemExit(run_step.retrying_main())
+"""
+    return subprocess.run(
+        [sys.executable, "-c", script, *args],
+        cwd=PCM_ROOT,
+        text=True,
+        capture_output=True,
+    )
+
+
 class AssembleFoundationTests(unittest.TestCase):
     def create_remote(
         self,
@@ -409,38 +424,27 @@ class AssembleFoundationTests(unittest.TestCase):
     def test_cli_runs_step_four_synchronously(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            demo_root = root / "demo"
             _, url = self.create_remote(root)
-            run_dir, _, _ = self.make_run(root, self.selection(url), run_directory_name="cli-run")
-            demo_runs = PCM_ROOT / "runs"
-            destination = demo_runs / "cli-run"
-            if destination.exists():
-                self.skipTest("本地 demo runs 已存在 cli-run")
-            try:
-                os.rename(run_dir, destination)
-                completed = subprocess.run(
-                    [sys.executable, str(PCM_ROOT / "run_step.py"), "--step", "4", "--run-id", "cli-run"],
-                    cwd=PCM_ROOT,
-                    text=True,
-                    capture_output=True,
-                )
-                self.assertEqual(completed.returncode, 0, completed.stderr)
-                self.assertIn("04.json", completed.stdout)
-            finally:
-                if destination.exists():
-                    os.rename(destination, run_dir)
+            run_dir, _, _ = self.make_run(
+                demo_root / "runs",
+                self.selection(url),
+                run_directory_name="cli-run",
+                state_run_id="cli-run",
+            )
+            completed = run_cli(demo_root, "--step", "4", "--run-id", run_dir.name)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertIn("04.json", completed.stdout)
 
     def test_cli_reports_missing_or_unknown_run_id_with_step_four_schema(self) -> None:
-        for arguments in ([], ["--run-id", "missing-run"]):
-            with self.subTest(arguments=arguments):
-                completed = subprocess.run(
-                    [sys.executable, str(PCM_ROOT / "run_step.py"), "--step", "4", *arguments],
-                    cwd=PCM_ROOT,
-                    text=True,
-                    capture_output=True,
-                )
-                self.assertEqual(completed.returncode, 1)
-                self.assertIn("第 4 步执行失败", completed.stderr)
-                self.assertNotIn("TypeError", completed.stderr)
+        with tempfile.TemporaryDirectory() as directory:
+            demo_root = Path(directory)
+            for arguments in ([], ["--run-id", "missing-run"]):
+                with self.subTest(arguments=arguments):
+                    completed = run_cli(demo_root, "--step", "4", *arguments)
+                    self.assertEqual(completed.returncode, 1)
+                    self.assertIn("第 4 步执行失败", completed.stderr)
+                    self.assertNotIn("TypeError", completed.stderr)
 
     def test_success_reuse_requires_matching_result_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from common.coordination import (
     acquire_execution_locks,
@@ -24,9 +25,31 @@ class CoordinationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name) / "coordination"
+        self.bindable_ports_patch = mock.patch(
+            "common.coordination._ports_bindable", return_value=True
+        )
+        self.bindable_ports = self.bindable_ports_patch.start()
 
     def tearDown(self) -> None:
+        self.bindable_ports_patch.stop()
         self.temporary_directory.cleanup()
+
+    def test_shared_root_creation_tolerates_concurrent_creator(self) -> None:
+        original_mkdir = Path.mkdir
+        injected = False
+
+        def mkdir_with_concurrent_creation(
+            path: Path, *args: object, **kwargs: object
+        ) -> None:
+            nonlocal injected
+            if path == self.root and not injected:
+                injected = True
+                original_mkdir(path)
+            original_mkdir(path, *args, **kwargs)
+
+        with mock.patch.object(Path, "mkdir", mkdir_with_concurrent_creation):
+            locks = acquire_execution_locks(self.root, "run-a", 2)
+        locks.close()
 
     def test_capacity_allows_limit_and_releases_on_close(self) -> None:
         first = acquire_execution_locks(self.root, "run-a", 2)
@@ -149,6 +172,15 @@ locks.close()
         self.assertEqual([record["port_slot"] for record in records], [100, 101])
         self.assertEqual(records[1]["ports"], {"frontend": 3101, "backend": 8101})
 
+    def test_unbindable_port_pair_is_skipped(self) -> None:
+        self.bindable_ports.side_effect = [False, True]
+        product = Path(self.temporary_directory.name) / "products" / "alpha"
+        key, canonical = product_key(product)
+        with acquire_product_lock(self.root, "run-a", key, canonical):
+            record = claim_product(self.root, "run-a", key, canonical)
+        self.assertEqual(record["port_slot"], 101)
+        self.assertEqual(record["ports"], {"frontend": 3101, "backend": 8101})
+
     def test_runtime_is_created_and_conflicts_are_rejected(self) -> None:
         product = Path(self.temporary_directory.name) / "products" / "alpha"
         product.mkdir(parents=True)
@@ -193,6 +225,15 @@ locks.close()
         with acquire_product_lock(self.root, "run-b", next_key, next_path):
             next_record = claim_product(self.root, "run-b", next_key, next_path)
         self.assertEqual(next_record["port_slot"], 100)
+
+    def test_release_is_rejected_while_ports_are_occupied(self) -> None:
+        product = Path(self.temporary_directory.name) / "products" / "alpha"
+        key, canonical = product_key(product)
+        with acquire_product_lock(self.root, "run-a", key, canonical):
+            claim_product(self.root, "run-a", key, canonical)
+        self.bindable_ports.return_value = False
+        with self.assertRaisesRegex(RuntimeError, "产品端口仍被占用"):
+            release_product(self.root, canonical)
 
     def test_release_is_rejected_while_owner_run_is_active(self) -> None:
         product = Path(self.temporary_directory.name) / "products" / "alpha"

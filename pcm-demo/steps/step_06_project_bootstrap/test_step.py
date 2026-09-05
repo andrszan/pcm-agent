@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -249,6 +248,7 @@ class ProjectBootstrapTests(unittest.TestCase):
             self.assertEqual(calls[1]["resume_session_id"], "session-bootstrap")
             self.assertEqual(calls[1]["prompt"], README_REPAIR_PROMPT)
             self.assertIsNone(calls[2]["resume_session_id"])
+            self.assertEqual(TAILWIND_THEME_MAX_TURNS, 9999)
             self.assertEqual(calls[2]["max_turns"], TAILWIND_THEME_MAX_TURNS)
 
             bootstrap_prompt = calls[0]["prompt"]
@@ -855,43 +855,37 @@ class ProjectBootstrapTests(unittest.TestCase):
             self.assertIs(outcome["tailwind_theme"], False)
 
     def test_cli_requires_run_id_and_handles_corrupt_state(self) -> None:
-        completed = subprocess.run(
-            [sys.executable, str(DEMO_ROOT / "run_step.py"), "--step", "6"],
-            cwd=DEMO_ROOT,
-            text=True,
-            capture_output=True,
-        )
-        self.assertEqual(completed.returncode, 1)
-        self.assertIn("第 6 步执行失败", completed.stderr)
-        self.assertNotIn("Traceback", completed.stderr)
+        with tempfile.TemporaryDirectory() as directory:
+            demo_root = Path(directory)
+            script = f"""
+from pathlib import Path
+import run_step
+run_step.DEMO_ROOT = Path({directory!r})
+raise SystemExit(run_step.retrying_main())
+"""
 
-        run_dir = DEMO_ROOT / "runs" / "corrupt-step-six-test"
-        if run_dir.exists():
-            self.skipTest("本地测试 run 已存在")
-        try:
+            def execute(*args: str) -> subprocess.CompletedProcess[str]:
+                return subprocess.run(
+                    [sys.executable, "-c", script, *args],
+                    cwd=DEMO_ROOT,
+                    text=True,
+                    capture_output=True,
+                )
+
+            completed = execute("--step", "6")
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("第 6 步执行失败", completed.stderr)
+            self.assertNotIn("Traceback", completed.stderr)
+
+            run_dir = demo_root / "runs" / "corrupt-step-six-test"
             (run_dir / "steps").mkdir(parents=True)
             (run_dir / "state.json").write_text("{invalid", encoding="utf-8")
-            broken = subprocess.run(
-                [
-                    sys.executable,
-                    str(DEMO_ROOT / "run_step.py"),
-                    "--step",
-                    "6",
-                    "--run-id",
-                    run_dir.name,
-                ],
-                cwd=DEMO_ROOT,
-                text=True,
-                capture_output=True,
-            )
+            broken = execute("--step", "6", "--run-id", run_dir.name)
             self.assertEqual(broken.returncode, 1)
             self.assertNotIn("Traceback", broken.stderr)
             saved = json.loads((run_dir / "steps/06.json").read_text(encoding="utf-8"))
             self.assertEqual(saved["status"], "failed")
             self.assertIs(saved["tailwind_theme"], False)
-        finally:
-            if run_dir.exists():
-                shutil.rmtree(run_dir)
 
 
 if __name__ == "__main__":

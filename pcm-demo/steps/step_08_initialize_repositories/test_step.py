@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -714,10 +713,9 @@ class InitializeRepositoriesTests(unittest.TestCase):
     def test_cli_success_fixture_uses_the_new_schema(self) -> None:
         import run_step as cli
 
-        run_dir = DEMO_ROOT / "runs" / "step-eight-new-schema-test"
-        if run_dir.exists():
-            self.skipTest("本地 demo runs 已存在 step-eight-new-schema-test")
-        try:
+        with tempfile.TemporaryDirectory() as directory:
+            demo_root = Path(directory)
+            run_dir = demo_root / "runs" / "step-eight-new-schema-test"
             (run_dir / "steps").mkdir(parents=True)
             successful_state = {
                 "status": "success",
@@ -753,6 +751,7 @@ class InitializeRepositoriesTests(unittest.TestCase):
             for attempt in range(2):
                 with self.subTest(attempt=attempt):
                     with (
+                        patch.object(cli, "DEMO_ROOT", demo_root),
                         patch.object(cli, "parse_args", return_value=args),
                         patch.object(
                             cli, "run_step_eight", side_effect=OSError("模拟中断")
@@ -765,9 +764,6 @@ class InitializeRepositoriesTests(unittest.TestCase):
                 self.assertEqual(preserved, fixture)
                 self.assertEqual(read_state(run_dir), successful_state)
                 self.assertNotIn("initial_commits", preserved)
-        finally:
-            if run_dir.exists():
-                shutil.rmtree(run_dir)
 
 
 if __name__ == "__main__":

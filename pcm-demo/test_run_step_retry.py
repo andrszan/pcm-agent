@@ -92,6 +92,8 @@ class RunStepRetryTests(unittest.TestCase):
                 )
                 stderr = io.StringIO()
                 with (
+                    tempfile.TemporaryDirectory() as directory,
+                    patch.object(run_step, "DEMO_ROOT", Path(directory)),
                     patch.object(run_step, "parse_args", return_value=Mock(step=0)),
                     patch.object(run_step, "run_step_zero", side_effect=error),
                     contextlib.redirect_stderr(stderr),
