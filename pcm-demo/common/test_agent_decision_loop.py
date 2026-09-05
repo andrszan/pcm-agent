@@ -1480,6 +1480,8 @@ class AgentDecisionTest(unittest.IsolatedAsyncioTestCase):
             "各选项主要影响",
             "Agent 的推荐与理由",
             "只能作为辅助引用",
+            "仅当 Agent 已提出待决策事项",
+            "不因 Agent 未复述已完成工作、未声明结束状态或未逐项声明没有问题而要求继续",
             "要求 Agent 在原会话中重新读取必要资料并补齐自包含交接",
             "不得猜测答案，不得 completed",
             "不得把信息不足本身判为 blocked",

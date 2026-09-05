@@ -8,7 +8,7 @@
 
 Claude Agent 在产品根以 requirement-scoped key `development_<requirement-id>` 复用公共 `run_agent_decision_loop` 调用，显式使用中模型和 `high` effort。初始 Agent prompt 只包含 `/dev-workflow`、需求 ID/标题和活动 TRD 路径；负责人的项目上下文包含同一路径和完整活动 TRD 正文。Agent 按活动 TRD 中适用的体验决定执行，并按需自行读取项目资料、代码、配置、测试和运行环境，不要求固定上游资料。稳定设计偏差可同步至活动 TRD。
 
-Agent 不得修改 `.claude/rules/`，也不得 stage、commit、创建或切换分支、merge 或 push。完成 verifier 为空；语义完成由 `dev-workflow`、Agent 和负责人裁决。Agent 最终回复必须明确声明“已完成”“已实现但未完全验证”或“阻塞”之一；只有明确声明已完成，并明确没有剩余工作、失败项、验证缺口或阻断项时，负责人才能返回 `AgentDecision.completed`。未声明结束状态、含糊总结或只引用文件、章节、代码符号和行号的回复必须返回 `continue`，要求原 session 重新读取并补齐；信息不足本身不得判为 `blocked`。
+Agent 不得修改 `.claude/rules/`，也不得 stage、commit、创建或切换分支、merge 或 push。完成 verifier 为空；负责人 `AgentDecision.completed` 即为本步骤领域完成，`continue` 和 `blocked` 沿用公共循环语义。
 
 首次从 Agent 取得 session 后，程序立即同步 `requirement_cycle.development_session_id`。success result 写入：
 
@@ -26,7 +26,7 @@ steps/requirements/<requirement-id>/15.json
 决定（默认 Target 含依据与重议条件）→可观察结果→实现位置→真实浏览器和实际读取截图证据→实际结果映射
 ```
 
-不得静默偏离适用决定；稳定偏差必须同步活动 TRD。截图只是其中一项证据，不能替代动态交互、权限、失败恢复和持久化的真实验证。完成报告可以保持简洁，不要求逐项复制此前已经报告的全部证据，但必须正面声明结束状态；不能以没有主动报告问题反推已经完成。需要负责人决定时，必须自包含准确问题、已核验事实与约束、当前约束下实质可行选项、各选项主要影响及推荐理由，引用只能辅助定位。
+不得静默偏离适用决定；稳定偏差必须同步活动 TRD。截图只是其中一项证据，不能替代动态交互、权限、失败恢复和持久化的真实验证。
 
 ## 真实验证
 
@@ -40,7 +40,7 @@ Agent 报告后端 Ruff/format/build、pytest 16 passed 1 skipped、真实 Postg
 
 ## 自动化与运行
 
-公共循环与第 15 步定向 57 项通过；PCM Demo 当前工作树全量 369 项中 368 项通过（54.112 秒），唯一失败是本次未修改且当前 `HEAD` 已存在的第 17 步 `MAX_DECISION_ROUNDS=32` 与测试仍期望 16 的基线断言。`compileall common steps probes run_step.py run_all.py test_run_step_retry.py test_run_all.py`、dev-workflow eval JSON 解析与 `git diff --check` 通过。fresh Probe C `probe-c-decision-handoff-20260905` 使用当前配置 AI-compatible 模型一次确认引用式不完整交接为 `continue`，一次确认自包含不可替代外部资源缺口为 `blocked`。本轮未重新执行真实 Claude Agent 产品开发或浏览器流程，也未修改现有产品工作区和历史 conversation；新负责人合同只进入新建 decision conversation，模板 Agent 规则只随未来新建工作区生效。
+第 14、15 步本体和 CLI 定向 29 项通过；PCM Demo 全量 359 项 `unittest` 通过（50.534 秒），`compileall common steps run_step.py run_all.py test_run_step_retry.py test_run_all.py`、相关 IDE diagnostics 与 `git diff --check` 通过。未运行新的真实 Claude Agent、AI-compatible 负责人或产品浏览器流程；本轮只补充第 14、15 步负责人直接权威上下文和相应自动化。第 8、17、18 步既有代码与验证事实保持不变。
 
 ```bash
 cd /Users/zhou/resource/fireworks/ANDRSZAN/pcm-agent-skills/pcm-demo

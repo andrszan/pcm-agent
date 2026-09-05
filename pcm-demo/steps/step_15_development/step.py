@@ -24,9 +24,9 @@ SKILL_NAME = "dev-workflow"
 MAX_DECISION_ROUNDS = 32
 DEVELOPMENT_MAX_TURNS = 9999
 
-DEVELOPMENT_DECISION_RULES = """- completed：仅当 Agent 最新回复明确声明当前需求已完成，并明确说明没有剩余工作、失败项、验证缺口或阻断项时使用；不得因回复没有提及未完成内容而推定完成，也不得因 Agent 未逐项复述此前已经报告的证据而自行增加验收门槛。
-- continue：Agent 未明确声明结束状态，或明确报告仍有未完成工作、失败项、验证缺口或其它可在当前环境继续处理的事项时，给出只针对当前缺口的下一步指令；决策交接不完整时按统一职责要求其在原会话重新读取并补齐，不得扩大工作范围。
-- blocked：仅当 Agent 自包含地明确报告缺少当前环境无法取得的不可替代外部条件，并说明具体解除条件时使用；不能把未主动报告的可选验证、推测性疑虑或不完整决策交接判为阻塞。"""
+DEVELOPMENT_DECISION_RULES = """- completed：Agent 最新回复没有明确自报未完成项、验证缺口或阻断时完成；不得因 Agent 未逐项复述证据而自行增加验收门槛。
+- continue：仅当 Agent 明确自报仍有未完成工作、失败项、验证缺口或其它需要继续处理的事项，且当前环境可以继续时，给出针对该事项的下一步指令；不得扩大 Agent 已报告的范围。
+- blocked：仅当 Agent 明确报告缺少当前环境无法取得的不可替代外部条件时使用；不能把未主动报告的可选验证或推测性疑虑判为阻塞。"""
 
 
 class DevelopmentBlocked(RuntimeError):
