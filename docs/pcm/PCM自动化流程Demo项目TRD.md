@@ -7,6 +7,8 @@
 > - [`PCM 自动化流程 Demo 项目设计`](./PCM自动化流程Demo项目设计.md)：定义 Demo 的目标、范围、黄金输入和最终完成标准；
 > - [`PCM 程序化调度的 AI Agent 产品开发流程`](../../.claude/PCM版AI%20Agent自动化流程设计.md)：定义第 0～18 步、阶段一、阶段二的流程语义、职责边界和停止条件。
 >
+> 本轮已建立待决策事项的自包含交接与多轮 `continue` 兜底：模板根 `AGENTS.md` 约束 Agent 在确实请求负责人决定时完整说明准确问题、已核验事实与约束、实质可行选项、主要影响及推荐理由，引用只辅助定位；`common/decision.py` 的统一负责人职责在新 conversation 中发现 Agent 已提出待决策事项但只给引用或缺少必要详情时，要求原 Claude session 重新读取并补齐，不在缺少关键信息时猜测决定，也不把交接信息不足本身判为 `blocked`。各步骤既有 `completed/continue/blocked` 判断规则、公共循环、`AgentDecision`、conversation/state、completion verifier、项目上下文范围、历史 run 和外部产品工作区均未修改，也未引入产物全文注入、动态快照、文件读取工具或自然语言解析。fresh Probe C 一次确认引用式待决策交接为 `continue`，一次确认自包含不可替代外部资源缺口为 `blocked`。新规则不迁移既有 decision conversation，Agent 侧模板规则只随未来新建工作区生效。
+>
 > 本轮 Claude Agent 模型分级已落实：PCM 从自身 `.env` 显式加载 Anthropic Messages 网关、受保护 API Key 和低/中/高真实模型映射；13 条 Agent 执行路径固定 model/effort，子代理默认模型与主模型同步，resume 重传相同 profile。配置、公共循环与固定 profile 定向 49 项、模型 profile 与需求循环定向 101 项、当前工作树全量 367 项 `unittest` 通过（49.802 秒），`compileall` 与 `git diff --check` 通过；中模型 + `high` effort 的公共 runner 首轮与同 session resume 真实成功。未配置 `max_budget_usd`，领域 prompt 和步骤业务语义未变。
 >
 > 本轮已完成第 9、14、15 步的工程架构约束传递修正：第 9 步明确稳定业务 owner、目录/包/模块边界、公开出口、私有禁区和依赖方向不可被巨型路由/页面、通用收纳目录或同名平铺文件静默替代；第 14 步按每个受影响交付单元把适用工程归属合同和架构 delta 写入活动 TRD；第 15 步负责人要求“架构约束/模块归属→改动位置与依赖关系→diff/导入/调用证据→实际结果”映射。边界内部文件粒度仍可按真实职责调整。第 9/14/15 步本体 35 项、公共循环与三步 CLI 相关回归 91 项、当前工作树全量 367 项 `unittest`（49.013 秒）通过；完整 `compileall`、修改 Python 文件 IDE diagnostics、两个 eval JSON 解析和 `git diff --check` 通过。第 14/15 步负责人上下文仍分别只增加完整 Backlog 与活动 TRD，没有新增工程架构全文注入、Markdown 解析、JSON 架构 DSL、Git verifier、公共循环或状态字段。真实 Agent 集成留给 BR-003 的第 14/15 步自然验证及下一 fresh 项目的第 9 步验证。
@@ -100,11 +102,11 @@ Demo 继续采用增量实施，不一次创建完整流程空壳：
 
 ### 2. 两类模型调用职责不同
 
-**AI-compatible 模型**是实际使用 Claude Code Agent 的项目负责人、工程负责人和 Agent 专家，处理所有能够基于当前输入、项目事实、可用工具和已提供资源完成的产品、技术、文档、流程及执行决策。它读取完整 conversation：`assistant` 是负责人发给 Agent 的初始、继续或修复指令，或负责人每轮返回的 `AgentDecision` JSON；`user` 是 Agent 完整真实回复。它不直接获得工作区文件和 Shell 操作权限，由 PCM 提供当前决定所需的最小事实。只有模型和当前环境无法取得的不可替代外部资源时才返回 `blocked`；输入、结构或本地状态错误返回 `failed`。
+**AI-compatible 模型**是实际使用 Claude Code Agent 的项目负责人、工程负责人和 Agent 专家，处理所有能够基于当前输入、项目事实、可用工具和已提供资源完成的产品、技术、文档、流程及执行决策。它读取完整 conversation：`assistant` 是负责人发给 Agent 的初始、继续或修复指令，或负责人每轮返回的 `AgentDecision` JSON；`user` 是 Agent 完整真实回复。它不直接获得工作区文件和 Shell 操作权限，由 PCM 提供当前决定所需的最小事实。Agent 请求负责人决定时，项目规则要求其自包含准确问题、已核验事实与约束、当前约束下实质可行选项、各选项主要影响及推荐理由，文件引用只作辅助；只给路径、章节、提交、代码符号或行号，或缺少可靠决定所需内容时，负责人必须 `continue` 要求原 session 重新读取并补齐，不得猜测、`completed` 或把信息不足判为 `blocked`。只有模型和当前环境无法取得的不可替代外部资源时才返回 `blocked`；输入、结构或本地状态错误返回 `failed`。
 
-**Claude Agent SDK**负责运行具备文件、命令和项目能力上下文的 coding agent，调用项目 Skills、修改工作区文件、执行验证，并返回 session 结果。
+**Claude Agent SDK**负责运行具备文件、命令和项目能力上下文的 coding agent，调用项目 Skills、修改工作区文件、执行验证，并返回 session 结果。Agent 能依据当前事实安全决定的普通事项自行处理，不机械上抛；确需决定时按项目规则完成自包含交接。
 
-Python 编排器负责确定性操作、两类会话衔接和最终步骤状态，不把任何模型的单次文字输出直接视为完成证据。
+Python 编排器负责确定性操作、两类会话衔接和最终步骤状态，不把任何模型的单次文字输出直接视为完成证据，也不为该交接合同解析回复、读取产物全文或扩展公共状态机。
 
 ### 3. Claude Agent SDK 当前约束
 
@@ -404,10 +406,10 @@ exception
 `verdict` 只允许：
 
 - `completed`：负责人根据 Agent 执行结果相信当前任务已完成；仍须通过步骤程序的完成核验，`answer` 与 `required_inputs` 均为空；
-- `continue`：向原 session 发送非空的明确指令，`required_inputs` 为空；
-- `blocked`：缺少当前环境不可取得的真实外部资源，`answer` 为空且 `required_inputs` 非空。
+- `continue`：向原 session 发送非空的明确指令，`required_inputs` 为空；Agent 请求决定但只给路径、章节、提交、代码符号或行号，或缺少准确问题、已核验事实与约束、实质可行选项、主要影响、推荐与理由时，只能使用该 verdict 要求原 session 重新读取并补齐；
+- `blocked`：缺少当前环境不可取得的真实外部资源，`answer` 为空且 `required_inputs` 非空；信息不足或引用式交接不构成阻塞。
 
-决策负责人拥有原人工调度者在同等输入和工具条件下可完成的全部决策权。步骤仅维护领域 `DECISION_RULES`；公共渲染器分别生成 `<role>`、`<project_context>`、`<responsibility>`、`<completion>`、`<output>`。步骤规则只进入 completion；output 约束 `completed/continue/blocked` 的 `answer`、`required_inputs` 组合并要求 `reason` 非空。`request_decision` 原样调用一次 `responses.parse`，以 Pydantic `AgentDecision` 取得结构化输出；没有手写解析、决定注入、隐藏 prompt 或格式重试。
+决策负责人拥有原人工调度者在同等输入和工具条件下可完成的全部决策权。交接完整且现有事实足够时直接选择合理方案，不继续上抛；交接不完整时不得猜测、不得 `completed`。步骤仅维护领域 `DECISION_RULES`；公共渲染器分别生成 `<role>`、`<project_context>`、`<responsibility>`、`<completion>`、`<output>`。统一 responsibility 承担交接充分性兜底，步骤规则只进入 completion；output 约束 `completed/continue/blocked` 的 `answer`、`required_inputs` 组合并要求 `reason` 非空。`request_decision` 原样调用一次 `responses.parse`，以 Pydantic `AgentDecision` 取得结构化输出；没有手写解析、决定注入、隐藏 prompt、产物全文注入或格式重试。
 
 ### 6. 命令结果
 
@@ -510,15 +512,15 @@ AI-compatible 模型可以决定所有能够基于当前输入、项目事实、
 
 ### 3. 决策上下文与历史
 
-发送给 AI-compatible 负责人的历史由完整 XML system snapshot 与既有对话组成。新 conversation 创建前，`common/decision.py` 将负责人角色、项目上下文、统一职责、步骤完成条件和 Pydantic 输出合同分别渲染为 `<role>`、`<project_context>`、`<responsibility>`、`<completion>`、`<output>` 并首次保存为 system。恢复严格使用历史 `messages[0]`，不重渲染或覆盖。完整 Agent 原文用于连续裁决，不能重新包装为步骤元数据或伪 `user` 消息。
+发送给 AI-compatible 负责人的历史由完整 XML system snapshot 与既有对话组成。新 conversation 创建前，`common/decision.py` 将负责人角色、项目上下文、统一职责、步骤完成条件和 Pydantic 输出合同分别渲染为 `<role>`、`<project_context>`、`<responsibility>`、`<completion>`、`<output>` 并首次保存为 system。统一职责先检查 Agent 的决策交接是否自包含；不完整时通过 `continue` 要求同一 Agent session 重新读取并补齐。恢复严格使用历史 `messages[0]`，不重渲染、覆盖或迁移；因此新职责只作用于新建 decision conversation，既有 conversation 不补造为新合同证据。完整 Agent 原文用于连续裁决，不能重新包装为步骤元数据或伪 `user` 消息。
 
 项目上下文范围固定为：第 2 步初稿原文和目标路径；第 5 步产品定义原文、适用工程、选型白名单投影以及资源清单的绝对路径/可读性；第 6 步 `project_bootstrap` 使用产品定义原文、已完成准备清单原文、配置迁移与既有资源边界、适用工程和组装白名单投影，`tailwind_theme` 使用产品定义原文、实际 frontend 和主题颜色边界；第 7 步产品定义原文、准备清单原文、适用工程和组装白名单投影；第 8 步有序权威仓库相对路径和干净基线说明；第 9 步两份产品定义原文、准备清单原文、总体技术方案原文、有序权威工程和固定输出路径；第 10 步适用时还包括固定工程架构文档与实际 `frontend`；第 11 步包括第 2/5/7 步文档、第 8 步权威工程、第 9 步工程架构和严格第 10 步交接，仅在第 10 步 true 时读取 UI/UX 框架。资源清单正文和 `.env` 因输入来源边界不读取或内联到项目上下文；第 6、7、9、10、11 步在消费准备清单前均严格核对当前清单和两份产品定义与 `readiness_baseline` 一致；第 8～11 步其它只读 Git 核验和 verifier 仍由步骤私有实现。
 
 选型和组装投影不含 `git_url`、`origin`、`remote`。渲染器仅对项目上下文做标准 XML 转义。`request_decision` 显式接收 XML prompt，原样传给一次 `responses.parse`，并以 Pydantic `AgentDecision` 取得结构化输出；没有公共默认、隐藏追加 prompt 或格式重试。
 
-PCM 在请求前读取该领域完整编排历史。首次保存动态 `system` 和已发送给 Claude Agent 的初始 `assistant` 指令；每次 Agent 完整真实回复先作为 `user` 追加，再调用 `request_decision` 并把负责人完整 `AgentDecision` JSON 作为 `assistant` 保存。`completed` 表示负责人根据 Agent 执行结果相信任务已完成，步骤程序仍执行现有完成核验；对话尾部是唯一调度真相：`user` 先裁决，`continue` 恢复 answer，`completed` 先核验，`blocked` 终止；只有 state 已标记 blocked 的显式重跑才发送固定重新核验提示。Agent initial prompt、conversation schema、公共循环状态机、repair/session、错误分类均保持不变，未引入 `task_contract`。
+PCM 在请求前读取该领域完整编排历史。首次保存动态 `system` 和已发送给 Claude Agent 的初始 `assistant` 指令；每次 Agent 完整真实回复先作为 `user` 追加，再调用 `request_decision` 并把负责人完整 `AgentDecision` JSON 作为 `assistant` 保存。`completed` 表示负责人根据 Agent 执行结果相信任务已完成，步骤程序仍执行现有完成核验；对话尾部是唯一调度真相：`user` 先裁决，决策交接不完整时 `continue` 要求原 session 补齐，交接完整后的 `continue` 恢复 answer，`completed` 先核验，`blocked` 终止；只有 state 已标记 blocked 的显式重跑才发送固定重新核验提示。公共循环不解析文件引用或 Agent 自然语言，也不向 Agent prompt 追加隐藏交接尾注。Agent initial prompt、conversation schema、公共循环状态机、repair/session、错误分类均保持不变，未引入 `task_contract`、动态产物快照或结构化决策工具。
 
-不发送密钥、完整 `.env`、资源清单正文、无关仓库内容或可由程序直接判断的原始大段日志。
+不发送密钥、完整 `.env`、资源清单正文、无关仓库内容或可由程序直接判断的原始大段日志。Agent 侧自包含交接由产品工作区项目规则约束；模板根 `AGENTS.md` 的新规则只随未来新建工作区生效，本轮不复制到既有外部产品工作区，也不修改既有 Claude session。当前已有工作区的新 decision conversation 仍可由负责人侧 `continue` 兜底。
 
 ## 七、已实现步骤合同与验收状态
 
@@ -557,8 +559,9 @@ PCM 在请求前读取该领域完整编排历史。首次保存动态 `system` 
 2. 能返回符合约定的结构化 JSON；
 3. 无效 JSON 会被检测和有限重试；
 4. 重构前普通定稿决定可返回 `approve`；该旧 `action` 记录仅供兼容读取；
-5. Probe C 的早期 `AgentDecision` verdict 与格式重试结果保留为旧合同历史。现行实现要求显式完整 XML system prompt，并将其原样传给一次 `responses.parse`，以 Pydantic `AgentDecision` 取得结构化输出；没有公共默认、隐藏追加 prompt 或格式重试。现行 XML prompt 已完成一次真实交接事实回放，但 Probe C 尚未按新合同单独重跑，不能以单次成功宣称重复调用稳定。
-6. 日志和状态中不出现 API Key。
+5. Probe C 的早期 `AgentDecision` verdict 与格式重试结果保留为旧合同历史。现行实现要求显式完整 XML system prompt，并将其原样传给一次 `responses.parse`，以 Pydantic `AgentDecision` 取得结构化输出；没有公共默认、隐藏追加 prompt、产物全文注入或格式重试。
+6. fresh run `probe-c-decision-handoff-20260905` 使用当前配置 AI-compatible 模型完成两次一次调用裁决：只引用活动 TRD 路径和行号、未说明五项详细问题的交接严格返回 `continue`、非空 `answer` 和空 `required_inputs`；自包含说明真实支付商户账号与生产密钥不可替代、当前环境无法取得且 Mock 不可用的交接返回 `blocked` 和非空 `required_inputs`。该探针只证明本次新 system prompt 对这两个输入的真实结果，不证明所有表达形式重复稳定，也不改写旧 conversation。
+7. 日志和状态中不出现 API Key。
 
 ### 第 0 步：形成产品初稿
 
@@ -1265,6 +1268,7 @@ Git 子进程统一过滤 `GIT_*`。仓库按非 root 原顺序、root 最后的
 - 配置和敏感信息不泄露；
 - JSON、Markdown、状态和 SHA-256 读写；
 - 第 0～8、12～18 步状态转换；
+- 本轮待决策事项交接合同由统一负责人 XML prompt、同 session `continue.answer` 恢复测试和 fresh Probe C 覆盖；只给活动 TRD 路径与行号、未说明详细待决策问题的交接返回 `continue`，自包含的不可替代外部资源缺口返回 `blocked`。各步骤原有 `completed/continue/blocked` 判断规则保持不变，本轮不把第 15 步完成声明或未复述内容设为新闸门；
 - 第 5 步本体 15 项、第 6/7/9/10/11 步下游 readiness 交接 68 项，合计 83 项；第 13 步本体 20 项与 CLI 10 项、显式 SDK 通道重试 7 项均保留其专属验证语境。本轮当前工作树全量 351 项 `unittest` 通过（61.878 秒），`compileall common steps run_step.py run_all.py test_run_step_retry.py test_run_all.py` 与本次目标 `git diff --check` 通过。当前工作树还包含其它公共循环/CLI 的未提交修改，故全量结果不能全部归因于第 9 步；
 - 本次第 1 步根 `.env` 工作区工具配置合同安全定向 24 项通过；当前工作树全量 359 项 `unittest` 通过（53.340 秒），相关 IDE diagnostics 与 `compileall common steps run_step.py run_all.py test_run_step_retry.py test_run_all.py` 通过。覆盖 `O_NOFOLLOW` 普通文件读取、创建即 `0600`、PCM 源路径控制键不传入 Agent SDK等安全边界；未调用外部模板仓库、AI-compatible 服务或 Claude Agent SDK 重新制造 fresh 发布证据。当前工作树还包含未纳入本议题的其它步骤运行参数与测试改动，因此全量结果不能全部归因于本次修改；
 - 重试定向覆盖任意 API 状态、明确 `api_error`、SDK 连接/进程异常、普通失败、取消、本地合同错误、内部退出码耗尽归一和瞬时标志不落盘；本次未调用真实外部服务制造故障；
