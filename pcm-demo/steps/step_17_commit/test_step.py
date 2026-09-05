@@ -238,7 +238,7 @@ class RequirementCommitTests(unittest.TestCase):
             "只 commit，不 push。",
         )
         self.assertEqual(calls[0]["resume_session_id"], "development-session-1")
-        self.assertEqual(MAX_DECISION_ROUNDS, 16)
+        self.assertEqual(MAX_DECISION_ROUNDS, 32)
         self.assertEqual(len(decision_prompts), 1)
         for required in (
             "全部白名单仓库仍在统一需求分支",
