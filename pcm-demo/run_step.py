@@ -1553,6 +1553,8 @@ def main(timing: StepTiming | None = None) -> int:
         elif result["status"] == "success" and not protected_success:
             write_step_result(run_dir, args.step, result)
 
+    if timing is not None:
+        timing.observe_result(run_dir, result)
     if run_dir is not None:
         scoped_path: Path | None = None
         if args.step in {13, 14, 15, 16, 17, 18}:
@@ -1577,8 +1579,6 @@ def main(timing: StepTiming | None = None) -> int:
             print(scoped_path or run_dir / "steps" / f"{args.step:02d}.json")
     else:
         print(result["summary"], file=sys.stderr)
-    if timing is not None:
-        timing.observe_result(run_dir, result)
     if result["status"] == "success":
         return 0
     return _RETRY_REQUESTED_EXIT_CODE if retry_requested else 1
@@ -1587,18 +1587,19 @@ def main(timing: StepTiming | None = None) -> int:
 def retrying_main() -> int:
     timing = StepTiming()
     returned = False
-    try:
-        exit_code = main(timing)
-        for delay in STEP_RETRY_DELAYS:
-            if exit_code != _RETRY_REQUESTED_EXIT_CODE:
-                break
-            print(f"Claude Agent SDK 执行异常，{delay} 秒后重试。", file=sys.stderr)
-            time.sleep(delay)
+    with timing.activate():
+        try:
             exit_code = main(timing)
-        returned = True
-        return 1 if exit_code == _RETRY_REQUESTED_EXIT_CODE else exit_code
-    finally:
-        timing.finish(returned=returned)
+            for delay in STEP_RETRY_DELAYS:
+                if exit_code != _RETRY_REQUESTED_EXIT_CODE:
+                    break
+                print(f"Claude Agent SDK 执行异常，{delay} 秒后重试。", file=sys.stderr)
+                time.sleep(delay)
+                exit_code = main(timing)
+            returned = True
+            return 1 if exit_code == _RETRY_REQUESTED_EXIT_CODE else exit_code
+        finally:
+            timing.finish(returned=returned)
 
 
 if __name__ == "__main__":

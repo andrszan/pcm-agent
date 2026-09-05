@@ -37,5 +37,8 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
             output.write("\n")
         temporary.replace(path)
     except BaseException:
-        temporary.unlink(missing_ok=True)
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
         raise
