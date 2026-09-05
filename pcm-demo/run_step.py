@@ -21,6 +21,7 @@ from common.state import (
     write_state,
     write_step_result,
 )
+from common.timing import StepTiming
 from config import (
     LLMConfig,
     load_agent_workspace_env_file,
@@ -835,11 +836,20 @@ def run_step_zero(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
     return run_dir, result
 
 
-def main() -> int:
+def main(timing: StepTiming | None = None) -> int:
     args = parse_args()
     if args.step not in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18}:
         print(f"步骤尚未实现：{args.step}", file=sys.stderr)
         return 2
+
+    if timing is not None:
+        timing.begin_attempt(args.step)
+        if args.run_id:
+            try:
+                timing.bind_run(run_dir_for(args.run_id), existing=True)
+            except ValueError:
+                pass
+        timing.announce()
 
     run_dir: Path | None = None
     error_message = ""
@@ -851,6 +861,8 @@ def main() -> int:
             run_dir, result = run_step_zero(args)
         elif args.step == 1:
             run_dir, state, draft_path = load_or_create_step_one_run(args)
+            if timing is not None:
+                timing.bind_run(run_dir)
             run_dir, result = complete_step_one(args, run_dir, state, draft_path)
         else:
             if args.step == 2:
@@ -1565,20 +1577,28 @@ def main() -> int:
             print(scoped_path or run_dir / "steps" / f"{args.step:02d}.json")
     else:
         print(result["summary"], file=sys.stderr)
+    if timing is not None:
+        timing.observe_result(run_dir, result)
     if result["status"] == "success":
         return 0
     return _RETRY_REQUESTED_EXIT_CODE if retry_requested else 1
 
 
 def retrying_main() -> int:
-    exit_code = main()
-    for delay in STEP_RETRY_DELAYS:
-        if exit_code != _RETRY_REQUESTED_EXIT_CODE:
-            return exit_code
-        print(f"Claude Agent SDK 执行异常，{delay} 秒后重试。", file=sys.stderr)
-        time.sleep(delay)
-        exit_code = main()
-    return 1 if exit_code == _RETRY_REQUESTED_EXIT_CODE else exit_code
+    timing = StepTiming()
+    returned = False
+    try:
+        exit_code = main(timing)
+        for delay in STEP_RETRY_DELAYS:
+            if exit_code != _RETRY_REQUESTED_EXIT_CODE:
+                break
+            print(f"Claude Agent SDK 执行异常，{delay} 秒后重试。", file=sys.stderr)
+            time.sleep(delay)
+            exit_code = main(timing)
+        returned = True
+        return 1 if exit_code == _RETRY_REQUESTED_EXIT_CODE else exit_code
+    finally:
+        timing.finish(returned=returned)
 
 
 if __name__ == "__main__":

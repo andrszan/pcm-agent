@@ -7,7 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 
 DEMO_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(DEMO_ROOT))
@@ -24,7 +24,7 @@ class RunStepRetryTests(unittest.TestCase):
             patch.object(run_step.time, "sleep", sleeper),
         ):
             self.assertEqual(run_step.retrying_main(), 0)
-        runner.assert_called_once_with()
+        runner.assert_called_once_with(ANY)
         sleeper.assert_not_called()
 
     def test_retry_requested_retries_twice(self) -> None:
@@ -65,7 +65,7 @@ class RunStepRetryTests(unittest.TestCase):
             patch.object(run_step.time, "sleep", sleeper),
         ):
             self.assertEqual(run_step.retrying_main(), 1)
-        runner.assert_called_once_with()
+        runner.assert_called_once_with(ANY)
         sleeper.assert_not_called()
 
     def test_cli_error_does_not_retry(self) -> None:
@@ -76,7 +76,7 @@ class RunStepRetryTests(unittest.TestCase):
             patch.object(run_step.time, "sleep", sleeper),
         ):
             self.assertEqual(run_step.retrying_main(), 2)
-        runner.assert_called_once_with()
+        runner.assert_called_once_with(ANY)
         sleeper.assert_not_called()
 
     def test_main_maps_only_explicit_retry_request_to_internal_exit(self) -> None:
@@ -334,7 +334,7 @@ class RunStepRetryTests(unittest.TestCase):
             self.assertRaises(KeyboardInterrupt),
         ):
             run_step.retrying_main()
-        runner.assert_called_once_with()
+        runner.assert_called_once_with(ANY)
         sleeper.assert_not_called()
 
 

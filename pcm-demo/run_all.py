@@ -13,6 +13,7 @@ from secrets import token_hex
 from typing import Any, TextIO
 
 from common.state import read_state, step_result_status
+from common.timing import print_timing_summary
 from steps.step_13_select_requirement.step import registry_handoff
 
 DEMO_ROOT = Path(__file__).resolve().parent
@@ -240,14 +241,20 @@ def _print_stop(run_id: str, run_dir: Path, args: argparse.Namespace) -> None:
 def orchestrate(args: argparse.Namespace) -> int:
     run_id = args.resume or args.run_id or new_run_id()
     run_dir = run_dir_for(run_id)
-    if args.resume:
-        if not run_dir.is_dir():
-            print(f"运行记录不存在：{run_id}", file=sys.stderr)
+    try:
+        if args.resume:
+            if not run_dir.is_dir():
+                print(f"运行记录不存在：{run_id}", file=sys.stderr)
+                return 2
+        elif run_dir.exists():
+            print(f"运行目录已存在，拒绝覆盖：{run_dir}", file=sys.stderr)
             return 2
-    elif run_dir.exists():
-        print(f"运行目录已存在，拒绝覆盖：{run_dir}", file=sys.stderr)
-        return 2
+        return _run_steps(args, run_id, run_dir)
+    finally:
+        print_timing_summary(run_dir)
 
+
+def _run_steps(args: argparse.Namespace, run_id: str, run_dir: Path) -> int:
     while True:
         try:
             state = read_state(run_dir) if run_dir.is_dir() else None
