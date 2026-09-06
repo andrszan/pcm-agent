@@ -167,6 +167,37 @@ class TimingTests(unittest.TestCase):
         self.assertIsNotNone(call["elapsed_seconds"])
         self.assertIsNotNone(call["interrupted_at"])
 
+    def test_repeated_sigterm_does_not_interrupt_cleanup_twice(self):
+        handlers = {}
+
+        def current_handler(signum):
+            return (
+                timing.signal.default_int_handler
+                if signum == timing.signal.SIGINT else timing.signal.SIG_DFL
+            )
+
+        def install_handler(signum, handler):
+            handlers[signum] = handler
+
+        clock = self.start()
+        measurement = clock.begin_agent()
+        with (
+            patch.object(timing.signal, "getsignal", side_effect=current_handler),
+            patch.object(timing.signal, "signal", side_effect=install_handler),
+            clock.activate(),
+        ):
+            interrupt = handlers[timing.signal.SIGTERM]
+            with self.assertRaises(SystemExit) as caught:
+                interrupt(timing.signal.SIGTERM, None)
+            interrupted_at = clock.active_call["interrupted_at"]
+            interrupt(timing.signal.SIGTERM, None)
+
+        self.assertEqual(caught.exception.code, 143)
+        self.assertEqual(clock.signal_reason, "sigterm")
+        self.assertIsNotNone(interrupted_at)
+        self.assertEqual(clock.active_call["interrupted_at"], interrupted_at)
+        self.assertIsNotNone(measurement)
+
     def test_resumed_step_accumulates_agent_time_and_includes_gap_only_in_wall(self):
         utc = iter(["2026-09-05T14:00:00+08:00", "2026-09-05T15:00:00+08:00", "2026-09-05T15:20:00+08:00"])
         with patch.object(timing, "beijing_now", side_effect=lambda: next(utc)):

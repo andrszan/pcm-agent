@@ -188,8 +188,9 @@ class StepTiming:
         previous = {}
 
         def interrupt(signum, _frame):
-            if self.signal_reason is None:
-                self.signal_reason = "sigint" if signum == signal.SIGINT else "sigterm"
+            if self.signal_reason is not None:
+                return
+            self.signal_reason = "sigint" if signum == signal.SIGINT else "sigterm"
             if self.active_call is not None and self.active_call["interrupted_at"] is None:
                 self.active_call["interrupted_at"] = beijing_now()
             if signum == signal.SIGINT:
