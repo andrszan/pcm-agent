@@ -675,7 +675,7 @@ PCM 在请求前读取该领域完整编排历史。首次保存动态 `system` 
 
 ### 第 3 步：基础工程选型
 
-执行方式：直接调用 OpenAI Python SDK `responses.parse`，不调用 `foundation-selection` Skill 或 Claude Agent SDK。
+执行方式：直接调用 OpenAI Python SDK `responses.parse`。
 
 实现合同：
 

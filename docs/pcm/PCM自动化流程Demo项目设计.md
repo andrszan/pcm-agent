@@ -77,7 +77,7 @@ python run_all.py \
 
 旧设计把第 3 步定义为“总体技术方案兼基础模板选型”，并把单需求循环放在第 11～19 步。新版流程已经整体重排：
 
-- 第 3 步只负责基础工程选型，直接调用 AI-compatible Responses API，不调用 `foundation-selection` Skill；
+- 第 3 步只负责基础工程选型，直接调用 AI-compatible Responses API；
 - 第 4～6 步依次完成基础工程组装、项目准备核验和基础工程项目化；
 - 第 7 步才调用 `solution-design` 形成总体技术方案；
 - 第 8 步是根仓及适用仓的首次全仓提交检查与干净基线节点：仅根仓和成功 `steps/04.json.outputs` 是权威仓库；Python 只读核验，已全干净时不调用 Agent，存在未提交变更时由一个 `commit-changes` session 负责必要提交；Python 不初始化子仓、暂存或提交；
@@ -342,8 +342,8 @@ Python 负责确定性操作和最终状态裁决：
 - 调用 OpenAI Python SDK `responses.parse`，以 `FoundationSelectionResult` 作为 `text_format`；
 - 模型直接返回完整的前端和后端选择，包括 `id`、`git_url`、`default_branch`、`path` 和 `reason`，不适用的一端为 `null`；
 - 程序直接保存 `response.output_parsed.model_dump()`，不手写 JSON Schema、不执行 `json.loads()` 或第二套字段校验；
-- 本步骤不调用或修改 `foundation-selection` Skill，不创建 Claude session，不获取或组装模板；
-- 第 4 步只读取 `steps/03.json`，以第 3 步 `FoundationSelectionResult` / `TemplateSelection` 校验交接；不读 catalog 或产品文档，不调用模型、Skill 或 Agent。
+- 本步骤不创建 Claude session，不获取或组装模板；
+- 第 4 步只读取 `steps/03.json`，以第 3 步 `FoundationSelectionResult` / `TemplateSelection` 校验交接；不读 catalog 或产品文档，不调用模型或 Claude Agent。
 
 第 4 步固定映射 `frontend`、`backend` 目标，只接受不存在或严格唯一普通 `.gitkeep` 的真实目录；对唯一 `(git_url, default_branch)` 一次 shallow clone，核验 origin、branch、HEAD SHA，校验选中相对路径并拒绝上游 `.git` 和任何符号链接，再复制到同级 run-owned 临时根。每个适用 payload 在临时根中执行 `git init -b main` 并核验自身 top-level、`main`、unborn HEAD、空 index、至少一个不被自身 ignore 的可提交文件；全部 payload 合格后才用 `os.rename()` 发布，`null` 端只删除严格占位目录。成功结果 `steps/04.json` 记录 `applicable`、`outputs` 和每端的选择、实际 origin/branch/commit SHA，状态推进至 `project:05_verify_readiness`、第 5 步。认证或读取权限缺失为 `blocked`，其它现场或操作错误为 `failed`；合法 marker 残留可在目标仍为占位或不存在时 fresh 重试，未知残留与部分发布不覆盖；成功现场最小复核后幂等复用而不 clone。第 4 步不暂存、提交或 push。
 
