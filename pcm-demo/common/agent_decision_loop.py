@@ -140,6 +140,163 @@ class AgentDecisionLoopSpec:
 AgentDecisionSpec = AgentDecisionLoopSpec
 
 
+@dataclass
+class ResumeMessage:
+    target_key: str
+    content: str
+    consumed: bool = False
+
+
+_RESUME_STEP_NODES = {
+    2: "project:02_intake",
+    5: "project:05_verify_readiness",
+    6: "project:06_bootstrap_foundation",
+    7: "project:07_solution_design",
+    8: "project:08_initialize_repositories",
+    9: "project:09_engineering_architecture",
+    10: "project:10_ui_ux_framework",
+    11: "project:11_requirement_breakdown",
+    14: "requirement:14_trd_design",
+    15: "requirement:15_development",
+    16: "requirement:16_rule_retrospective",
+    17: "requirement:17_commit",
+}
+_RESUME_STATIC_KEYS = {
+    2: ("project_intake",),
+    5: ("project_readiness",),
+    6: ("project_bootstrap", "tailwind_theme"),
+    7: ("solution_design",),
+    8: ("initialize_repositories",),
+    9: ("engineering_architecture",),
+    10: ("ui_ux_framework",),
+    11: ("requirement_breakdown",),
+}
+_RESUME_REQUIREMENT_PREFIXES = {
+    14: "trd_design",
+    15: "development",
+    16: "rule_retrospective",
+    17: "requirement_commit",
+}
+
+
+def _decision_at(
+    messages: list[dict[str, str]], index: int
+) -> AgentDecision | None:
+    normalized = index if index >= 0 else len(messages) + index
+    if normalized <= 0 or normalized >= len(messages):
+        return None
+    message = messages[normalized]
+    if message["role"] != "assistant" or messages[normalized - 1]["role"] != "user":
+        return None
+    try:
+        return parse_agent_decision(message["content"])
+    except ValidationError:
+        return None
+
+
+def _resume_anchor(messages: list[dict[str, str]]) -> bool:
+    last_user = next(
+        (
+            index
+            for index in range(len(messages) - 1, -1, -1)
+            if messages[index]["role"] == "user"
+        ),
+        -1,
+    )
+    decision = _decision_at(messages, last_user + 1)
+    return (
+        decision is not None
+        and decision.verdict == "blocked"
+        and all(message["role"] == "assistant" for message in messages[last_user + 1 :])
+    )
+
+
+def _resume_keys(step: int, state: dict[str, Any]) -> tuple[str, ...]:
+    static = _RESUME_STATIC_KEYS.get(step)
+    if static is not None:
+        return static
+    prefix = _RESUME_REQUIREMENT_PREFIXES.get(step)
+    requirement_id = state.get("active_requirement")
+    if prefix is None or not isinstance(requirement_id, str) or not requirement_id:
+        return ()
+    return (f"{prefix}_{requirement_id}",)
+
+
+def validate_resume_target(
+    run_dir: Path,
+    state: dict[str, Any],
+    step: int,
+) -> str:
+    """在步骤锁内选择当前 blocked 节点唯一可恢复的原对话。"""
+
+    expected_node = _RESUME_STEP_NODES.get(step)
+    if expected_node is None:
+        raise ValueError(f"第 {step} 步不支持负责人消息恢复")
+    if (
+        state.get("status") != "blocked"
+        or (state.get("step"), state.get("current_step"), state.get("current_node"))
+        != (step, step, expected_node)
+    ):
+        raise ValueError("负责人消息只能用于当前 blocked 节点")
+
+    sessions = state.get("claude_sessions")
+    references = state.get("decision_conversations")
+    if not isinstance(sessions, dict) or not isinstance(references, dict):
+        raise ValueError("当前 blocked 节点没有可恢复的原 Agent 对话")
+
+    matches: list[str] = []
+    for key in _resume_keys(step, state):
+        session_id = sessions.get(key)
+        reference = references.get(key)
+        expected_path = f"conversations/{key}.json"
+        if (
+            not isinstance(session_id, str)
+            or not session_id
+            or not isinstance(reference, dict)
+            or set(reference) not in ({"path"}, {"path", "turn"})
+            or reference.get("path") != expected_path
+        ):
+            continue
+        conversation = run_dir / expected_path
+        try:
+            data = json.loads(conversation.read_bytes().decode("utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            continue
+        if not isinstance(data, dict) or set(data) != {"messages"}:
+            continue
+        try:
+            messages = _validate_messages(data["messages"])
+        except RuntimeError:
+            continue
+        if _resume_anchor(messages):
+            matches.append(key)
+
+    if len(matches) != 1:
+        raise ValueError("当前 blocked 节点没有唯一可恢复的原 Agent 对话")
+    return matches[0]
+
+
+def prepare_resume_message(
+    path: Path,
+    run_dir: Path,
+    state: dict[str, Any],
+    step: int,
+) -> ResumeMessage:
+    """读取一次负责人恢复消息并绑定已校验的原对话。"""
+
+    target_key = validate_resume_target(run_dir, state, step)
+    resolved = path.resolve()
+    if not resolved.is_file():
+        raise ValueError("负责人消息文件不存在或不是普通文件")
+    try:
+        content = resolved.read_bytes().decode("utf-8")
+    except (OSError, UnicodeError) as error:
+        raise ValueError("负责人消息文件不可读取或不是有效 UTF-8 文本") from error
+    if not content.strip():
+        raise ValueError("负责人消息文件不能为空")
+    return ResumeMessage(target_key, content)
+
+
 def conversation_path(spec: AgentDecisionLoopSpec) -> Path:
     return Path("conversations") / f"{spec.key}.json"
 
@@ -183,7 +340,7 @@ def _conversation_reference(
     return reference
 
 
-def _validate_messages(messages: Any, spec: AgentDecisionLoopSpec) -> list[dict[str, str]]:
+def _validate_messages(messages: Any) -> list[dict[str, str]]:
     if not isinstance(messages, list) or not messages:
         raise RuntimeError("决策历史内容不符合约定")
     normalized: list[dict[str, str]] = []
@@ -214,7 +371,7 @@ def _load_conversation(
         raise RuntimeError("决策历史不可读取") from error
     if not isinstance(data, dict) or set(data) != {"messages"}:
         raise RuntimeError("决策历史内容不符合约定")
-    messages = _validate_messages(data["messages"], spec)
+    messages = _validate_messages(data["messages"])
     if reference is None:
         references = state.setdefault("decision_conversations", {})
         if not isinstance(references, dict):
@@ -515,9 +672,7 @@ def _append_pending_agent_text(
         _clear_pending_agent_text(run_dir, state, spec)
         return messages
     if tail["role"] == "assistant":
-        try:
-            parse_agent_decision(tail["content"])
-        except ValidationError:
+        if _decision_at(messages, -1) is None:
             messages.append({"role": "user", "content": pending})
             _save_conversation(run_dir, state, spec, messages)
         else:
@@ -539,18 +694,17 @@ def _require_decision_capacity(messages: list[dict[str, str]], spec: AgentDecisi
 
 
 def _tail_decision(messages: list[dict[str, str]]) -> AgentDecision | None:
-    tail = messages[-1]
-    if tail["role"] != "assistant":
-        return None
-    try:
-        return parse_agent_decision(tail["content"])
-    except ValidationError:
-        return None
+    return _decision_at(messages, -1)
 
 
 def _legacy_completion(messages: list[dict[str, str]], spec: AgentDecisionLoopSpec) -> bool:
     tail = messages[-1]
-    return tail["role"] == "assistant" and tail["content"] in spec.legacy_completion_messages
+    return (
+        len(messages) >= 2
+        and tail["role"] == "assistant"
+        and messages[-2]["role"] == "user"
+        and tail["content"] in spec.legacy_completion_messages
+    )
 
 
 def _validate_agent_result(
@@ -754,6 +908,7 @@ async def run_agent_decision_loop(
     agent_runner: Callable[..., Any] = run_claude,
     decision_runner: Callable[..., Any] = request_decision,
     config_loader: Callable[[], LLMConfig] = LLMConfig.load,
+    resume_message: ResumeMessage | None = None,
 ) -> AgentDecision:
     """运行并恢复 Claude Agent 与结构化决策模型的公共对话循环。"""
 
@@ -777,9 +932,34 @@ async def run_agent_decision_loop(
     )
 
     while True:
+        targeted_resume = (
+            resume_message is not None
+            and not resume_message.consumed
+            and resume_message.target_key == spec.key
+        )
+        if targeted_resume and (
+            _resume_anchor(messages) or _tail_decision(messages) is not None
+        ):
+            _require_decision_capacity(messages, spec)
+            messages.append({"role": "assistant", "content": resume_message.content})
+            _save_conversation(run_dir, state, spec, messages)
+            resume_message.consumed = True
+            blocked_resume_pending = False
+            messages = await _run_agent(
+                run_dir,
+                state,
+                workspace,
+                spec,
+                resume_message.content,
+                agent_runner,
+            )
+            continue
+
         if _legacy_completion(messages, spec):
             repair = await _verify_completed(completion_verifier)
             if repair is None:
+                if targeted_resume:
+                    raise RuntimeError("负责人消息未能投递到原 blocked 对话")
                 return AgentDecision(
                     verdict="completed",
                     answer="",
@@ -816,6 +996,8 @@ async def run_agent_decision_loop(
                     continue
                 repair = await _verify_completed(completion_verifier)
                 if repair is None:
+                    if targeted_resume:
+                        raise RuntimeError("负责人消息未能投递到原 blocked 对话")
                     return decision
                 messages.append({"role": "assistant", "content": repair})
                 _save_conversation(run_dir, state, spec, messages)

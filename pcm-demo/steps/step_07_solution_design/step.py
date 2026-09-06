@@ -5,7 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from common.agent_decision_loop import AgentDecisionLoopSpec, run_agent_decision_loop
+from common.agent_decision_loop import AgentDecisionLoopSpec, ResumeMessage, run_agent_decision_loop
 from common.claude_agent import run_claude
 from common.decision import render_decision_system_prompt, request_decision
 from common.files import resolve_workspace_output
@@ -245,6 +245,7 @@ async def run(
     agent_runner=run_claude,
     decision_runner=request_decision,
     config_loader=LLMConfig.load,
+    resume_message: ResumeMessage | None = None,
 ) -> dict[str, Any]:
     workspace, product_outputs, assembly, outputs = validate_inputs(run_dir, state)
     position = (state.get("step"), state.get("current_step"), state.get("current_node"))
@@ -303,6 +304,7 @@ async def run(
         agent_runner=agent_runner,
         decision_runner=decision_runner,
         config_loader=config_loader,
+        resume_message=resume_message,
     )
     if decision.verdict == "blocked":
         validate_inputs(run_dir, state)

@@ -10,7 +10,12 @@ from pathlib import Path
 from secrets import token_hex
 from typing import Any
 
-from common.agent_decision_loop import AIDecisionFailure, AgentExecutionFailure
+from common.agent_decision_loop import (
+    AIDecisionFailure,
+    AgentExecutionFailure,
+    ResumeMessage,
+    prepare_resume_message,
+)
 from common.coordination import (
     ExecutionLocks,
     HeldLock,
@@ -190,8 +195,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--workspace-root", type=Path)
     parser.add_argument("--catalog-path", type=Path)
     parser.add_argument("--run-id")
+    parser.add_argument(
+        "--resume-message-file",
+        type=Path,
+        help="仅用于当前 blocked：读取 UTF-8 文件作为人工负责人恢复指令",
+    )
     parser.add_argument("--coordination-locks", help=argparse.SUPPRESS)
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.resume_message_file is not None and not args.run_id:
+        parser.error("--resume-message-file 需要 --run-id")
+    return args
+
+
+def _resume_message(args: argparse.Namespace) -> ResumeMessage | None:
+    value = getattr(args, "resume_message", None)
+    return value if isinstance(value, ResumeMessage) else None
 
 
 def new_run_id() -> str:
@@ -646,7 +664,9 @@ def load_step_two_run(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
 
 async def run_step_two(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
     run_dir, state = load_step_two_run(args)
-    return run_dir, await run_project_intake(run_dir, state)
+    return run_dir, await run_project_intake(
+        run_dir, state, resume_message=_resume_message(args)
+    )
 
 
 async def run_step_three(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
@@ -675,7 +695,9 @@ async def run_step_five(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]
     run_dir = run_dir_for(args.run_id)
     if not run_dir.is_dir():
         raise ValueError(f"运行记录不存在：{args.run_id}")
-    return run_dir, await run_project_readiness(run_dir, read_state(run_dir))
+    return run_dir, await run_project_readiness(
+        run_dir, read_state(run_dir), resume_message=_resume_message(args)
+    )
 
 
 async def run_step_six(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
@@ -684,7 +706,9 @@ async def run_step_six(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
     run_dir = run_dir_for(args.run_id)
     if not run_dir.is_dir():
         raise ValueError(f"运行记录不存在：{args.run_id}")
-    return run_dir, await run_project_bootstrap(run_dir, read_state(run_dir))
+    return run_dir, await run_project_bootstrap(
+        run_dir, read_state(run_dir), resume_message=_resume_message(args)
+    )
 
 
 async def run_step_seven(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
@@ -693,7 +717,9 @@ async def run_step_seven(args: argparse.Namespace) -> tuple[Path, dict[str, Any]
     run_dir = run_dir_for(args.run_id)
     if not run_dir.is_dir():
         raise ValueError(f"运行记录不存在：{args.run_id}")
-    return run_dir, await run_solution_design(run_dir, read_state(run_dir))
+    return run_dir, await run_solution_design(
+        run_dir, read_state(run_dir), resume_message=_resume_message(args)
+    )
 
 
 async def run_step_eight(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
@@ -702,7 +728,9 @@ async def run_step_eight(args: argparse.Namespace) -> tuple[Path, dict[str, Any]
     run_dir = run_dir_for(args.run_id)
     if not run_dir.is_dir():
         raise ValueError(f"运行记录不存在：{args.run_id}")
-    return run_dir, await run_initialize_repositories(run_dir, read_state(run_dir))
+    return run_dir, await run_initialize_repositories(
+        run_dir, read_state(run_dir), resume_message=_resume_message(args)
+    )
 
 
 async def run_step_nine(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
@@ -711,7 +739,9 @@ async def run_step_nine(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]
     run_dir = run_dir_for(args.run_id)
     if not run_dir.is_dir():
         raise ValueError(f"运行记录不存在：{args.run_id}")
-    return run_dir, await run_engineering_architecture(run_dir, read_state(run_dir))
+    return run_dir, await run_engineering_architecture(
+        run_dir, read_state(run_dir), resume_message=_resume_message(args)
+    )
 
 
 async def run_step_ten(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
@@ -720,7 +750,9 @@ async def run_step_ten(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
     run_dir = run_dir_for(args.run_id)
     if not run_dir.is_dir():
         raise ValueError(f"运行记录不存在：{args.run_id}")
-    return run_dir, await run_ui_ux_framework(run_dir, read_state(run_dir))
+    return run_dir, await run_ui_ux_framework(
+        run_dir, read_state(run_dir), resume_message=_resume_message(args)
+    )
 
 
 async def run_step_eleven(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
@@ -729,7 +761,9 @@ async def run_step_eleven(args: argparse.Namespace) -> tuple[Path, dict[str, Any
     run_dir = run_dir_for(args.run_id)
     if not run_dir.is_dir():
         raise ValueError(f"运行记录不存在：{args.run_id}")
-    return run_dir, await run_requirement_breakdown(run_dir, read_state(run_dir))
+    return run_dir, await run_requirement_breakdown(
+        run_dir, read_state(run_dir), resume_message=_resume_message(args)
+    )
 
 
 async def run_step_twelve(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
@@ -756,7 +790,9 @@ async def run_step_fourteen(args: argparse.Namespace) -> tuple[Path, dict[str, A
     run_dir = run_dir_for(args.run_id)
     if not run_dir.is_dir():
         raise ValueError(f"运行记录不存在：{args.run_id}")
-    return run_dir, await run_trd_design(run_dir, read_state(run_dir))
+    return run_dir, await run_trd_design(
+        run_dir, read_state(run_dir), resume_message=_resume_message(args)
+    )
 
 
 async def run_step_fifteen(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
@@ -765,7 +801,9 @@ async def run_step_fifteen(args: argparse.Namespace) -> tuple[Path, dict[str, An
     run_dir = run_dir_for(args.run_id)
     if not run_dir.is_dir():
         raise ValueError(f"运行记录不存在：{args.run_id}")
-    return run_dir, await run_development(run_dir, read_state(run_dir))
+    return run_dir, await run_development(
+        run_dir, read_state(run_dir), resume_message=_resume_message(args)
+    )
 
 
 async def run_step_sixteen(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
@@ -774,7 +812,9 @@ async def run_step_sixteen(args: argparse.Namespace) -> tuple[Path, dict[str, An
     run_dir = run_dir_for(args.run_id)
     if not run_dir.is_dir():
         raise ValueError(f"运行记录不存在：{args.run_id}")
-    return run_dir, await run_rule_retrospective(run_dir, read_state(run_dir))
+    return run_dir, await run_rule_retrospective(
+        run_dir, read_state(run_dir), resume_message=_resume_message(args)
+    )
 
 
 async def run_step_seventeen(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
@@ -783,7 +823,9 @@ async def run_step_seventeen(args: argparse.Namespace) -> tuple[Path, dict[str, 
     run_dir = run_dir_for(args.run_id)
     if not run_dir.is_dir():
         raise ValueError(f"运行记录不存在：{args.run_id}")
-    return run_dir, await run_requirement_commit(run_dir, read_state(run_dir))
+    return run_dir, await run_requirement_commit(
+        run_dir, read_state(run_dir), resume_message=_resume_message(args)
+    )
 
 
 def run_step_eighteen(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
@@ -892,6 +934,15 @@ def _prepare_execution_locks(args: argparse.Namespace) -> ExecutionLocks:
         locks = acquire_execution_locks(root, run_id, maximum)
 
     try:
+        message_file = getattr(args, "resume_message_file", None)
+        if isinstance(message_file, Path):
+            run_dir = run_dir_for(run_id)
+            if not run_dir.is_dir():
+                raise ValueError(f"运行记录不存在：{run_id}")
+            args.resume_message = prepare_resume_message(
+                message_file, run_dir, read_state(run_dir), args.step
+            )
+
         run_dir = run_dir_for(run_id)
         if run_dir.is_dir():
             try:
@@ -1378,6 +1429,10 @@ def _execute(
         if isinstance(error, (AIDecisionFailure, AgentExecutionFailure)):
             result["error"] = error.as_error()
             error_message = str(error)
+
+    resume_message = _resume_message(args)
+    if resume_message is not None and not resume_message.consumed:
+        raise RuntimeError("负责人消息未被当前 blocked 对话消费")
 
     if result["status"] != "success" and not error_message:
         detail = result.get("blocked") or result.get("error") or {}

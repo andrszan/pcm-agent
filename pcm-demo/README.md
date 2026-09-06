@@ -127,6 +127,38 @@ uv run python run_all.py --resume <run-id>
 
 恢复只重新进入 `state.json` 指向的当前节点；不会从头重跑已经完成的流程。进程中断会由操作系统释放执行锁，但产品登记的配对端口会继续保留。
 
+### 用人工负责人指令恢复 blocked 步骤
+
+当前节点为 `blocked` 且已有对应 Agent 对话和 session 时，可通过 `--resume-message-file` 提交真正负责人的新指令：
+
+```bash
+uv run python run_all.py --resume <run-id> \
+  --resume-message-file /absolute/path/to/resume-message.md
+```
+
+若只希望处理当前阻塞步骤、完成后先停下，而不立即进入后续开发：
+
+```bash
+uv run python run_step.py --step <当前步骤> --run-id <run-id> \
+  --resume-message-file /absolute/path/to/resume-message.md
+```
+
+文件可以位于产品工作区之外；相对路径按执行命令时的工作目录解析。推荐 `.txt` 或 `.md`，但不限制扩展名，也不要求 frontmatter。文件须是可读、非空白的 UTF-8 普通文本，正文完整保留，不截断或裁剪首尾空白。新运行、非 blocked 状态、错误步骤或没有原 Agent 对话/session 的阻塞不支持此参数；参数不能作为任意节点的强制继续入口。
+
+例如，你认为此前 blocked 判断过于保守，可以写明可行的处理方式；你已补好资源，则可以写：
+
+```markdown
+所需服务已准备好，凭据已写入产品 backend/.env，配置键为
+THIRD_PARTY_BASE_URL 和 THIRD_PARTY_API_KEY。
+请重新读取并验证连接，成功后继续原任务，不展示密钥。
+```
+
+PCM 将正文作为负责人 `assistant` 消息追加到当前 `conversations/<key>.json`，先保存，再原样发送给原 Claude Agent session；不会先交给决策模型审批，也不会替换此前 blocked 记录。已有尚未获得回复的泛化恢复提示时，仍可追加人工指令。Agent 返回后，负责人决策模型继续按原三态规则裁决；人工指令不等于步骤已经完成，资源仍不可用时也不能伪造成功。
+
+该参数只用于本次当前阻塞对话，不会传给 `run_all` 的后续步骤，也不会重置或扩大既有裁决轮数上限；额度已耗尽时明确拒绝，不能借人工指令绕过上限。同一命令的内部自动重试不重复追加人工消息；消息落盘后若中断，直接用不带文件参数的普通 `--resume` 即可复用历史正文，不再依赖源文件。Agent 投递仍可能重发，并不保证业务操作恰好执行一次。只有需要追加新的负责人指令时才再次提供文件参数。
+
+**秘密边界：正文会完整进入 PCM 对话历史、Agent session 和模型请求。** 文件参数只避免正文出现在 shell 命令行，不提供脱敏或秘密隔离。API key、令牌等外部凭据应先写入已有受保护配置，消息只引用配置路径、键和资源说明；不要将秘密直接写在人工指令文件中。不要手改 `state.json`、步骤 result、conversation 或 Claude session 来传递回复；stdin 管道也不是受支持的输入入口。
+
 ### 查看与释放产品端口
 
 ```bash
@@ -194,7 +226,7 @@ runs/
 - `state.json`：当前 phase、node、step、活动需求、需求注册表、session 引用和恢复所需最小状态；
 - `steps/XX.json`：第 0～12 步最近一次业务结果；
 - `steps/requirements/<ID>/XX.json`：第 13～18 步按需求隔离的业务结果；
-- `conversations/*.json`：Claude Agent 回复与 AI-compatible 负责人决定组成的完整编排历史；
+- `conversations/*.json`：Claude Agent 回复、AI-compatible 负责人决定与人工负责人恢复指令组成的完整编排历史；
 - `logs/*.json`：结构化故障诊断快照，不是普通执行流水。
 - `timings.json`：`schema_version: 2` 按步骤保存 Claude Code 累计执行时间、步骤总历时及每次主调用区间；北京时间起止和中断时刻，不作为业务恢复真源。字段定义见 [计时说明](docs/timing.md)。
 

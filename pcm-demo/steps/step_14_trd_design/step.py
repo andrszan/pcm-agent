@@ -5,7 +5,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Callable
 
-from common.agent_decision_loop import AgentDecisionLoopSpec, run_agent_decision_loop
+from common.agent_decision_loop import AgentDecisionLoopSpec, ResumeMessage, run_agent_decision_loop
 from common.claude_agent import run_claude
 from common.decision import render_decision_system_prompt, request_decision
 from common.files import resolve_workspace_output
@@ -342,6 +342,7 @@ async def run(
     decision_runner=request_decision,
     config_loader=LLMConfig.load,
     today_provider: Callable[[], date] = date.today,
+    resume_message: ResumeMessage | None = None,
 ) -> dict[str, Any]:
     context = _context(state)
     saved = _saved_result(run_dir, context["requirement_id"])
@@ -444,6 +445,7 @@ async def run(
         agent_runner=agent_runner,
         decision_runner=decision_runner,
         config_loader=config_loader,
+        resume_message=resume_message,
     )
     session_id = _session(state, context["key"])
     if session_id is None:

@@ -13,6 +13,9 @@ DEMO_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(DEMO_ROOT))
 
 import run_step
+from common.agent_decision_loop import ResumeMessage
+
+_REAL_PARSE_ARGS = run_step.parse_args
 
 
 class RunStepRetryTests(unittest.TestCase):
@@ -25,6 +28,20 @@ class RunStepRetryTests(unittest.TestCase):
         ):
             patcher.start()
             self.addCleanup(patcher.stop)
+
+    def test_resume_message_help_explains_blocked_utf8_contract(self) -> None:
+        stdout = io.StringIO()
+        with (
+            patch.object(sys, "argv", ["run_step.py", "--help"]),
+            contextlib.redirect_stdout(stdout),
+            self.assertRaises(SystemExit) as raised,
+        ):
+            _REAL_PARSE_ARGS()
+        self.assertEqual(raised.exception.code, 0)
+        self.assertIn(
+            "仅用于当前 blocked：读取 UTF-8 文件作为人工负责人恢复指令",
+            stdout.getvalue(),
+        )
 
     def test_success_does_not_retry(self) -> None:
         runner = Mock(return_value=0)
@@ -110,6 +127,195 @@ class RunStepRetryTests(unittest.TestCase):
                 ):
                     self.assertEqual(run_step.main(), expected)
                 self.assertIn("第 0 步执行失败", stderr.getvalue())
+
+    def test_sdk_retry_reuses_one_prepared_resume_message(self) -> None:
+        root = run_step.DEMO_ROOT
+        run_dir = root / "runs/test-run"
+        (run_dir / "steps").mkdir(parents=True)
+        (run_dir / "state.json").write_text(
+            json.dumps(
+                {
+                    "status": "blocked",
+                    "step": 2,
+                    "current_step": 2,
+                    "current_node": "project:02_intake",
+                }
+            ),
+            encoding="utf-8",
+        )
+        path = root / "message"
+        path.write_text("负责人决定", encoding="utf-8")
+        args = Mock(
+            step=2,
+            run_id="test-run",
+            resume_message_file=path,
+            coordination_locks=None,
+        )
+        message = ResumeMessage("project_intake", "负责人决定")
+        seen: list[object] = []
+
+        def execute(current_args, *_args):
+            seen.append(current_args.resume_message)
+            return run_step._RETRY_REQUESTED_EXIT_CODE if len(seen) == 1 else 0
+
+        with (
+            patch.object(run_step, "parse_args", return_value=args),
+            patch.object(run_step, "prepare_resume_message", return_value=message) as prepare,
+            patch.object(run_step, "_execute", side_effect=execute),
+            patch.object(run_step.time, "sleep"),
+        ):
+            self.assertEqual(run_step.retrying_main(), 0)
+
+        prepare.assert_called_once()
+        self.assertEqual(seen, [message, message])
+
+    def test_invalid_resume_file_stops_before_business_execution(self) -> None:
+        root = run_step.DEMO_ROOT
+        run_dir = root / "runs/test-run"
+        (run_dir / "steps").mkdir(parents=True)
+        (run_dir / "conversations").mkdir()
+        state = {
+            "run_id": "test-run",
+            "status": "blocked",
+            "step": 2,
+            "current_step": 2,
+            "current_node": "project:02_intake",
+            "claude_sessions": {"project_intake": "session-1"},
+            "decision_conversations": {
+                "project_intake": {"path": "conversations/project_intake.json"}
+            },
+        }
+        (run_dir / "state.json").write_text(json.dumps(state), encoding="utf-8")
+        blocked = json.dumps(
+            {
+                "verdict": "blocked",
+                "answer": "",
+                "reason": "缺少输入",
+                "required_inputs": ["负责人决定"],
+            }
+        )
+        (run_dir / "conversations/project_intake.json").write_text(
+            json.dumps(
+                {
+                    "messages": [
+                        {"role": "system", "content": "system"},
+                        {"role": "assistant", "content": "初始提示"},
+                        {"role": "user", "content": "Agent 回复"},
+                        {"role": "assistant", "content": blocked},
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        message = root / "invalid"
+        message.write_bytes(b"\xff")
+        args = Mock(
+            step=2,
+            run_id="test-run",
+            resume_message_file=message,
+            coordination_locks=None,
+        )
+        before_state = (run_dir / "state.json").read_bytes()
+        before_conversation = (run_dir / "conversations/project_intake.json").read_bytes()
+
+        with (
+            patch.object(run_step, "parse_args", return_value=args),
+            patch.object(run_step, "_execute") as execute,
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(run_step.main(), 2)
+
+        execute.assert_not_called()
+        self.assertEqual((run_dir / "state.json").read_bytes(), before_state)
+        self.assertEqual(
+            (run_dir / "conversations/project_intake.json").read_bytes(),
+            before_conversation,
+        )
+        self.assertEqual(list((run_dir / "steps").iterdir()), [])
+        self.assertFalse((run_dir / "timings.json").exists())
+
+    def test_real_cli_reads_relative_utf8_file_and_preserves_newlines(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            run_dir = root / "runs/test-run"
+            (run_dir / "steps").mkdir(parents=True)
+            (run_dir / "conversations").mkdir()
+            state = {
+                "run_id": "test-run",
+                "status": "blocked",
+                "phase": "project_initialization",
+                "step": 2,
+                "current_step": 2,
+                "current_node": "project:02_intake",
+                "claude_sessions": {"project_intake": "session-1"},
+                "decision_conversations": {
+                    "project_intake": {"path": "conversations/project_intake.json"}
+                },
+            }
+            (run_dir / "state.json").write_text(
+                json.dumps(state, ensure_ascii=False), encoding="utf-8"
+            )
+            blocked = json.dumps(
+                {
+                    "verdict": "blocked",
+                    "answer": "",
+                    "reason": "缺少决定",
+                    "required_inputs": ["负责人决定"],
+                },
+                ensure_ascii=False,
+            )
+            (run_dir / "conversations/project_intake.json").write_text(
+                json.dumps(
+                    {
+                        "messages": [
+                            {"role": "system", "content": "system"},
+                            {"role": "assistant", "content": "初始提示"},
+                            {"role": "user", "content": "Agent 回复"},
+                            {"role": "assistant", "content": blocked},
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            raw = "第一行\r\n第二行\r\n".encode("utf-8")
+            (root / "message.any").write_bytes(raw)
+            script = f"""
+import sys
+sys.path.insert(0, {str(DEMO_ROOT)!r})
+from pathlib import Path
+import run_step
+from common.state import write_state
+run_step.DEMO_ROOT = Path({str(root)!r})
+async def fake(run_dir, state, *, resume_message=None):
+    assert resume_message is not None
+    (Path({str(root)!r}) / 'captured.bin').write_bytes(resume_message.content.encode('utf-8'))
+    resume_message.consumed = True
+    state.update({{'status': 'success', 'step': 3, 'current_step': 3, 'current_node': 'project:03_foundation_selection', 'blocked': None, 'error': None}})
+    write_state(run_dir, state)
+    return {{'step': 2, 'name': '项目定义澄清', 'status': 'success', 'summary': '完成', 'applicable': True, 'outputs': [], 'blocked': None, 'error': None}}
+run_step.run_project_intake = fake
+raise SystemExit(run_step.retrying_main())
+"""
+            completed = __import__("subprocess").run(
+                [
+                    sys.executable,
+                    "-c",
+                    script,
+                    "--step",
+                    "2",
+                    "--run-id",
+                    "test-run",
+                    "--resume-message-file",
+                    "message.any",
+                ],
+                cwd=root,
+                text=True,
+                capture_output=True,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual((root / "captured.bin").read_bytes(), raw)
 
     def test_step_zero_failure_resumes_same_run_and_advances(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

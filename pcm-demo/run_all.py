@@ -12,6 +12,7 @@ from pathlib import Path
 from secrets import token_hex
 from typing import Any
 
+from common.agent_decision_loop import validate_resume_target
 from common.coordination import (
     ExecutionLocks,
     acquire_execution_locks,
@@ -69,9 +70,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--run-id")
     parser.add_argument("--workspace-root", type=Path)
     parser.add_argument("--catalog-path", type=Path)
+    parser.add_argument(
+        "--resume-message-file",
+        type=Path,
+        help="仅用于当前 blocked：读取 UTF-8 文件作为人工负责人恢复指令",
+    )
     args = parser.parse_args(argv)
     if args.resume and args.run_id:
         parser.error("--resume 不能与 --run-id 同时使用")
+    if args.resume_message_file is not None and not args.resume:
+        parser.error("--resume-message-file 只能与 --resume 一起使用")
     return args
 
 
@@ -285,6 +293,9 @@ def build_step_command(
         command.extend(["--workspace-root", str(args.workspace_root.resolve())])
     if step == 3 and args.catalog_path is not None:
         command.extend(["--catalog-path", str(args.catalog_path.resolve())])
+    resume_message_file = getattr(args, "resume_message_file", None)
+    if isinstance(resume_message_file, Path):
+        command.extend(["--resume-message-file", str(resume_message_file.resolve())])
     if locks is not None:
         command.extend(["--coordination-locks", inherited_lock_argument(locks)])
     return command
@@ -375,6 +386,12 @@ def _orchestrate_locked(
             if not run_dir.is_dir():
                 print(f"运行记录不存在：{run_id}", file=sys.stderr)
                 return 2
+            message_file = getattr(args, "resume_message_file", None)
+            if isinstance(message_file, Path):
+                state = read_state(run_dir)
+                step = step_for_state(run_dir, state)
+                validate_resume_target(run_dir, state, step)
+                args.resume_message_file = message_file.resolve()
         elif run_dir.exists():
             print(f"运行目录已存在，拒绝覆盖：{run_dir}", file=sys.stderr)
             return 2
@@ -424,6 +441,7 @@ def _run_steps(
             else:
                 print(f"重试命令：{fresh_command(run_id, args)}", file=sys.stderr)
             return return_code
+        args.resume_message_file = None
         if not run_dir.is_dir():
             print("步骤执行成功但运行目录不存在", file=sys.stderr)
             return 1

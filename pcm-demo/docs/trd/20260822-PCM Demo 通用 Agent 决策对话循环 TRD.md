@@ -255,7 +255,7 @@ runs/<run-id>/conversations/<key>.json
 角色约定：
 
 - `system`：新 conversation 保存的动态 system snapshot；恢复时严格读取历史 `messages[0]`，不重渲染或覆盖；
-- `assistant`：实际使用 Claude Code Agent 的项目负责人、工程负责人和 Agent 专家发给 Agent 的初始、继续或修复指令，或该负责人每轮返回的 `AgentDecision` JSON；
+- `assistant`：实际使用 Claude Code Agent 的项目负责人、工程负责人和 Agent 专家发给 Agent 的初始、继续或修复指令，或该负责人每轮返回的 `AgentDecision` JSON；也包括真正的人通过 `--resume-message-file` 提交的负责人恢复指令，正文原样保存；
 - `user`：Claude Agent SDK 返回的完整真实 Agent 回复。
 
 ```mermaid
@@ -293,6 +293,22 @@ stateDiagram-v2
 
 最终成功时 conversation 尾部就是 `completed`，不再追加 Python 固定完成声明。
 
+### 6.1 人工负责人恢复指令
+
+`run_all.py --resume <run-id> --resume-message-file <path>` 与 `run_step.py --step <step> --run-id <run-id> --resume-message-file <path>` 提供人工负责人接管当前 blocked 决定的入口。它不是自由跳转或强制 completed：仅已有 run、当前 blocked 节点、对应的原 Agent 对话/session 可使用；没有 Agent 对话的确定性阻塞明确拒绝，不能静默丢弃意见或新建 session。
+
+- 文件可以在任意目录，支持绝对路径和按调用者工作目录解析的相对路径；推荐 txt/md，但不限制扩展名。不要求结构化字段或 frontmatter。
+- CLI 在执行锁内、业务状态变更及计时落盘之前校验当前阻塞位置与文件；只读取一次 UTF-8 正文。缺失、非普通文件、不可读、无效编码或全空白均报输入错误，不覆盖原 blocked 业务结果。检验非空不改变正文，保留首尾换行等原始文本。
+- 目标对话尾部为 blocked 决定，或该阻塞后的恢复指令尚未获得 Agent 回复时，保留旧历史并追加普通 `assistant` 人工正文。尤其允许已有泛化 `BLOCKED_RESUME_PROMPT` 后再追加人工指令。
+- 必须先持久化人工正文，再发送同一正文给原 Claude session；文件路径本身不是发给 Agent 的指令。发送前不调用负责人决策模型预审，也不再补发泛化恢复提示。
+- Agent 返回后仍追加真实 `user` 回复并进入既有决策流程。决策模型可以看到人工指令及其执行结果；真实缺口仍应如实报告，不因人工要求继续而伪造资源、批准或验证。
+- 同一 CLI 执行中的自动重试共享仅内存的消费状态；本次消息不能在后续再次 blocked 时重复注入。人工恢复不重置或扩大既有裁决轮数上限，额度不足时在追加正文前明确拒绝。`run_all` 只向当前子步骤传递该参数；同一步有多个 loop 时只向真正的阻塞对话发送，不能投递给已完成或新开启的相邻对话。
+- 新输入无法确定合法投递目标时明确拒绝，不允许步骤先成功后才发现输入未被消费。已有 `pending_agent_text` 继续按原持久化协议处理，不丢弃既有回复或将其冒充为人工指令执行结果。
+
+人工正文不增加 conversation schema 字段。识别结构化模型决定及旧完成标记时，要求该 `assistant` 紧随 Agent 的 `user` 回复；在旧 blocked/generic `assistant` 后追加的人工正文即使恰好是合法 `AgentDecision` JSON 或旧完成标记，也只能作为普通指令投递，不触发完成、不计入模型裁决轮数。
+
+正文原样进入 PCM conversation、Agent session 和模型请求，不提供秘密扫描或自动脱敏。外部系统密码、API key、令牌等先写入已有受保护配置，人工指令只引用配置位置、键和资源说明。文件参数避免正文进入 shell 命令行，不意味着正文不会持久化或发给模型；CLI 错误与普通运行日志不主动回显正文。
+
 ## 7. 持久化与中断恢复
 
 ### 7.1 最小状态
@@ -311,7 +327,7 @@ decision_conversations.<key>.path
 - decision turn；
 - `COMPLETION_MESSAGE`。
 
-决策轮次直接从 conversation 中可解析的决定数计算。
+决策轮次直接从 conversation 中紧随 Agent `user` 回复的可解析负责人决定数计算，人工恢复指令不计入。
 
 ### 7.2 Agent 回复写入时序
 
@@ -343,7 +359,7 @@ sequenceDiagram
 3. 再调用决策模型；
 4. 不重复调用 Agent。
 
-Prompt 投递采用 at-least-once 语义。恢复指令必须是幂等的“重新读取当前事实并继续”，不为 Demo 建设 exactly-once 协议。
+Prompt 投递采用 at-least-once 语义。自动恢复指令使用幂等的“重新读取当前事实并继续”，不为 Demo 建设 exactly-once 协议。人工恢复正文落盘后如遇中断，普通恢复从 conversation 尾部复用正文，不再读取源文件；源文件被删除或修改不改变这条已持久化指令。同一命令自动重试不重复追加人工消息，但不能据此宣称 Agent 或其业务操作恰好执行一次。只有用户显式提交新意见时才再次提供 `--resume-message-file`；普通恢复命令不保留旧文件参数。
 
 ### 7.3 AI-compatible 裁决失败诊断
 

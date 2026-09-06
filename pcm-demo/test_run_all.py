@@ -40,6 +40,7 @@ class RunAllTests(unittest.TestCase):
         run_id: str | None = None,
         workspace_root: Path | None = None,
         catalog_path: Path | None = None,
+        resume_message_file: Path | None = None,
     ) -> Namespace:
         return Namespace(
             resume=resume,
@@ -47,6 +48,7 @@ class RunAllTests(unittest.TestCase):
             run_id=run_id,
             workspace_root=workspace_root,
             catalog_path=catalog_path,
+            resume_message_file=resume_message_file,
             product_status=None,
             release_product=None,
         )
@@ -55,6 +57,46 @@ class RunAllTests(unittest.TestCase):
         run_dir = self.runs / run_id
         (run_dir / "steps").mkdir(parents=True)
         write_json(run_dir / "state.json", state)
+        return run_dir
+
+    def make_blocked_agent_run(self, *, key: str = "project_intake") -> Path:
+        run_dir = self.make_run(
+            {
+                "run_id": "test-run",
+                "status": "blocked",
+                "phase": "project_initialization",
+                "step": 2,
+                "current_step": 2,
+                "current_node": "project:02_intake",
+                "claude_sessions": {key: "session-1"},
+                "decision_conversations": {
+                    key: {"path": f"conversations/{key}.json"}
+                },
+            }
+        )
+        (run_dir / "conversations").mkdir()
+        write_json(
+            run_dir / "conversations" / f"{key}.json",
+            {
+                "messages": [
+                    {"role": "system", "content": "system"},
+                    {"role": "assistant", "content": "初始提示"},
+                    {"role": "user", "content": "Agent 回复"},
+                    {
+                        "role": "assistant",
+                        "content": json.dumps(
+                            {
+                                "verdict": "blocked",
+                                "answer": "",
+                                "reason": "缺少输入",
+                                "required_inputs": ["负责人决定"],
+                            },
+                            ensure_ascii=False,
+                        ),
+                    },
+                ]
+            },
+        )
         return run_dir
 
     def test_canonical_nodes_route_to_exact_steps(self) -> None:
@@ -316,6 +358,63 @@ class RunAllTests(unittest.TestCase):
 
         self.assertEqual(calls, list(range(19)))
 
+    def test_resume_message_file_is_absolute_and_only_forwarded_to_first_step(self) -> None:
+        run_dir = self.make_blocked_agent_run()
+        message = self.root / "负责人决定.any"
+        message.write_bytes("第一行\r\n第二行\r\n".encode("utf-8"))
+        args = self.args(resume_message_file=message)
+        calls: list[list[str]] = []
+
+        def fake_run_child(command: list[str], _pass_fds: tuple[int, ...] = ()) -> int:
+            calls.append(command)
+            if len(calls) == 1:
+                write_json(
+                    run_dir / "state.json",
+                    {
+                        "run_id": "test-run",
+                        "status": "running",
+                        "phase": "project_initialization",
+                        "step": 3,
+                        "current_step": 3,
+                        "current_node": "project:03_foundation_selection",
+                    },
+                )
+                return 0
+            return 1
+
+        with patch.object(run_all, "run_child", side_effect=fake_run_child):
+            self.assertEqual(run_all.orchestrate(args), 1)
+
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(
+            calls[0][calls[0].index("--resume-message-file") + 1],
+            str(message.resolve()),
+        )
+        self.assertNotIn("--resume-message-file", calls[1])
+
+    def test_parent_does_not_read_invalid_resume_file_or_change_business_state(self) -> None:
+        run_dir = self.make_blocked_agent_run()
+        message = self.root / "missing-message"
+        before = (run_dir / "state.json").read_bytes()
+        calls: list[list[str]] = []
+
+        def rejected_by_child(command: list[str], _pass_fds: tuple[int, ...] = ()) -> int:
+            calls.append(command)
+            return 2
+
+        with patch.object(run_all, "run_child", side_effect=rejected_by_child):
+            self.assertEqual(
+                run_all.orchestrate(self.args(resume_message_file=message)), 2
+            )
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(
+            calls[0][calls[0].index("--resume-message-file") + 1],
+            str(message.resolve()),
+        )
+        self.assertEqual((run_dir / "state.json").read_bytes(), before)
+        self.assertEqual(list((run_dir / "steps").iterdir()), [])
+
     def test_failed_step_stops_without_outer_retry(self) -> None:
         run_dir = self.make_run(
             {
@@ -428,6 +527,16 @@ class RunAllTests(unittest.TestCase):
         with patch.object(run_all.subprocess, "Popen", return_value=child):
             self.assertEqual(run_all.run_child(["python", "step.py"]), 143)
 
+    def test_resume_message_help_explains_blocked_utf8_contract(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout), self.assertRaises(SystemExit) as raised:
+            run_all.parse_args(["--help"])
+        self.assertEqual(raised.exception.code, 0)
+        self.assertIn(
+            "仅用于当前 blocked：读取 UTF-8 文件作为人工负责人恢复指令",
+            stdout.getvalue(),
+        )
+
     def test_cli_requires_exactly_one_fresh_or_resume_entry(self) -> None:
         with self.assertRaises(SystemExit):
             run_all.parse_args([])
@@ -435,6 +544,10 @@ class RunAllTests(unittest.TestCase):
             run_all.parse_args(["--product-draft", "draft.md", "--resume", "run"])
         with self.assertRaises(SystemExit):
             run_all.parse_args(["--resume", "run", "--run-id", "other"])
+        with self.assertRaises(SystemExit):
+            run_all.parse_args(
+                ["--product-draft", "draft.md", "--resume-message-file", "message"]
+            )
 
 
 if __name__ == "__main__":
