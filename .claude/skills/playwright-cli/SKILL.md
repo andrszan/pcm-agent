@@ -1,8 +1,7 @@
 ---
 name: playwright-cli
-description: Use when 需要通过当前环境已经可用的 playwright-cli 操作或检查真实网页、调试浏览器行为，或生成和运行 Playwright 测试时。
-disable-model-invocation: true
-allowed-tools: Bash(playwright-cli:*), Bash(mkdir:*)
+description: Automate browser interactions, test web pages and work with Playwright tests.
+allowed-tools: Bash(playwright-cli:*) Bash(npx:*) Bash(npm:*)
 ---
 
 # Browser Automation with playwright-cli
@@ -18,10 +17,8 @@ playwright-cli goto https://playwright.dev
 playwright-cli click e15
 playwright-cli type "page.click"
 playwright-cli press Enter
-# 在工作区根目录准备 Git 忽略的截图目录
-mkdir -p .test-screenshots
 # take a screenshot (rarely used, as snapshot is more common)
-playwright-cli screenshot --filename=.test-screenshots/quick-start.png
+playwright-cli screenshot
 # close the browser
 playwright-cli close
 ```
@@ -97,13 +94,11 @@ playwright-cli mousewheel 0 100
 
 ### Save as
 
-所有为开发验证、测试或 UI 浏览器验收生成的临时截图都必须遵循项目 `AGENTS.md`，显式写入工作区根目录的 `.test-screenshots/`。以下命令假设当前目录为工作区根目录；Agent 可以按任务自行创建内部子目录和文件名。
-
 ```bash
-mkdir -p .test-screenshots
-playwright-cli screenshot --filename=.test-screenshots/page.png
-playwright-cli screenshot e5 --filename=.test-screenshots/element-e5.png
-playwright-cli screenshot --hires --filename=.test-screenshots/page-hires.png
+playwright-cli screenshot
+playwright-cli screenshot e5
+playwright-cli screenshot --filename=page.png
+playwright-cli screenshot --hires
 playwright-cli pdf --filename=page.pdf
 ```
 
@@ -345,15 +340,19 @@ playwright-cli close-all
 playwright-cli kill-all
 ```
 
-## Availability Boundary
+## Installation
 
-This Skill only uses a `playwright-cli` command that is already available in the current environment. Check availability before opening a session:
+If global `playwright-cli` command is not available, try a local version via `npx playwright cli`:
 
 ```bash
-playwright-cli --help
+npx --no-install playwright --version
 ```
 
-If the command is unavailable, stop and report the missing tool. Do not install a package, invoke an `npx` fallback, change project dependencies, or modify global tooling from this Skill.
+When local version is available, use `npx playwright cli` in all commands. Otherwise, install `playwright-cli` as a global command:
+
+```bash
+npm install -g @playwright/cli@latest
+```
 
 ## Example: Form submission
 
