@@ -44,6 +44,13 @@
       "path": ".agents/plugins/pyright-lsp"
     },
     {
+      "id": "gpt-image@wuyoscar-skills",
+      "name": "gpt-image",
+      "version": "0.2.0",
+      "provider": "wuyoscar-skills",
+      "path": ".agents/plugins/gpt-image"
+    },
+    {
       "id": "skill-creator@claude-plugins-official",
       "name": "skill-creator",
       "version": "2dc97c0d12ab",

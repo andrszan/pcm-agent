@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+.uv-cache/
+
+# Secrets
+.env
+.env.local
+.env.*.local
+
+# Generated images (callers write outputs next to where they invoke the script)
+*.png
+*.jpg
+*.jpeg
+*.webp
+!docs/**/
+!docs/*.png
+!docs/*.jpg
+!docs/**/*.png
+!docs/**/*.jpg
+!docs/**/*.jpeg
+!docs/**/*.webp
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS / build
+.cache/
+build/
+dist/
+*.egg-info/
+
+# Claude Code runtime state (OMC-style)
+.omc/
+.omx/
+.claude/state/
+
+# Stray local tool configs (mcporter etc. if cwd happens to be this repo)
+config/mcporter.json
+
+# Local Codex handoff
+AGENTS.md
+CLAUDE.md
