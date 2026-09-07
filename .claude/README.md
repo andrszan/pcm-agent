@@ -115,17 +115,19 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 | `tailwind-theme` | 适用于 Tailwind CSS v4 CSS-first 前端；根据项目事实和明确主题要求选择经校验的 tweakcn 内置主题或生成自定义配色，只落实完整 light/dark 语义颜色并验证真实渲染，不修改字体、圆角、阴影、布局、组件或业务页面，也不自动安装 Tailwind 或组件库 |
 | `ui-component-patterns` | 适用于 React + shadcn/ui Base UI + Tailwind CSS v4 的具体 Chat、认证、业务卡片、结构化表单和真实趋势场景；从本地受控参考中选择少量候选并按真实业务、品牌、数据和状态二次设计，不安装或复制 registry，不决定 Shell、信息架构或主题；Radix 及其它不兼容栈无副作用跳过 |
 | `playwright-cli` | 依赖当前环境已具备的对应浏览器运行工具；用于真实浏览器操作与验证，核心 Skills 不得把它作为隐藏必需 Skill |
-| `media-assets` | 工作区固有、按需调用的开发期媒体工具；通过受控 Provider catalog 选择适配来源，获取少量资源并固化到目标项目，但不构成产品运行时依赖 |
+| `media-assets` | 工作区固有、按需调用的开发期媒体工具；仅负责已有素材搜索/获取、传入资产检查与固化，以及测试 fixture，不负责定制图片生成或编辑，也不构成产品运行时依赖 |
 
-可选技术或工具能力不适用、不可用时，应无副作用跳过或记录真实验证缺口；本仓库不为此自动安装新的 CLI、插件或项目依赖。
+可选技术或工具能力不适用、不可用时，应无副作用跳过或记录真实验证缺口；本仓库不自动安装任意新的 CLI、插件或项目依赖。已准入受控工具随附的声明式依赖可以按其使用合同由隔离运行时准备，不等同于允许任意安装新工具或把工具依赖加入目标产品。
 
 ### 第三方 Skills
 
 - `find-skills`
 - `shadcn`
+- `gpt-image:gpt-image`：用于定制图片生成和编辑。
+- `gpt-image:get-prompt-from-image`：仅在已有参考图且需要提炼可复用视觉风格时按需使用。
 - `ui-ux-pro-max` 系列：可选的设计、品牌和 UI 实现辅助，不是核心流程前置，也不能作为体验合格或开发完成的证据。
 
-它们由外部来源维护，本仓库不直接重写其内容，也不把它们作为核心流程必经能力。
+它们由外部来源维护，本仓库不直接重写其内容，也不把它们作为核心流程必经能力。`gpt-image` 以受控本地快照加载；它与 `media-assets` 的分工只在本 README 和人工流程文档中编排，不让任一 Skill 正文嵌套调用其它自定义 Skill。
 
 ### 流程外辅助能力
 
@@ -161,8 +163,7 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 │   │   ├── SKILL.md
 │   │   ├── providers/
 │   │   │   ├── README.md
-│   │   │   ├── pixabay/README.md
-│   │   │   └── openai-compatible-image/README.md
+│   │   │   └── pixabay/README.md
 │   │   ├── assets/fixtures/
 │   │   │   ├── README.md
 │   │   │   └── manifest.template.json
@@ -241,7 +242,13 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 
 项目执行时可以另有 `.claude/rules/` 保存项目级稳定规则。普通运行不创建专属过程目录、Manifest、Run ID 或阶段报告；需要长期保留的事实进入产品文档、活动 TRD、代码、测试、Git 或项目已有记录位置。
 
-`media-assets` 的 `providers/` 维护显式准入的 Provider catalog 和适配说明，不扫描目录或自动安装来源；`assets/fixtures/` 是受跟踪测试输入的维护入口，不承载目标产品资产、对象存储数据或工作区私有凭据。
+`media-assets` 仅负责已有素材搜索/获取、调用方传入资产的检查与固化，以及测试 fixture。其 `providers/` 维护已有素材来源的显式准入 catalog 和适配说明，不扫描目录或自动安装来源；`assets/fixtures/` 是受跟踪测试输入的维护入口，不承载产品界面资产、业务数据、对象存储数据或工作区私有凭据。
+
+承担 UI 设计或开发任务的 Agent 应主动从内容识别、场景理解、品牌表达和产品展示评估媒体价值；有明确收益且在授权范围内时自行落实，不等待用户点名，也不要求每个页面配图。不存在固定的“复用 → fixture → 图库 → 生成”顺序：已有合适资产优先复用，真实通用摄影使用 `media-assets` 检索，定制构图可以直接使用 `gpt-image:gpt-image` 生成或编辑，fixture 只用于测试；仅当已有参考图且需要提炼可复用视觉风格时，才按需使用 `gpt-image:get-prompt-from-image`。这些关系只由流程调用方编排，不新增固定 PCM 步骤。
+
+`gpt-image` 使用 `.agents/plugins/gpt-image` 中版本为 `0.2.0` 的受控精简运行快照，保留 Plugin 元数据、完整 Skills 与案例 Prompt、源码、包元数据和许可，不复制上游 `docs/` 案例原图或维护文档。案例预览引用的裁剪及与上游的差异记录在 [快照说明](../.agents/plugins/gpt-image/README.md) 中；更新快照时继续按运行所需内容取舍，不把上游完整展示仓库重新纳入版本控制。执行时优先使用 `uv run .agents/plugins/gpt-image/skills/gpt-image/scripts/generate.py`；该脚本随附 PEP 723 依赖声明，`uv` 在隔离缓存中准备已准入工具依赖，不把依赖安装进目标产品 `.venv`，也不要求全局安装。不得因 `PATH` 或缓存中已有同名命令而偏离受控快照版本。本机工具生图统一读取工作区工具配置 `OPENAI_BASE_URL` 和 `OPENAI_API_KEY`；默认使用上游模型 `gpt-image-2`，任务明确要求其它模型时传 `--model`，不新增 `OPENAI_MODEL`，也不为配置适配修改第三方源码。
+
+上述命令从产品工作区根目录执行，不切到插件目录或前后端目录；launcher 从自身位置定位受控源码，但 `.env` 和相对输入/输出路径仍按当前工作目录解析。配置读取顺序为进程环境、工作区根 `.env`、`~/.env`，已有变量不被后者覆盖；工作区已有配置时不另写插件专用 `.env`。每次传入明确的 `-f` 目标资产路径，避免默认输出散落到工作区根。首次 `uv run` 可能下载声明的 Python 依赖；只运行 `--help` 可验证启动，但不代表图片服务、模型权限或生成质量已经验收。
 
 `tailwind-theme` 只面向实际采用 Tailwind CSS v4 CSS-first 语义颜色变量的前端。它按需读取 tweakcn 当前动态 registry，但只消费经过校验的 light/dark 颜色白名单并把最终值固化进目标项目；网络不可用或没有合适 preset 时依据项目事实生成自定义配色，不把动态 URL、完整远程 CSS、字体、圆角、阴影或其它非颜色 token 变成产品依赖。
 
@@ -257,7 +264,7 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 - 不因为示例流程存在就机械运行所有能力；不适用时允许无副作用跳过。
 - 活动需求和活动 TRD 可随当前事实调整；归档历史保持不可变。
 - 开发 `.env` 可以在项目范围内安全使用；用于登录目标产品的交付开发账号及密码应进入受跟踪账号文档，PCM 或目标产品用于访问其它系统或资源的凭据及其它秘密必须保持 Git 忽略并在输出中脱敏。
-- 工作区媒体 Provider 的私有配置仅服务 `media-assets`，按需调用；它们不属于目标项目配置、开发资源清单或产品运行时依赖。
+- 工作区媒体工具的私有配置供相应的已有素材检索或定制生成/编辑能力使用；它们是 AI Agent 工作区工具配置，不属于目标项目配置、开发资源清单或产品运行时依赖。
 - 不为当前任务擅自引入新基础设施、CLI、插件或第三方 Skill。
 - 验证以真实行为和风险为中心，局部 Mock、代码阅读或工具缺位不能冒充完成。
 
