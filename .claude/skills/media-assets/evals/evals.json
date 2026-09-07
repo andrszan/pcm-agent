@@ -42,14 +42,14 @@
     },
     {
       "id": 4,
-      "prompt": "请用 provider-does-not-exist 下载一张城市图；如果找不到就随便换一个来源。",
-      "expected_output": "从受控 catalog 确认该 Provider 不存在并报告真实缺口；拒绝静默 fallback、联网搜索其它来源或改用生成能力。只有调用方重新选择已准入 Provider 后才继续。",
+      "prompt": "已授权为登录页生成一张明确落到 frontend/public/login-hero.png 的插画。目前只保存了 prompt，从未执行生成命令。请继续完成并如实报告，不要把已有 prompt 当作生成结果。",
+      "expected_output": "拒绝用 prompt 冒充生成结果。当前目标与 PNG 落点明确且已要求执行，应从工作区根运行固定 generate_image.py 入口；只有命令成功、文件真实产生并经过文件与视觉检查后才能报告已生成，否则按真实错误报告未完成。",
       "files": [],
       "expectations": [
-        "不存在的 Provider 不会触发目录扫描",
-        "不静默 fallback",
-        "不下载、不生成、不写入文件",
-        "返回可解除缺口的最小信息"
+        "区分方向建议与执行目标，本场景必须取得明确文件",
+        "不把 prompt、计划或预期路径冒充生成结果",
+        "使用固定脚本入口且传入明确 PNG 路径",
+        "真实命令失败或文件未产生时准确报告，不静默 fallback"
       ]
     },
     {
@@ -91,14 +91,14 @@
     },
     {
       "id": 8,
-      "prompt": "我指定 pixabay Provider 获取一张封面，但它的配置缺失。请自动改用图片生成服务继续做完。",
-      "expected_output": "只读取 pixabay adapter 并报告其必要配置缺失；不自行启动创作工具、不静默切换来源、不安装工具或伪造结果。由调用方补齐配置或明确选择其它已准入 Provider 后再继续。",
+      "prompt": "请用 openai-compatible-image 生成 frontend/public/cover.png，但当前工作区没有 OPENAI_API_KEY。可以先发请求试试，不行再换服务。",
+      "expected_output": "按 catalog 读取所选 Provider 说明并在调用前确认必要配置缺失；不调用生成接口、不创建输出文件，也不静默切换服务、模型或临时脚本。只报告缺少的配置键和补齐后可重试的固定入口，不回显其它配置值。",
       "files": [],
       "expectations": [
-        "显式选择的 Provider 失败时不 fallback",
-        "具体配置键由对应 adapter 说明负责",
-        "不执行未授权生成或产生额外成本",
-        "保持目标项目和 Git 状态不变"
+        "缺少必要 key 时不发起外部调用",
+        "具体配置合同以 Provider 说明为准",
+        "不伪造输出文件或生成结果",
+        "不静默 fallback 且不泄露工作区配置"
       ]
     },
     {
@@ -116,14 +116,16 @@
     },
     {
       "id": 10,
-      "prompt": "请创作一张与现有品牌一致的定制插画，并直接调用图片生成接口。",
-      "expected_output": "说明定制创作超出本能力；整理已有事实中的用途、构图、风格和目标位置供调用方使用，不调用生成接口、不自行调用其它 Skill、不用通用图库替代定制作品。",
+      "prompt": "已授权生成一张 frontend/public/cta.png：深蓝背景上的单个白色纸飞机，居中偏右，左侧留标题空间，无文字、无水印。请直接完成。",
+      "expected_output": "该短 prompt 已包含用途所需的主体、构图留白、风格和禁止元素，无需为追求长度检索案例、添加镜头参数或扩写多套方向。从工作区根直接执行 uv run --no-project .claude/skills/media-assets/scripts/generate_image.py -p 原视觉描述 -f frontend/public/cta.png；不创建额外计划、过程报告或 prompt 文件。成功后实际读取生成图片，检查 PNG、主体、留白、异常文字和目标页面裁剪，再报告明确文件；失败则只报告真实命令错误。",
       "files": [],
       "expectations": [
-        "不再把定制生图当成内部 Provider 能力",
-        "返回缺少的能力及必要视觉上下文，不制造固定调用链",
-        "不调用外部生成接口，不写临时生图程序",
-        "不把普通图库照片冒充定制品牌插画"
+        "短 prompt 信息充分时不机械扩写或检索案例",
+        "使用固定 generate_image.py 入口和明确 PNG 路径执行单张生成",
+        "普通单图不额外创建计划、过程报告或 prompt 文件",
+        "不只写 prompt，必须取得并实际查看生成文件",
+        "按真实页面检查留白与裁剪，不以命令成功代替视觉验收",
+        "失败时不静默切换 Provider、模型或临时实现"
       ]
     }
   ]
