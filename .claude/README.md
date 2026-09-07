@@ -170,6 +170,7 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 │   ├── media-assets/
 │   │   ├── SKILL.md
 │   │   ├── scripts/generate_image.py
+│   │   ├── scripts/pixabay.py
 │   │   ├── providers/
 │   │   │   ├── README.md
 │   │   │   ├── openai-compatible-image/README.md
@@ -255,6 +256,8 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 `media-assets` 统一负责已有资产复用、图库检索、单张定制生成、调用方传入及本次取得文件的检查与固化，以及测试 fixture。其 `providers/` 维护显式准入 catalog 和适配说明，不扫描目录或自动安装来源；`assets/fixtures/` 是受跟踪测试输入的维护入口，不承载产品界面资产、业务数据、对象存储数据或工作区私有凭据。
 
 承担 UI 设计或开发任务的 Agent 应主动从内容识别、场景理解、品牌表达和产品展示评估媒体价值；有明确收益且在授权范围内时自行落实，不等待用户点名，也不要求每个页面配图。已有合适资产优先复用，真实通用摄影适合检索，品牌化或特定构图可以直接生成，fixture 只用于测试；不存在必须先穷尽图库的固定顺序，也不新增固定 PCM 步骤。
+
+图库检索与下载使用 `.claude/skills/media-assets/scripts/pixabay.py`：先执行 `search -q "明确查询词"` 获取有限候选，再执行 `download --id <选中的ID> -f <明确文件路径>` 下载单个选中资源。支持图片与视频，复用 24 小时的私有查询缓存；不自动翻页或批量下载。参数与缓存位置见 [Pixabay Provider 说明](skills/media-assets/providers/pixabay/README.md)，不再为普通调用临时编写程序。
 
 定制生成从产品工作区根目录执行固定入口，并传入明确 PNG 落点：
 

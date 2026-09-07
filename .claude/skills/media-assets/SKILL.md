@@ -1,6 +1,6 @@
 ---
 name: media-assets
-description: Use when 官网首屏、产品介绍、内容封面等界面需要复用、检索或生成图片，或需要检查并固化传入与生成结果、维护上传测试 fixture 时；即使任务没有点名素材来源也适用。不负责产品运行时媒体服务。
+description: Use when 官网首屏、产品介绍、内容封面等界面需要复用或检索图片、视频，生成单张图片，或需要检查并固化传入与生成结果、维护上传测试 fixture 时；即使任务没有点名素材来源也适用。不负责产品运行时媒体服务。
 argument-hint: <资源用途、目标项目或目录、视觉要求、已有文件、来源约束和写入范围>
 ---
 
@@ -38,6 +38,17 @@ Provider 是本能力内部的可选适配，不是独立运行时或产品模�
 - 已选择的 Provider 失败后不静默改用另一个来源，不自动安装 SDK、CLI、Plugin 或连接未声明的公共服务。
 
 Provider 凭据只从调用方授权的受保护配置取得。不得回显、复制到目标产品前后端运行配置、写入业务数据、测试清单、日志或最终回复。
+
+## 已有素材检索与下载
+
+从工作区根目录执行 `scripts/pixabay.py` 的固定入口：先用 `search` 取得有限候选，选定资源 ID 后再用 `download` 保存明确文件。不另写查询或下载程序，不自动遍历候选下载，不把预览 URL 当作正式资产。
+
+```bash
+uv run --no-project .claude/skills/media-assets/scripts/pixabay.py search -q "明确查询词"
+uv run --no-project .claude/skills/media-assets/scripts/pixabay.py download --id <选中的ID> -f <明确文件路径>
+```
+
+图片／视频参数、档位和 24 小时私有查询缓存合同见 [Pixabay Provider 说明](providers/pixabay/README.md)。缓存仅服务工具调用，不进入产品资产或业务数据；下载成功后仍须实际检查文件与来源边界。
 
 ## 单张定制生成
 
