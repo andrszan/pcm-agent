@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import signal
 import tempfile
 import unittest
@@ -10,6 +11,7 @@ from argparse import Namespace
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import model_policy
 import run_all
 from common.files import write_json
 
@@ -20,9 +22,13 @@ class RunAllTests(unittest.TestCase):
         self.root = Path(self.temporary_directory.name)
         self.runs = self.root / "runs"
         self.runs.mkdir()
+        self.policy_path = self.root / "model-policy.toml"
+        self.policy_path.write_bytes((run_all.DEMO_ROOT / "model-policy.toml").read_bytes())
+        model_policy._cached_policy = None
         self.patchers = [
             patch.object(run_all, "RUNS_DIR", self.runs),
             patch.object(run_all, "COORDINATION_ROOT", self.runs / ".coordination"),
+            patch.object(model_policy, "_MODEL_POLICY_PATH", self.policy_path),
         ]
         for patcher in self.patchers:
             patcher.start()
@@ -30,6 +36,7 @@ class RunAllTests(unittest.TestCase):
     def tearDown(self) -> None:
         for patcher in reversed(self.patchers):
             patcher.stop()
+        model_policy._cached_policy = None
         self.temporary_directory.cleanup()
 
     def args(
@@ -40,6 +47,7 @@ class RunAllTests(unittest.TestCase):
         run_id: str | None = None,
         workspace_root: Path | None = None,
         catalog_path: Path | None = None,
+        resume_message_file: Path | None = None,
     ) -> Namespace:
         return Namespace(
             resume=resume,
@@ -47,6 +55,7 @@ class RunAllTests(unittest.TestCase):
             run_id=run_id,
             workspace_root=workspace_root,
             catalog_path=catalog_path,
+            resume_message_file=resume_message_file,
             product_status=None,
             release_product=None,
         )
@@ -55,6 +64,46 @@ class RunAllTests(unittest.TestCase):
         run_dir = self.runs / run_id
         (run_dir / "steps").mkdir(parents=True)
         write_json(run_dir / "state.json", state)
+        return run_dir
+
+    def make_blocked_agent_run(self, *, key: str = "project_intake") -> Path:
+        run_dir = self.make_run(
+            {
+                "run_id": "test-run",
+                "status": "blocked",
+                "phase": "project_initialization",
+                "step": 2,
+                "current_step": 2,
+                "current_node": "project:02_intake",
+                "claude_sessions": {key: "session-1"},
+                "decision_conversations": {
+                    key: {"path": f"conversations/{key}.json"}
+                },
+            }
+        )
+        (run_dir / "conversations").mkdir()
+        write_json(
+            run_dir / "conversations" / f"{key}.json",
+            {
+                "messages": [
+                    {"role": "system", "content": "system"},
+                    {"role": "assistant", "content": "初始提示"},
+                    {"role": "user", "content": "Agent 回复"},
+                    {
+                        "role": "assistant",
+                        "content": json.dumps(
+                            {
+                                "verdict": "blocked",
+                                "answer": "",
+                                "reason": "缺少输入",
+                                "required_inputs": ["负责人决定"],
+                            },
+                            ensure_ascii=False,
+                        ),
+                    },
+                ]
+            },
+        )
         return run_dir
 
     def test_canonical_nodes_route_to_exact_steps(self) -> None:
@@ -201,6 +250,67 @@ class RunAllTests(unittest.TestCase):
         self.assertNotIn("--catalog-path", step_one)
         self.assertIn("--catalog-path", step_three)
 
+    def test_run_all_reloads_file_and_fixes_snapshot_for_every_child(self) -> None:
+        run_dir = self.make_run(
+            {
+                "run_id": "test-run",
+                "status": "running",
+                "phase": "project_initialization",
+                "step": 2,
+                "current_step": 2,
+                "current_node": "project:02_intake",
+            }
+        )
+        snapshots: list[str] = []
+        stdout = io.StringIO()
+
+        def fake_run_child(
+            _command: list[str],
+            _pass_fds: tuple[int, ...] = (),
+            env: dict[str, str] | None = None,
+        ) -> int:
+            self.assertIsNotNone(env)
+            snapshots.append(env[model_policy._MODEL_POLICY_SNAPSHOT_ENV])
+            if len(snapshots) == 1:
+                self.policy_path.write_text(
+                    self.policy_path.read_text(encoding="utf-8").replace(
+                        "gpt-5.6-sol[1m]", "changed-on-disk"
+                    ),
+                    encoding="utf-8",
+                )
+                write_json(
+                    run_dir / "state.json",
+                    {
+                        "run_id": "test-run",
+                        "status": "running",
+                        "phase": "project_initialization",
+                        "step": 5,
+                        "current_step": 5,
+                        "current_node": "project:05_verify_readiness",
+                    },
+                )
+                return 0
+            return 1
+
+        with (
+            patch.dict(
+                os.environ,
+                {model_policy._MODEL_POLICY_SNAPSHOT_ENV: "inherited-old-snapshot"},
+                clear=False,
+            ),
+            patch.object(run_all, "run_child", side_effect=fake_run_child),
+            contextlib.redirect_stdout(stdout),
+        ):
+            self.assertEqual(run_all.orchestrate(self.args()), 1)
+
+        self.assertEqual(len(snapshots), 2)
+        self.assertEqual(snapshots[0], snapshots[1])
+        self.assertEqual(
+            json.loads(snapshots[0])["profiles"]["planning"]["model"],
+            "gpt-5.6-sol[1m]",
+        )
+        self.assertEqual(stdout.getvalue().count("模型策略："), 1)
+
     def test_full_fresh_sequence_stops_after_first_completed_requirement(self) -> None:
         draft = self.root / "draft.md"
         draft.write_text("产品初稿", encoding="utf-8")
@@ -213,7 +323,11 @@ class RunAllTests(unittest.TestCase):
         calls: list[int] = []
         nodes = {step: node for node, step in run_all.NODE_TO_STEP.items()}
 
-        def fake_run_child(command: list[str], _pass_fds: tuple[int, ...] = ()) -> int:
+        def fake_run_child(
+            command: list[str],
+            _pass_fds: tuple[int, ...] = (),
+            _env: dict[str, str] | None = None,
+        ) -> int:
             step = int(command[command.index("--step") + 1])
             calls.append(step)
             (run_dir / "steps").mkdir(parents=True, exist_ok=True)
@@ -316,6 +430,71 @@ class RunAllTests(unittest.TestCase):
 
         self.assertEqual(calls, list(range(19)))
 
+    def test_resume_message_file_is_absolute_and_only_forwarded_to_first_step(self) -> None:
+        run_dir = self.make_blocked_agent_run()
+        message = self.root / "负责人决定.any"
+        message.write_bytes("第一行\r\n第二行\r\n".encode("utf-8"))
+        args = self.args(resume_message_file=message)
+        calls: list[list[str]] = []
+
+        def fake_run_child(
+            command: list[str],
+            _pass_fds: tuple[int, ...] = (),
+            _env: dict[str, str] | None = None,
+        ) -> int:
+            calls.append(command)
+            if len(calls) == 1:
+                write_json(
+                    run_dir / "state.json",
+                    {
+                        "run_id": "test-run",
+                        "status": "running",
+                        "phase": "project_initialization",
+                        "step": 3,
+                        "current_step": 3,
+                        "current_node": "project:03_foundation_selection",
+                    },
+                )
+                return 0
+            return 1
+
+        with patch.object(run_all, "run_child", side_effect=fake_run_child):
+            self.assertEqual(run_all.orchestrate(args), 1)
+
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(
+            calls[0][calls[0].index("--resume-message-file") + 1],
+            str(message.resolve()),
+        )
+        self.assertNotIn("--resume-message-file", calls[1])
+
+    def test_parent_does_not_read_invalid_resume_file_or_change_business_state(self) -> None:
+        run_dir = self.make_blocked_agent_run()
+        message = self.root / "missing-message"
+        before = (run_dir / "state.json").read_bytes()
+        calls: list[list[str]] = []
+
+        def rejected_by_child(
+            command: list[str],
+            _pass_fds: tuple[int, ...] = (),
+            _env: dict[str, str] | None = None,
+        ) -> int:
+            calls.append(command)
+            return 2
+
+        with patch.object(run_all, "run_child", side_effect=rejected_by_child):
+            self.assertEqual(
+                run_all.orchestrate(self.args(resume_message_file=message)), 2
+            )
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(
+            calls[0][calls[0].index("--resume-message-file") + 1],
+            str(message.resolve()),
+        )
+        self.assertEqual((run_dir / "state.json").read_bytes(), before)
+        self.assertEqual(list((run_dir / "steps").iterdir()), [])
+
     def test_failed_step_stops_without_outer_retry(self) -> None:
         run_dir = self.make_run(
             {
@@ -330,7 +509,11 @@ class RunAllTests(unittest.TestCase):
         calls: list[list[str]] = []
         stderr = io.StringIO()
 
-        def failed(command: list[str], _pass_fds: tuple[int, ...] = ()) -> int:
+        def failed(
+            command: list[str],
+            _pass_fds: tuple[int, ...] = (),
+            _env: dict[str, str] | None = None,
+        ) -> int:
             calls.append(command)
             return 1
 
@@ -428,6 +611,16 @@ class RunAllTests(unittest.TestCase):
         with patch.object(run_all.subprocess, "Popen", return_value=child):
             self.assertEqual(run_all.run_child(["python", "step.py"]), 143)
 
+    def test_resume_message_help_explains_blocked_utf8_contract(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout), self.assertRaises(SystemExit) as raised:
+            run_all.parse_args(["--help"])
+        self.assertEqual(raised.exception.code, 0)
+        self.assertIn(
+            "仅用于当前 blocked：读取 UTF-8 文件作为人工负责人恢复指令",
+            stdout.getvalue(),
+        )
+
     def test_cli_requires_exactly_one_fresh_or_resume_entry(self) -> None:
         with self.assertRaises(SystemExit):
             run_all.parse_args([])
@@ -435,6 +628,10 @@ class RunAllTests(unittest.TestCase):
             run_all.parse_args(["--product-draft", "draft.md", "--resume", "run"])
         with self.assertRaises(SystemExit):
             run_all.parse_args(["--resume", "run", "--run-id", "other"])
+        with self.assertRaises(SystemExit):
+            run_all.parse_args(
+                ["--product-draft", "draft.md", "--resume-message-file", "message"]
+            )
 
 
 if __name__ == "__main__":

@@ -30,6 +30,7 @@ from common.agent_decision_loop import (
 from common.claude_agent import ClaudeRunResult
 from common.files import sha256, write_json
 from common.test_agent_decision_loop import FakeAgentRunner, FakeDecisionRunner, decision
+from model_policy import get_agent_profile
 
 
 STEP_FIELDS = {
@@ -44,11 +45,17 @@ STEP_FIELDS = {
     "agent_executions",
 }
 CALL_FIELDS = {
+    "task",
+    "model",
+    "effort",
     "started_at",
     "finished_at",
     "interrupted_at",
     "elapsed_seconds",
     "end_reason",
+    "usage",
+    "model_usage",
+    "total_cost_usd",
 }
 
 
@@ -197,8 +204,7 @@ class AgentTimingIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 skill_name="test-skill",
                 max_decision_rounds=3,
                 max_turns=7,
-                model_tier="medium",
-                effort="high",
+                task="project_intake",
                 decision_system_prompt="决策 system prompt",
             )
             clock = [0.0]
@@ -246,11 +252,13 @@ class AgentTimingIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(final.verdict, "completed")
             self.assertEqual([call[0] for call in agent.calls], ["初始 Agent 提示", "继续完成"])
             self.assertEqual(len(owner.calls), 2)
+            profile = get_agent_profile(spec.task)
             for index, (_prompt, kwargs) in enumerate(agent.calls):
                 self.assertEqual(kwargs["cwd"], workspace)
                 self.assertEqual(kwargs["max_turns"], 7)
-                self.assertEqual(kwargs["model_tier"], "medium")
-                self.assertEqual(kwargs["effort"], "high")
+                self.assertEqual(kwargs["task"], spec.task)
+                self.assertEqual(kwargs["model"], profile.model)
+                self.assertEqual(kwargs["effort"], profile.effort)
                 self.assertEqual(
                     kwargs["resume_session_id"], None if index == 0 else "session-1"
                 )
@@ -280,8 +288,7 @@ class AgentTimingIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 skill_name="test-skill",
                 max_decision_rounds=3,
                 max_turns=7,
-                model_tier="medium",
-                effort="high",
+                task="project_intake",
                 decision_system_prompt="决策 system prompt",
             )
             clock = [0.0]

@@ -11,6 +11,7 @@ from pathlib import Path
 DEMO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(DEMO_ROOT))
 
+from common.agent_decision_loop import ResumeMessage
 from common.claude_agent import ClaudeRunResult
 from common.files import write_json
 from common.state import read_state, write_state
@@ -794,16 +795,88 @@ class ProjectBootstrapTests(unittest.TestCase):
                 self.assertIn("项目专属 light/dark", system_prompt)
                 return decision("completed")
 
+            resume_message = ResumeMessage("tailwind_theme", "使用负责人提供的品牌决定")
             outcome = self.run_step(
                 run_dir,
                 resumed_state,
                 agent_runner=resumed_agent,
                 decision_runner=resumed_decision,
                 config_loader=lambda: object(),
+                resume_message=resume_message,
             )
             self.assertIs(outcome["tailwind_theme"], True)
+            self.assertTrue(resume_message.consumed)
             self.assertEqual(len(resumed_calls), 1)
+            self.assertEqual(resumed_calls[0]["prompt"], "使用负责人提供的品牌决定")
             self.assertFalse(resumed_calls[0]["prompt"].startswith("/project-bootstrap\n"))
+
+    def test_bootstrap_manual_resume_is_consumed_before_new_theme_loop(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory))
+            (workspace / "README.md").write_text("# 项目\n", encoding="utf-8")
+
+            async def first_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
+                current = agent_result_for_prompt(
+                    prompt, cwd=kwargs["cwd"]  # type: ignore[arg-type, index]
+                )
+                kwargs["on_update"](current)  # type: ignore[index, operator]
+                return current
+
+            async def blocked_bootstrap(messages, config, *, system_prompt):
+                return decision(
+                    "blocked",
+                    reason="缺少负责人决定",
+                    required_inputs=["负责人决定"],
+                )
+
+            with self.assertRaises(ProjectBootstrapBlocked):
+                self.run_step(
+                    run_dir,
+                    state,
+                    agent_runner=first_agent,
+                    decision_runner=blocked_bootstrap,
+                    config_loader=lambda: object(),
+                )
+
+            resumed_state = read_state(run_dir)
+            resumed_state.update(
+                {
+                    "status": "blocked",
+                    "blocked": {
+                        "reason": "缺少负责人决定",
+                        "required_inputs": ["负责人决定"],
+                    },
+                }
+            )
+            write_state(run_dir, resumed_state)
+            resume_message = ResumeMessage("project_bootstrap", "负责人决定原文")
+            calls: list[str] = []
+
+            async def resumed_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
+                calls.append(prompt)
+                current = agent_result_for_prompt(
+                    prompt, cwd=kwargs["cwd"]  # type: ignore[arg-type, index]
+                )
+                kwargs["on_update"](current)  # type: ignore[index, operator]
+                return current
+
+            async def completed(messages, config, *, system_prompt):
+                return decision("completed")
+
+            outcome = self.run_step(
+                run_dir,
+                resumed_state,
+                agent_runner=resumed_agent,
+                decision_runner=completed,
+                config_loader=lambda: object(),
+                resume_message=resume_message,
+            )
+
+            self.assertEqual(outcome["status"], "success")
+            self.assertTrue(resume_message.consumed)
+            self.assertEqual(calls[0], "负责人决定原文")
+            self.assertTrue(calls[1].startswith("/tailwind-theme\n"))
+            self.assertEqual(calls.count("负责人决定原文"), 1)
 
     def test_success_marker_is_strict_and_matches_frontend_applicability(self) -> None:
         cases = (

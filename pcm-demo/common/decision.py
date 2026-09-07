@@ -158,8 +158,14 @@ def render_decision_system_prompt(
 
 def count_decisions(messages: list[dict[str, Any]]) -> int:
     count = 0
-    for message in messages:
-        if not isinstance(message, dict) or message.get("role") != "assistant":
+    for index, message in enumerate(messages):
+        if (
+            index == 0
+            or not isinstance(message, dict)
+            or message.get("role") != "assistant"
+            or not isinstance(messages[index - 1], dict)
+            or messages[index - 1].get("role") != "user"
+        ):
             continue
         try:
             parse_agent_decision(message.get("content"))

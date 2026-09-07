@@ -56,7 +56,7 @@ pcm-demo/
 
 要求：
 
-- Python 3.10 或更高版本；
+- Python 3.11 或更高版本（策略文件使用标准库 `tomllib`）；
 - `uv`；
 - Git；
 - 可访问 Anthropic Messages 协议的 Claude Agent SDK 网关和受保护 Bearer token；
@@ -74,9 +74,8 @@ uv sync
 
 | 配置 | 用途 |
 | --- | --- |
-| `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL` | AI-compatible 结构化决策与提取 |
+| `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL`、`LLM_MODEL_EFFORT` | AI-compatible 结构化决策、提取与 JSON 修复共用配置；effort 可留空，不发送 `reasoning.effort` |
 | `PCM_AGENT_BASE_URL`、`PCM_AGENT_AUTH_TOKEN` | Claude Agent SDK 使用的 Anthropic Messages 网关与受保护 Bearer token；Base URL 不包含 `/v1` |
-| `PCM_AGENT_MODEL_LOW`、`PCM_AGENT_MODEL_MEDIUM`、`PCM_AGENT_MODEL_HIGH` | 低、中、高语义档位对应的网关真实模型名 |
 | `PCM_WORKSPACE_ROOT` | 所有目标产品项目的外部父目录，必须位于当前能力仓库之外 |
 | `PCM_MAX_CONCURRENT_PROJECTS` | 当前 Demo checkout 同时执行的产品项目上限，默认 `2` |
 | `PCM_TEMPLATE_CATALOG` | 基础工程候选目录 JSON |
@@ -90,17 +89,37 @@ uv sync
 
 已有开发配置需把 `PCM_AGENT_API_KEY` 的有效值迁移到 `PCM_AGENT_AUTH_TOKEN`，旧键不再作为认证输入接受；真实凭据继续保持 Git 忽略，POSIX 下使用 `0600`。修改后重新启动 PCM 进程加载新代码与配置，不修改已有 conversation 或运行状态。
 
-固定 Agent profile：
+### 模型策略
 
-| 步骤 | 模型档位 | effort |
-| --- | --- | --- |
-| 2、5、7、9、10、11 | 高 | `high` |
-| 6（bootstrap/theme）、14、15 | 中 | `high` |
-| 8、16、17 | 中 | `medium` |
+Claude Agent 的模型与推理强度只在受跟踪的 [`model-policy.toml`](model-policy.toml) 配置，不再读取 `.env` 中的 `PCM_AGENT_MODEL_LOW/MEDIUM/HIGH`。`.env` 只保留 Agent 连接与认证；AI-compatible 继续使用独立的共用 `LLM_*` 配置。
 
-第 15～17 步恢复同一个 development session 时始终使用中模型；每次 Agent 首次调用和 resume 都重新显式传入 model 与 effort。当前不为 Agent 步骤使用低模型，不配置 fallback model 或 `max_budget_usd`，并保持各步骤既有最大 turn 与负责人决策轮数。
+```toml
+[profiles]
+planning = { model = "gpt-5.6-sol[1m]", effort = "high" }
+building = { model = "gpt-5.6-sol[1m]", effort = "high" }
+routine = { model = "gpt-5.6-sol[1m]", effort = "medium" }
 
-公共 runner 在会话级 `settings` 中生成 `modelOverrides`：`claude-haiku-4-5-20251001`、`claude-sonnet-4-6`、`claude-opus-4-8` 分别注册为 LOW、MEDIUM、HIGH 配置的实际模型 ID。`options.model` 仍直接使用实际 ID，不另设一套模型配置、不自动加 `[1m]`，也不引入 `*_MODEL_NAME` 显示项。该映射用于 Claude Code 识别自定义模型名并避免 `unrecognized_model`，不把底层 GPT 变成 Claude；SDK 升级后需复验识别和出站模型。PCM 仍核验 init 模型与配置一致，但真实路由验证以发往配置中转的请求为准。Claude Code 的 `total_cost_usd` 不代表当前订阅代理的真实分模型成本。
+[steps]
+# 以下为分配示例；完整必需任务清单见实际策略文件。
+"6.bootstrap" = "building"
+"6.theme" = "building"
+"14" = "building"
+"15" = "building"
+"16" = "routine"
+"17" = "routine"
+```
+
+- 批量调整：修改一个 profile 的真实 `model` 或 `effort`，所有引用它的步骤一起调整。profile 名字不代表模型强弱，多个 profile 可以使用同一模型。
+- 单步调整：新增或选择一个完整组合，再修改对应步骤的 profile。第 6 步项目化与主题可分别配置；步骤代码只保留稳定任务标识，不写模型或 effort。
+- 支持的 Agent effort 为 `low/medium/high/xhigh/max`；具体模型的有效档位仍受实际 CLI、网关和服务能力约束，PCM 不自行替换档位。`LLM_MODEL_EFFORT` 按 AI-compatible 服务支持的值填写，不套用 Agent 五档白名单；留空不同于显式 `none`。
+- 修改前主动停止编排，再执行原 `run_all.py --resume <run-id>`。完整入口每次启动只读取一次策略并传给所有步骤子进程，启动时打印最终分配表；运行中改文件不生效。独立 `run_step` 或模块入口使用各自本次进程加载的策略，不监听文件变化。
+- 策略必须完整且有效；未知任务、缺失分配、不存在的 profile、空模型或非法 Agent effort 明确失败，不使用默认模型、环境变量或命令行覆盖兜底。内部子进程传递内容不持久化，也不作为用户配置入口。
+
+第 15～17 步仍恢复同一 development session，但允许各步选择不同真实模型与 effort。每次首次调用和 resume 都显式传入本次启动已确定的组合，不重建或清空原 session；最大 turn、负责人决策轮数、重试、三态和完成条件不变。
+
+公共 runner 将 SDK 与插件的标准模型别名通过 `modelOverrides` 统一注册为本次选定的真实模型，默认子代理也使用同一模型；这只是兼容注册，不再是一套低中高策略。`options.model` 直接使用配置的完整 ID，不自动添加或移除 `[1m]`。PCM 仍核验 init 模型与配置一致，但实际出站路由与 effort 解释由网关负责。`total_cost_usd` 是 SDK 估算，不代表订阅账户真实扣款。
+
+每次 Agent 执行区间记录 `task/model/effort` 和原始 `usage/model_usage/total_cost_usd`，AI-compatible 的每次主请求与修复请求分别保存到同一步骤的 `ai_executions`。`model_usage` 包括子代理，不能与仅主循环的 `usage` 重复相加；当前单输入 `query()` 各次独立，resume 不覆盖此前调用。未知用量保持空值，旧记录不补造、不重置。字段与统计口径见 [计时与用量说明](docs/timing.md)。
 
 ## 运行方式
 
@@ -126,6 +145,38 @@ uv run python run_all.py --resume <run-id>
 ```
 
 恢复只重新进入 `state.json` 指向的当前节点；不会从头重跑已经完成的流程。进程中断会由操作系统释放执行锁，但产品登记的配对端口会继续保留。
+
+### 用人工负责人指令恢复 blocked 步骤
+
+当前节点为 `blocked` 且已有对应 Agent 对话和 session 时，可通过 `--resume-message-file` 提交真正负责人的新指令：
+
+```bash
+uv run python run_all.py --resume <run-id> \
+  --resume-message-file /absolute/path/to/resume-message.md
+```
+
+若只希望处理当前阻塞步骤、完成后先停下，而不立即进入后续开发：
+
+```bash
+uv run python run_step.py --step <当前步骤> --run-id <run-id> \
+  --resume-message-file /absolute/path/to/resume-message.md
+```
+
+文件可以位于产品工作区之外；相对路径按执行命令时的工作目录解析。推荐 `.txt` 或 `.md`，但不限制扩展名，也不要求 frontmatter。文件须是可读、非空白的 UTF-8 普通文本，正文完整保留，不截断或裁剪首尾空白。新运行、非 blocked 状态、错误步骤或没有原 Agent 对话/session 的阻塞不支持此参数；参数不能作为任意节点的强制继续入口。
+
+例如，你认为此前 blocked 判断过于保守，可以写明可行的处理方式；你已补好资源，则可以写：
+
+```markdown
+所需服务已准备好，凭据已写入产品 backend/.env，配置键为
+THIRD_PARTY_BASE_URL 和 THIRD_PARTY_API_KEY。
+请重新读取并验证连接，成功后继续原任务，不展示密钥。
+```
+
+PCM 将正文作为负责人 `assistant` 消息追加到当前 `conversations/<key>.json`，先保存，再原样发送给原 Claude Agent session；不会先交给决策模型审批，也不会替换此前 blocked 记录。已有尚未获得回复的泛化恢复提示时，仍可追加人工指令。Agent 返回后，负责人决策模型继续按原三态规则裁决；人工指令不等于步骤已经完成，资源仍不可用时也不能伪造成功。
+
+该参数只用于本次当前阻塞对话，不会传给 `run_all` 的后续步骤，也不会重置或扩大既有裁决轮数上限；额度已耗尽时明确拒绝，不能借人工指令绕过上限。同一命令的内部自动重试不重复追加人工消息；消息落盘后若中断，直接用不带文件参数的普通 `--resume` 即可复用历史正文，不再依赖源文件。Agent 投递仍可能重发，并不保证业务操作恰好执行一次。只有需要追加新的负责人指令时才再次提供文件参数。
+
+**秘密边界：正文会完整进入 PCM 对话历史、Agent session 和模型请求。** 文件参数只避免正文出现在 shell 命令行，不提供脱敏或秘密隔离。API key、令牌等外部凭据应先写入已有受保护配置，消息只引用配置路径、键和资源说明；不要将秘密直接写在人工指令文件中。不要手改 `state.json`、步骤 result、conversation 或 Claude session 来传递回复；stdin 管道也不是受支持的输入入口。
 
 ### 查看与释放产品端口
 
@@ -194,7 +245,7 @@ runs/
 - `state.json`：当前 phase、node、step、活动需求、需求注册表、session 引用和恢复所需最小状态；
 - `steps/XX.json`：第 0～12 步最近一次业务结果；
 - `steps/requirements/<ID>/XX.json`：第 13～18 步按需求隔离的业务结果；
-- `conversations/*.json`：Claude Agent 回复与 AI-compatible 负责人决定组成的完整编排历史；
+- `conversations/*.json`：Claude Agent 回复、AI-compatible 负责人决定与人工负责人恢复指令组成的完整编排历史；
 - `logs/*.json`：结构化故障诊断快照，不是普通执行流水。
 - `timings.json`：`schema_version: 2` 按步骤保存 Claude Code 累计执行时间、步骤总历时及每次主调用区间；北京时间起止和中断时刻，不作为业务恢复真源。字段定义见 [计时说明](docs/timing.md)。
 

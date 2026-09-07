@@ -27,7 +27,9 @@ from common.agent_decision_loop import (  # noqa: E402
     AIDecisionFailure,
     AgentExecutionFailure,
     AgentDecisionLoopSpec,
+    ResumeMessage,
     persist_agent_failure,
+    prepare_resume_message,
     run_agent_decision_loop,
 )
 from common.claude_agent import ClaudeRunResult, filtered_env, run_claude  # noqa: E402
@@ -42,6 +44,7 @@ from common.decision import (  # noqa: E402
 from common.openai_responses import ResponsesFailure  # noqa: E402
 from common.files import write_json  # noqa: E402
 from config import AgentConfig  # noqa: E402
+from model_policy import get_agent_profile  # noqa: E402
 
 
 class FakeAgentRunner:
@@ -100,19 +103,16 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
             skill_name="test-skill",
             max_decision_rounds=3,
             max_turns=7,
-            model_tier="medium",
-            effort="high",
+            task="project_intake",
             decision_system_prompt="决策 system prompt",
         )
 
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
 
-    def test_spec_requires_supported_model_tier_and_effort(self) -> None:
-        with self.assertRaisesRegex(ValueError, "model_tier"):
-            AgentDecisionLoopSpec(**{**self.spec.__dict__, "model_tier": "unsupported"})
-        with self.assertRaisesRegex(ValueError, "effort"):
-            AgentDecisionLoopSpec(**{**self.spec.__dict__, "effort": "low"})
+    def test_spec_requires_task(self) -> None:
+        with self.assertRaisesRegex(ValueError, "task"):
+            AgentDecisionLoopSpec(**{**self.spec.__dict__, "task": ""})
 
     def result(
         self,
@@ -166,6 +166,7 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
         agent: FakeAgentRunner,
         decisions: FakeDecisionRunner,
         verifier=lambda: None,
+        resume_message: ResumeMessage | None = None,
     ) -> AgentDecision:
         return await run_agent_decision_loop(
             self.run_dir,
@@ -177,7 +178,89 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
             agent_runner=agent,
             decision_runner=decisions,
             config_loader=lambda: object(),
+            resume_message=resume_message,
         )
+
+    def test_prepare_resume_message_preserves_utf8_bytes_and_selects_blocked_conversation(self) -> None:
+        blocked = decision("blocked", required_inputs=["负责人决定"])
+        self.state.update(
+            {
+                "status": "blocked",
+                "step": 6,
+                "current_step": 6,
+                "current_node": "project:06_bootstrap_foundation",
+                "claude_sessions": {
+                    "project_bootstrap": "session-bootstrap",
+                    "tailwind_theme": "session-theme",
+                },
+                "decision_conversations": {
+                    "project_bootstrap": {
+                        "path": "conversations/project_bootstrap.json"
+                    },
+                    "tailwind_theme": {"path": "conversations/tailwind_theme.json"},
+                },
+            }
+        )
+        conversations = self.run_dir / "conversations"
+        conversations.mkdir()
+        write_json(
+            conversations / "project_bootstrap.json",
+            {
+                "messages": [
+                    {"role": "system", "content": "system"},
+                    {"role": "assistant", "content": "初始提示"},
+                    {"role": "user", "content": "Agent 回复"},
+                    {"role": "assistant", "content": decision("completed").model_dump_json()},
+                ]
+            },
+        )
+        write_json(
+            conversations / "tailwind_theme.json",
+            {
+                "messages": [
+                    {"role": "system", "content": "system"},
+                    {"role": "assistant", "content": "初始提示"},
+                    {"role": "user", "content": "Agent 回复"},
+                    {"role": "assistant", "content": blocked.model_dump_json()},
+                    {"role": "assistant", "content": BLOCKED_RESUME_PROMPT},
+                    {
+                        "role": "assistant",
+                        "content": decision(
+                            "completed", reason="人工 JSON，不是裁决"
+                        ).model_dump_json(),
+                    },
+                ]
+            },
+        )
+        message_path = self.run_dir.parent / "message.no-extension"
+        raw = "第一行\r\n第二行\r\n".encode("utf-8")
+        message_path.write_bytes(raw)
+
+        message = prepare_resume_message(message_path, self.run_dir, self.state, 6)
+
+        self.assertEqual(message.target_key, "tailwind_theme")
+        self.assertEqual(message.content.encode("utf-8"), raw)
+        self.assertFalse(message.consumed)
+
+    def test_prepare_resume_message_rejects_missing_session_without_reading_body(self) -> None:
+        self.state.update(
+            {
+                "status": "blocked",
+                "step": 2,
+                "current_step": 2,
+                "current_node": "project:02_intake",
+                "decision_conversations": {
+                    "project_intake": {"path": "conversations/project_intake.json"}
+                },
+            }
+        )
+        message_path = self.run_dir.parent / "secret-message"
+        message_path.write_text("不得出现在错误中的正文", encoding="utf-8")
+
+        with self.assertRaisesRegex(ValueError, "原 Agent 对话") as raised:
+            prepare_resume_message(message_path, self.run_dir, self.state, 2)
+
+        self.assertNotIn("不得出现在错误中的正文", str(raised.exception))
 
     async def test_new_session_continue_then_completed_preserves_full_text(self) -> None:
         original = "首轮 Agent 原文\n包含全部细节：token-like-text"
@@ -199,9 +282,10 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNone(agent.calls[0][1]["resume_session_id"])
         self.assertEqual(agent.calls[1][1]["resume_session_id"], "session-1")
+        profile = get_agent_profile(self.spec.task)
         self.assertEqual(
-            [(call[1]["model_tier"], call[1]["effort"]) for call in agent.calls],
-            [("medium", "high"), ("medium", "high")],
+            [(call[1]["task"], call[1]["model"], call[1]["effort"]) for call in agent.calls],
+            [(self.spec.task, profile.model, profile.effort)] * 2,
         )
         self.assertEqual(decisions.calls[0][0][-1], {"role": "user", "content": original})
         messages = json.loads(
@@ -511,6 +595,360 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(agent.calls), 1)
         self.assertEqual(agent.calls[0][0], BLOCKED_RESUME_PROMPT)
         self.assertEqual(len(decisions.calls), 1)
+
+    async def test_manual_resume_is_saved_before_original_session_call_and_then_judged(self) -> None:
+        blocked = decision(
+            "blocked", reason="缺少负责人决定", required_inputs=["提供决定"]
+        )
+        self.state.update(
+            {
+                "status": "running",
+                "claude_sessions": {self.spec.key: "session-1"},
+            }
+        )
+        self.save_conversation(
+            [
+                {"role": "system", "content": self.spec.decision_system_prompt},
+                {"role": "assistant", "content": "初始 Agent 提示"},
+                {"role": "user", "content": "首次 Agent 回复"},
+                {"role": "assistant", "content": blocked.model_dump_json()},
+            ]
+        )
+        original = "负责人原文\n保留结尾换行\n"
+        resume_message = ResumeMessage(self.spec.key, original)
+        decisions = FakeDecisionRunner([decision("completed", reason="已按负责人决定完成")])
+
+        async def saved_first(prompt: str, **kwargs: object) -> ClaudeRunResult:
+            messages = json.loads(
+                (self.run_dir / "conversations" / f"{self.spec.key}.json").read_text(
+                    encoding="utf-8"
+                )
+            )["messages"]
+            self.assertEqual(messages[-1], {"role": "assistant", "content": original})
+            self.assertTrue(resume_message.consumed)
+            return self.result("按负责人决定完成")
+
+        outcome = await self.run_loop(saved_first, decisions, resume_message=resume_message)
+
+        self.assertEqual(outcome.verdict, "completed")
+        self.assertEqual(decisions.calls[0][0][-1]["content"], "按负责人决定完成")
+
+    async def test_manual_resume_save_failure_does_not_send_or_consume(self) -> None:
+        blocked = decision("blocked", required_inputs=["提供决定"])
+        self.state.update(
+            {"status": "blocked", "claude_sessions": {self.spec.key: "session-1"}}
+        )
+        self.save_conversation(
+            [
+                {"role": "system", "content": self.spec.decision_system_prompt},
+                {"role": "assistant", "content": "初始提示"},
+                {"role": "user", "content": "Agent 回复"},
+                {"role": "assistant", "content": blocked.model_dump_json()},
+            ]
+        )
+        message = ResumeMessage(self.spec.key, "负责人原文")
+        agent = FakeAgentRunner([])
+
+        with (
+            patch(
+                "common.agent_decision_loop._save_conversation",
+                side_effect=OSError("disk full"),
+            ),
+            self.assertRaises(OSError),
+        ):
+            await self.run_loop(
+                agent, FakeDecisionRunner([]), resume_message=message
+            )
+
+        self.assertFalse(message.consumed)
+        self.assertEqual(agent.calls, [])
+
+    async def test_manual_resume_checks_decision_capacity_before_saving(self) -> None:
+        limited_spec = AgentDecisionLoopSpec(
+            **{**self.spec.__dict__, "max_decision_rounds": 1}
+        )
+        blocked = decision("blocked", required_inputs=["提供决定"])
+        self.state.update(
+            {"status": "blocked", "claude_sessions": {self.spec.key: "session-1"}}
+        )
+        self.save_conversation(
+            [
+                {"role": "system", "content": self.spec.decision_system_prompt},
+                {"role": "assistant", "content": "初始提示"},
+                {"role": "user", "content": "Agent 回复"},
+                {"role": "assistant", "content": blocked.model_dump_json()},
+            ]
+        )
+        path = self.run_dir / "conversations" / f"{self.spec.key}.json"
+        before = path.read_bytes()
+        message = ResumeMessage(self.spec.key, "负责人原文")
+        agent = FakeAgentRunner([])
+
+        with self.assertRaisesRegex(RuntimeError, "达到上限"):
+            await run_agent_decision_loop(
+                self.run_dir,
+                self.state,
+                self.workspace,
+                limited_spec,
+                "初始 Agent 提示",
+                lambda: None,
+                agent_runner=agent,
+                decision_runner=FakeDecisionRunner([]),
+                config_loader=lambda: object(),
+                resume_message=message,
+            )
+
+        self.assertEqual(path.read_bytes(), before)
+        self.assertFalse(message.consumed)
+        self.assertEqual(agent.calls, [])
+
+    async def test_manual_json_and_legacy_text_are_sent_not_treated_as_decisions(self) -> None:
+        blocked = decision("blocked", required_inputs=["提供决定"])
+        for original in (
+            decision("completed", reason="这只是人工原文").model_dump_json(),
+            "旧完成 sentinel",
+        ):
+            with self.subTest(original=original), tempfile.TemporaryDirectory() as directory:
+                run_dir = Path(directory) / "run"
+                workspace = Path(directory) / "workspace"
+                run_dir.mkdir()
+                workspace.mkdir()
+                state: dict[str, object] = {
+                    "status": "blocked",
+                    "claude_sessions": {self.spec.key: "session-1"},
+                    "decision_conversations": {
+                        self.spec.key: {"path": f"conversations/{self.spec.key}.json"}
+                    },
+                }
+                path = run_dir / "conversations" / f"{self.spec.key}.json"
+                path.parent.mkdir()
+                write_json(
+                    path,
+                    {
+                        "messages": [
+                            {"role": "system", "content": self.spec.decision_system_prompt},
+                            {"role": "assistant", "content": "初始提示"},
+                            {"role": "user", "content": "Agent 回复"},
+                            {"role": "assistant", "content": blocked.model_dump_json()},
+                        ]
+                    },
+                )
+                agent = FakeAgentRunner([self.result("执行人工指令后的回复", cwd=workspace)])
+                outcome = await run_agent_decision_loop(
+                    run_dir,
+                    state,
+                    workspace,
+                    AgentDecisionLoopSpec(
+                        **{
+                            **self.spec.__dict__,
+                            "legacy_completion_messages": ("旧完成 sentinel",),
+                        }
+                    ),
+                    "初始 Agent 提示",
+                    lambda: None,
+                    agent_runner=agent,
+                    decision_runner=FakeDecisionRunner(
+                        [decision("completed", reason="已完成")]
+                    ),
+                    config_loader=lambda: object(),
+                    resume_message=ResumeMessage(self.spec.key, original),
+                )
+                self.assertEqual(outcome.verdict, "completed")
+                self.assertEqual(agent.calls[0][0], original)
+
+    async def test_manual_resume_after_generic_tail_overrides_generic_prompt(self) -> None:
+        blocked = decision("blocked", required_inputs=["提供决定"])
+        self.state.update(
+            {"status": "blocked", "claude_sessions": {self.spec.key: "session-1"}}
+        )
+        self.save_conversation(
+            [
+                {"role": "system", "content": self.spec.decision_system_prompt},
+                {"role": "assistant", "content": "初始提示"},
+                {"role": "user", "content": "Agent 回复"},
+                {"role": "assistant", "content": blocked.model_dump_json()},
+                {"role": "assistant", "content": BLOCKED_RESUME_PROMPT},
+            ]
+        )
+        agent = FakeAgentRunner([self.result("执行人工指令后的回复")])
+
+        await self.run_loop(
+            agent,
+            FakeDecisionRunner([decision("completed")]),
+            resume_message=ResumeMessage(self.spec.key, "新的人工指令"),
+        )
+
+        self.assertEqual([call[0] for call in agent.calls], ["新的人工指令"])
+
+    async def test_pending_agent_completed_decision_is_preserved_before_manual_resume(self) -> None:
+        blocked = decision("blocked", required_inputs=["提供决定"])
+        self.state.update(
+            {
+                "status": "blocked",
+                "claude_sessions": {self.spec.key: "session-1"},
+                self.spec.state_key: {"pending_agent_text": "泛化恢复后的 Agent 回复"},
+            }
+        )
+        self.save_conversation(
+            [
+                {"role": "system", "content": self.spec.decision_system_prompt},
+                {"role": "assistant", "content": "初始提示"},
+                {"role": "user", "content": "首次 Agent 回复"},
+                {"role": "assistant", "content": blocked.model_dump_json()},
+                {"role": "assistant", "content": BLOCKED_RESUME_PROMPT},
+            ]
+        )
+        decisions = FakeDecisionRunner(
+            [
+                decision("completed", reason="待恢复回复已完成旧工作"),
+                decision("completed", reason="执行人工决定后完成"),
+            ]
+        )
+        agent = FakeAgentRunner([self.result("执行人工决定后的回复")])
+
+        outcome = await self.run_loop(
+            agent,
+            decisions,
+            resume_message=ResumeMessage(self.spec.key, "新的人工决定"),
+        )
+
+        self.assertEqual(outcome.verdict, "completed")
+        self.assertEqual(
+            decisions.calls[0][0][-1],
+            {"role": "user", "content": "泛化恢复后的 Agent 回复"},
+        )
+        self.assertEqual([call[0] for call in agent.calls], ["新的人工决定"])
+
+    async def test_pending_agent_continue_decision_is_preserved_before_manual_resume(self) -> None:
+        blocked = decision("blocked", required_inputs=["提供决定"])
+        self.state.update(
+            {
+                "status": "blocked",
+                "claude_sessions": {self.spec.key: "session-1"},
+                self.spec.state_key: {"pending_agent_text": "泛化恢复后的 Agent 回复"},
+            }
+        )
+        self.save_conversation(
+            [
+                {"role": "system", "content": self.spec.decision_system_prompt},
+                {"role": "assistant", "content": "初始提示"},
+                {"role": "user", "content": "首次 Agent 回复"},
+                {"role": "assistant", "content": blocked.model_dump_json()},
+                {"role": "assistant", "content": BLOCKED_RESUME_PROMPT},
+            ]
+        )
+        continue_decision = decision(
+            "continue", answer="旧回复尚需继续", reason="旧工作未完成"
+        )
+        decisions = FakeDecisionRunner(
+            [continue_decision, decision("completed", reason="执行人工决定后完成")]
+        )
+        agent = FakeAgentRunner([self.result("执行人工决定后的回复")])
+
+        outcome = await self.run_loop(
+            agent,
+            decisions,
+            resume_message=ResumeMessage(self.spec.key, "新的人工决定"),
+        )
+
+        self.assertEqual(outcome.verdict, "completed")
+        self.assertEqual([call[0] for call in agent.calls], ["新的人工决定"])
+        messages = json.loads(
+            (self.run_dir / "conversations" / f"{self.spec.key}.json").read_text(
+                encoding="utf-8"
+            )
+        )["messages"]
+        self.assertIn(
+            {"role": "assistant", "content": continue_decision.model_dump_json()},
+            messages,
+        )
+
+    async def test_sdk_retry_reuses_consumed_message_without_duplicate_append(self) -> None:
+        blocked = decision("blocked", required_inputs=["提供决定"])
+        self.state.update(
+            {"status": "blocked", "claude_sessions": {self.spec.key: "session-1"}}
+        )
+        self.save_conversation(
+            [
+                {"role": "system", "content": self.spec.decision_system_prompt},
+                {"role": "assistant", "content": "初始提示"},
+                {"role": "user", "content": "Agent 回复"},
+                {"role": "assistant", "content": blocked.model_dump_json()},
+            ]
+        )
+        resume_message = ResumeMessage(self.spec.key, "只追加一次")
+
+        async def failed(*_args: object, **_kwargs: object) -> ClaudeRunResult:
+            error = CLIConnectionError("connection failed")
+            raise error
+
+        with self.assertRaises(AgentExecutionFailure):
+            await self.run_loop(failed, FakeDecisionRunner([]), resume_message=resume_message)
+        self.assertTrue(resume_message.consumed)
+
+        outcome = await self.run_loop(
+            FakeAgentRunner([self.result("重试后回复")]),
+            FakeDecisionRunner([decision("completed")]),
+            resume_message=resume_message,
+        )
+        messages = json.loads(
+            (self.run_dir / "conversations" / f"{self.spec.key}.json").read_text(
+                encoding="utf-8"
+            )
+        )["messages"]
+        self.assertEqual(outcome.verdict, "completed")
+        self.assertEqual(
+            [message for message in messages if message == {"role": "assistant", "content": "只追加一次"}],
+            [{"role": "assistant", "content": "只追加一次"}],
+        )
+
+    async def test_ordinary_resume_replays_already_saved_manual_text(self) -> None:
+        blocked = decision("blocked", required_inputs=["提供决定"])
+        self.state["claude_sessions"] = {self.spec.key: "session-1"}
+        self.save_conversation(
+            [
+                {"role": "system", "content": self.spec.decision_system_prompt},
+                {"role": "assistant", "content": "初始提示"},
+                {"role": "user", "content": "Agent 回复"},
+                {"role": "assistant", "content": blocked.model_dump_json()},
+                {"role": "assistant", "content": "已落盘的人工原文\n"},
+            ]
+        )
+        agent = FakeAgentRunner([self.result("执行后回复")])
+
+        outcome = await self.run_loop(
+            agent, FakeDecisionRunner([decision("completed")])
+        )
+
+        self.assertEqual(outcome.verdict, "completed")
+        self.assertEqual(agent.calls[0][0], "已落盘的人工原文\n")
+
+    async def test_consumed_message_is_not_reused_for_new_block(self) -> None:
+        blocked = decision("blocked", required_inputs=["提供决定"])
+        self.state.update(
+            {"status": "blocked", "claude_sessions": {self.spec.key: "session-1"}}
+        )
+        self.save_conversation(
+            [
+                {"role": "system", "content": self.spec.decision_system_prompt},
+                {"role": "assistant", "content": "初始提示"},
+                {"role": "user", "content": "Agent 回复"},
+                {"role": "assistant", "content": blocked.model_dump_json()},
+            ]
+        )
+        message = ResumeMessage(self.spec.key, "人工指令")
+        agent = FakeAgentRunner([self.result("仍有新阻塞")])
+
+        outcome = await self.run_loop(
+            agent,
+            FakeDecisionRunner(
+                [decision("blocked", reason="新阻塞", required_inputs=["另一输入"])]
+            ),
+            resume_message=message,
+        )
+
+        self.assertEqual(outcome.verdict, "blocked")
+        self.assertEqual([call[0] for call in agent.calls], ["人工指令"])
 
     async def test_legacy_action_and_legacy_completion_sentinel(self) -> None:
         legacy_action = json.dumps(
@@ -1091,9 +1529,6 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
         self.agent_config = AgentConfig(
             "http://agent.example.invalid",
             SecretStr("agent-secret"),
-            low_model="low-model",
-            medium_model="medium-model",
-            high_model="high-model",
         )
         self.agent_config_patcher = patch(
             "common.claude_agent.AgentConfig.load", return_value=self.agent_config
@@ -1108,6 +1543,8 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
             "LLM_BASE_URL": "http://decision.example.invalid/v1",
             "LLM_API_KEY": "decision-secret",
             "LLM_MODEL": "decision-model",
+            "LLM_MODEL_EFFORT": "high",
+            "PCM_MODEL_POLICY_SNAPSHOT": "private-policy",
             "PCM_AGENT_AUTH_TOKEN": "private-pcm-token",
             "PCM_AGENT_API_KEY": "legacy-private-key",
             "PCM_WORKSPACE_ROOT": "/products",
@@ -1162,7 +1599,7 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
             with self.subTest(key=key):
                 self.assertEqual(env[key], "")
 
-    async def test_model_overrides_apply_to_all_tiers_and_resume(self) -> None:
+    async def test_real_models_and_all_efforts_apply_on_resume(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             workspace = Path(directory)
             write_json(workspace / "plugins-lock.json", {"version": 1, "plugins": []})
@@ -1179,24 +1616,29 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
                 )
 
             with patch("common.claude_agent.query", new=fake_query):
-                for tier in ("low", "medium", "high"):
+                for effort in ("low", "medium", "high", "xhigh", "max"):
                     for session in (None, "session-1"):
-                        outcome = await run_claude("测试提示", cwd=workspace, model_tier=tier, resume_session_id=session)
+                        model = "another-real-model" if session else "real-model"
+                        outcome = await run_claude(
+                            "测试提示", cwd=workspace, model=model, effort=effort,
+                            resume_session_id=session,
+                        )
                         self.assertIsNone(outcome.exception)
                         options = captured[-1]
-                        self.assertEqual(options.model, self.agent_config.resolve_model(tier))
+                        self.assertEqual(options.model, model)
+                        self.assertEqual(options.effort, effort)
                         self.assertEqual(options.resume, session)
                         self.assertEqual(options.setting_sources, ["project", "local"])
                         self.assertEqual(options.env["CLAUDE_CODE_SUBAGENT_MODEL"], options.model)
                         self.assertEqual(
                             json.loads(options.settings)["modelOverrides"],
                             {
-                                "claude-haiku-4-5-20251001": "low-model",
-                                "claude-sonnet-4-6": "medium-model",
-                                "claude-opus-4-8": "high-model",
+                                "claude-haiku-4-5-20251001": model,
+                                "claude-sonnet-4-6": model,
+                                "claude-opus-4-8": model,
                             },
                         )
-            self.assertEqual(len(captured), 6)
+            self.assertEqual(len(captured), 10)
 
     async def test_result_terminal_reason_api_status_and_errors_are_preserved(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1220,6 +1662,9 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
                     session_id="session-1",
                     result="Agent 的完整结果",
                     errors=["tool warning agent-secret"],
+                    usage={"input_tokens": 12, "output_tokens": 4},
+                    model_usage={"medium-model": {"inputTokens": 30, "outputTokens": 8}},
+                    total_cost_usd=0.02,
                     api_error_status=429,
                     terminal_reason="api_error",
                 )
@@ -1227,6 +1672,8 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
             with patch("common.claude_agent.query", new=fake_query):
                 result = await run_claude(
                     "测试提示",
+                    model="medium-model",
+                    effort="high",
                     cwd=workspace,
                     resume_session_id="session-1",
                     on_update=updates.append,
@@ -1245,9 +1692,9 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             json.loads(captured_options[0].settings),
             {"modelOverrides": {
-                "claude-haiku-4-5-20251001": "low-model",
+                "claude-haiku-4-5-20251001": "medium-model",
                 "claude-sonnet-4-6": "medium-model",
-                "claude-opus-4-8": "high-model",
+                "claude-opus-4-8": "medium-model",
             }},
         )
         self.assertNotIn("agent-secret", captured_options[0].settings)
@@ -1268,6 +1715,18 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(updates[-1].has_errors)
         self.assertEqual(updates[-1].sdk_errors, ["tool warning [REDACTED]"])
         self.assertTrue(updates[-1].retry_requested)
+        self.assertEqual(result.usage, {"input_tokens": 12, "output_tokens": 4})
+        self.assertEqual(result.model_usage, {"medium-model": {"inputTokens": 30, "outputTokens": 8}})
+        self.assertEqual(result.total_cost_usd, 0.02)
+        self.assertEqual(updates[-1].usage, result.usage)
+        self.assertEqual(updates[-1].model_usage, result.model_usage)
+
+    async def test_invalid_model_or_effort_fails_before_query(self) -> None:
+        with patch("common.claude_agent.query") as mocked:
+            for model, effort in (("", "low"), ("real-model", "minimal")):
+                with self.subTest(model=model, effort=effort), self.assertRaises(ValueError):
+                    await run_claude("测试提示", cwd=Path.cwd(), model=model, effort=effort)
+            mocked.assert_not_called()
 
     async def test_all_api_statuses_and_api_terminal_reason_request_retry(self) -> None:
         for status in (400, 403, 500, None):
@@ -1298,6 +1757,8 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
                 with patch("common.claude_agent.query", new=fake_query):
                     result = await run_claude(
                         "测试提示",
+                        model="medium-model",
+                        effort="high",
                         cwd=workspace,
                         resume_session_id="session-1",
                     )
@@ -1328,6 +1789,8 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
             with patch("common.claude_agent.query", new=fake_query):
                 result = await run_claude(
                     "测试提示",
+                    model="medium-model",
+                    effort="high",
                     cwd=workspace,
                     resume_session_id="session-1",
                 )
@@ -1355,7 +1818,7 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
                     yield
 
                 with patch("common.claude_agent.query", new=fake_query):
-                    result = await run_claude("测试提示", cwd=workspace)
+                    result = await run_claude("测试提示", cwd=workspace, model="medium-model", effort="high")
 
                 self.assertEqual(result.retry_requested, expected)
 
@@ -1372,7 +1835,7 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
                 yield
 
             with patch("common.claude_agent.query", new=fake_query):
-                result = await run_claude("测试提示", cwd=workspace)
+                result = await run_claude("测试提示", cwd=workspace, model="medium-model", effort="high")
 
         self.assertEqual(result.exception_type, "TimeoutError")
         self.assertIn("SDK internal timeout", result.exception or "")
@@ -1403,7 +1866,7 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
                 patch("common.claude_agent.query", new=fake_query),
                 patch("common.claude_agent.CLAUDE_AGENT_TIMEOUT_SECONDS", 0.001),
             ):
-                result = await run_claude("测试提示", cwd=workspace)
+                result = await run_claude("测试提示", cwd=workspace, model="medium-model", effort="high")
 
         self.assertTrue(cleaned_up)
         self.assertEqual(result.session_id, "session-timeout")
@@ -1434,7 +1897,7 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
                     cleaned_up = True
 
             with patch("common.claude_agent.query", new=fake_query):
-                task = asyncio.create_task(run_claude("测试提示", cwd=workspace))
+                task = asyncio.create_task(run_claude("测试提示", cwd=workspace, model="medium-model", effort="high"))
                 await started.wait()
                 task.cancel()
                 with self.assertRaises(asyncio.CancelledError):
@@ -1468,7 +1931,7 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
                 raise ProcessError("process failed", exit_code=1)
 
             with patch("common.claude_agent.query", new=fake_query):
-                result = await run_claude("测试提示", cwd=workspace)
+                result = await run_claude("测试提示", cwd=workspace, model="medium-model", effort="high")
 
         self.assertFalse(result.retry_requested)
 
@@ -1500,6 +1963,8 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
             with patch("common.claude_agent.query", new=fake_query):
                 result = await run_claude(
                     "测试提示",
+                    model="medium-model",
+                    effort="high",
                     cwd=workspace,
                     resume_session_id="session-1",
                 )
@@ -1533,7 +1998,7 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
                 )
 
             with patch("common.claude_agent.query", new=fake_query):
-                result = await run_claude("测试提示", cwd=workspace)
+                result = await run_claude("测试提示", cwd=workspace, model="medium-model", effort="high")
 
         self.assertEqual(result.exception_type, "ModelMismatchError")
         self.assertFalse(result.retry_requested)
@@ -1621,6 +2086,22 @@ class AgentDecisionTest(unittest.IsolatedAsyncioTestCase):
             }
         )
         self.assertEqual(legacy_approve.verdict, "continue")
+
+    def test_count_decisions_only_counts_assistant_json_after_agent_reply(self) -> None:
+        model_decision = decision("completed").model_dump_json()
+        self.assertEqual(
+            count_decisions(
+                [
+                    {"role": "system", "content": "system"},
+                    {"role": "assistant", "content": "初始提示"},
+                    {"role": "user", "content": "Agent 回复"},
+                    {"role": "assistant", "content": model_decision},
+                    {"role": "assistant", "content": BLOCKED_RESUME_PROMPT},
+                    {"role": "assistant", "content": model_decision},
+                ]
+            ),
+            1,
+        )
 
     async def test_request_decision_uses_exact_required_system_prompt_once(self) -> None:
         calls: list[str] = []

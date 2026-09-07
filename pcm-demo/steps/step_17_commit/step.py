@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from common.agent_decision_loop import AgentDecisionLoopSpec, run_agent_decision_loop
+from common.agent_decision_loop import AgentDecisionLoopSpec, ResumeMessage, run_agent_decision_loop
 from common.claude_agent import run_claude
 from common.decision import render_decision_system_prompt, request_decision
 from common.state import (
@@ -350,8 +350,7 @@ def _decision_spec(context: dict[str, Any]) -> AgentDecisionLoopSpec:
         skill_name=SKILL_NAME,
         max_decision_rounds=MAX_DECISION_ROUNDS,
         max_turns=COMMIT_MAX_TURNS,
-        model_tier="medium",
-        effort="medium",
+        task="requirement_commit",
         decision_system_prompt=render_decision_system_prompt(
             REQUIREMENT_COMMIT_DECISION_RULES,
             {
@@ -458,6 +457,7 @@ async def run(
     agent_runner=run_claude,
     decision_runner=request_decision,
     config_loader=LLMConfig.load,
+    resume_message: ResumeMessage | None = None,
 ) -> dict[str, Any]:
     advanced = _position(state) == (STEP + 1, STEP + 1, NEXT_NODE)
     context = _context(run_dir, state, advanced=advanced)
@@ -484,6 +484,7 @@ async def run(
         run_dir, state, context["workspace"], spec, initial_prompt(context),
         lambda: _completion_repair(context), agent_runner=agent_runner,
         decision_runner=decision_runner, config_loader=config_loader,
+        resume_message=resume_message,
     )
     if decision.verdict == "blocked":
         _record_blocked(run_dir, state, context, decision.reason, decision.required_inputs)

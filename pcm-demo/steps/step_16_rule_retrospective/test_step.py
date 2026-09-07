@@ -13,6 +13,7 @@ sys.path.insert(0, str(DEMO_ROOT))
 
 from common.claude_agent import ClaudeRunResult
 from common.state import read_state, write_state
+from model_policy import get_agent_profile
 from steps.step_16_rule_retrospective.step import (
     CURRENT_NODE,
     NEXT_NODE,
@@ -118,8 +119,12 @@ class RuleRetrospectiveTests(unittest.TestCase):
                 )
                 prompts.append(prompt)
                 resumes.append(kwargs.get("resume_session_id"))
-                self.assertEqual(kwargs.get("model_tier"), "medium")
-                self.assertEqual(kwargs.get("effort"), "medium")
+                profile = get_agent_profile("rule_retrospective")
+                self.assertEqual(kwargs.get("task"), "rule_retrospective")
+                self.assertEqual(
+                    (kwargs.get("model"), kwargs.get("effort")),
+                    (profile.model, profile.effort),
+                )
                 return agent_result(workspace)
 
             async def decide(*_: object, **__: object) -> tuple[dict, int, str]:

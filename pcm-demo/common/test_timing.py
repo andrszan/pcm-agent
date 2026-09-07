@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import io
 import json
+import signal
 import tempfile
 import unittest
 from datetime import datetime, timedelta
@@ -20,7 +21,8 @@ def agent_result(**changes):
         **{
             "result_subtype": "success", "is_error": False, "has_errors": False,
             "exception": None, "exception_type": None, "api_error_status": None,
-            "terminal_reason": "completed", **changes,
+            "terminal_reason": "completed", "usage": None, "model_usage": None,
+            "total_cost_usd": None, **changes,
         }
     )
 
@@ -102,6 +104,157 @@ class TimingTests(unittest.TestCase):
         self.assertTrue(all(call["end_reason"] == "returned" and call["interrupted_at"] is None for call in entry["agent_executions"]))
         self.assertEqual(calls, [("原始指令", {"resume_session_id": "session-1"}), ("继续", {"resume_session_id": "session-1"})])
 
+    def test_agent_callback_and_final_update_same_execution(self):
+        clock = self.start()
+        updates = []
+        callback_result = agent_result(
+            usage={"input_tokens": 3},
+            model_usage={"child-model": {"input_tokens": 2}},
+            total_cost_usd=0.02,
+        )
+        final_result = agent_result(
+            usage={"input_tokens": 5},
+            model_usage={"child-model": {"input_tokens": 4}},
+            total_cost_usd=0.03,
+        )
+
+        async def runner(**kwargs):
+            self.assertEqual(
+                {name: kwargs[name] for name in ("task", "model", "effort")},
+                {"task": "project_intake", "model": "agent-model", "effort": "xhigh"},
+            )
+            kwargs["on_update"](callback_result)
+            persisted, = self.data()["steps"][0]["agent_executions"]
+            self.assertEqual(persisted["usage"], {"input_tokens": 3})
+            return final_result
+
+        with clock.activate():
+            returned = asyncio.run(timing.run_timed_agent(
+                runner,
+                task="project_intake",
+                model="agent-model",
+                effort="xhigh",
+                on_update=updates.append,
+            ))
+
+        self.assertIs(returned, final_result)
+        self.assertEqual(updates, [callback_result])
+        call, = self.data()["steps"][0]["agent_executions"]
+        self.assertEqual(len(self.data()["steps"][0]["agent_executions"]), 1)
+        self.assertEqual(
+            (call["task"], call["model"], call["effort"]),
+            ("project_intake", "agent-model", "xhigh"),
+        )
+        self.assertEqual(call["usage"], {"input_tokens": 5})
+        self.assertEqual(call["model_usage"], {"child-model": {"input_tokens": 4}})
+        self.assertEqual(call["total_cost_usd"], 0.03)
+
+    def test_callback_usage_survives_runner_exception(self):
+        clock = self.start()
+        failure = RuntimeError("agent failed after Result")
+
+        async def runner(*, on_update):
+            on_update(agent_result(
+                usage={"input_tokens": 8},
+                model_usage={"subagent": {"output_tokens": 6}},
+                total_cost_usd=0.04,
+            ))
+            raise failure
+
+        with clock.activate(), self.assertRaises(RuntimeError) as caught:
+            asyncio.run(timing.run_timed_agent(runner, on_update=lambda _update: None))
+
+        self.assertIs(caught.exception, failure)
+        call, = self.data()["steps"][0]["agent_executions"]
+        self.assertEqual(call["usage"], {"input_tokens": 8})
+        self.assertEqual(call["model_usage"], {"subagent": {"output_tokens": 6}})
+        self.assertEqual(call["total_cost_usd"], 0.04)
+        self.assertEqual(call["end_reason"], "exception")
+
+    def test_sigterm_during_result_observation_saves_result_and_closes_execution(self):
+        clock = self.start()
+        returned = agent_result(
+            usage={"input_tokens": 13},
+            model_usage={"subagent": {"output_tokens": 9}},
+            total_cost_usd=0.05,
+        )
+        original_observe = clock.observe_agent_result
+        interrupted = False
+
+        def observe(measurement, result):
+            nonlocal interrupted
+            if not interrupted:
+                interrupted = True
+                signal.raise_signal(signal.SIGTERM)
+            return original_observe(measurement, result)
+
+        async def runner():
+            return returned
+
+        with (
+            clock.activate(),
+            patch.object(clock, "observe_agent_result", side_effect=observe),
+            self.assertRaises(SystemExit) as caught,
+        ):
+            asyncio.run(timing.run_timed_agent(runner))
+
+        self.assertEqual(caught.exception.code, 143)
+        call, = self.data()["steps"][0]["agent_executions"]
+        self.assertEqual(call["usage"], {"input_tokens": 13})
+        self.assertEqual(call["model_usage"], {"subagent": {"output_tokens": 9}})
+        self.assertEqual(call["total_cost_usd"], 0.05)
+        self.assertEqual(call["end_reason"], "sigterm")
+        self.assertIsNotNone(call["finished_at"])
+        self.assertEqual(len(self.data()["steps"][0]["agent_executions"]), 1)
+
+    def test_sigterm_during_response_finish_retries_known_usage_save(self):
+        clock = self.start()
+        original_write = timing.write_json
+        armed = False
+        interrupted = False
+
+        def write(path, data):
+            nonlocal interrupted
+            if armed and not interrupted:
+                interrupted = True
+                signal.raise_signal(signal.SIGTERM)
+            return original_write(path, data)
+
+        with (
+            clock.activate(),
+            patch.object(timing, "write_json", side_effect=write),
+            self.assertRaises(SystemExit) as caught,
+        ):
+            with timing.measure_response("ai-model", "high", "primary") as call:
+                call.update(
+                    usage={"input_tokens": 7},
+                    response_id="resp-known",
+                    status="completed",
+                )
+                armed = True
+
+        self.assertEqual(caught.exception.code, 143)
+        ai_call, = self.data()["steps"][0]["ai_executions"]
+        self.assertEqual(ai_call["usage"], {"input_tokens": 7})
+        self.assertEqual(ai_call["response_id"], "resp-known")
+        self.assertEqual(ai_call["status"], "completed")
+        self.assertIsNotNone(ai_call["finished_at"])
+        self.assertEqual(len(self.data()["steps"][0]["ai_executions"]), 1)
+
+    def test_unknown_agent_usage_stays_null(self):
+        clock = self.start()
+
+        async def runner():
+            return agent_result()
+
+        with clock.activate():
+            asyncio.run(timing.run_timed_agent(runner))
+
+        call, = self.data()["steps"][0]["agent_executions"]
+        self.assertIsNone(call["usage"])
+        self.assertIsNone(call["model_usage"])
+        self.assertIsNone(call["total_cost_usd"])
+
     def test_agent_start_is_persisted_before_runner_executes(self):
         clock = self.start()
 
@@ -110,6 +263,9 @@ class TimingTests(unittest.TestCase):
             self.assertIsNone(call["finished_at"])
             self.assertIsNone(call["elapsed_seconds"])
             self.assertIsNone(call["interrupted_at"])
+            self.assertIsNone(call["usage"])
+            self.assertIsNone(call["model_usage"])
+            self.assertIsNone(call["total_cost_usd"])
             return agent_result()
 
         with clock.activate():
@@ -365,6 +521,24 @@ class TimingTests(unittest.TestCase):
                 files.write_json(path, {"value": "new"})
             self.assertIs(caught.exception, failure)
             self.assertEqual(path.read_bytes(), b"original")
+
+    def test_existing_v2_agent_execution_keeps_original_fields(self):
+        old_call = {
+            "started_at": "2026-09-05T14:00:00+08:00",
+            "finished_at": "2026-09-05T14:00:01+08:00",
+            "interrupted_at": None,
+            "elapsed_seconds": 1.0,
+            "end_reason": "returned",
+        }
+        record = timing._new_step(15, "BR-001", "2026-09-05T14:00:00+08:00")
+        record["agent_executions"] = [old_call.copy()]
+        write_json(self.run_dir / "timings.json", {"schema_version": 2, "steps": [record]})
+
+        clock = self.start()
+
+        self.assertEqual(self.data()["steps"][0]["agent_executions"], [old_call])
+        self.assertNotIn("ai_executions", self.data()["steps"][0])
+        self.assertFalse(clock.disabled)
 
     def test_unsupported_formats_are_rejected_without_conversion_or_deletion(self):
         path = self.run_dir / "timings.json"

@@ -15,6 +15,7 @@ sys.path.insert(0, str(DEMO_ROOT))
 from common.agent_decision_loop import BLOCKED_RESUME_PROMPT
 from common.claude_agent import ClaudeRunResult
 from common.state import read_state, write_requirement_step_result, write_state
+from model_policy import get_agent_profile
 from steps.step_17_commit.step import (
     COMMIT_MAX_TURNS,
     CURRENT_NODE,
@@ -224,8 +225,12 @@ class RequirementCommitTests(unittest.TestCase):
         )
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0]["max_turns"], COMMIT_MAX_TURNS)
-        self.assertEqual(calls[0]["model_tier"], "medium")
-        self.assertEqual(calls[0]["effort"], "medium")
+        profile = get_agent_profile("requirement_commit")
+        self.assertEqual(calls[0]["task"], "requirement_commit")
+        self.assertEqual(
+            (calls[0]["model"], calls[0]["effort"]),
+            (profile.model, profile.effort),
+        )
         self.assertNotIn("max_budget_usd", calls[0])
         self.assertEqual(
             calls[0]["prompt"],

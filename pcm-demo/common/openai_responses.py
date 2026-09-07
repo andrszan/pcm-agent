@@ -12,6 +12,7 @@ from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 from pydantic import BaseModel, ValidationError
 
 from common.error_diagnostics import exception_diagnostics, redact_text, truncate_text
+from common.timing import measure_response
 
 ParsedModel = TypeVar("ParsedModel", bound=BaseModel)
 ResponsesFailureKind = Literal[
@@ -165,10 +166,38 @@ def _strip_json_fence(value: str) -> str:
     return match.group("body") if match else value
 
 
+def _capture_response(call: dict[str, Any], response: Any) -> None:
+    try:
+        usage = response.get("usage") if isinstance(response, Mapping) else getattr(response, "usage", None)
+        model_dump = getattr(usage, "model_dump", None)
+        if callable(model_dump):
+            usage = model_dump()
+        if isinstance(usage, Mapping):
+            call["usage"] = dict(usage)
+    except Exception:  # noqa: BLE001 - 用量旁路记录不可改变业务结果。
+        pass
+    for field, target in (("id", "response_id"), ("status", "status")):
+        try:
+            value = response.get(field) if isinstance(response, Mapping) else getattr(response, field, None)
+            if isinstance(value, str):
+                call[target] = value
+        except Exception:  # noqa: BLE001 - 用量旁路记录不可改变业务结果。
+            pass
+
+
+def _raw_response_body(raw_response: Any) -> Mapping[str, Any] | None:
+    try:
+        body = raw_response.http_response.json()
+        return body if isinstance(body, Mapping) else None
+    except Exception:  # noqa: BLE001 - 仅尝试旁路提取，原解析路径仍自行处理响应体。
+        return None
+
+
 async def _repair_json_once(
     client: AsyncOpenAI,
     *,
     model: str,
+    effort: str | None,
     invalid_output: str,
     validation_error: ValidationError,
     output_model: type[ParsedModel],
@@ -196,7 +225,11 @@ async def _repair_json_once(
     }
     if max_output_tokens is not None:
         request["max_output_tokens"] = max_output_tokens
-    repair_response = await client.responses.create(**request)
+    if effort is not None:
+        request["reasoning"] = {"effort": effort}
+    with measure_response(model, effort, "repair") as call:
+        repair_response = await client.responses.create(**request)
+        _capture_response(call, repair_response)
     if repair_response.status != "completed":
         raise ResponsesFailure(
             "response",
@@ -226,6 +259,7 @@ async def parse_response(
     except Exception as error:
         raise _failure_from_error("internal", error, known_secrets) from error
 
+    effort = getattr(config, "effort", None)
     try:
         request = {
             "model": config.model,
@@ -237,15 +271,30 @@ async def parse_response(
         }
         if max_output_tokens is not None:
             request["max_output_tokens"] = max_output_tokens
+        if effort is not None:
+            request["reasoning"] = {"effort": effort}
         raw_api = getattr(client.responses, "with_raw_response", None)
+        validation_error = None
+        body = None
         if raw_api is None:
-            response = await client.responses.parse(**request)
+            with measure_response(config.model, effort, "primary") as call:
+                response = await client.responses.parse(**request)
+                _capture_response(call, response)
         else:
-            raw_response = await raw_api.parse(**request)
-            try:
-                response = raw_response.parse()
-            except ValidationError as validation_error:
-                body = raw_response.http_response.json()
+            with measure_response(config.model, effort, "primary") as call:
+                raw_response = await raw_api.parse(**request)
+                body = _raw_response_body(raw_response)
+                if body is not None:
+                    _capture_response(call, body)
+                try:
+                    response = raw_response.parse()
+                except ValidationError as error:
+                    validation_error = error
+                else:
+                    _capture_response(call, response)
+            if validation_error is not None:
+                if body is None:
+                    body = raw_response.http_response.json()
                 status = body.get("status") if isinstance(body, Mapping) else None
                 if status != "completed":
                     raise ResponsesFailure(
@@ -254,7 +303,7 @@ async def parse_response(
                     ) from validation_error
                 invalid_output = _response_output_text(body)
                 if invalid_output is None:
-                    raise
+                    raise validation_error
                 stripped_output = _strip_json_fence(invalid_output)
                 if stripped_output != invalid_output:
                     try:
@@ -264,6 +313,7 @@ async def parse_response(
                 return await _repair_json_once(
                     client,
                     model=config.model,
+                    effort=effort,
                     invalid_output=invalid_output,
                     validation_error=validation_error,
                     output_model=output_model,

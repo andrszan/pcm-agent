@@ -6,7 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from common.agent_decision_loop import AgentDecisionLoopSpec, run_agent_decision_loop
+from common.agent_decision_loop import AgentDecisionLoopSpec, ResumeMessage, run_agent_decision_loop
 from common.claude_agent import run_claude
 from common.coordination import acquire_lock
 from common.decision import render_decision_system_prompt, request_decision
@@ -39,8 +39,7 @@ DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     skill_name=SKILL_NAME,
     max_decision_rounds=MAX_DECISION_ROUNDS,
     max_turns=PROJECT_INTAKE_MAX_TURNS,
-    model_tier="high",
-    effort="high",
+    task="project_intake",
     decision_system_prompt=render_decision_system_prompt(PROJECT_INTAKE_DECISION_RULES, {}),
     legacy_completion_messages=(
         "已完成 project-intake：两份正式产品定义文档已生成并通过文件事实核验。",
@@ -246,6 +245,7 @@ async def run(
     agent_runner=run_claude,
     decision_runner=request_decision,
     config_loader=LLMConfig.load,
+    resume_message: ResumeMessage | None = None,
 ) -> dict[str, Any]:
     workspace, draft = validate_inputs(run_dir, state)
     existing_outputs = output_contents(workspace)
@@ -314,6 +314,7 @@ async def run(
         agent_runner=agent_runner,
         decision_runner=decision_runner,
         config_loader=config_loader,
+        resume_message=resume_message,
     )
     if decision.verdict == "blocked":
         raise ProjectIntakeBlocked(decision.reason, decision.required_inputs)

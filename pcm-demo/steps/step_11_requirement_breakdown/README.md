@@ -35,7 +35,7 @@ fresh 入口的状态必须是 `project:11_requirement_breakdown`，产品工作
 
 ## Agent、决策与 Backlog 边界
 
-步骤只使用一个领域键和 Claude session：`requirement_breakdown`。初始提示首行固定为 `/requirement-breakdown`，显式使用高模型和 `high` effort；单次 Agent 与同一历史负责人决策轮数沿用步骤代码的有限配置，不设置 `max_budget_usd`。
+步骤只使用一个领域键和 Claude session：`requirement_breakdown`。初始提示首行固定为 `/requirement-breakdown`；步骤只传同名稳定任务标识，实际 model 与 effort 由 `model-policy.toml` 解析并按本次进程启动时加载的策略固定。单次 Agent 与同一历史负责人决策轮数沿用步骤代码的有限配置，不设置 `max_budget_usd`。
 
 Agent 只允许创建或更新唯一固定产物：
 

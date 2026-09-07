@@ -3,29 +3,23 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from stat import S_ISREG
-from typing import Literal
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_ENV_FILE = Path(__file__).with_name(".env")
 CAPABILITY_REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
-AgentModelTier = Literal["low", "medium", "high"]
 
 
 class Settings(BaseSettings):
     llm_base_url: str | None = Field(default=None, validation_alias="LLM_BASE_URL")
     llm_api_key: SecretStr | None = Field(default=None, validation_alias="LLM_API_KEY", repr=False)
     llm_model: str | None = Field(default=None, validation_alias="LLM_MODEL")
+    llm_model_effort: str | None = Field(default=None, validation_alias="LLM_MODEL_EFFORT")
     pcm_agent_base_url: str | None = Field(default=None, validation_alias="PCM_AGENT_BASE_URL")
     pcm_agent_auth_token: SecretStr | None = Field(
         default=None, validation_alias="PCM_AGENT_AUTH_TOKEN", repr=False
     )
-    pcm_agent_model_low: str | None = Field(default=None, validation_alias="PCM_AGENT_MODEL_LOW")
-    pcm_agent_model_medium: str | None = Field(
-        default=None, validation_alias="PCM_AGENT_MODEL_MEDIUM"
-    )
-    pcm_agent_model_high: str | None = Field(default=None, validation_alias="PCM_AGENT_MODEL_HIGH")
     pcm_workspace_root: Path | None = Field(default=None, validation_alias="PCM_WORKSPACE_ROOT")
     pcm_max_concurrent_projects: int = Field(
         default=2, validation_alias="PCM_MAX_CONCURRENT_PROJECTS", ge=1
@@ -49,34 +43,12 @@ class Settings(BaseSettings):
 
 
 class AgentConfig:
-    def __init__(
-        self,
-        base_url: str,
-        auth_token: SecretStr,
-        *,
-        low_model: str,
-        medium_model: str,
-        high_model: str,
-    ) -> None:
+    def __init__(self, base_url: str, auth_token: SecretStr) -> None:
         self.base_url = base_url.rstrip("/")
         self.auth_token = auth_token
-        self.models = {
-            "low": low_model,
-            "medium": medium_model,
-            "high": high_model,
-        }
 
     def __repr__(self) -> str:
-        return (
-            f"AgentConfig(base_url={self.base_url!r}, auth_token=SecretStr('**********'), "
-            f"models={self.models!r})"
-        )
-
-    def resolve_model(self, tier: AgentModelTier) -> str:
-        try:
-            return self.models[tier]
-        except KeyError as error:
-            raise ValueError(f"未知 Agent 模型档位：{tier}") from error
+        return f"AgentConfig(base_url={self.base_url!r}, auth_token=SecretStr('**********'))"
 
     @classmethod
     def load(cls, env_file: Path | None = None) -> "AgentConfig":
@@ -84,9 +56,6 @@ class AgentConfig:
         values = {
             "PCM_AGENT_BASE_URL": settings.pcm_agent_base_url,
             "PCM_AGENT_AUTH_TOKEN": settings.pcm_agent_auth_token,
-            "PCM_AGENT_MODEL_LOW": settings.pcm_agent_model_low,
-            "PCM_AGENT_MODEL_MEDIUM": settings.pcm_agent_model_medium,
-            "PCM_AGENT_MODEL_HIGH": settings.pcm_agent_model_high,
         }
         missing = [name for name, value in values.items() if value is None]
         if missing:
@@ -94,23 +63,27 @@ class AgentConfig:
         base_url = settings.pcm_agent_base_url.rstrip("/")
         if base_url.endswith("/v1"):
             raise ValueError("PCM_AGENT_BASE_URL 不得包含 /v1")
-        return cls(
-            base_url,
-            settings.pcm_agent_auth_token,
-            low_model=settings.pcm_agent_model_low,
-            medium_model=settings.pcm_agent_model_medium,
-            high_model=settings.pcm_agent_model_high,
-        )
+        return cls(base_url, settings.pcm_agent_auth_token)
 
 
 class LLMConfig:
-    def __init__(self, base_url: str, api_key: SecretStr, model: str) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        api_key: SecretStr,
+        model: str,
+        effort: str | None = None,
+    ) -> None:
         self.base_url = base_url
         self.api_key = api_key
         self.model = model
+        self.effort = (effort.strip() or None) if effort is not None else None
 
     def __repr__(self) -> str:
-        return f"LLMConfig(base_url={self.base_url!r}, api_key=SecretStr('**********'), model={self.model!r})"
+        return (
+            f"LLMConfig(base_url={self.base_url!r}, api_key=SecretStr('**********'), "
+            f"model={self.model!r}, effort={self.effort!r})"
+        )
 
     @classmethod
     def load(cls, env_file: Path | None = None) -> "LLMConfig":
@@ -126,7 +99,12 @@ class LLMConfig:
         ]
         if missing:
             raise ValueError(f"缺少 LLM 配置：{', '.join(missing)}")
-        return cls(settings.llm_base_url, settings.llm_api_key, settings.llm_model)
+        return cls(
+            settings.llm_base_url,
+            settings.llm_api_key,
+            settings.llm_model,
+            settings.llm_model_effort,
+        )
 
 
 def load_settings(env_file: Path | None = None, **overrides: object) -> Settings:

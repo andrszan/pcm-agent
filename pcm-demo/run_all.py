@@ -12,6 +12,7 @@ from pathlib import Path
 from secrets import token_hex
 from typing import Any
 
+from common.agent_decision_loop import validate_resume_target
 from common.coordination import (
     ExecutionLocks,
     acquire_execution_locks,
@@ -29,6 +30,12 @@ from common.coordination import (
 from common.state import read_state, step_result_status, write_state
 from common.timing import print_timing_summary
 from config import load_settings
+from model_policy import (
+    _MODEL_POLICY_SNAPSHOT_ENV,
+    _load_model_policy_from_file,
+    _model_policy_snapshot,
+    _model_policy_table,
+)
 from steps.step_13_select_requirement.step import registry_handoff
 
 DEMO_ROOT = Path(__file__).resolve().parent
@@ -69,9 +76,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--run-id")
     parser.add_argument("--workspace-root", type=Path)
     parser.add_argument("--catalog-path", type=Path)
+    parser.add_argument(
+        "--resume-message-file",
+        type=Path,
+        help="仅用于当前 blocked：读取 UTF-8 文件作为人工负责人恢复指令",
+    )
     args = parser.parse_args(argv)
     if args.resume and args.run_id:
         parser.error("--resume 不能与 --run-id 同时使用")
+    if args.resume_message_file is not None and not args.resume:
+        parser.error("--resume-message-file 只能与 --resume 一起使用")
     return args
 
 
@@ -285,6 +299,9 @@ def build_step_command(
         command.extend(["--workspace-root", str(args.workspace_root.resolve())])
     if step == 3 and args.catalog_path is not None:
         command.extend(["--catalog-path", str(args.catalog_path.resolve())])
+    resume_message_file = getattr(args, "resume_message_file", None)
+    if isinstance(resume_message_file, Path):
+        command.extend(["--resume-message-file", str(resume_message_file.resolve())])
     if locks is not None:
         command.extend(["--coordination-locks", inherited_lock_argument(locks)])
     return command
@@ -315,12 +332,17 @@ def fresh_command(run_id: str, args: argparse.Namespace) -> str:
     return shlex.join(command)
 
 
-def run_child(command: list[str], pass_fds: tuple[int, ...] = ()) -> int:
+def run_child(
+    command: list[str],
+    pass_fds: tuple[int, ...] = (),
+    env: dict[str, str] | None = None,
+) -> int:
     child = subprocess.Popen(
         command,
         cwd=DEMO_ROOT,
         start_new_session=True,
         pass_fds=pass_fds,
+        env=env,
     )
     received_signal: int | None = None
     previous_handlers: dict[int, Any] = {}
@@ -364,21 +386,36 @@ def _print_stop(run_id: str, run_dir: Path, args: argparse.Namespace) -> None:
     print(f"恢复命令：{recovery_command(run_id, args)}", file=sys.stderr)
 
 
+def _child_environment(model_policy_snapshot: str) -> dict[str, str]:
+    env = dict(os.environ)
+    env[_MODEL_POLICY_SNAPSHOT_ENV] = model_policy_snapshot
+    return env
+
+
 def _orchestrate_locked(
     args: argparse.Namespace,
     run_id: str,
     run_dir: Path,
     locks: ExecutionLocks,
+    model_policy_snapshot: str,
 ) -> int:
     try:
         if args.resume:
             if not run_dir.is_dir():
                 print(f"运行记录不存在：{run_id}", file=sys.stderr)
                 return 2
+            message_file = getattr(args, "resume_message_file", None)
+            if isinstance(message_file, Path):
+                state = read_state(run_dir)
+                step = step_for_state(run_dir, state)
+                validate_resume_target(run_dir, state, step)
+                args.resume_message_file = message_file.resolve()
         elif run_dir.exists():
             print(f"运行目录已存在，拒绝覆盖：{run_dir}", file=sys.stderr)
             return 2
-        return _run_steps(args, run_id, run_dir, locks)
+        return _run_steps(
+            args, run_id, run_dir, locks, model_policy_snapshot
+        )
     finally:
         print_timing_summary(run_dir)
 
@@ -388,7 +425,9 @@ def _run_steps(
     run_id: str,
     run_dir: Path,
     locks: ExecutionLocks,
+    model_policy_snapshot: str,
 ) -> int:
+    child_env = _child_environment(model_policy_snapshot)
     while True:
         try:
             state = read_state(run_dir) if run_dir.is_dir() else None
@@ -410,7 +449,9 @@ def _run_steps(
             return 1
 
         try:
-            return_code = run_child(command, locks.file_descriptors())
+            return_code = run_child(
+                command, locks.file_descriptors(), child_env
+            )
         except OSError as error:
             print(f"无法启动步骤进程：{error}", file=sys.stderr)
             if run_dir.is_dir():
@@ -424,6 +465,7 @@ def _run_steps(
             else:
                 print(f"重试命令：{fresh_command(run_id, args)}", file=sys.stderr)
             return return_code
+        args.resume_message_file = None
         if not run_dir.is_dir():
             print("步骤执行成功但运行目录不存在", file=sys.stderr)
             return 1
@@ -433,9 +475,14 @@ def orchestrate(args: argparse.Namespace) -> int:
     run_id = args.resume or args.run_id or new_run_id()
     run_dir = run_dir_for(run_id)
     try:
+        model_policy = _load_model_policy_from_file()
+        model_policy_snapshot = _model_policy_snapshot(model_policy)
+        print(_model_policy_table(model_policy))
         maximum = load_settings().pcm_max_concurrent_projects
         with acquire_execution_locks(COORDINATION_ROOT, run_id, maximum) as locks:
-            return _orchestrate_locked(args, run_id, run_dir, locks)
+            return _orchestrate_locked(
+                args, run_id, run_dir, locks, model_policy_snapshot
+            )
     except (OSError, RuntimeError, ValueError) as error:
         print(str(error), file=sys.stderr)
         return 2

@@ -21,6 +21,11 @@ from claude_agent_sdk import (
     query,
 )
 
+DEMO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(DEMO_ROOT))
+
+from model_policy import get_agent_profile  # noqa: E402
+
 STATE_NAME = "state.json"
 RESULT_NAME = "result.json"
 FACTS_NAME = "facts.txt"
@@ -43,6 +48,7 @@ def filtered_env() -> dict[str, str]:
 def sdk_options(
     workspace: Path, *, resume: str | None = None, allow_read: bool = True
 ) -> ClaudeAgentOptions:
+    profile = get_agent_profile("development")
     return ClaudeAgentOptions(
         cwd=workspace,
         setting_sources=[],
@@ -53,7 +59,8 @@ def sdk_options(
         permission_mode="dontAsk",
         max_turns=3,
         max_budget_usd=1.0,
-        effort="low",
+        model=profile.model,
+        effort=profile.effort,
         resume=resume,
         env=filtered_env(),
     )

@@ -28,7 +28,7 @@ docs/trd/<YYYY-MM-DD>-<requirement-id>-<requirement-title>.md
 
 ## Agent 与负责人决策
 
-Claude Agent 在产品根运行，显式使用中模型和 `high` effort，首次调用与后续恢复保持相同 profile；使用 requirement-scoped key：
+Claude Agent 在产品根运行，只传稳定任务标识 `trd_design`；实际 model 与 effort 由 `model-policy.toml` 解析并按本次进程启动时加载的策略固定，首次调用与后续恢复显式传入本次启动确定的组合。conversation 和 session 使用 requirement-scoped key：
 
 ```text
 trd_design_<requirement-id>

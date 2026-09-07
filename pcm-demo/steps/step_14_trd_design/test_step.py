@@ -15,6 +15,7 @@ sys.path.insert(0, str(DEMO_ROOT))
 from common.claude_agent import ClaudeRunResult
 from common.files import write_json
 from common.state import read_state, write_requirement_step_result, write_state
+from model_policy import get_agent_profile
 from steps.step_14_trd_design.step import (
     CURRENT_NODE,
     NEXT_NODE,
@@ -267,7 +268,7 @@ class TRDDesignTests(unittest.TestCase):
     def test_continue_reuses_public_loop_session(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))
-            calls: list[tuple[object, object, object]] = []
+            calls: list[tuple[object, object, object, object]] = []
             decisions = iter(
                 [
                     decision("continue", answer="请补全验证场景。"),
@@ -279,7 +280,8 @@ class TRDDesignTests(unittest.TestCase):
                 calls.append(
                     (
                         kwargs.get("resume_session_id"),
-                        kwargs.get("model_tier"),
+                        kwargs.get("task"),
+                        kwargs.get("model"),
                         kwargs.get("effort"),
                     )
                 )
@@ -298,11 +300,12 @@ class TRDDesignTests(unittest.TestCase):
                 config_loader=lambda: object(),
                 today_provider=lambda: date(2026, 8, 25),
             )
+            profile = get_agent_profile("trd_design")
             self.assertEqual(
                 calls,
                 [
-                    (None, "medium", "high"),
-                    ("trd-session-1", "medium", "high"),
+                    (None, "trd_design", profile.model, profile.effort),
+                    ("trd-session-1", "trd_design", profile.model, profile.effort),
                 ],
             )
 

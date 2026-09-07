@@ -6,7 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from common.agent_decision_loop import AgentDecisionLoopSpec, run_agent_decision_loop
+from common.agent_decision_loop import AgentDecisionLoopSpec, ResumeMessage, run_agent_decision_loop
 from common.claude_agent import run_claude
 from common.decision import render_decision_system_prompt, request_decision
 from common.state import step_result_status, write_state, write_step_result
@@ -56,8 +56,7 @@ DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     skill_name=SKILL_NAME,
     max_decision_rounds=MAX_DECISION_ROUNDS,
     max_turns=PROJECT_BOOTSTRAP_MAX_TURNS,
-    model_tier="medium",
-    effort="high",
+    task="project_bootstrap",
     decision_system_prompt=render_decision_system_prompt(BOOTSTRAP_DECISION_RULES, {}),
     legacy_completion_messages=LEGACY_COMPLETION_MESSAGES,
 )
@@ -67,8 +66,7 @@ TAILWIND_THEME_DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     skill_name=TAILWIND_THEME_SKILL_NAME,
     max_decision_rounds=MAX_DECISION_ROUNDS,
     max_turns=TAILWIND_THEME_MAX_TURNS,
-    model_tier="medium",
-    effort="high",
+    task="tailwind_theme",
     decision_system_prompt=render_decision_system_prompt(
         TAILWIND_THEME_DECISION_RULES, {}
     ),
@@ -419,6 +417,7 @@ async def run(
     agent_runner=run_claude,
     decision_runner=request_decision,
     config_loader=LLMConfig.load,
+    resume_message: ResumeMessage | None = None,
 ) -> dict[str, Any]:
     workspace, product_outputs, assembly, checklist = validate_inputs(run_dir, state)
     outputs = assembly["outputs"]
@@ -525,6 +524,7 @@ async def run(
         agent_runner=agent_runner,
         decision_runner=decision_runner,
         config_loader=config_loader,
+        resume_message=resume_message,
     )
     if bootstrap_decision.verdict == "blocked":
         verified_workspace, _, verified_assembly, _ = validate_inputs(run_dir, state)
@@ -564,6 +564,7 @@ async def run(
         agent_runner=agent_runner,
         decision_runner=decision_runner,
         config_loader=config_loader,
+        resume_message=resume_message,
     )
     if tailwind_theme_decision.verdict == "blocked":
         verified_workspace, _, verified_assembly, _ = validate_inputs(run_dir, state)

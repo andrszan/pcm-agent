@@ -17,6 +17,7 @@ from common.agent_decision_loop import BLOCKED_RESUME_PROMPT
 from common.claude_agent import ClaudeRunResult
 from common.files import write_json
 from common.state import read_state, write_state
+from model_policy import get_agent_profile
 from steps.step_01_create_workspace import initialize_root_repository
 from steps.step_08_initialize_repositories.step import (
     CURRENT_NODE,
@@ -194,8 +195,12 @@ class InitializeRepositoriesTests(unittest.TestCase):
             self.assertEqual(calls[0]["cwd"].resolve(), workspace.resolve())
             self.assertIsNone(calls[0]["resume_session_id"])
             self.assertEqual(calls[0]["max_turns"], INITIALIZE_REPOSITORIES_MAX_TURNS)
-            self.assertEqual(calls[0]["model_tier"], "medium")
-            self.assertEqual(calls[0]["effort"], "medium")
+            profile = get_agent_profile("initialize_repositories")
+            self.assertEqual(calls[0]["task"], "initialize_repositories")
+            self.assertEqual(
+                (calls[0]["model"], calls[0]["effort"]),
+                (profile.model, profile.effort),
+            )
             self.assertNotIn("max_budget_usd", calls[0])
             self.assertTrue(calls[0]["prompt"].startswith("/commit-changes\n"))
             self.assertEqual(len(decision_prompts), 1)

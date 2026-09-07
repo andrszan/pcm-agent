@@ -14,6 +14,7 @@ sys.path.insert(0, str(DEMO_ROOT))
 from common.claude_agent import ClaudeRunResult
 from common.files import write_json
 from common.state import read_state, write_requirement_step_result, write_state
+from model_policy import get_agent_profile
 from steps.step_15_development.step import (
     CURRENT_NODE,
     NEXT_NODE,
@@ -292,7 +293,7 @@ class DevelopmentTests(unittest.TestCase):
     def test_continue_reuses_development_session(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))
-            calls: list[tuple[object, object, object]] = []
+            calls: list[tuple[object, object, object, object]] = []
             decisions = iter(
                 [
                     decision("continue", answer="请继续完成遗漏。"),
@@ -304,7 +305,8 @@ class DevelopmentTests(unittest.TestCase):
                 calls.append(
                     (
                         kwargs.get("resume_session_id"),
-                        kwargs.get("model_tier"),
+                        kwargs.get("task"),
+                        kwargs.get("model"),
                         kwargs.get("effort"),
                     )
                 )
@@ -322,11 +324,17 @@ class DevelopmentTests(unittest.TestCase):
                 decision_runner=decide,
                 config_loader=lambda: object(),
             )
+            profile = get_agent_profile("development")
             self.assertEqual(
                 calls,
                 [
-                    (None, "medium", "high"),
-                    ("development-session-1", "medium", "high"),
+                    (None, "development", profile.model, profile.effort),
+                    (
+                        "development-session-1",
+                        "development",
+                        profile.model,
+                        profile.effort,
+                    ),
                 ],
             )
 
