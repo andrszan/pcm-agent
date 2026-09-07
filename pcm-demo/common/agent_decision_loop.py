@@ -7,7 +7,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import ValidationError
 
@@ -22,7 +22,8 @@ from common.files import write_json
 from common.openai_responses import ResponsesFailure
 from common.state import write_state
 from common.timing import run_timed_agent
-from config import AgentModelTier, LLMConfig
+from config import LLMConfig
+from model_policy import get_agent_profile
 
 BLOCKED_RESUME_PROMPT = (
     "此前任务因缺少外部输入而阻塞。请在所需输入已具备后重新核验当前事实并继续；"
@@ -98,8 +99,7 @@ class AgentDecisionLoopSpec:
     skill_name: str
     max_decision_rounds: int
     max_turns: int
-    model_tier: AgentModelTier
-    effort: Literal["medium", "high"]
+    task: str
     decision_system_prompt: str
     legacy_completion_messages: tuple[str, ...] = ()
 
@@ -126,10 +126,8 @@ class AgentDecisionLoopSpec:
             or self.max_turns <= 0
         ):
             raise ValueError("max_turns 必须是正整数")
-        if self.model_tier not in {"low", "medium", "high"}:
-            raise ValueError("model_tier 必须是 low、medium 或 high")
-        if self.effort not in {"medium", "high"}:
-            raise ValueError("effort 必须是 medium 或 high")
+        if not isinstance(self.task, str) or not self.task:
+            raise ValueError("task 必须是非空任务标识")
         if not isinstance(self.decision_system_prompt, str) or not self.decision_system_prompt:
             raise ValueError("decision_system_prompt 不能为空")
         if any(not isinstance(message, str) or not message for message in self.legacy_completion_messages):
@@ -437,6 +435,8 @@ def _safe_agent_result(
         "session_id": value.session_id,
         "num_turns": value.num_turns,
         "total_cost_usd": value.total_cost_usd,
+        "usage": value.usage,
+        "model_usage": value.model_usage,
         "api_error_status": value.api_error_status,
         "terminal_reason": value.terminal_reason,
         "has_errors": value.has_errors,
@@ -776,14 +776,16 @@ async def _run_agent(
 ) -> list[dict[str, str]]:
     _require_decision_capacity(_load_conversation(run_dir, state, spec), spec)
     try:
+        profile = get_agent_profile(spec.task)
         value = await run_timed_agent(
             agent_runner,
             prompt,
             cwd=workspace,
             resume_session_id=_session(state, spec),
             max_turns=spec.max_turns,
-            model_tier=spec.model_tier,
-            effort=spec.effort,
+            task=spec.task,
+            model=profile.model,
+            effort=profile.effort,
             on_update=lambda update: _save_agent_update(run_dir, state, spec, update),
         )
     except asyncio.CancelledError:

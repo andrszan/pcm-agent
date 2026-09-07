@@ -49,6 +49,7 @@ from config import (
     load_workspace_root,
     read_agent_workspace_env_file,
 )
+from model_policy import load_model_policy
 from steps.step_00_product_draft import run as run_product_draft
 from steps.step_01_create_workspace import (
     WorkspaceBlocked,
@@ -1803,6 +1804,7 @@ def _execute(
 def main(*, retry: bool = False) -> int:
     args = parse_args()
     try:
+        load_model_policy()
         with _prepare_execution_locks(args) as locks:
             if retry:
                 return _retry_locked(args, locks)

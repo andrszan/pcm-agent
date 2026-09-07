@@ -15,7 +15,7 @@
 1. `project_bootstrap`：显式调用 `/project-bootstrap` 完成有限项目化和真实工程验证；
 2. `tailwind_theme`：仅当 `steps/04.json.outputs` 含 `frontend` 时，在 bootstrap 完成后显式调用 `/tailwind-theme`，落实并验证项目专属 light/dark 主题配色。
 
-两个 Skill 不共用 Claude session，也不写入同一 conversation。两项任务均显式使用中模型和 `high` effort，并在各自恢复调用中保持相同 profile。公共循环、步骤编号和 `current_node` 不增加双阶段抽象；步骤程序只在两项适用能力都完成后写 success 并推进第 7 步。
+两个 Skill 不共用 Claude session，也不写入同一 conversation。两项任务分别只传稳定任务标识 `project_bootstrap` 和 `tailwind_theme`，实际 model 与 effort 由 `model-policy.toml` 解析并按本次进程启动时加载的策略固定；各自恢复调用显式传入本次启动确定的组合。公共循环、步骤编号和 `current_node` 不增加双阶段抽象；步骤程序只在两项适用能力都完成后写 success 并推进第 7 步。
 
 ### 项目化
 

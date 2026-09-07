@@ -412,8 +412,7 @@ async def run(
         skill_name=SKILL_NAME,
         max_decision_rounds=MAX_DECISION_ROUNDS,
         max_turns=TRD_DESIGN_MAX_TURNS,
-        model_tier="medium",
-        effort="high",
+        task="trd_design",
         decision_system_prompt=render_decision_system_prompt(
             TRD_DESIGN_DECISION_RULES,
             {

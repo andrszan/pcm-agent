@@ -26,7 +26,12 @@ from claude_agent_sdk import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_RUNS_DIR = REPO_ROOT / "pcm-demo" / "probe-runs"
+DEMO_ROOT = REPO_ROOT / "pcm-demo"
+sys.path.insert(0, str(DEMO_ROOT))
+
+from model_policy import get_agent_profile  # noqa: E402
+
+DEFAULT_RUNS_DIR = DEMO_ROOT / "probe-runs"
 FACT = "probe-a-project-fact"
 FORBIDDEN_NAME = "permission_probe_should_not_exist.txt"
 
@@ -86,6 +91,7 @@ def filtered_env() -> dict[str, str]:
 
 
 def options(workspace: Path, *, permission_target: Path | None = None) -> ClaudeAgentOptions:
+    profile = get_agent_profile("project_intake")
     visible_tools = ["Read", "Glob", "Grep", "Skill"]
     disallowed_tools = ["Bash"]
     if permission_target is not None:
@@ -103,7 +109,8 @@ def options(workspace: Path, *, permission_target: Path | None = None) -> Claude
         permission_mode="dontAsk",
         max_turns=4,
         max_budget_usd=1.0,
-        effort="low",
+        model=profile.model,
+        effort=profile.effort,
         env=filtered_env(),
     )
 

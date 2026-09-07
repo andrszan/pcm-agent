@@ -56,7 +56,7 @@ pcm-demo/
 
 要求：
 
-- Python 3.10 或更高版本；
+- Python 3.11 或更高版本（策略文件使用标准库 `tomllib`）；
 - `uv`；
 - Git；
 - 可访问 Anthropic Messages 协议的 Claude Agent SDK 网关和受保护 Bearer token；
@@ -74,9 +74,8 @@ uv sync
 
 | 配置 | 用途 |
 | --- | --- |
-| `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL` | AI-compatible 结构化决策与提取 |
+| `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL`、`LLM_MODEL_EFFORT` | AI-compatible 结构化决策、提取与 JSON 修复共用配置；effort 可留空，不发送 `reasoning.effort` |
 | `PCM_AGENT_BASE_URL`、`PCM_AGENT_AUTH_TOKEN` | Claude Agent SDK 使用的 Anthropic Messages 网关与受保护 Bearer token；Base URL 不包含 `/v1` |
-| `PCM_AGENT_MODEL_LOW`、`PCM_AGENT_MODEL_MEDIUM`、`PCM_AGENT_MODEL_HIGH` | 低、中、高语义档位对应的网关真实模型名 |
 | `PCM_WORKSPACE_ROOT` | 所有目标产品项目的外部父目录，必须位于当前能力仓库之外 |
 | `PCM_MAX_CONCURRENT_PROJECTS` | 当前 Demo checkout 同时执行的产品项目上限，默认 `2` |
 | `PCM_TEMPLATE_CATALOG` | 基础工程候选目录 JSON |
@@ -90,17 +89,37 @@ uv sync
 
 已有开发配置需把 `PCM_AGENT_API_KEY` 的有效值迁移到 `PCM_AGENT_AUTH_TOKEN`，旧键不再作为认证输入接受；真实凭据继续保持 Git 忽略，POSIX 下使用 `0600`。修改后重新启动 PCM 进程加载新代码与配置，不修改已有 conversation 或运行状态。
 
-固定 Agent profile：
+### 模型策略
 
-| 步骤 | 模型档位 | effort |
-| --- | --- | --- |
-| 2、5、7、9、10、11 | 高 | `high` |
-| 6（bootstrap/theme）、14、15 | 中 | `high` |
-| 8、16、17 | 中 | `medium` |
+Claude Agent 的模型与推理强度只在受跟踪的 [`model-policy.toml`](model-policy.toml) 配置，不再读取 `.env` 中的 `PCM_AGENT_MODEL_LOW/MEDIUM/HIGH`。`.env` 只保留 Agent 连接与认证；AI-compatible 继续使用独立的共用 `LLM_*` 配置。
 
-第 15～17 步恢复同一个 development session 时始终使用中模型；每次 Agent 首次调用和 resume 都重新显式传入 model 与 effort。当前不为 Agent 步骤使用低模型，不配置 fallback model 或 `max_budget_usd`，并保持各步骤既有最大 turn 与负责人决策轮数。
+```toml
+[profiles]
+planning = { model = "gpt-5.6-sol[1m]", effort = "high" }
+building = { model = "gpt-5.6-sol[1m]", effort = "high" }
+routine = { model = "gpt-5.6-sol[1m]", effort = "medium" }
 
-公共 runner 在会话级 `settings` 中生成 `modelOverrides`：`claude-haiku-4-5-20251001`、`claude-sonnet-4-6`、`claude-opus-4-8` 分别注册为 LOW、MEDIUM、HIGH 配置的实际模型 ID。`options.model` 仍直接使用实际 ID，不另设一套模型配置、不自动加 `[1m]`，也不引入 `*_MODEL_NAME` 显示项。该映射用于 Claude Code 识别自定义模型名并避免 `unrecognized_model`，不把底层 GPT 变成 Claude；SDK 升级后需复验识别和出站模型。PCM 仍核验 init 模型与配置一致，但真实路由验证以发往配置中转的请求为准。Claude Code 的 `total_cost_usd` 不代表当前订阅代理的真实分模型成本。
+[steps]
+# 以下为分配示例；完整必需任务清单见实际策略文件。
+"6.bootstrap" = "building"
+"6.theme" = "building"
+"14" = "building"
+"15" = "building"
+"16" = "routine"
+"17" = "routine"
+```
+
+- 批量调整：修改一个 profile 的真实 `model` 或 `effort`，所有引用它的步骤一起调整。profile 名字不代表模型强弱，多个 profile 可以使用同一模型。
+- 单步调整：新增或选择一个完整组合，再修改对应步骤的 profile。第 6 步项目化与主题可分别配置；步骤代码只保留稳定任务标识，不写模型或 effort。
+- 支持的 Agent effort 为 `low/medium/high/xhigh/max`；具体模型的有效档位仍受实际 CLI、网关和服务能力约束，PCM 不自行替换档位。`LLM_MODEL_EFFORT` 按 AI-compatible 服务支持的值填写，不套用 Agent 五档白名单；留空不同于显式 `none`。
+- 修改前主动停止编排，再执行原 `run_all.py --resume <run-id>`。完整入口每次启动只读取一次策略并传给所有步骤子进程，启动时打印最终分配表；运行中改文件不生效。独立 `run_step` 或模块入口使用各自本次进程加载的策略，不监听文件变化。
+- 策略必须完整且有效；未知任务、缺失分配、不存在的 profile、空模型或非法 Agent effort 明确失败，不使用默认模型、环境变量或命令行覆盖兜底。内部子进程传递内容不持久化，也不作为用户配置入口。
+
+第 15～17 步仍恢复同一 development session，但允许各步选择不同真实模型与 effort。每次首次调用和 resume 都显式传入本次启动已确定的组合，不重建或清空原 session；最大 turn、负责人决策轮数、重试、三态和完成条件不变。
+
+公共 runner 将 SDK 与插件的标准模型别名通过 `modelOverrides` 统一注册为本次选定的真实模型，默认子代理也使用同一模型；这只是兼容注册，不再是一套低中高策略。`options.model` 直接使用配置的完整 ID，不自动添加或移除 `[1m]`。PCM 仍核验 init 模型与配置一致，但实际出站路由与 effort 解释由网关负责。`total_cost_usd` 是 SDK 估算，不代表订阅账户真实扣款。
+
+每次 Agent 执行区间记录 `task/model/effort` 和原始 `usage/model_usage/total_cost_usd`，AI-compatible 的每次主请求与修复请求分别保存到同一步骤的 `ai_executions`。`model_usage` 包括子代理，不能与仅主循环的 `usage` 重复相加；当前单输入 `query()` 各次独立，resume 不覆盖此前调用。未知用量保持空值，旧记录不补造、不重置。字段与统计口径见 [计时与用量说明](docs/timing.md)。
 
 ## 运行方式
 

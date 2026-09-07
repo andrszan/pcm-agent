@@ -152,6 +152,30 @@ def _read_timings(run_dir: Path) -> dict[str, Any]:
             }:
                 raise ValueError("Agent 执行区间格式无效")
             _duration(call["elapsed_seconds"])
+            for field in ("task", "model", "effort"):
+                if field in call and call[field] is not None and not isinstance(call[field], str):
+                    raise ValueError("Agent 执行区间格式无效")
+            for field in ("usage", "model_usage"):
+                if field in call and call[field] is not None and not isinstance(call[field], dict):
+                    raise ValueError("Agent 执行区间格式无效")
+            if "total_cost_usd" in call and call["total_cost_usd"] is not None:
+                _duration(call["total_cost_usd"])
+        if "ai_executions" in record:
+            if not isinstance(record["ai_executions"], list):
+                raise ValueError("AI-compatible 执行记录格式无效")
+            for call in record["ai_executions"]:
+                call["started_at"] = _beijing(call["started_at"])
+                call["finished_at"] = _beijing(call["finished_at"])
+                if (
+                    call["started_at"] is None
+                    or call["kind"] not in {"primary", "repair"}
+                    or not isinstance(call["model"], str)
+                    or (call["effort"] is not None and not isinstance(call["effort"], str))
+                    or (call["usage"] is not None and not isinstance(call["usage"], dict))
+                    or (call["response_id"] is not None and not isinstance(call["response_id"], str))
+                    or (call["status"] is not None and not isinstance(call["status"], str))
+                ):
+                    raise ValueError("AI-compatible 执行记录格式无效")
         _update_totals(record)
     return data
 
@@ -313,20 +337,69 @@ class StepTiming:
         except Exception:  # noqa: BLE001 - 旁路收口不可覆盖业务退出结果。
             self._disable()
 
-    def begin_agent(self) -> tuple[dict[str, Any], float] | None:
+    def begin_agent(
+        self, *, task: str | None = None, model: str | None = None,
+        effort: str | None = None,
+    ) -> tuple[dict[str, Any], float] | None:
         if self.record is None or self.disabled:
             return None
         call = {
+            "task": task,
+            "model": model,
+            "effort": effort,
             "started_at": beijing_now(),
             "finished_at": None,
             "interrupted_at": None,
             "elapsed_seconds": None,
             "end_reason": None,
+            "usage": None,
+            "model_usage": None,
+            "total_cost_usd": None,
         }
         self.record["agent_executions"].append(call)
         self.active_call = call
         self._save()
         return call, time.monotonic()
+
+    def observe_agent_result(
+        self, measurement: tuple[dict[str, Any], float], result: Any,
+    ) -> None:
+        try:
+            fields = ("usage", "model_usage", "total_cost_usd")
+            if not any(hasattr(result, field) for field in fields):
+                return
+            call, _started = measurement
+            for field in fields:
+                call[field] = getattr(result, field, None)
+            self._save()
+        except Exception:  # noqa: BLE001 - 用量旁路记录不可干扰 Agent 执行。
+            self._disable()
+
+    def begin_response(
+        self, model: str, effort: str | None, kind: str,
+    ) -> dict[str, Any] | None:
+        if self.record is None or self.disabled:
+            return None
+        call = {
+            "model": model,
+            "effort": effort,
+            "kind": kind,
+            "started_at": beijing_now(),
+            "finished_at": None,
+            "usage": None,
+            "response_id": None,
+            "status": None,
+        }
+        self.record.setdefault("ai_executions", []).append(call)
+        self._save()
+        return call
+
+    def finish_response(self, call: dict[str, Any]) -> None:
+        try:
+            call["finished_at"] = beijing_now()
+            self._save()
+        except Exception:  # noqa: BLE001 - 用量旁路记录不可干扰 AI 请求。
+            self._disable()
 
     def finish_agent(
         self, measurement: tuple[dict[str, Any], float], reason: str,
@@ -378,6 +451,26 @@ class StepTiming:
             self._disable()
 
 
+@contextmanager
+def measure_response(model: str, effort: str | None, kind: str):
+    timing = _ACTIVE_TIMING.get()
+    call = None
+    if timing is not None:
+        try:
+            call = timing.begin_response(model, effort, kind)
+        except Exception:  # noqa: BLE001 - 用量旁路记录不可干扰 AI 请求。
+            timing._disable()
+    try:
+        yield call if call is not None else {}
+    finally:
+        if timing is not None and call is not None:
+            try:
+                timing.finish_response(call)
+            except (KeyboardInterrupt, SystemExit):
+                timing.finish_response(call)
+                raise
+
+
 def _agent_end_reason(result: Any) -> str:
     if result.result_subtype == "error_max_turns":
         return "turn_limit"
@@ -396,23 +489,57 @@ def _agent_end_reason(result: Any) -> str:
 
 async def run_timed_agent(agent_runner, *args, **kwargs):
     timing = _ACTIVE_TIMING.get()
-    measurement = timing.begin_agent() if timing is not None else None
+    measurement = timing.begin_agent(
+        task=kwargs.get("task"),
+        model=kwargs.get("model"),
+        effort=kwargs.get("effort"),
+    ) if timing is not None else None
+    original_on_update = kwargs.get("on_update")
+    if measurement is not None and callable(original_on_update):
+        def on_update(result):
+            try:
+                timing.observe_agent_result(measurement, result)
+            except (KeyboardInterrupt, SystemExit):
+                timing.observe_agent_result(measurement, result)
+                raise
+            return original_on_update(result)
+
+        kwargs = {**kwargs, "on_update": on_update}
     try:
         result = await agent_runner(*args, **kwargs)
     except BaseException as error:
         if measurement is not None:
             ended, finished_at = time.monotonic(), beijing_now()
             reason = "cancelled" if isinstance(error, (asyncio.CancelledError, KeyboardInterrupt, SystemExit)) else "exception"
-            timing.finish_agent(measurement, reason, ended, finished_at)
+            try:
+                timing.finish_agent(measurement, reason, ended, finished_at)
+            except (KeyboardInterrupt, SystemExit):
+                timing.finish_agent(measurement, reason, ended, finished_at)
+                raise
         raise
     else:
         if measurement is not None:
-            ended, finished_at = time.monotonic(), beijing_now()
+            reason = "error"
+            ended = None
+            finished_at = None
             try:
-                reason = _agent_end_reason(result)
-            except Exception:
-                reason = "error"
-            timing.finish_agent(measurement, reason, ended, finished_at)
+                ended, finished_at = time.monotonic(), beijing_now()
+                timing.observe_agent_result(measurement, result)
+                try:
+                    reason = _agent_end_reason(result)
+                except Exception:
+                    pass
+            finally:
+                ended = ended if ended is not None else time.monotonic()
+                finished_at = finished_at or beijing_now()
+                if timing.signal_reason is not None:
+                    timing.observe_agent_result(measurement, result)
+                try:
+                    timing.finish_agent(measurement, reason, ended, finished_at)
+                except (KeyboardInterrupt, SystemExit):
+                    timing.observe_agent_result(measurement, result)
+                    timing.finish_agent(measurement, reason, ended, finished_at)
+                    raise
         return result
 
 

@@ -39,8 +39,7 @@ DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     skill_name=SKILL_NAME,
     max_decision_rounds=MAX_DECISION_ROUNDS,
     max_turns=PROJECT_INTAKE_MAX_TURNS,
-    model_tier="high",
-    effort="high",
+    task="project_intake",
     decision_system_prompt=render_decision_system_prompt(PROJECT_INTAKE_DECISION_RULES, {}),
     legacy_completion_messages=(
         "已完成 project-intake：两份正式产品定义文档已生成并通过文件事实核验。",

@@ -8,7 +8,8 @@
 
 - **`agent_elapsed_seconds`**：Claude Code 各次已记录执行区间的累计耗时。
 - **`wall_elapsed_seconds`**：整个步骤第一次开始到最终成功完成，跨越了多长时间。
-- **`agent_executions`**：逐次查看 Claude Code 什么时候开始、结束、中断以及每次执行多久。
+- **`agent_executions`**：逐次查看 Claude Code 什么时候开始、结束、中断、模型策略，以及该次独立 query 返回的原始用量和成本。
+- **`ai_executions`**：仅在步骤实际发起 AI-compatible 请求后出现，逐次记录主请求和 JSON repair 请求的模型、effort、原始用量及响应状态。
 - **`note`**：仅在存在数据缺失、未知中断等需要解释的情况时出现。带提示的累计值可能只是已知部分，不能冒充完整用时。
 
 所有时间戳均为北京时间，使用 ISO 8601 的 `+08:00` 偏移，例如 `2026-09-05T14:51:19.141561+08:00`。所有耗时数值均以**秒**为单位，可以带小数；终端会转换为时、分、秒。
@@ -34,7 +35,8 @@
 | `finished_at` | 时间戳或 `null` | 该步骤首次成功已持久化后观测到的完成时间，先于终端结果输出保存；随后收到退出信号不会撤销已观测成功。失败、阻塞或中断不填写此字段；成功结束证据不足时也为空。 |
 | `agent_elapsed_seconds` | 数值或 `null` | 当前已记录、已闭合的主 Claude Code 调用区间耗时之和。执行中的区间暂不计入；存在缺口时仅代表已知累计，见 `note`。 |
 | `wall_elapsed_seconds` | 数值或 `null` | `finished_at - started_at`。只有步骤已成功且起止时刻均可信、时间差非负时才有数值。 |
-| `agent_executions` | 数组 | 该步骤中每次主 Claude Code 调用的时间区间，按开始顺序保存。 |
+| `agent_executions` | 数组 | 该步骤中每次主 Claude Code 调用的时间区间与该次独立 query 返回的原始用量，按开始顺序保存。 |
+| `ai_executions` | 数组，可省略 | AI-compatible 请求记录。仅在首次真实请求发起时创建；未调用的步骤和旧记录不补此字段。 |
 | `note` | 字符串，可省略 | 数据缺失或时钟异常等解释。正常完整记录不写这个字段。 |
 
 ### 两个耗时为什么不同
@@ -47,17 +49,23 @@
 
 新执行的纯 Python 步骤或仅调用 AI-compatible 模型的步骤，没有主 Claude Code 调用时，`agent_executions` 为空、`agent_elapsed_seconds` 为 `0`。正在执行第一段 Agent 时，已闭合累计也可能暂为 `0`，应结合区间的空结束字段理解。`schema_version: 2` 记录缺少 Agent 区间证据时则为 `null`，不能当成 `0`，也不能用其它耗时字段推算。
 
-内部 Subagent 的工作时间包含在主调用区间里，不另行叠加，以免并行部分重复计时。本功能不拆分每个子代理、每个工具调用或每次 HTTP 请求，也不是纯模型推理耗时统计。
+内部 Subagent 的工作时间包含在主调用区间里，不另行叠加，以免并行部分重复计时。`usage` 与 `model_usage` 都保存 SDK 对**本次独立 query**返回的原值：不按 session 取最后一次结果，不把两者相加，也不自行推算 token；`model_usage` 可包含子 Agent 的分模型用量。缺失信息保存为 `null`，不会填 `0`。
 
 ## 3. 每次 Claude Code 执行的字段：`agent_executions[]`
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
+| `task` | 字符串或 `null` | 稳定领域任务名。旧调用或调用方未提供时为空。 |
+| `model` | 字符串或 `null` | PCM 本次传给 SDK 的完整模型 ID；SDK init 仍单独核验。旧记录可缺失该字段。 |
+| `effort` | 字符串或 `null` | PCM 本次传给 SDK 的 effort，不宣称是网关转换后的服务端回显值。旧记录可缺失该字段。 |
 | `started_at` | 时间戳 | 这一次主 Claude Code 调用发起前的开始标记时间。先落盘，再进入 Agent 调用。 |
 | `finished_at` | 时间戳或 `null` | 这一次调用返回或异常退出、完成相应清理后的观测时间。**不表示整个步骤已成功。** |
 | `interrupted_at` | 时间戳或 `null` | 可观测的中断时刻：收到取消信号时的时间，或调用返回/抛出时识别到异常、限制的时间。正常返回为空；无法取得证据时也为空，须结合 `end_reason`。 |
 | `elapsed_seconds` | 数值或 `null` | 单调时钟测出的主调用耗时，包含 SDK 自身退出清理，但排除计时文件读写和计时器自身的返回结果分类。系统日历时间调整不会改变此数值，未闭合区间不补算。 |
 | `end_reason` | 字符串或 `null` | 结束原因，取值见下表。刚开始尚未结束时为空。 |
+| `usage` | 对象或 `null` | SDK Result 对本次独立 query 的主 Agent 循环返回的原始用量，不含子代理。不与 `model_usage` 相加；未知时为空。 |
+| `model_usage` | 对象或 `null` | SDK Result 的原始分模型用量，包括子代理请求；未知时为空。 |
+| `total_cost_usd` | 数值或 `null` | SDK Result 返回的本次 query 估算费用，不是订阅实际扣费。只保存原值，不按 token 或价格表推算；未知时为空。 |
 
 开始标记需要先落盘，而单调时钟累计从标记写完、紧邻实际调用的位置起算，并在调用返回或抛出时立即停止。因此开始标记落盘延迟和系统时钟变化可能使两个时间戳之差与 `elapsed_seconds` 略有不同；执行耗时以 `elapsed_seconds` 为准，不从日历时间戳反算。
 
@@ -83,11 +91,28 @@
 
 API 错误、轮数限制等由返回结果才能识别的情况，记录的是程序**收到异常返回或捕获异常**的观测时间，通常等于该区间的 `finished_at`，不是服务端故障最早发生的时刻。
 
-默认 SIGINT/SIGTERM 处理会保存观测时间并维持取消退出，不触发自动重试；已有自定义或忽略信号策略不会被计时功能覆盖。SIGKILL、断电或进程彻底崩溃无法靠自身保存中断时间，结束、中断和耗时字段保持为空。后续恢复同一 `schema_version: 2` 记录时只将结束原因标为 `unknown` 并添加步骤级提示，不使用恢复时刻或文件 mtime 补造区间；只读汇总不修改记录。没有外部观察者时，不能承诺内核精确终止时间。
+默认 SIGINT/SIGTERM 处理会保存观测时间并维持取消退出，不触发自动重试；若信号恰好落在已取得 Agent Result 或 AI usage 后的计时收口写入窗口，会在原信号继续传播前补写一次已知结果并闭合原记录，不新增执行记录。已有自定义或忽略信号策略不会被计时功能覆盖。SIGKILL、断电或进程彻底崩溃无法靠自身保存中断时间，结束、中断和耗时字段保持为空。后续恢复同一 `schema_version: 2` 记录时只将结束原因标为 `unknown` 并添加步骤级提示，不使用恢复时刻或文件 mtime 补造区间；只读汇总不修改记录。没有外部观察者时，不能承诺内核精确终止时间。
 
 即使某个 Agent 区间缺少结束证据，只要步骤首次开始和最终成功时间已知，**步骤总历时仍然可以计算**；Agent 累计值则保留缺口提示。这是两个独立指标，不用一个“计时完整”布尔值混在一起控制。
 
-## 4. 读取示例
+## 4. 每次 AI-compatible 请求的字段：`ai_executions[]`
+
+`ai_executions` 与 `agent_executions` 使用同一个步骤计时上下文，但不计入 `agent_elapsed_seconds`。主 Responses 请求和因结构化输出校验失败而真实发起的 JSON repair 请求分别记录一条；去除完整 Markdown 围栏后本地校验成功不会产生 repair 记录。
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `model` | 字符串 | 请求使用的真实模型 ID。 |
+| `effort` | 字符串或 `null` | 请求实际传递的 reasoning effort；配置为空时请求不传 `reasoning`，记录也为空。 |
+| `kind` | 字符串 | `primary` 表示业务主请求，`repair` 表示 JSON repair 请求。 |
+| `started_at` | 时间戳 | 发起真实 API 请求前的时间。 |
+| `finished_at` | 时间戳或 `null` | 请求返回或抛出异常后旁路记录完成的时间；进程不可观测终止时可为空。 |
+| `usage` | 对象或 `null` | 响应对象 `usage.model_dump()` 或原始响应体 `usage` 的原值。校验失败、业务失败也保留已经取得的值；服务端未返回或请求未取得响应时为空。 |
+| `response_id` | 字符串或 `null` | 响应 ID；未取得时为空。它只用于识别对应响应，不新增 operation 关联 ID。 |
+| `status` | 字符串或 `null` | 服务端响应状态，例如 `completed`、`incomplete`；异常发生前未取得状态时为空。 |
+
+同一步骤内以记录顺序和 `kind` 区分主请求与 repair 即可。Responses 的 `input_tokens_details.cached_tokens`、`cache_write_tokens` 与 `output_tokens_details.reasoning_tokens` 是明细，不重复加到 `total_tokens`；与 Agent 协议的缓存字段保持各自原始口径。SDK 内部重试未暴露响应时无法获知该次消耗，不能把缺失值当作零或完整总量。计时旁路提取或写入失败不会改变原结构化输出合同、业务三态、异常传播或退出码。
+
+## 5. 读取示例
 
 下面只是字段示意，不是真实运行记录。第一次 Agent 调用执行 600 秒后因 SIGTERM 中断，恢复后的调用执行 900 秒；步骤从 14:00 到 15:00 完成：
 
@@ -106,18 +131,30 @@ API 错误、轮数限制等由返回结果才能识别的情况，记录的是�
       "wall_elapsed_seconds": 3600.0,
       "agent_executions": [
         {
+          "task": "trd_design",
+          "model": "gpt-5.6-terra[1m]",
+          "effort": "high",
           "started_at": "2026-09-05T14:00:05+08:00",
           "finished_at": "2026-09-05T14:10:05+08:00",
           "interrupted_at": "2026-09-05T14:10:00+08:00",
           "elapsed_seconds": 600.0,
-          "end_reason": "sigterm"
+          "end_reason": "sigterm",
+          "usage": {"input_tokens": 1200, "output_tokens": 400},
+          "model_usage": {"gpt-5.6-terra[1m]": {"inputTokens": 1200, "outputTokens": 400}},
+          "total_cost_usd": 0.12
         },
         {
+          "task": "trd_design",
+          "model": "gpt-5.6-terra[1m]",
+          "effort": "high",
           "started_at": "2026-09-05T14:30:00+08:00",
           "finished_at": "2026-09-05T14:45:00+08:00",
           "interrupted_at": null,
           "elapsed_seconds": 900.0,
-          "end_reason": "returned"
+          "end_reason": "returned",
+          "usage": null,
+          "model_usage": null,
+          "total_cost_usd": null
         }
       ]
     }
@@ -127,18 +164,18 @@ API 错误、轮数限制等由返回结果才能识别的情况，记录的是�
 
 由此可见：Claude Code 累计执行 **25 分钟**，整个步骤跨越 **1 小时**。负责人决策、恢复等待等没有被塞进 Agent 区间。
 
-## 5. 存储策略与旧数据边界
+## 6. 存储策略与旧数据边界
 
-- 当前计时读写路径只接受 `schema_version: 2` 的 `runs/<run-id>/timings.json`。程序不读取、投影或转换旧计时格式，也不自动迁移、归档或删除旧数据。
+- 当前计时读写路径只接受 `schema_version: 2` 的 `runs/<run-id>/timings.json`。新增字段仍属于 v2 向后兼容扩展：读取旧 v2 时保留原值，不补 `task/model/effort/usage/model_usage/total_cost_usd`，也不为没有 AI 请求证据的旧步骤补 `ai_executions`。程序不读取、投影或转换其它版本，也不自动迁移、归档或删除旧数据。
 - 不在当前 run 计时读写路径上的旧数据原样保留，不批量扫描或清理。
 - 若当前 run 中的旧格式 `timings.json` 实际阻碍所需的新版记录，必须先确认没有旧进程仍在写入该 run，再精确移除这一份冲突的 `timings.json`；程序不会自动执行此操作。
 - 处理计时冲突时不得修改或删除 `state.json`、`steps/` 下的业务 result、`conversations/` 或其它业务运行数据。
 
-## 6. 使用与边界
+## 7. 使用与边界
 
 - 默认启用，无需新增参数或环境变量。`run_step.py` 显示当前步骤的两个指标，`run_all.py` 完成或停止时只读汇总。
 - 单次命令只解析一次参数并固定 run ID；全部自动重试、10/30 秒退避及最终计时写入都在同一组执行锁内，退避期间继续占用 Capacity Slot 和已取得的 Product Lock。锁准备失败不开始计时，并释放已取得的锁；同一 run 锁冲突时不写计时或读取汇总。`run_all.py` 在释放 Run Lock 前读取汇总。
 - 输出提示使用 stderr，原有 stdout 结果路径不变；计时读写或展示失败只警告，不改变业务结果和退出码。
 - 不直接调用或解析模型来判断耗时；不把步骤、需求或计时背景追加到模型 prompt。记录中不保存 prompt、模型回复、错误正文、API Key 或环境变量。
 - 首次成功后的正常幂等复用不会新增 Agent 区间或改写原始起止时间。业务判断仍由步骤本身负责，计时文件不是成功证明。
-- 本功能没有定时心跳、剩余时间预测、成本统计、子代理独立时间轴或外部监控服务。
+- 本功能没有定时心跳、剩余时间预测、价格表推算、跨 query/session 用量聚合、子代理独立时间轴或外部监控服务。

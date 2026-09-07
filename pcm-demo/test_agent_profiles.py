@@ -21,19 +21,19 @@ from steps.step_11_requirement_breakdown.step import (
 class AgentProfileTest(unittest.TestCase):
     def test_project_level_profiles(self) -> None:
         expected = {
-            PROJECT_INTAKE: ("high", "high"),
-            PROJECT_READINESS: ("high", "high"),
-            PROJECT_BOOTSTRAP: ("medium", "high"),
-            TAILWIND_THEME: ("medium", "high"),
-            SOLUTION_DESIGN: ("high", "high"),
-            ENGINEERING_ARCHITECTURE: ("high", "high"),
-            UI_UX_FRAMEWORK: ("high", "high"),
-            REQUIREMENT_BREAKDOWN: ("high", "high"),
+            PROJECT_INTAKE: "project_intake",
+            PROJECT_READINESS: "project_readiness",
+            PROJECT_BOOTSTRAP: "project_bootstrap",
+            TAILWIND_THEME: "tailwind_theme",
+            SOLUTION_DESIGN: "solution_design",
+            ENGINEERING_ARCHITECTURE: "engineering_architecture",
+            UI_UX_FRAMEWORK: "ui_ux_framework",
+            REQUIREMENT_BREAKDOWN: "requirement_breakdown",
         }
 
-        for spec, profile in expected.items():
+        for spec, task in expected.items():
             with self.subTest(skill=spec.skill_name):
-                self.assertEqual((spec.model_tier, spec.effort), profile)
+                self.assertEqual(spec.task, task)
 
 
 if __name__ == "__main__":

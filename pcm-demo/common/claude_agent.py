@@ -6,7 +6,7 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, get_args
 
 from claude_agent_sdk import (
     AssistantMessage,
@@ -19,9 +19,10 @@ from claude_agent_sdk import (
     TextBlock,
     query,
 )
+from claude_agent_sdk.types import EffortLevel
 
 from common.error_diagnostics import exception_diagnostics, redact_text
-from config import AgentConfig, AgentModelTier
+from config import AgentConfig
 
 CLAUDE_AGENT_TIMEOUT_SECONDS = 10 * 60 * 60
 
@@ -48,11 +49,15 @@ class ClaudeRunResult:
     sdk_errors: list[str] | None = None
     exception_details: dict[str, Any] | None = None
     retry_requested: bool = False
+    usage: dict[str, Any] | None = None
+    model_usage: dict[str, Any] | None = None
 
 
 def filtered_env(config: AgentConfig, model: str) -> dict[str, str]:
     env = dict(os.environ)
     for name in env:
+        if name.startswith(("PCM_", "LLM_")):
+            env[name] = ""
         if name in {"ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_MODEL", "ANTHROPIC_SMALL_FAST_MODEL"} or name.startswith((
             "ANTHROPIC_DEFAULT_HAIKU_MODEL",
             "ANTHROPIC_DEFAULT_SONNET_MODEL",
@@ -81,12 +86,11 @@ def filtered_env(config: AgentConfig, model: str) -> dict[str, str]:
             "LLM_BASE_URL": "",
             "LLM_API_KEY": "",
             "LLM_MODEL": "",
+            "LLM_MODEL_EFFORT": "",
+            "PCM_MODEL_POLICY_SNAPSHOT": "",
             "PCM_AGENT_BASE_URL": "",
             "PCM_AGENT_AUTH_TOKEN": "",
             "PCM_AGENT_API_KEY": "",
-            "PCM_AGENT_MODEL_LOW": "",
-            "PCM_AGENT_MODEL_MEDIUM": "",
-            "PCM_AGENT_MODEL_HIGH": "",
             "PCM_WORKSPACE_ROOT": "",
             "PCM_MAX_CONCURRENT_PROJECTS": "",
             "PCM_TEMPLATE_CATALOG": "",
@@ -191,15 +195,19 @@ async def run_claude(
     prompt: str,
     *,
     cwd: Path,
-    model_tier: AgentModelTier = "medium",
-    effort: Literal["medium", "high"] = "high",
+    model: str,
+    effort: EffortLevel,
+    task: str | None = None,
     resume_session_id: str | None = None,
     max_turns: int = 12,
     on_update: Callable[[ClaudeRunResult], None] | None = None,
     agent_config_loader: Callable[[], AgentConfig] | None = None,
 ) -> ClaudeRunResult:
+    if not isinstance(model, str) or not model.strip():
+        raise ValueError("Agent model 必须是非空真实模型名")
+    if effort not in get_args(EffortLevel):
+        raise ValueError("Agent effort 必须是 low、medium、high、xhigh 或 max")
     agent_config = (agent_config_loader or AgentConfig.load)()
-    model = agent_config.resolve_model(model_tier)
     init: dict[str, Any] | None = None
     result: ResultMessage | None = None
     texts: list[str] = []
@@ -214,12 +222,11 @@ async def run_claude(
         system_prompt={"type": "preset", "preset": "claude_code"},
         skills="all",
         setting_sources=["project", "local"],
-        # 当前兼容基线：Agent SDK 0.2.139 / Claude Code 2.1.233。
-        # 升级 SDK 或实际 CLI 后复验三档识别、出站模型与 resume，再确认是否调整这些标准 ID。
+        # SDK 与插件的标准模型别名统一使用本次策略，不另设子代理档位。
         settings=json.dumps({"modelOverrides": {
-            "claude-haiku-4-5-20251001": agent_config.resolve_model("low"),
-            "claude-sonnet-4-6": agent_config.resolve_model("medium"),
-            "claude-opus-4-8": agent_config.resolve_model("high"),
+            "claude-haiku-4-5-20251001": model,
+            "claude-sonnet-4-6": model,
+            "claude-opus-4-8": model,
         }}),
         plugins=load_plugins(cwd),
         max_turns=max_turns,
@@ -287,6 +294,8 @@ async def run_claude(
                             stop_reason=result.stop_reason,
                             num_turns=result.num_turns,
                             total_cost_usd=result.total_cost_usd,
+                            usage=result.usage,
+                            model_usage=result.model_usage,
                             exception=None,
                             api_error_status=_api_error_status(result),
                             terminal_reason=result.terminal_reason,
@@ -363,6 +372,8 @@ async def run_claude(
         stop_reason=result.stop_reason if result else None,
         num_turns=result.num_turns if result else None,
         total_cost_usd=result.total_cost_usd if result else None,
+        usage=result.usage if result else None,
+        model_usage=result.model_usage if result else None,
         exception=exception,
         api_error_status=final_api_error_status,
         terminal_reason=final_terminal_reason,

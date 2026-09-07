@@ -54,8 +54,7 @@ DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     skill_name=SKILL_NAME,
     max_decision_rounds=MAX_DECISION_ROUNDS,
     max_turns=SOLUTION_DESIGN_MAX_TURNS,
-    model_tier="high",
-    effort="high",
+    task="solution_design",
     decision_system_prompt=render_decision_system_prompt(SOLUTION_DESIGN_DECISION_RULES, {}),
     legacy_completion_messages=LEGACY_COMPLETION_MESSAGES,
 )

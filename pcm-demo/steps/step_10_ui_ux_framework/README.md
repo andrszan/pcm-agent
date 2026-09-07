@@ -1,6 +1,6 @@
 # 第 10 步：产品级 UI/UX 框架
 
-本步骤在产品初始化阶段按当前 Demo v1 合同建立产品级、跨需求稳定的 UI/UX 框架；不做单项需求设计或页面实现。适用时的 Claude Agent 显式使用高模型和 `high` effort；不适用路径保持零 Agent 调用。
+本步骤在产品初始化阶段按当前 Demo v1 合同建立产品级、跨需求稳定的 UI/UX 框架；不做单项需求设计或页面实现。适用时的 Claude Agent 只传稳定任务标识 `ui_ux_framework`，实际 model 与 effort 由 `model-policy.toml` 解析并按本次进程启动时加载的策略固定；不适用路径保持零 Agent 调用。
 
 ## 运行
 

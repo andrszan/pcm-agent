@@ -44,6 +44,7 @@ from common.decision import (  # noqa: E402
 from common.openai_responses import ResponsesFailure  # noqa: E402
 from common.files import write_json  # noqa: E402
 from config import AgentConfig  # noqa: E402
+from model_policy import get_agent_profile  # noqa: E402
 
 
 class FakeAgentRunner:
@@ -102,19 +103,16 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
             skill_name="test-skill",
             max_decision_rounds=3,
             max_turns=7,
-            model_tier="medium",
-            effort="high",
+            task="project_intake",
             decision_system_prompt="决策 system prompt",
         )
 
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
 
-    def test_spec_requires_supported_model_tier_and_effort(self) -> None:
-        with self.assertRaisesRegex(ValueError, "model_tier"):
-            AgentDecisionLoopSpec(**{**self.spec.__dict__, "model_tier": "unsupported"})
-        with self.assertRaisesRegex(ValueError, "effort"):
-            AgentDecisionLoopSpec(**{**self.spec.__dict__, "effort": "low"})
+    def test_spec_requires_task(self) -> None:
+        with self.assertRaisesRegex(ValueError, "task"):
+            AgentDecisionLoopSpec(**{**self.spec.__dict__, "task": ""})
 
     def result(
         self,
@@ -284,9 +282,10 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNone(agent.calls[0][1]["resume_session_id"])
         self.assertEqual(agent.calls[1][1]["resume_session_id"], "session-1")
+        profile = get_agent_profile(self.spec.task)
         self.assertEqual(
-            [(call[1]["model_tier"], call[1]["effort"]) for call in agent.calls],
-            [("medium", "high"), ("medium", "high")],
+            [(call[1]["task"], call[1]["model"], call[1]["effort"]) for call in agent.calls],
+            [(self.spec.task, profile.model, profile.effort)] * 2,
         )
         self.assertEqual(decisions.calls[0][0][-1], {"role": "user", "content": original})
         messages = json.loads(
@@ -1530,9 +1529,6 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
         self.agent_config = AgentConfig(
             "http://agent.example.invalid",
             SecretStr("agent-secret"),
-            low_model="low-model",
-            medium_model="medium-model",
-            high_model="high-model",
         )
         self.agent_config_patcher = patch(
             "common.claude_agent.AgentConfig.load", return_value=self.agent_config
@@ -1547,6 +1543,8 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
             "LLM_BASE_URL": "http://decision.example.invalid/v1",
             "LLM_API_KEY": "decision-secret",
             "LLM_MODEL": "decision-model",
+            "LLM_MODEL_EFFORT": "high",
+            "PCM_MODEL_POLICY_SNAPSHOT": "private-policy",
             "PCM_AGENT_AUTH_TOKEN": "private-pcm-token",
             "PCM_AGENT_API_KEY": "legacy-private-key",
             "PCM_WORKSPACE_ROOT": "/products",
@@ -1601,7 +1599,7 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
             with self.subTest(key=key):
                 self.assertEqual(env[key], "")
 
-    async def test_model_overrides_apply_to_all_tiers_and_resume(self) -> None:
+    async def test_real_models_and_all_efforts_apply_on_resume(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             workspace = Path(directory)
             write_json(workspace / "plugins-lock.json", {"version": 1, "plugins": []})
@@ -1618,24 +1616,29 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
                 )
 
             with patch("common.claude_agent.query", new=fake_query):
-                for tier in ("low", "medium", "high"):
+                for effort in ("low", "medium", "high", "xhigh", "max"):
                     for session in (None, "session-1"):
-                        outcome = await run_claude("测试提示", cwd=workspace, model_tier=tier, resume_session_id=session)
+                        model = "another-real-model" if session else "real-model"
+                        outcome = await run_claude(
+                            "测试提示", cwd=workspace, model=model, effort=effort,
+                            resume_session_id=session,
+                        )
                         self.assertIsNone(outcome.exception)
                         options = captured[-1]
-                        self.assertEqual(options.model, self.agent_config.resolve_model(tier))
+                        self.assertEqual(options.model, model)
+                        self.assertEqual(options.effort, effort)
                         self.assertEqual(options.resume, session)
                         self.assertEqual(options.setting_sources, ["project", "local"])
                         self.assertEqual(options.env["CLAUDE_CODE_SUBAGENT_MODEL"], options.model)
                         self.assertEqual(
                             json.loads(options.settings)["modelOverrides"],
                             {
-                                "claude-haiku-4-5-20251001": "low-model",
-                                "claude-sonnet-4-6": "medium-model",
-                                "claude-opus-4-8": "high-model",
+                                "claude-haiku-4-5-20251001": model,
+                                "claude-sonnet-4-6": model,
+                                "claude-opus-4-8": model,
                             },
                         )
-            self.assertEqual(len(captured), 6)
+            self.assertEqual(len(captured), 10)
 
     async def test_result_terminal_reason_api_status_and_errors_are_preserved(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1659,6 +1662,9 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
                     session_id="session-1",
                     result="Agent 的完整结果",
                     errors=["tool warning agent-secret"],
+                    usage={"input_tokens": 12, "output_tokens": 4},
+                    model_usage={"medium-model": {"inputTokens": 30, "outputTokens": 8}},
+                    total_cost_usd=0.02,
                     api_error_status=429,
                     terminal_reason="api_error",
                 )
@@ -1666,6 +1672,8 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
             with patch("common.claude_agent.query", new=fake_query):
                 result = await run_claude(
                     "测试提示",
+                    model="medium-model",
+                    effort="high",
                     cwd=workspace,
                     resume_session_id="session-1",
                     on_update=updates.append,
@@ -1684,9 +1692,9 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             json.loads(captured_options[0].settings),
             {"modelOverrides": {
-                "claude-haiku-4-5-20251001": "low-model",
+                "claude-haiku-4-5-20251001": "medium-model",
                 "claude-sonnet-4-6": "medium-model",
-                "claude-opus-4-8": "high-model",
+                "claude-opus-4-8": "medium-model",
             }},
         )
         self.assertNotIn("agent-secret", captured_options[0].settings)
@@ -1707,6 +1715,18 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(updates[-1].has_errors)
         self.assertEqual(updates[-1].sdk_errors, ["tool warning [REDACTED]"])
         self.assertTrue(updates[-1].retry_requested)
+        self.assertEqual(result.usage, {"input_tokens": 12, "output_tokens": 4})
+        self.assertEqual(result.model_usage, {"medium-model": {"inputTokens": 30, "outputTokens": 8}})
+        self.assertEqual(result.total_cost_usd, 0.02)
+        self.assertEqual(updates[-1].usage, result.usage)
+        self.assertEqual(updates[-1].model_usage, result.model_usage)
+
+    async def test_invalid_model_or_effort_fails_before_query(self) -> None:
+        with patch("common.claude_agent.query") as mocked:
+            for model, effort in (("", "low"), ("real-model", "minimal")):
+                with self.subTest(model=model, effort=effort), self.assertRaises(ValueError):
+                    await run_claude("测试提示", cwd=Path.cwd(), model=model, effort=effort)
+            mocked.assert_not_called()
 
     async def test_all_api_statuses_and_api_terminal_reason_request_retry(self) -> None:
         for status in (400, 403, 500, None):
@@ -1737,6 +1757,8 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
                 with patch("common.claude_agent.query", new=fake_query):
                     result = await run_claude(
                         "测试提示",
+                        model="medium-model",
+                        effort="high",
                         cwd=workspace,
                         resume_session_id="session-1",
                     )
@@ -1767,6 +1789,8 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
             with patch("common.claude_agent.query", new=fake_query):
                 result = await run_claude(
                     "测试提示",
+                    model="medium-model",
+                    effort="high",
                     cwd=workspace,
                     resume_session_id="session-1",
                 )
@@ -1794,7 +1818,7 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
                     yield
 
                 with patch("common.claude_agent.query", new=fake_query):
-                    result = await run_claude("测试提示", cwd=workspace)
+                    result = await run_claude("测试提示", cwd=workspace, model="medium-model", effort="high")
 
                 self.assertEqual(result.retry_requested, expected)
 
@@ -1811,7 +1835,7 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
                 yield
 
             with patch("common.claude_agent.query", new=fake_query):
-                result = await run_claude("测试提示", cwd=workspace)
+                result = await run_claude("测试提示", cwd=workspace, model="medium-model", effort="high")
 
         self.assertEqual(result.exception_type, "TimeoutError")
         self.assertIn("SDK internal timeout", result.exception or "")
@@ -1842,7 +1866,7 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
                 patch("common.claude_agent.query", new=fake_query),
                 patch("common.claude_agent.CLAUDE_AGENT_TIMEOUT_SECONDS", 0.001),
             ):
-                result = await run_claude("测试提示", cwd=workspace)
+                result = await run_claude("测试提示", cwd=workspace, model="medium-model", effort="high")
 
         self.assertTrue(cleaned_up)
         self.assertEqual(result.session_id, "session-timeout")
@@ -1873,7 +1897,7 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
                     cleaned_up = True
 
             with patch("common.claude_agent.query", new=fake_query):
-                task = asyncio.create_task(run_claude("测试提示", cwd=workspace))
+                task = asyncio.create_task(run_claude("测试提示", cwd=workspace, model="medium-model", effort="high"))
                 await started.wait()
                 task.cancel()
                 with self.assertRaises(asyncio.CancelledError):
@@ -1907,7 +1931,7 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
                 raise ProcessError("process failed", exit_code=1)
 
             with patch("common.claude_agent.query", new=fake_query):
-                result = await run_claude("测试提示", cwd=workspace)
+                result = await run_claude("测试提示", cwd=workspace, model="medium-model", effort="high")
 
         self.assertFalse(result.retry_requested)
 
@@ -1939,6 +1963,8 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
             with patch("common.claude_agent.query", new=fake_query):
                 result = await run_claude(
                     "测试提示",
+                    model="medium-model",
+                    effort="high",
                     cwd=workspace,
                     resume_session_id="session-1",
                 )
@@ -1972,7 +1998,7 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
                 )
 
             with patch("common.claude_agent.query", new=fake_query):
-                result = await run_claude("测试提示", cwd=workspace)
+                result = await run_claude("测试提示", cwd=workspace, model="medium-model", effort="high")
 
         self.assertEqual(result.exception_type, "ModelMismatchError")
         self.assertFalse(result.retry_requested)

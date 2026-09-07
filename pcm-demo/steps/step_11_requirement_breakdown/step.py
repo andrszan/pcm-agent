@@ -54,8 +54,7 @@ DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     skill_name=SKILL_NAME,
     max_decision_rounds=MAX_DECISION_ROUNDS,
     max_turns=REQUIREMENT_BREAKDOWN_MAX_TURNS,
-    model_tier="high",
-    effort="high",
+    task="requirement_breakdown",
     decision_system_prompt=render_decision_system_prompt(REQUIREMENT_BREAKDOWN_DECISION_RULES, {}),
 )
 

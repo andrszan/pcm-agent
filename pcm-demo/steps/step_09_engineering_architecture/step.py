@@ -63,8 +63,7 @@ DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     skill_name=SKILL_NAME,
     max_decision_rounds=MAX_DECISION_ROUNDS,
     max_turns=ENGINEERING_ARCHITECTURE_MAX_TURNS,
-    model_tier="high",
-    effort="high",
+    task="engineering_architecture",
     decision_system_prompt=render_decision_system_prompt(
         ENGINEERING_ARCHITECTURE_DECISION_RULES, {}
     ),

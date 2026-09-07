@@ -30,6 +30,12 @@ from common.coordination import (
 from common.state import read_state, step_result_status, write_state
 from common.timing import print_timing_summary
 from config import load_settings
+from model_policy import (
+    _MODEL_POLICY_SNAPSHOT_ENV,
+    _load_model_policy_from_file,
+    _model_policy_snapshot,
+    _model_policy_table,
+)
 from steps.step_13_select_requirement.step import registry_handoff
 
 DEMO_ROOT = Path(__file__).resolve().parent
@@ -326,12 +332,17 @@ def fresh_command(run_id: str, args: argparse.Namespace) -> str:
     return shlex.join(command)
 
 
-def run_child(command: list[str], pass_fds: tuple[int, ...] = ()) -> int:
+def run_child(
+    command: list[str],
+    pass_fds: tuple[int, ...] = (),
+    env: dict[str, str] | None = None,
+) -> int:
     child = subprocess.Popen(
         command,
         cwd=DEMO_ROOT,
         start_new_session=True,
         pass_fds=pass_fds,
+        env=env,
     )
     received_signal: int | None = None
     previous_handlers: dict[int, Any] = {}
@@ -375,11 +386,18 @@ def _print_stop(run_id: str, run_dir: Path, args: argparse.Namespace) -> None:
     print(f"恢复命令：{recovery_command(run_id, args)}", file=sys.stderr)
 
 
+def _child_environment(model_policy_snapshot: str) -> dict[str, str]:
+    env = dict(os.environ)
+    env[_MODEL_POLICY_SNAPSHOT_ENV] = model_policy_snapshot
+    return env
+
+
 def _orchestrate_locked(
     args: argparse.Namespace,
     run_id: str,
     run_dir: Path,
     locks: ExecutionLocks,
+    model_policy_snapshot: str,
 ) -> int:
     try:
         if args.resume:
@@ -395,7 +413,9 @@ def _orchestrate_locked(
         elif run_dir.exists():
             print(f"运行目录已存在，拒绝覆盖：{run_dir}", file=sys.stderr)
             return 2
-        return _run_steps(args, run_id, run_dir, locks)
+        return _run_steps(
+            args, run_id, run_dir, locks, model_policy_snapshot
+        )
     finally:
         print_timing_summary(run_dir)
 
@@ -405,7 +425,9 @@ def _run_steps(
     run_id: str,
     run_dir: Path,
     locks: ExecutionLocks,
+    model_policy_snapshot: str,
 ) -> int:
+    child_env = _child_environment(model_policy_snapshot)
     while True:
         try:
             state = read_state(run_dir) if run_dir.is_dir() else None
@@ -427,7 +449,9 @@ def _run_steps(
             return 1
 
         try:
-            return_code = run_child(command, locks.file_descriptors())
+            return_code = run_child(
+                command, locks.file_descriptors(), child_env
+            )
         except OSError as error:
             print(f"无法启动步骤进程：{error}", file=sys.stderr)
             if run_dir.is_dir():
@@ -451,9 +475,14 @@ def orchestrate(args: argparse.Namespace) -> int:
     run_id = args.resume or args.run_id or new_run_id()
     run_dir = run_dir_for(run_id)
     try:
+        model_policy = _load_model_policy_from_file()
+        model_policy_snapshot = _model_policy_snapshot(model_policy)
+        print(_model_policy_table(model_policy))
         maximum = load_settings().pcm_max_concurrent_projects
         with acquire_execution_locks(COORDINATION_ROOT, run_id, maximum) as locks:
-            return _orchestrate_locked(args, run_id, run_dir, locks)
+            return _orchestrate_locked(
+                args, run_id, run_dir, locks, model_policy_snapshot
+            )
     except (OSError, RuntimeError, ValueError) as error:
         print(str(error), file=sys.stderr)
         return 2
