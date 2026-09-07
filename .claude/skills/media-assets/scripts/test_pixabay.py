@@ -22,6 +22,7 @@ MP4 = b"\x00\x00\x00\x20ftypisom" + b"unit-test-data" * 12
 def response(data):
     stream = io.BytesIO(data)
     stream.headers = {"Content-Length": str(len(data))}
+    stream.status = 200
     return stream
 
 
@@ -158,6 +159,88 @@ class PixabayTest(unittest.TestCase):
         self.network.assert_called_once()
         self.assertIn("HTTP 429", self.stderr.getvalue())
         self.assertNotIn(KEY, self.stdout.getvalue() + self.stderr.getvalue())
+
+    def test_success_diagnostics_and_cache_do_not_add_requests(self):
+        value = api_response()
+        value.headers.update({"X-RateLimit-Limit": "100", "X-RateLimit-Remaining": "99", "X-RateLimit-Reset": "60", "Server": "cloudflare", "Set-Cookie": "session=hidden-cookie"})
+        self.network.return_value = value
+        self.assertEqual(self.run_cli("search", "-q", "forest", "--diagnostics"), 0)
+        event = json.loads(self.stderr.getvalue().splitlines()[0])
+        self.assertEqual(event["stage"], "api_query")
+        self.assertEqual(event["status"], 200)
+        self.assertEqual(event["headers"]["X-RateLimit-Remaining"], 99)
+        self.assertNotIn("hidden-cookie", self.stderr.getvalue())
+        self.stderr.seek(0)
+        self.stderr.truncate()
+        self.assertEqual(self.run_cli("search", "-q", "forest", "--diagnostics"), 0)
+        self.network.assert_called_once()
+        event = json.loads(self.stderr.getvalue().splitlines()[0])
+        self.assertEqual(event["event"], "pixabay_cache")
+        self.assertFalse(event["network_request"])
+        self.assertNotIn("headers", event)
+
+    def test_api_429_diagnostics_redact_body_and_headers(self):
+        query = "private client"
+        body = ("API rate limit exceeded; " + KEY + " https://pixabay.com/api/?key=" + KEY + " q=" + query + " Authorization: Bearer hidden-bearer; token=hidden-token; key=other-key; Basic hidden-basic; 203.0.113.8 2001:db8::1 ::1 admin@example.com").encode()
+        headers = {"Content-Type": "text/plain", "X-RateLimit-Limit": "100", "X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "57", "Retry-After": "57", "Set-Cookie": "hidden-cookie"}
+        self.network.side_effect = urllib.error.HTTPError("https://pixabay.com/api/?key=" + KEY, 429, "error", headers, io.BytesIO(body))
+        self.assertEqual(self.run_cli("search", "-q", query), 1)
+        self.network.assert_called_once()
+        text = self.stderr.getvalue()
+        event = json.loads(text.splitlines()[0])
+        self.assertEqual(event["stage"], "api_query")
+        self.assertTrue(event["api_rate_limit_message_detected"])
+        self.assertEqual(event["headers"]["Retry-After"], 57)
+        for secret in (KEY, query, "hidden-bearer", "hidden-token", "hidden-cookie", "other-key", "hidden-basic", "203.0.113.8", "2001:db8::1", "::1", "admin@example.com", "https://pixabay.com/api/"):
+            self.assertNotIn(secret, text)
+
+    def test_media_429_html_diagnostics_preserve_code_not_page(self):
+        token = "private-signed-file-" + "a" * 40
+        url = "https://pixabay.com/get/" + token
+        body = ("<html><title>Too many requests</title><body>" + "private-page-data " * 80 + " error code: 1015</body></html>").encode()
+        error = urllib.error.HTTPError(url, 429, "error", {"Content-Type": "text/html", "Server": "cloudflare", "Retry-After": "Wed, 09 Sep 2026 00:00:00 GMT"}, io.BytesIO(body))
+        self.network.side_effect = [api_response(), error]
+        self.assertEqual(self.run_cli("download", "--id", "17", "-f", str(self.output)), 1)
+        event = json.loads(self.stderr.getvalue().splitlines()[0])
+        self.assertEqual(event["stage"], "media_download")
+        self.assertEqual(event["service_error_code"], "1015")
+        self.assertFalse(event["api_rate_limit_message_detected"])
+        self.assertEqual(event["error_summary"], "服务返回四位错误码")
+        self.assertEqual(event["headers"]["Retry-After"], "2026-09-09T00:00:00+00:00")
+        self.assertNotIn(token, self.stderr.getvalue())
+        self.assertNotIn("private-page-data", self.stderr.getvalue())
+        self.assertFalse(self.output.exists())
+        self.assertEqual(self.network.call_count, 2)
+
+    def test_diagnostics_do_not_log_changed_or_encoded_user_data(self):
+        key, query = "secret+key/with?symbols", "private client"
+        value = urllib.parse.quote("https://private.example/api/?key=" + key) + " q=" + urllib.parse.quote_plus(query) + ' {"access_token":"other-hidden-token"} PRIVATE CLIENT private_client PRIVATE\\tCLIENT'
+        for body in (value, "<html><title>PRIVATE CLIENT</title><body>" + value + "</body></html>"):
+            with self.subTest(body_type=body[:5]):
+                self.stderr.seek(0)
+                self.stderr.truncate()
+                error = urllib.error.HTTPError("https://private.example/api/?key=" + key, 429, "error", {"Server": "PRIVATE CLIENT", "Content-Type": "private/client", "Retry-After": query}, io.BytesIO(body.encode()))
+                with redirect_stderr(self.stderr):
+                    pixabay.http_diagnostic("api_query", error, error.url, failed=True)
+                text = self.stderr.getvalue()
+                for secret in (key, query, query.upper(), "private_client", "PRIVATE\\tCLIENT", urllib.parse.quote_plus(query), "other-hidden-token", "https://", "private.example"):
+                    self.assertNotIn(secret, text)
+                event = json.loads(text)
+                self.assertEqual(event["host"], "[configured-host]")
+                self.assertEqual(event["headers"]["Server"], "other")
+                self.assertEqual(event["headers"]["Content-Type"], "other")
+                self.assertNotIn("Retry-After", event["headers"])
+
+    def test_unreadable_error_body_keeps_http_status(self):
+        class BrokenBody(io.BytesIO):
+            def read(self, *args): raise OSError("hidden-body-detail")
+        self.network.side_effect = urllib.error.HTTPError("https://pixabay.com/api/", 429, "error", {}, BrokenBody())
+        self.assertEqual(self.run_cli("search", "-q", "forest"), 1)
+        event = json.loads(self.stderr.getvalue().splitlines()[0])
+        self.assertEqual(event["status"], 429)
+        self.assertEqual(event["error_body_read_error"], "OSError")
+        self.assertNotIn("hidden-body-detail", self.stderr.getvalue())
+        self.network.assert_called_once()
 
     def test_empty_results_do_not_download_or_expand(self):
         self.network.return_value = response(b'{"hits":[]}')

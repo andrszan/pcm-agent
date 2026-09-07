@@ -8,15 +8,18 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import html
 import http.client
 import json
 import os
+import re
 import sys
 import tempfile
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -54,6 +57,8 @@ def parse_args(argv=None):
     download.add_argument("--media", choices=VARIANTS, default="image")
     download.add_argument("--variant", choices=("preview", "web", "large", "tiny", "small", "medium"))
     download.add_argument("-f", "--file", type=Path, required=True)
+    for command in (search, download):
+        command.add_argument("--diagnostics", action="store_true", help="将脱敏 HTTP 响应头及缓存状态写入 stderr，不增加请求")
     args = parser.parse_args(argv)
     if args.action == "search":
         args.query = args.query.strip()
@@ -68,6 +73,65 @@ def parse_args(argv=None):
         if args.variant not in VARIANTS[args.media]:
             parser.error("所选档位不适用于该媒体类型")
     return args
+
+
+def http_diagnostic(stage: str, response, request_url: str, failed: bool = False) -> None:
+    parsed = urllib.parse.urlsplit(request_url)
+    headers = response.headers or {}
+    selected = {}
+    for name in ("X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"):
+        value = headers.get(name, "")
+        if isinstance(value, str) and value.isdigit() and len(value) <= 12:
+            selected[name] = int(value)
+    for name in ("Date", "Retry-After"):
+        value = headers.get(name, "")
+        if not isinstance(value, str) or not value:
+            continue
+        if name == "Retry-After" and value.isdigit() and len(value) <= 12:
+            selected[name] = int(value)
+        else:
+            try:
+                selected[name] = parsedate_to_datetime(value).isoformat()
+            except (TypeError, ValueError, OverflowError):
+                pass
+    server = str(headers.get("Server", "")).lower().split("/", 1)[0]
+    if server:
+        selected["Server"] = server if server in {"cloudflare", "nginx", "apache", "envoy", "varnish", "amazons3"} else "other"
+    content_type = str(headers.get("Content-Type", "")).lower().split(";", 1)[0].strip()
+    if content_type:
+        selected["Content-Type"] = content_type if content_type in {"text/plain", "text/html", "application/json", "application/octet-stream", "image/jpeg", "image/png", "image/webp", "image/gif", "video/mp4"} else "other"
+    if headers.get("CF-Mitigated"):
+        selected["CF-Mitigated"] = "challenge" if headers["CF-Mitigated"] == "challenge" else "other"
+    event = {
+        "event": "pixabay_http", "stage": stage, "timestamp": int(time.time()),
+        "host": parsed.hostname if parsed.hostname in {"pixabay.com", "cdn.pixabay.com"} else "[configured-host]",
+        "status": getattr(response, "status", None) or getattr(response, "code", None), "headers": selected,
+    }
+    if failed:
+        try:
+            raw = response.read(4097)
+            event["error_body_truncated"] = len(raw) > 4096
+            body = html.unescape(raw[:4096].decode("utf-8", errors="replace"))
+            match = re.search(r"error\s+code\s*[:=]?\s*(\d{4})\b", body, re.I)
+            if match:
+                event["service_error_code"] = match.group(1)
+            event["api_rate_limit_message_detected"] = "api rate limit exceeded" in body.lower()
+            # 仅映射固定错误类别，不记录自由正文或标题，避免变形回显绕过脱敏。
+            if event["api_rate_limit_message_detected"]:
+                event["error_summary"] = "API rate limit exceeded"
+            elif match:
+                event["error_summary"] = "服务返回四位错误码"
+            elif "too many requests" in body.lower() or "rate limit" in body.lower():
+                event["error_summary"] = "服务返回限流提示"
+            elif "invalid api key" in body.lower():
+                event["error_summary"] = "服务提示 API key 无效"
+            elif "access denied" in body.lower() or "forbidden" in body.lower():
+                event["error_summary"] = "服务返回访问拒绝提示"
+            else:
+                event["error_summary"] = "未识别的服务错误说明，正文未记录"
+        except (OSError, ValueError, http.client.HTTPException) as error:
+            event["error_body_read_error"] = type(error).__name__
+    print(json.dumps(event, ensure_ascii=False), file=sys.stderr)
 
 
 def normalize(hit: dict, media: str) -> dict:
@@ -101,7 +165,7 @@ def normalize(hit: dict, media: str) -> dict:
     return item
 
 
-def api_results(base: str, key: str, media: str, params: dict) -> tuple[list[dict], bool]:
+def api_results(base: str, key: str, media: str, params: dict, diagnostics: bool = False) -> tuple[list[dict], bool]:
     endpoint = base.rstrip("/") + ("/videos/" if media == "video" else "/")
     identity = json.dumps([endpoint, key, params], sort_keys=True).encode()
     cache = CACHE_DIR / (hashlib.sha256(identity).hexdigest() + ".json")
@@ -111,13 +175,18 @@ def api_results(base: str, key: str, media: str, params: dict) -> tuple[list[dic
         if 0 <= now - cached["created_at"] < CACHE_SECONDS:
             if key in json.dumps(cached["items"]):
                 raise MediaError("缓存包含凭据，拒绝输出")
+            if diagnostics:
+                print(json.dumps({"event": "pixabay_cache", "stage": "api_query", "cache_hit": True, "age_seconds": int(now - cached["created_at"]), "network_request": False}), file=sys.stderr)
             return cached["items"], True
     url = endpoint + "?" + urllib.parse.urlencode({**params, "key": key, "safesearch": "true"})
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
+            if diagnostics:
+                http_diagnostic("api_query", response, url)
             raw = response.read(2 * 1024 * 1024 + 1)
     except urllib.error.HTTPError as error:
+        http_diagnostic("api_query", error, url, failed=True)
         raise MediaError(f"查询接口返回 HTTP {error.code}；未自动重试") from None
     if len(raw) > 2 * 1024 * 1024:
         raise MediaError("API 响应超出有限候选的大小范围")
@@ -166,13 +235,15 @@ def download_file(args, base: str, key: str) -> dict:
         output.parent.mkdir(parents=True, exist_ok=True)
         with output.open("xb") as stream:
             claimed = os.fstat(stream.fileno())
-            items, _ = api_results(base, key, args.media, {"id": args.id, "per_page": 3})
+            items, _ = api_results(base, key, args.media, {"id": args.id, "per_page": 3}, args.diagnostics)
             item = next((item for item in items if item["id"] == args.id), None)
             if item is None or args.variant not in item["variants"]:
                 raise MediaError("指定资源或档位不可用，不自动替换")
             url = http_url(item["variants"][args.variant]["url"])
             request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
             with urllib.request.urlopen(request, timeout=60) as response:
+                if args.diagnostics:
+                    http_diagnostic("media_download", response, url)
                 first = response.read(64)
                 mime = sniff_mime(first)
                 if not mime.startswith(args.media + "/") or output.suffix.lower() not in EXTENSIONS[mime]:
@@ -213,12 +284,13 @@ def main(argv=None) -> int:
             params = {"q": args.query, "per_page": args.limit}
             if args.media == "image":
                 params.update(image_type=args.image_type, orientation=args.orientation)
-            items, cached = api_results(base, key, args.media, params)
+            items, cached = api_results(base, key, args.media, params, args.diagnostics)
             candidates = [{**{k: v for k, v in item.items() if k != "variants"}, "variants": {name: {k: v for k, v in variant.items() if k != "url"} for name, variant in item["variants"].items()}} for item in items]
             result = {"provider": "pixabay", "media": args.media, "cached": cached, "count": len(candidates), "candidates": candidates}
         else:
             result = download_file(args, base, key)
     except urllib.error.HTTPError as error:
+        http_diagnostic("media_download", error, error.url, failed=True)
         print(f"Pixabay 文件下载失败：HTTP {error.code}；未自动重试", file=sys.stderr)
         return 1
     except urllib.error.URLError as error:

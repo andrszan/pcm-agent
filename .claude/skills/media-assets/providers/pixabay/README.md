@@ -52,6 +52,7 @@ uv run --no-project .claude/skills/media-assets/scripts/pixabay.py download \
 | `download --id` | 必填，已选资源的正整数 ID |
 | `download --variant` | 图片可选 `preview`、`web`、`large`，默认 `large`；视频可选 `tiny`、`small`、`medium`、`large`，默认 `medium` |
 | `download -f` | 必填，明确的新文件路径，不覆盖已有文件 |
+| `--diagnostics` | 两个子命令均可用，额外把成功 HTTP 响应的白名单头和缓存命中信息写入 stderr；不改变查询、缓存或重试行为 |
 
 所有 API 请求固定启用 `safesearch=true`。图片档位不存在或视频所选档位不可用时报告缺口，不静默降级。图片支持 JPEG、PNG、WebP、GIF，视频支持常见 MP4；扩展名须与实际签名一致，不自动改格式。单文件下载上限为 128 MiB，适用于少量开发图片和短视频，不提供批量或大媒体搬运能力。
 
@@ -73,7 +74,22 @@ Pixabay 官方默认允许**每个 API key 每 60 秒最多 100 次 API 请求**
 - 官方文档给出的 API 配额超限错误说明是 `API rate limit exceeded`。判断具体原因需要结合失败位置、响应头和服务错误说明；没有这些证据时明确记录原因未确认，不猜测为某个固定的下载端限制或 IP 策略。
 - 收到 429 时停止当前调用；若取得 `Retry-After`，遵循其等待要求，API 查询也可参考对应的 `X-RateLimit-Reset`。没有可用恢复信息时报告缺口，不凭 API 的 60 秒窗口推断媒体下载的恢复时间，不自动重试、换 key、代理、来源或档位绕过。
 
-当前脚本只输出脱敏的查询／下载错误位置与 HTTP 状态，没有记录配额头、`Retry-After` 或原始错误正文，因此仅凭现有历史日志不能精确追溯一次 429 的触发条件。不要为探测配额而绕过 24 小时查询缓存或连续重发失败请求。
+## 脱敏 HTTP 诊断
+
+HTTP 失败默认在 stderr 输出 `pixabay_http` JSON 诊断行，并保留原有文字错误提示。需要观察正常调用时，加 `--diagnostics`，例如：
+
+```bash
+uv run --no-project .claude/skills/media-assets/scripts/pixabay.py search \
+  -q "明确查询词" --diagnostics
+```
+
+- `stage` 区分 `api_query` 与 `media_download`，并记录时间、状态和公开 Pixabay 主机类别；不记录完整 URL、查询参数或签名路径，其它主机统一隐藏。
+- 响应头只保留数值型的三个 `X-RateLimit-*` 指标、格式有效的 `Retry-After`／`Date`，以及白名单化的 `Server`、`Content-Type`、`CF-Mitigated` 分类；不记录 Cookie、认证信息或任意其它响应头。
+- 错误正文只分析前 4 KiB，只提取四位服务错误码和预定义错误类别。`api_rate_limit_message_detected` 表示是否观察到官方 API 配额错误说明，不独立证明触发原因；未匹配不等于未限流。任意原始正文、HTML 标题、查询词和个人信息均不写入日志，未知说明明确标为未识别，不强行猜测。
+- 命中缓存时，诊断行是 `pixabay_cache`，说明此次没有 API 网络请求；不会伪造最新配额信息。诊断开关不绕过缓存、不增加探测请求，也不启用自动重试。
+- stdout 仍保持原有结果 JSON。stderr 同时含 JSON 诊断行及文字错误提示，机器读取时只解析 JSON 行；日志保存在工作区授权的私有位置，不纳入产品或 Git。
+
+应从正常未缓存请求的响应头了解当前 API 配额，而不是清缓存或变更参数制造重复请求。未取得服务提供方明确授权时，不对其进行压力测试；这与正常的限额内素材请求不同。历史请求没有保留这些诊断时，不能事后精确追溯；一次复查恢复 200，也不能证明原 429 的触发规则或真实速率上限。
 
 ## 配置与缓存
 
