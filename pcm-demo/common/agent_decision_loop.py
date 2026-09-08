@@ -16,12 +16,12 @@ from common.claude_agent import (
     is_retryable_claude_sdk_error,
     run_claude,
 )
-from common.decision import AgentDecision, count_decisions, parse_agent_decision, request_decision
+from common.decision import AgentDecision, DecisionMessage, count_decisions, parse_agent_decision, request_decision
 from common.error_diagnostics import exception_diagnostics, redact_text, write_diagnostic
 from common.files import write_json
 from common.openai_responses import ResponsesFailure
 from common.state import write_state
-from common.timing import run_timed_agent
+from common.timing import beijing_now, run_timed_agent
 from config import LLMConfig
 from model_policy import get_agent_profile
 
@@ -338,19 +338,23 @@ def _conversation_reference(
     return reference
 
 
+def conversation_message(role: str, content: str) -> dict[str, str]:
+    return {"role": role, "content": content, "timestamp": beijing_now()}
+
+
 def _validate_messages(messages: Any) -> list[dict[str, str]]:
     if not isinstance(messages, list) or not messages:
         raise RuntimeError("决策历史内容不符合约定")
     normalized: list[dict[str, str]] = []
     for message in messages:
-        if (
-            not isinstance(message, dict)
-            or set(message) != {"role", "content"}
-            or message.get("role") not in {"system", "assistant", "user"}
-            or not isinstance(message.get("content"), str)
-        ):
+        if not isinstance(message, dict):
             raise RuntimeError("决策历史消息不符合约定")
-        normalized.append({"role": message["role"], "content": message["content"]})
+        try:
+            DecisionMessage.model_validate(message)
+        except ValidationError as error:
+            raise RuntimeError("决策历史消息不符合约定") from error
+        # 验证后复制原字段；旧消息不补时间，新时间不在加载时刷新。
+        normalized.append(dict(message))
     if normalized[0]["role"] != "system":
         raise RuntimeError("决策历史首条消息必须是 system")
     return normalized
@@ -362,7 +366,7 @@ def _load_conversation(
     reference = _conversation_reference(state, spec)
     path = run_dir / conversation_path(spec)
     if reference is None and not path.exists():
-        return [{"role": "system", "content": spec.decision_system_prompt}]
+        return [conversation_message("system", spec.decision_system_prompt)]
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
@@ -668,19 +672,19 @@ def _append_pending_agent_text(
         _clear_pending_agent_text(run_dir, state, spec)
         return messages
     tail = messages[-1]
-    if tail == {"role": "user", "content": pending}:
+    if tail["role"] == "user" and tail["content"] == pending:
         _clear_pending_agent_text(run_dir, state, spec)
         return messages
     if tail["role"] == "assistant":
         if _decision_at(messages, -1) is None:
-            messages.append({"role": "user", "content": pending})
+            messages.append(conversation_message("user", pending))
             _save_conversation(run_dir, state, spec, messages)
         else:
-            if len(messages) >= 2 and messages[-2] == {"role": "user", "content": pending}:
+            if len(messages) >= 2 and messages[-2]["role"] == "user" and messages[-2]["content"] == pending:
                 # 结构化决定已消费该回复，只清理中断时遗留的恢复锚点。
                 _clear_pending_agent_text(run_dir, state, spec)
                 return messages
-            messages.append({"role": "user", "content": pending})
+            messages.append(conversation_message("user", pending))
             _save_conversation(run_dir, state, spec, messages)
     else:
         raise RuntimeError("待恢复 Agent 回复与决策历史尾部冲突")
@@ -872,7 +876,7 @@ async def _request_next_decision(
     if not isinstance(raw, str) or decision != raw_decision:
         _raise_decision_failure(run_dir, state, spec, {"kind": "response"})
 
-    messages.append({"role": "assistant", "content": raw})
+    messages.append(conversation_message("assistant", raw))
     try:
         _save_conversation(run_dir, state, spec, messages)
     except Exception as error:
@@ -943,7 +947,7 @@ async def run_agent_decision_loop(
             _resume_anchor(messages) or _tail_decision(messages) is not None
         ):
             _require_decision_capacity(messages, spec)
-            messages.append({"role": "assistant", "content": resume_message.content})
+            messages.append(conversation_message("assistant", resume_message.content))
             _save_conversation(run_dir, state, spec, messages)
             resume_message.consumed = True
             blocked_resume_pending = False
@@ -968,7 +972,7 @@ async def run_agent_decision_loop(
                     reason="已识别既有完成记录并通过核验",
                     required_inputs=[],
                 )
-            messages.append({"role": "assistant", "content": repair})
+            messages.append(conversation_message("assistant", repair))
             _save_conversation(run_dir, state, spec, messages)
             messages = await _run_agent(
                 run_dir, state, workspace, spec, repair, agent_runner
@@ -982,7 +986,7 @@ async def run_agent_decision_loop(
                 if not blocked_resume_pending:
                     return decision
                 blocked_resume_pending = False
-                messages.append({"role": "assistant", "content": BLOCKED_RESUME_PROMPT})
+                messages.append(conversation_message("assistant", BLOCKED_RESUME_PROMPT))
                 _save_conversation(run_dir, state, spec, messages)
                 messages = await _run_agent(
                     run_dir, state, workspace, spec, BLOCKED_RESUME_PROMPT, agent_runner
@@ -990,7 +994,7 @@ async def run_agent_decision_loop(
                 continue
             if decision.verdict == "completed":
                 if _last_agent_requires_normal_completion(state, spec):
-                    messages.append({"role": "assistant", "content": RECOVERABLE_RESULT_PROMPT})
+                    messages.append(conversation_message("assistant", RECOVERABLE_RESULT_PROMPT))
                     _save_conversation(run_dir, state, spec, messages)
                     messages = await _run_agent(
                         run_dir, state, workspace, spec, RECOVERABLE_RESULT_PROMPT, agent_runner
@@ -1001,7 +1005,7 @@ async def run_agent_decision_loop(
                     if targeted_resume:
                         raise RuntimeError("负责人消息未能投递到原 blocked 对话")
                     return decision
-                messages.append({"role": "assistant", "content": repair})
+                messages.append(conversation_message("assistant", repair))
                 _save_conversation(run_dir, state, spec, messages)
                 messages = await _run_agent(
                     run_dir, state, workspace, spec, repair, agent_runner
@@ -1025,7 +1029,7 @@ async def run_agent_decision_loop(
             continue
         if tail["role"] == "system":
             prompt = initial_prompt
-            messages.append({"role": "assistant", "content": prompt})
+            messages.append(conversation_message("assistant", prompt))
             _save_conversation(run_dir, state, spec, messages)
         else:
             prompt = tail["content"]

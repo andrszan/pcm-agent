@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from common.agent_decision_loop import AgentDecisionLoopSpec, ResumeMessage, run_agent_decision_loop
+from common.agent_decision_loop import AgentDecisionLoopSpec, ResumeMessage, conversation_message, run_agent_decision_loop
 from common.claude_agent import run_claude
 from common.decision import parse_agent_decision, render_decision_system_prompt, request_decision
 from common.files import write_json
@@ -248,9 +248,9 @@ def _record_recovered_completion(run_dir: Path, state: dict[str, Any]) -> None:
             if decision.verdict == "completed":
                 return
     messages.append(
-        {
-            "role": "assistant",
-            "content": json.dumps(
+        conversation_message(
+            "assistant",
+            json.dumps(
                 {
                     "verdict": "completed",
                     "answer": "",
@@ -260,7 +260,7 @@ def _record_recovered_completion(run_dir: Path, state: dict[str, Any]) -> None:
                 ensure_ascii=False,
                 separators=(",", ":"),
             ),
-        }
+        )
     )
     write_json(conversation_path, {"messages": messages})
     references = state.setdefault("decision_conversations", {})

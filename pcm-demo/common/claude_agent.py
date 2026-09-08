@@ -7,6 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, get_args
+from xml.sax.saxutils import escape
 
 from claude_agent_sdk import (
     AssistantMessage,
@@ -191,6 +192,27 @@ def _sdk_errors(value: Any, known_secrets: list[str]) -> list[str] | None:
     return [redact_text(item, known_secrets=known_secrets) for item in value if isinstance(item, str)] or None
 
 
+def _agent_reply(texts: list[str], result: ResultMessage | None) -> str:
+    if result is None or result.is_error or not result.result:
+        return "\n".join(texts)
+    final = result.result
+    notes = texts
+    # 只移除由完整可见文本块组成的相同尾部，不删早期相同文字或块内子串。
+    for index in range(len(texts) - 1, -1, -1):
+        if "\n".join(texts[index:]) == final:
+            notes = texts[:index]
+            break
+    process = "\n".join(notes)
+    if not process:
+        return final
+    return (
+        "以下是本次调用的主 Agent 可见回复。过程说明用于补充依据，最终回复用于判断当前状态；"
+        "已被最终回复解决或替代的阶段性事项不是当前缺口。分区正文已作 XML 转义。\n"
+        f"<Agent回复><过程说明>{escape(process)}</过程说明>"
+        f"<最终回复>{escape(final)}</最终回复></Agent回复>"
+    )
+
+
 async def run_claude(
     prompt: str,
     *,
@@ -211,6 +233,7 @@ async def run_claude(
     init: dict[str, Any] | None = None
     result: ResultMessage | None = None
     texts: list[str] = []
+    reply_text: str | None = None
     exception: str | None = None
     exception_type: str | None = None
     exception_details: dict[str, Any] | None = None
@@ -245,7 +268,7 @@ async def run_claude(
             raise _QueryRaisedTimeout(str(error)) from error
 
     async def consume_messages() -> None:
-        nonlocal init, result
+        nonlocal init, result, reply_text
         async for message in guarded_messages():
             if isinstance(message, SystemMessage) and message.subtype == "init":
                 init = {
@@ -277,17 +300,18 @@ async def run_claude(
                             exception=None,
                         )
                     )
-            elif isinstance(message, AssistantMessage):
+            elif isinstance(message, AssistantMessage) and message.parent_tool_use_id is None:
                 texts.extend(
                     block.text for block in message.content if isinstance(block, TextBlock)
                 )
             elif isinstance(message, ResultMessage):
                 result = message
+                reply_text = _agent_reply(texts, result)
                 if on_update:
                     on_update(
                         ClaudeRunResult(
                             init=init,
-                            text=result.result or "\n".join(texts),
+                            text=reply_text,
                             result_subtype=result.subtype,
                             is_error=result.is_error,
                             session_id=result.session_id,
@@ -362,7 +386,7 @@ async def run_claude(
         exception_type = "ModelMismatchError"
     final_api_error_status = (_api_error_status(result) if result else None) or api_error_status
     final_terminal_reason = result.terminal_reason if result else None
-    final_text = result.result if result and not result.is_error and result.result else "\n".join(texts)
+    final_text = reply_text if reply_text is not None else _agent_reply(texts, result)
     return ClaudeRunResult(
         init=init,
         text=final_text,

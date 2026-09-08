@@ -324,7 +324,7 @@ class ProjectReadinessTests(unittest.TestCase):
             )
 
             self.assertEqual(outcome["outputs"], [CHECKLIST.as_posix()])
-            self.assertEqual(decision_inputs[0][-1], {"role": "user", "content": "完整 Agent 原文"})
+            self.assertEqual(decision_inputs[0][-1], {"role": "user", "content": "完整 Agent 原文", "timestamp": decision_inputs[0][-1]["timestamp"]})
             saved = read_state(run_dir)
             self.assertEqual((saved["current_step"], saved["current_node"]), (6, NEXT_NODE))
             saved_result = json.loads((run_dir / "steps/05.json").read_text())
@@ -341,7 +341,7 @@ class ProjectReadinessTests(unittest.TestCase):
             history = json.loads(
                 (run_dir / "conversations/project_readiness.json").read_text(encoding="utf-8")
             )["messages"]
-            self.assertEqual(history[2], {"role": "user", "content": "完整 Agent 原文"})
+            self.assertEqual(history[2], decision_inputs[0][-1])
             self.assertEqual(json.loads(history[3]["content"])["verdict"], "completed")
             self.assertNotIn("已完成 project-readiness", history[3]["content"])
 
@@ -391,7 +391,7 @@ class ProjectReadinessTests(unittest.TestCase):
             self.assertIn("清单只描述最终选定绑定", str(calls[1]["prompt"]))
             self.assertIn("不得提及或比较未采用候选", str(calls[1]["prompt"]))
             self.assertIn("共享管理或根凭据、生产身份", str(calls[1]["prompt"]))
-            self.assertEqual(decision_inputs[0][-1], {"role": "user", "content": "Agent 原文 1"})
+            self.assertEqual(decision_inputs[0][-1], {"role": "user", "content": "Agent 原文 1", "timestamp": decision_inputs[0][-1]["timestamp"]})
             self.assertNotIn("pending_agent_prompt", read_state(run_dir)["project_readiness"])
 
     def test_blocked_decision_maps_to_existing_exception(self) -> None:

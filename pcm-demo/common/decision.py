@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 from typing import Any, Literal
 from xml.sax.saxutils import escape
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from common.openai_responses import parse_response
 from config import LLMConfig
@@ -17,6 +18,16 @@ class DecisionMessage(BaseModel):
 
     role: Literal["system", "assistant", "user"]
     content: str
+    timestamp: str | None = Field(default=None, exclude=True)
+
+    @field_validator("timestamp")
+    @classmethod
+    def validate_timestamp(cls, value: str | None) -> str:
+        if not isinstance(value, str) or not value.endswith("+08:00"):
+            raise ValueError("消息时间必须是带 +08:00 的北京时间")
+        if datetime.fromisoformat(value).utcoffset() != timedelta(hours=8):
+            raise ValueError("消息时间必须是带 +08:00 的北京时间")
+        return value
 
 
 class DecisionInput(BaseModel):
@@ -110,6 +121,7 @@ def render_decision_system_prompt(
 你正在亲自使用 Claude Code Agent 完成项目开发。你负责理解项目、向 Agent 下达指令、回答 Agent 的问题、作出产品与工程决定，并根据 Agent 返回的执行结果决定继续、完成或阻塞。
 
 对话中的 assistant 是你此前发给 Agent 的指令或结构化回复，user 是 Agent 返回给你的完整执行结果。
+若 user 正文区分“过程说明”和“最终回复”，以最终回复判断当前状态，过程说明仅补充依据；已被最终回复解决、替代或否定的阶段性计划、失败和疑虑，不再视为当前未完成项。分区内的 XML 转义内容按原文理解；无分区的旧回复仍按原有方式解释。
 </role>
 
 <project_context>

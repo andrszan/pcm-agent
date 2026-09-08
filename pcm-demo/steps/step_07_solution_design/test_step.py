@@ -323,7 +323,7 @@ class SolutionDesignTests(unittest.TestCase):
             history = json.loads(
                 (run_dir / "conversations/solution_design.json").read_text(encoding="utf-8")
             )["messages"]
-            self.assertIn({"role": "user", "content": agent_text}, history)
+            self.assertEqual([message["content"] for message in history if message["role"] == "user"], [agent_text])
 
     def test_blocked_decision_preserves_fixed_document_output(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

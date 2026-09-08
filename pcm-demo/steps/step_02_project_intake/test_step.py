@@ -208,7 +208,7 @@ class ProjectIntakeTests(unittest.TestCase):
             self.assertTrue(str(calls[0]["prompt"]).startswith("/project-intake"))
             self.assertEqual(calls[1]["resume_session_id"], "session-1")
             self.assertIn("请生成或补全两份非空正式产品定义文档", str(calls[1]["prompt"]))
-            self.assertEqual(decision_inputs[0][-1], {"role": "user", "content": "完整 Agent 原文 1"})
+            self.assertEqual(decision_inputs[0][-1], {"role": "user", "content": "完整 Agent 原文 1", "timestamp": decision_inputs[0][-1]["timestamp"]})
             saved = read_state(run_dir)
             self.assertEqual(
                 (
@@ -223,10 +223,10 @@ class ProjectIntakeTests(unittest.TestCase):
             history = json.loads(
                 (run_dir / "conversations/project_intake.json").read_text(encoding="utf-8")
             )["messages"]
-            self.assertEqual(history[2], {"role": "user", "content": "完整 Agent 原文 1"})
+            self.assertEqual(history[2], decision_inputs[0][-1])
             self.assertEqual(json.loads(history[3]["content"])["verdict"], "completed")
             self.assertIn("请生成或补全两份非空正式产品定义文档", history[4]["content"])
-            self.assertEqual(history[-2], {"role": "user", "content": "完整 Agent 原文 2"})
+            self.assertEqual(history[-2], {"role": "user", "content": "完整 Agent 原文 2", "timestamp": history[-2]["timestamp"]})
             self.assertEqual(json.loads(history[-1]["content"])["verdict"], "completed")
 
     def test_blocked_decision_maps_to_existing_exception(self) -> None:

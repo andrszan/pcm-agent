@@ -91,6 +91,10 @@ def decision(
 
 class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
+        self.timestamp = "2026-09-08T20:15:30.123456+08:00"
+        clock = patch("common.agent_decision_loop.beijing_now", return_value=self.timestamp)
+        clock.start()
+        self.addCleanup(clock.stop)
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.run_dir = Path(self.temporary_directory.name) / "run"
         self.workspace = Path(self.temporary_directory.name) / "workspace"
@@ -287,12 +291,13 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
             [(call[1]["task"], call[1]["model"], call[1]["effort"]) for call in agent.calls],
             [(self.spec.task, profile.model, profile.effort)] * 2,
         )
-        self.assertEqual(decisions.calls[0][0][-1], {"role": "user", "content": original})
+        self.assertEqual(decisions.calls[0][0][-1], {"role": "user", "content": original, "timestamp": self.timestamp})
         messages = json.loads(
             (self.run_dir / "conversations" / f"{self.spec.key}.json").read_text(encoding="utf-8")
         )["messages"]
+        self.assertTrue(all(message.get("timestamp") == self.timestamp for message in messages))
         self.assertEqual(
-            messages,
+            [{key: value for key, value in message.items() if key != "timestamp"} for message in messages],
             [
                 {"role": "system", "content": self.spec.decision_system_prompt},
                 {"role": "assistant", "content": "初始 Agent 提示"},
@@ -337,7 +342,7 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(outcome.verdict, "completed")
         self.assertEqual(agent.calls, [])
-        self.assertEqual(decisions.calls[0][0][-1], {"role": "user", "content": original})
+        self.assertEqual(decisions.calls[0][0][-1], {"role": "user", "content": original, "timestamp": self.timestamp})
         self.assertNotIn("pending_agent_text", self.state[self.spec.state_key])
 
     async def test_configuration_failure_persists_safe_diagnostic(self) -> None:
@@ -535,7 +540,7 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
         first_completed_index = next(
             index for index, message in enumerate(messages) if message["content"] == completed.model_dump_json()
         )
-        self.assertEqual(messages[first_completed_index + 1], {"role": "assistant", "content": "请修复遗漏的文件。"})
+        self.assertEqual(messages[first_completed_index + 1], {"role": "assistant", "content": "请修复遗漏的文件。", "timestamp": self.timestamp})
 
     async def test_completion_verifier_exception_fails_without_rewriting_completed_decision(self) -> None:
         completed = decision("completed", reason="已完成")
@@ -624,7 +629,7 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
                     encoding="utf-8"
                 )
             )["messages"]
-            self.assertEqual(messages[-1], {"role": "assistant", "content": original})
+            self.assertEqual(messages[-1], {"role": "assistant", "content": original, "timestamp": self.timestamp})
             self.assertTrue(resume_message.consumed)
             return self.result("按负责人决定完成")
 
@@ -815,7 +820,7 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(outcome.verdict, "completed")
         self.assertEqual(
             decisions.calls[0][0][-1],
-            {"role": "user", "content": "泛化恢复后的 Agent 回复"},
+            {"role": "user", "content": "泛化恢复后的 Agent 回复", "timestamp": self.timestamp},
         )
         self.assertEqual([call[0] for call in agent.calls], ["新的人工决定"])
 
@@ -859,7 +864,7 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
             )
         )["messages"]
         self.assertIn(
-            {"role": "assistant", "content": continue_decision.model_dump_json()},
+            {"role": "assistant", "content": continue_decision.model_dump_json(), "timestamp": self.timestamp},
             messages,
         )
 
@@ -898,8 +903,8 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
         )["messages"]
         self.assertEqual(outcome.verdict, "completed")
         self.assertEqual(
-            [message for message in messages if message == {"role": "assistant", "content": "只追加一次"}],
-            [{"role": "assistant", "content": "只追加一次"}],
+            [message for message in messages if message["role"] == "assistant" and message["content"] == "只追加一次"],
+            [{"role": "assistant", "content": "只追加一次", "timestamp": self.timestamp}],
         )
 
     async def test_ordinary_resume_replays_already_saved_manual_text(self) -> None:

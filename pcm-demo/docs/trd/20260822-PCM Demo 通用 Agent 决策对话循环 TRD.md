@@ -178,6 +178,10 @@ exception_type
 
 Agent 回复 `text` 与 SDK/API 异常分开处理：前者完整保存，后者只持久化安全分类。
 
+正常结果的 `text` 保留单次 `query()` 调用内主 Agent 的全部可见 `TextBlock` 和最终 `ResultMessage.result`，不包含 thinking、工具调用/结果、带 `parent_tool_use_id` 的子 Agent 消息或此前 session 历史。有过程文字时，在简短解释后用 `<Agent回复><过程说明>…</过程说明><最终回复>…</最终回复></Agent回复>` 分区，正文 XML 转义以保留原意并避免标签混淆；过程用于补充依据，最终回复用于判断当前状态，已被最终回复解决、替代或否定的阶段性事项不再作为当前缺口。新 system prompt 同样说明该优先级；已有冻结 system 不改写，分区自身的解释支持旧会话恢复。
+
+仅在最终结果与连续完整尾部文本块按换行拼接后完全相同时移除该尾部重复，不做全局去重、子串裁剪、语义筛选、摘要或截断。没有过程文字时保持原最终纯文本；缺少正常最终结果时保留既有收集文本回退与错误判定，不把过程标作成功最终回复。Result 回调先组装一次，最终返回复用同一正文，保证 pending 落盘与恢复不丢失过程依据、不重复包装。
+
 ## 5. 完整决策流程
 
 ```mermaid
@@ -256,7 +260,15 @@ runs/<run-id>/conversations/<key>.json
 
 - `system`：新 conversation 保存的动态 system snapshot；恢复时严格读取历史 `messages[0]`，不重渲染或覆盖；
 - `assistant`：实际使用 Claude Code Agent 的项目负责人、工程负责人和 Agent 专家发给 Agent 的初始、继续或修复指令，或该负责人每轮返回的 `AgentDecision` JSON；也包括真正的人通过 `--resume-message-file` 提交的负责人恢复指令，正文原样保存；
-- `user`：Claude Agent SDK 返回的完整真实 Agent 回复。
+- `user`：Claude Agent SDK 返回的完整真实 Agent 回复，按 §4 的过程说明/最终回复合同保存。
+
+今后新建的每条消息均带 `timestamp`，表示该条 conversation 消息创建时的北京时间（ISO 8601，显式 `+08:00`），不是 Agent 调用的开始时间：
+
+```json
+{"role":"user","content":"Agent 回复","timestamp":"2026-09-08T20:15:30.123456+08:00"}
+```
+
+该字段涵盖新 system、初始/继续/修复/人工指令、负责人决定和 Agent 回复，也涵盖确定性恢复追加的完成消息。时间在创建时记录；加载、保存、重放不刷新，pending 回复在首次加入 conversation 时记录。旧消息仍允许只有 `role/content`，不补时间、不补 null、不回填历史。读取接受这两种结构并校验新增时间，未知字段仍拒绝；去重和尾部状态判断只看原有角色与正文，不因 timestamp 重复追加。timestamp 仅供查看，不进入负责人模型的序列化输入，也不加入发送给 Agent 的指令正文。
 
 ```mermaid
 stateDiagram-v2
