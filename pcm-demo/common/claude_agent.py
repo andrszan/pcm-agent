@@ -206,10 +206,8 @@ def _agent_reply(texts: list[str], result: ResultMessage | None) -> str:
     if not process:
         return final
     return (
-        "以下是本次调用的主 Agent 可见回复。过程说明用于补充依据，最终回复用于判断当前状态；"
-        "已被最终回复解决或替代的阶段性事项不是当前缺口。分区正文已作 XML 转义。\n"
-        f"<Agent回复><过程说明>{escape(process)}</过程说明>"
-        f"<最终回复>{escape(final)}</最终回复></Agent回复>"
+        f"<过程说明>{escape(process)}</过程说明>"
+        f"<最终回复>{escape(final)}</最终回复>"
     )
 
 

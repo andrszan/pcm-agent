@@ -188,14 +188,7 @@ class DevelopmentTests(unittest.TestCase):
             self.assertNotIn("docs/backlog", decision_prompts[0])
             for content in (prompts[0], decision_prompts[0]):
                 self.assertNotIn("docs/design/工程架构设计.md", content)
-            for required in (
-                "Agent 最新回复没有明确自报未完成项、验证缺口或阻断时完成",
-                "不得因 Agent 未逐项复述证据而自行增加验收门槛",
-                "仅当 Agent 明确自报仍有未完成工作、失败项、验证缺口",
-                "不得扩大 Agent 已报告的范围",
-                "仅当 Agent 明确报告缺少当前环境无法取得的不可替代外部条件",
-            ):
-                self.assertIn(required, decision_prompts[0])
+            self.assertIn(development_step.DEVELOPMENT_DECISION_RULES, decision_prompts[0])
             for forbidden in (
                 "每个受影响交付单元",
                 "架构约束/模块归属→改动位置与依赖关系→diff/导入/调用证据→实际结果映射",
@@ -256,6 +249,29 @@ class DevelopmentTests(unittest.TestCase):
                 (completed["step"], completed["current_step"], completed["current_node"]),
                 (16, 16, NEXT_NODE),
             )
+
+    def test_nonblocking_observation_can_complete_without_another_agent_call(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory))
+            report = "功能和关键验证完成；真实数据库短窗口到期测试通过，长期现场观察尚未结束。"
+            calls = []
+
+            async def agent(*args, **kwargs):
+                calls.append(args)
+                return agent_result(workspace, text=report)
+
+            async def decide(messages, config, *, system_prompt):
+                self.assertEqual(messages[-1]["content"], report)
+                self.assertIn(development_step.DEVELOPMENT_DECISION_RULES, system_prompt)
+                return decision("completed", reason="已有关键证据，长期观察不阻断交付")
+
+            saved = self.run_step(
+                run_dir, state, agent_runner=agent, decision_runner=decide,
+                config_loader=lambda: object(),
+            )
+            self.assertEqual(saved["status"], "success")
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(read_state(run_dir)["current_step"], 16)
 
     def test_blocked_saves_session_and_keeps_current_anchor(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

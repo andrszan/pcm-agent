@@ -69,7 +69,7 @@ class AgentHandoffTest(unittest.IsolatedAsyncioTestCase):
         ])
         self.assertIsNone(result.exception)
         self.assertEqual(updates[-1].text, result.text)
-        payload = ElementTree.fromstring(result.text[result.text.index("<Agent回复>"):])
+        payload = ElementTree.fromstring(f"<reply>{result.text}</reply>")
         self.assertEqual(payload.findtext("过程说明"), "先前失败，等待修复\n完整依据 <最终回复> & 推荐")
         self.assertEqual(payload.findtext("最终回复"), "已修复，工作完成")
         self.assertNotIn("思考不能交接", result.text)
@@ -109,7 +109,7 @@ class AgentHandoffTest(unittest.IsolatedAsyncioTestCase):
                 if notes is None:
                     self.assertEqual(result.text, final)
                 else:
-                    payload = ElementTree.fromstring(result.text[result.text.index("<Agent回复>"):])
+                    payload = ElementTree.fromstring(f"<reply>{result.text}</reply>")
                     self.assertEqual(payload.findtext("过程说明"), notes)
                     self.assertEqual(payload.findtext("最终回复"), final)
 
