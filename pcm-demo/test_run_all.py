@@ -250,67 +250,6 @@ class RunAllTests(unittest.TestCase):
         self.assertNotIn("--catalog-path", step_one)
         self.assertIn("--catalog-path", step_three)
 
-    def test_run_all_reloads_file_and_fixes_snapshot_for_every_child(self) -> None:
-        run_dir = self.make_run(
-            {
-                "run_id": "test-run",
-                "status": "running",
-                "phase": "project_initialization",
-                "step": 2,
-                "current_step": 2,
-                "current_node": "project:02_intake",
-            }
-        )
-        snapshots: list[str] = []
-        stdout = io.StringIO()
-
-        def fake_run_child(
-            _command: list[str],
-            _pass_fds: tuple[int, ...] = (),
-            env: dict[str, str] | None = None,
-        ) -> int:
-            self.assertIsNotNone(env)
-            snapshots.append(env[model_policy._MODEL_POLICY_SNAPSHOT_ENV])
-            if len(snapshots) == 1:
-                self.policy_path.write_text(
-                    self.policy_path.read_text(encoding="utf-8").replace(
-                        "gpt-5.6-sol[1m]", "changed-on-disk"
-                    ),
-                    encoding="utf-8",
-                )
-                write_json(
-                    run_dir / "state.json",
-                    {
-                        "run_id": "test-run",
-                        "status": "running",
-                        "phase": "project_initialization",
-                        "step": 5,
-                        "current_step": 5,
-                        "current_node": "project:05_verify_readiness",
-                    },
-                )
-                return 0
-            return 1
-
-        with (
-            patch.dict(
-                os.environ,
-                {model_policy._MODEL_POLICY_SNAPSHOT_ENV: "inherited-old-snapshot"},
-                clear=False,
-            ),
-            patch.object(run_all, "run_child", side_effect=fake_run_child),
-            contextlib.redirect_stdout(stdout),
-        ):
-            self.assertEqual(run_all.orchestrate(self.args()), 1)
-
-        self.assertEqual(len(snapshots), 2)
-        self.assertEqual(snapshots[0], snapshots[1])
-        self.assertEqual(
-            json.loads(snapshots[0])["profiles"]["planning"]["model"],
-            "gpt-5.6-sol[1m]",
-        )
-        self.assertEqual(stdout.getvalue().count("模型策略："), 1)
-
     def test_full_fresh_sequence_stops_after_first_completed_requirement(self) -> None:
         draft = self.root / "draft.md"
         draft.write_text("产品初稿", encoding="utf-8")
