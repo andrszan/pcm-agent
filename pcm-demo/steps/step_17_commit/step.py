@@ -226,22 +226,70 @@ def _ref(path: Path, reference: str) -> str | None:
     return None if _git(path, "show-ref", "--verify", "--quiet", reference, allowed=(0, 1)).returncode else _git_read(path, "show-ref", "--verify", "--hash", reference)
 
 
+def _has_in_progress_operation(path: Path) -> bool:
+    for reference in ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"):
+        if _git(path, "rev-parse", "-q", "--verify", reference, allowed=(0, 1)).returncode == 0:
+            return True
+    for name in ("rebase-merge", "rebase-apply", "BISECT_START"):
+        progress = Path(_git_read(path, "rev-parse", "--git-path", name))
+        if not progress.is_absolute():
+            progress = path / progress
+        if progress.exists():
+            return True
+    return False
+
+
 def _facts(context: dict[str, Any]) -> list[dict[str, Any]]:
     facts = []
     for repository in context["repositories"]:
-        path = repository["path"]
-        _require(Path(_git_read(path, "rev-parse", "--show-toplevel")).resolve() == path.resolve(), "Git 仓库顶层目录与白名单路径不一致")
-        facts.append({"name": repository["name"], "branch": _git_read(path, "branch", "--show-current"), "head": _git_read(path, "rev-parse", "HEAD"), "main": _ref(path, "refs/heads/main"), "target": _ref(path, f"refs/heads/{context['branch']}"), "dirty": _git_read(path, "status", "--porcelain=v1", "--untracked-files=all") != ""})
+        name, path = repository["name"], repository["path"]
+        _require(
+            Path(_git_read(path, "rev-parse", "--show-toplevel")).resolve() == path.resolve(),
+            f"权威仓库 {name}: Git 顶层目录与白名单路径不一致",
+        )
+        _require(not _has_in_progress_operation(path), f"权威仓库 {name}: 存在未完成的 Git 操作")
+        facts.append({
+            "name": name,
+            "path": path,
+            "branch": _git_read(path, "branch", "--show-current"),
+            "head": _git_read(path, "rev-parse", "HEAD"),
+            "main": _ref(path, "refs/heads/main"),
+            "target": _ref(path, f"refs/heads/{context['branch']}"),
+            "dirty": _git_read(path, "status", "--porcelain=v1", "--untracked-files=all") != "",
+        })
     return facts
 
 
-def _verify_boundary(context: dict[str, Any], facts: list[dict[str, Any]], *, fresh: bool) -> None:
+def _verify_boundary(context: dict[str, Any], facts: list[dict[str, Any]]) -> None:
     for fact in facts:
-        base = context["bases"][fact["name"]]
+        name, path = fact["name"], fact["path"]
+        base = context["bases"][name]
+        _require(fact["branch"] == context["branch"], f"权威仓库 {name}: 当前分支不是统一需求分支")
         _require(
-            all(_is_sha(value) for value in (fact["head"], fact["main"], fact["target"])) and fact["branch"] == context["branch"]
-            and fact["main"] == base and fact["target"] == fact["head"] and (not fresh or fact["head"] == base),
-            "权威仓库 Git 边界不符合约定",
+            all(_is_sha(value) for value in (fact["head"], fact["main"], fact["target"])),
+            f"权威仓库 {name}: HEAD、main 或 target 引用不符合约定",
+        )
+        _require(fact["target"] == fact["head"], f"权威仓库 {name}: target 与 HEAD 不一致")
+        try:
+            base_before_main = _git(
+                path, "merge-base", "--is-ancestor", base, fact["main"], allowed=(0, 1)
+            ).returncode == 0
+            main_before_head = _git(
+                path, "merge-base", "--is-ancestor", fact["main"], fact["head"], allowed=(0, 1)
+            ).returncode == 0
+        except RuntimeError as error:
+            raise RuntimeError(f"权威仓库 {name}: 无法校验 base、main 与 HEAD 的祖先关系") from error
+        _require(base_before_main, f"权威仓库 {name}: base 不是 main 的祖先")
+        _require(main_before_head, f"权威仓库 {name}: main 不是 HEAD 的祖先")
+        current = {
+            "branch": _git_read(path, "branch", "--show-current"),
+            "head": _git_read(path, "rev-parse", "HEAD"),
+            "main": _ref(path, "refs/heads/main"),
+            "target": _ref(path, f"refs/heads/{context['branch']}"),
+        }
+        _require(
+            all(current[key] == fact[key] for key in current),
+            f"权威仓库 {name}: Git 引用在边界检查期间发生变化",
         )
 
 
@@ -251,7 +299,7 @@ def _repository_results(context: dict[str, Any], facts: list[dict[str, Any]]) ->
 
 def _completion_repair(context: dict[str, Any]) -> str | None:
     facts = _facts(context)
-    _verify_boundary(context, facts, fresh=False)
+    _verify_boundary(context, facts)
     return REPOSITORY_REPAIR_PROMPT if any(fact["dirty"] for fact in facts) else None
 
 
@@ -296,9 +344,13 @@ def _validate_success(saved: Any, context: dict[str, Any], *, advanced: bool) ->
 
 def _complete_facts(context: dict[str, Any], saved: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     facts = _facts(context)
-    _verify_boundary(context, facts, fresh=False)
-    _require(not any(fact["dirty"] for fact in facts), "白名单仓库仍有未提交变更")
-    _require(saved is None or _repository_results(context, facts) == saved["repositories"], "需求提交结果与当前 Git 事实不一致")
+    _verify_boundary(context, facts)
+    for index, fact in enumerate(facts):
+        _require(not fact["dirty"], f"权威仓库 {fact['name']}: 仍有未提交变更")
+        _require(
+            saved is None or _repository_results(context, [fact])[0] == saved["repositories"][index],
+            f"权威仓库 {fact['name']}: 需求提交结果与当前 Git 事实不一致",
+        )
     return facts
 
 
@@ -472,7 +524,7 @@ async def run(
 
     scene = _execution_scene(run_dir, state, context)
     facts = _facts(context)
-    _verify_boundary(context, facts, fresh=not scene)
+    _verify_boundary(context, facts)
     if not scene and not any(fact["dirty"] for fact in facts):
         return _fresh_success(run_dir, state, context, facts)
     _prepare_session(state, context)

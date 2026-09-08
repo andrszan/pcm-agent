@@ -477,7 +477,11 @@ Prompt 投递采用 at-least-once 语义。自动恢复指令使用幂等的“�
 | 9 `engineering-architecture` | 必须基于固定权威输入形成工程架构文档；文档 repair 后，仅在根仓存在且仅存在固定文档未提交变化时才在原 session 调用 `commit-changes` | 固定文档非空、非符号链接、tracked；全体权威仓库当前为自身 top-level / `main` / clean |
 | 10 `ui-ux-framework` | 仅第 8 步严格交接含 `frontend` 时适用；不适用路径按执行产物存在性拒绝并零副作用 | 适用时固定文档非空、非符号链接、tracked；全体权威仓库当前 clean；不适用时 `applicable:false`、空 outputs |
 | 11 `requirement-breakdown` | 基于严格第 2/5/7/8/9/10 交接形成固定 Backlog；只在唯一根仓文档未提交变化时调用 `commit-changes` | 固定 Backlog 非空、非符号链接、tracked；全体权威仓库当前为自身 top-level / `main` / clean |
-| 17 `commit-changes` | 在一个产品根 session 中提交当前需求的有序权威仓库白名单；负责人处理确认、意外、blocked和继续 | 各仓仍在统一需求分支，`main==base`、`HEAD==target`，工作树与暂存区 clean；记录 `tip_sha` |
+| 17 `commit-changes` | 在一个产品根 session 中提交当前需求的有序权威仓库白名单；负责人处理确认、意外、blocked和继续 | 各仓仍在统一需求分支，`base ≤ main ≤ HEAD == target`（祖先关系），无进行中的 Git 操作，工作树与暂存区 clean；记录实际 `tip_sha` |
+
+需求收尾保留创建需求时的 `base_sha`，不要求首次提交时 HEAD 仍等于 base，也不要求当前 main 永远停在 base。第 17 步首次、提交后和恢复均以捕获的 SHA 校验 `base ≤ main ≤ tip`；功能分支已有提交时可以继续提交，所有仓库干净时记录当前 tip，不制造空提交。已保存成功结果的恢复仍须与当前 tip 精确一致。
+
+第 18 步以当前 main 与第 17 步保存的 tip 检查同一祖先关系，已合并 no-op 也须保留有效原始历史。切换到 main 后重新核验引用与工作区；引用发生变化时停止，不沿用过期判断。执行 `git merge --ff-only <保存的 tip SHA>`，避免需求分支引用在检查后移动而合入未经记录的提交；合并后与清理恢复仍严格核验 main/HEAD 等于保存 tip。分叉、main 领先 tip、丢失原始 base 历史或错误分支均拒绝，不强制覆盖，也不通过改写 base 放行。多仓中途失败保留已完成事实，按原恢复协议续接，不承诺跨仓原子合并。
 
 第 6 步没有适用基础工程时，继续 `applicable: false` 无副作用跳过，两个 spec 都不调用；backend-only 只运行 `project_bootstrap`，frontend 路径在 bootstrap 完成后才运行独立 `tailwind_theme`，两个领域都完成前不写 success。第 6 步没有新增节点或公共多阶段 runner，theme blocked/failed 后重跑只实际恢复 theme。第 9 步始终 `applicable: true`，不存在简单项目跳过或不适用结果；第 10 步仍按第 8 步严格交接是否含 `frontend` 确定，未含时按执行产物存在性拒绝且零 Git、Agent、负责人决策、LLM 配置和文档副作用。第 11 步与第 9 步同样仅在固定 Backlog 造成唯一根仓未提交变化时调用 `commit-changes`。
 

@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 DEMO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(DEMO_ROOT))
@@ -16,6 +17,7 @@ from common.agent_decision_loop import BLOCKED_RESUME_PROMPT
 from common.claude_agent import ClaudeRunResult
 from common.state import read_state, write_requirement_step_result, write_state
 from model_policy import get_agent_profile
+import steps.step_17_commit.step as commit_step
 from steps.step_17_commit.step import (
     COMMIT_MAX_TURNS,
     CURRENT_NODE,
@@ -200,6 +202,123 @@ class RequirementCommitTests(unittest.TestCase):
         self.assertEqual(completed["current_node"], NEXT_NODE)
         self.assertNotIn("requirement_commit_BR-001", completed["claude_sessions"])
         self.assertFalse((run_dir / "conversations/requirement_commit_BR-001.json").exists())
+
+    def test_clean_head_ahead_of_base_skips_agent_and_records_tip(self) -> None:
+        run_dir, workspace, state, bases = self.make_run()
+        (workspace / "committed.txt").write_text("committed\n", encoding="utf-8")
+        tip = commit_all(workspace, "feat: already committed")
+
+        async def unexpected(*args: Any, **kwargs: Any) -> Any:
+            raise AssertionError("clean 且已有提交不应调用 Agent 或负责人")
+
+        saved = self.execute(
+            run_dir, state, agent_runner=unexpected, decision_runner=unexpected,
+            config_loader=lambda: object(),
+        )
+
+        self.assertNotEqual(tip, bases["root"])
+        self.assertEqual(saved["repositories"][0]["tip_sha"], tip)
+
+    def test_dirty_head_ahead_of_base_uses_normal_commit_path(self) -> None:
+        run_dir, workspace, state, _bases = self.make_run()
+        (workspace / "committed.txt").write_text("committed\n", encoding="utf-8")
+        commit_all(workspace, "feat: existing commit")
+        self.dirty(workspace, ["root"])
+        calls = 0
+
+        async def agent(prompt: str, **kwargs: Any) -> ClaudeRunResult:
+            nonlocal calls
+            calls += 1
+            self.commit_names(workspace, ["root"])
+            value = agent_result(kwargs["cwd"])
+            kwargs["on_update"](value)
+            return value
+
+        async def completed(messages, config, *, system_prompt):
+            return decision("completed")
+
+        saved = self.execute(
+            run_dir, state, agent_runner=agent, decision_runner=completed,
+            config_loader=lambda: object(),
+        )
+
+        self.assertEqual(calls, 1)
+        self.assertEqual(saved["repositories"][0]["tip_sha"], command("rev-parse", "HEAD", cwd=workspace))
+
+    def test_intermediate_main_is_allowed_when_it_is_in_tip_history(self) -> None:
+        run_dir, workspace, state, _bases = self.make_run()
+        (workspace / "shared.txt").write_text("shared\n", encoding="utf-8")
+        middle = commit_all(workspace, "feat: shared")
+        (workspace / "tip.txt").write_text("tip\n", encoding="utf-8")
+        tip = commit_all(workspace, "feat: tip")
+        command("branch", "-f", "main", middle, cwd=workspace)
+
+        saved = self.execute(run_dir, state)
+
+        self.assertEqual(saved["repositories"][0]["tip_sha"], tip)
+
+    def test_boundary_failures_name_repository_and_reason(self) -> None:
+        for case, reason in (
+            ("diverged", "main 不是 HEAD 的祖先"),
+            ("main_ahead", "main 不是 HEAD 的祖先"),
+            ("wrong_base", "base 不是 main 的祖先"),
+            ("wrong_branch", "当前分支"),
+            ("in_progress", "未完成的 Git 操作"),
+        ):
+            with self.subTest(case=case):
+                run_dir, workspace, state, _bases = self.make_run()
+                if case == "diverged":
+                    command("switch", "main", cwd=workspace)
+                    (workspace / "main.txt").write_text("main\n", encoding="utf-8")
+                    commit_all(workspace, "main diverges")
+                    command("switch", "req/br-001", cwd=workspace)
+                    (workspace / "tip.txt").write_text("tip\n", encoding="utf-8")
+                    commit_all(workspace, "requirement tip")
+                elif case == "main_ahead":
+                    (workspace / "tip.txt").write_text("tip\n", encoding="utf-8")
+                    tip = commit_all(workspace, "requirement tip")
+                    command("switch", "main", cwd=workspace)
+                    command("merge", "--ff-only", tip, cwd=workspace)
+                    (workspace / "later.txt").write_text("later\n", encoding="utf-8")
+                    commit_all(workspace, "main ahead")
+                    command("switch", "req/br-001", cwd=workspace)
+                elif case == "wrong_base":
+                    (workspace / "tip.txt").write_text("tip\n", encoding="utf-8")
+                    state["requirement_cycle"]["repositories"]["root"]["base_sha"] = commit_all(
+                        workspace, "requirement tip"
+                    )
+                elif case == "wrong_branch":
+                    command("switch", "main", cwd=workspace)
+                else:
+                    git_dir = Path(command("rev-parse", "--git-dir", cwd=workspace))
+                    if not git_dir.is_absolute():
+                        git_dir = workspace / git_dir
+                    (git_dir / "MERGE_HEAD").write_text("0" * 40 + "\n", encoding="ascii")
+
+                with self.assertRaisesRegex(RuntimeError, f"root.*{reason}"):
+                    self.execute(run_dir, state)
+
+    def test_reference_change_during_boundary_check_is_rejected(self) -> None:
+        run_dir, workspace, state, _bases = self.make_run()
+        (workspace / "tip.txt").write_text("tip\n", encoding="utf-8")
+        original_tip = commit_all(workspace, "requirement tip")
+        original_git = commit_step._git
+        changed = False
+
+        def racing_git(path: Path, *args: str, **kwargs: Any):
+            nonlocal changed
+            if not changed and args[:2] == ("merge-base", "--is-ancestor"):
+                changed = True
+                (workspace / "late.txt").write_text("late\n", encoding="utf-8")
+                commit_all(workspace, "late unrecorded tip")
+            return original_git(path, *args, **kwargs)
+
+        with patch("steps.step_17_commit.step._git", side_effect=racing_git):
+            with self.assertRaisesRegex(RuntimeError, "root.*检查期间发生变化"):
+                self.execute(run_dir, state)
+
+        self.assertNotEqual(command("rev-parse", "HEAD", cwd=workspace), original_tip)
+        self.assertFalse((run_dir / "steps/requirements/BR-001/17.json").exists())
 
     def test_dirty_completed_creates_full_conversation(self) -> None:
         run_dir, workspace, state, _bases = self.make_run(["web", "api"])
@@ -531,6 +650,19 @@ class RequirementCommitTests(unittest.TestCase):
                 run_dir, state, agent_runner=agent, decision_runner=completed,
                 config_loader=lambda: object(),
             )
+
+    def test_saved_success_recovery_requires_exact_saved_tip(self) -> None:
+        run_dir, workspace, state, bases = self.make_run()
+        (workspace / "tip.txt").write_text("tip\n", encoding="utf-8")
+        saved_tip = commit_all(workspace, "requirement tip")
+        write_requirement_step_result(
+            run_dir, "BR-001", STEP, self.success(bases, {"root": saved_tip})
+        )
+        (workspace / "later.txt").write_text("later\n", encoding="utf-8")
+        commit_all(workspace, "later unrecorded tip")
+
+        with self.assertRaisesRegex(RuntimeError, "需求提交结果与当前 Git 事实不一致"):
+            self.execute(run_dir, state)
 
     def test_result_recovery_and_advanced_compatibility(self) -> None:
         run_dir, workspace, state, bases = self.make_run()

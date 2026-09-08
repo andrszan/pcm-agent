@@ -360,17 +360,18 @@ def _has_in_progress_operation(path: Path) -> bool:
 
 
 def _facts(repository: dict[str, Any], branch: str) -> dict[str, Any]:
+    name = repository["name"]
     path = repository["path"]
     _require(
         isinstance(path, Path) and not path.is_symlink() and path.is_dir(),
-        "权威 Git 仓库路径不存在或是符号链接",
+        f"权威仓库 {name}: Git 路径不存在或是符号链接",
     )
     path = path.resolve()
     _require(
         Path(_git_read(path, "rev-parse", "--show-toplevel")).resolve() == path,
-        "Git 仓库顶层目录与白名单路径不一致",
+        f"权威仓库 {name}: Git 顶层目录与白名单路径不一致",
     )
-    _require(not _has_in_progress_operation(path), "Git 仓库存在未完成的合并、变基、拣选、还原或二分操作")
+    _require(not _has_in_progress_operation(path), f"权威仓库 {name}: 存在未完成的 Git 操作")
     status = _git_read(path, "status", "--porcelain=v1", "--untracked-files=all")
     facts = {
         "path": path,
@@ -385,9 +386,27 @@ def _facts(repository: dict[str, Any], branch: str) -> dict[str, Any]:
         _is_sha(facts["head"])
         and (facts["main"] is None or _is_sha(facts["main"]))
         and (facts["target"] is None or _is_sha(facts["target"])),
-        "Git 仓库引用不符合约定",
+        f"权威仓库 {name}: Git 引用不符合约定",
     )
     return facts
+
+
+def _verify_ancestry(context: dict[str, Any], name: str, facts: dict[str, Any]) -> None:
+    base, tip, main = context["bases"][name], context["tips"][name], facts["main"]
+    _require(main is not None, f"权威仓库 {name}: main 引用不存在")
+    try:
+        base_before_main = _git(
+            facts["path"], "merge-base", "--is-ancestor", base, main,
+            allowed_returncodes=(0, 1),
+        ).returncode == 0
+        main_before_tip = _git(
+            facts["path"], "merge-base", "--is-ancestor", main, tip,
+            allowed_returncodes=(0, 1),
+        ).returncode == 0
+    except RuntimeError as error:
+        raise RuntimeError(f"权威仓库 {name}: 无法校验 base、main 与 saved tip 的祖先关系") from error
+    _require(base_before_main, f"权威仓库 {name}: base 不是 main 的祖先")
+    _require(main_before_tip, f"权威仓库 {name}: main 不是 saved tip 的祖先")
 
 
 def _only_untracked(status: Any) -> bool:
@@ -400,12 +419,17 @@ def _merge_facts(context: dict[str, Any], repository: dict[str, Any]) -> dict[st
     name = repository["name"]
     facts = _facts(repository, context["branch"])
     _require(
-        facts["current"] in {"main", context["branch"]}
-        and facts["main"] is not None
-        and facts["target"] == context["tips"][name]
-        and facts["clean"],
-        "Git 仓库合并前状态不符合约定",
+        facts["current"] in {"main", context["branch"]},
+        f"权威仓库 {name}: 当前分支不是 main 或统一需求分支",
     )
+    _require(facts["main"] is not None, f"权威仓库 {name}: main 引用不存在")
+    _require(facts["target"] == context["tips"][name], f"权威仓库 {name}: target 与 saved tip 不一致")
+    _require(facts["clean"], f"权威仓库 {name}: 工作区或暂存区不干净")
+    if facts["current"] == "main":
+        _require(facts["head"] == facts["main"], f"权威仓库 {name}: main 与 HEAD 不一致")
+    else:
+        _require(facts["head"] == context["tips"][name], f"权威仓库 {name}: 需求分支 HEAD 与 saved tip 不一致")
+    _verify_ancestry(context, name, facts)
     return facts
 
 
@@ -419,34 +443,36 @@ def _mark_merged(run_dir: Path, state: dict[str, Any], context: dict[str, Any], 
 def _merge_repository(run_dir: Path, state: dict[str, Any], context: dict[str, Any], repository: dict[str, Any]) -> None:
     name = repository["name"]
     facts = _merge_facts(context, repository)
-    base = context["bases"][name]
     tip = context["tips"][name]
+    captured_main = facts["main"]
     merged = context["merged"][name]
 
-    if facts["main"] == tip:
+    if captured_main == tip:
         _mark_merged(run_dir, state, context, name)
         return
-    _require(facts["main"] == base, "Git 仓库 main 不在记录的基线或提交 tip")
-    _require(merged is False, "Git 仓库记录为已合并但 main 仍在基线")
+    _require(merged is False, f"权威仓库 {name}: 已记录合并但 main 尚未到达 saved tip")
     if facts["current"] != "main":
         _git_write(repository["path"], "switch", "main")
     facts = _facts(repository, context["branch"])
+    _require(facts["current"] == "main", f"权威仓库 {name}: switch 后未处于 main")
     _require(
-        facts["current"] == "main"
-        and facts["head"] == base
-        and facts["main"] == base
-        and facts["target"] == tip
-        and (facts["clean"] or _only_untracked(facts["status"])),
-        "Git 仓库 fast-forward 合并前状态不符合约定",
+        facts["head"] == captured_main and facts["main"] == captured_main,
+        f"权威仓库 {name}: switch 后 main 或 HEAD 不再等于 captured main",
     )
-    _git_write(repository["path"], "merge", "--ff-only", context["branch"])
+    _require(facts["target"] == tip, f"权威仓库 {name}: switch 后 target 与 saved tip 不一致")
+    _require(
+        facts["clean"] or _only_untracked(facts["status"]),
+        f"权威仓库 {name}: fast-forward 前工作区或暂存区不干净",
+    )
+    _verify_ancestry(context, name, facts)
+    _git_write(repository["path"], "merge", "--ff-only", tip)
     facts = _merge_facts(context, repository)
     _require(
         facts["current"] == "main"
         and facts["head"] == tip
         and facts["main"] == tip
         and facts["target"] == tip,
-        "Git 仓库 fast-forward 合并后状态不符合约定",
+        f"权威仓库 {name}: fast-forward 合并后未精确到达 saved tip",
     )
     _mark_merged(run_dir, state, context, name)
 
@@ -456,6 +482,7 @@ def _verify_all_merged(context: dict[str, Any]) -> None:
     for repository in context["repositories"]:
         name = repository["name"]
         facts = _facts(repository, context["branch"])
+        _verify_ancestry(context, name, facts)
         _require(
             facts["current"] in {"main", context["branch"]}
             and facts["head"] == context["tips"][name]
@@ -463,24 +490,28 @@ def _verify_all_merged(context: dict[str, Any]) -> None:
             and facts["target"] in {None, context["tips"][name]}
             and facts["clean"]
             and (facts["target"] is not None or facts["current"] == "main"),
-            "并非全部权威仓库均已完成 fast-forward 合并",
+            f"权威仓库 {name}: 未精确完成到 saved tip 的 fast-forward 合并",
         )
 
 
 def _cleanup_facts(context: dict[str, Any], repository: dict[str, Any]) -> dict[str, Any]:
     name = repository["name"]
     facts = _facts(repository, context["branch"])
+    _verify_ancestry(context, name, facts)
     _require(
         facts["current"] in {"main", context["branch"]}
         and facts["main"] == context["tips"][name]
         and facts["clean"]
         and facts["target"] in {None, context["tips"][name]},
-        "Git 仓库分支清理前状态不符合约定",
+        f"权威仓库 {name}: 分支清理前未精确处于 saved tip",
     )
     if facts["target"] is None:
-        _require(facts["current"] == "main" and facts["head"] == facts["main"], "Git 仓库分支清理恢复状态不符合约定")
+        _require(
+            facts["current"] == "main" and facts["head"] == facts["main"],
+            f"权威仓库 {name}: 分支清理恢复状态不符合约定",
+        )
     else:
-        _require(facts["head"] == context["tips"][name], "Git 仓库分支清理前 HEAD 不符合约定")
+        _require(facts["head"] == context["tips"][name], f"权威仓库 {name}: 分支清理前 HEAD 不是 saved tip")
     return facts
 
 
@@ -495,7 +526,7 @@ def _cleanup_repository(context: dict[str, Any], repository: dict[str, Any]) -> 
             facts["current"] == "main"
             and facts["head"] == context["tips"][name]
             and facts["target"] == context["tips"][name],
-            "Git 仓库删除需求分支前状态不符合约定",
+            f"权威仓库 {name}: 删除需求分支前状态不符合约定",
         )
         _git_write(repository["path"], "branch", "-d", context["branch"])
     _final_facts(context, repository)
@@ -504,13 +535,14 @@ def _cleanup_repository(context: dict[str, Any], repository: dict[str, Any]) -> 
 def _final_facts(context: dict[str, Any], repository: dict[str, Any]) -> None:
     name = repository["name"]
     facts = _facts(repository, context["branch"])
+    _verify_ancestry(context, name, facts)
     _require(
         facts["current"] == "main"
         and facts["head"] == context["tips"][name]
         and facts["main"] == context["tips"][name]
         and facts["target"] is None
         and facts["clean"],
-        "Git 仓库最终合并状态不符合约定",
+        f"权威仓库 {name}: 最终状态未精确处于 saved tip",
     )
 
 

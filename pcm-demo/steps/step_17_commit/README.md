@@ -27,9 +27,9 @@ Python只检查：
 
 - 仓库路径不是符号链接，且是该仓自身 Git top-level；
 - 当前分支是统一需求分支；
-- local `main == base_sha`；
-- `HEAD` 等于需求分支 ref；
-- fresh 时 `HEAD == base_sha`；
+- 对捕获的 SHA 校验 `base_sha ≤ local main ≤ HEAD`，其中 `≤` 表示祖先或相等；
+- `HEAD` 等于需求分支 ref；首次也允许已有提交，不要求 HEAD 仍等于 base；
+- 不存在进行中的 merge、rebase、cherry-pick、revert 或 bisect；边界检查后复读引用，变化时停止；
 - clean 使用 `git status --porcelain=v1 --untracked-files=all`。
 
 ## Agent 决策循环
@@ -74,7 +74,7 @@ system
 
 - 边界正确且全部 clean：成功；
 - 只有未提交内容：向同一 session 发送固定 repair prompt；
-- 分支、main/base、target/HEAD 或 top-level 冲突：failed 并保留现场。
+- 分支、祖先关系、target/HEAD 或 top-level 冲突：failed 并保留现场。
 
 blocked 会写 scoped `17.json` 和 state；条件解除后，公共循环从同一 conversation 和同一 session 恢复。
 
@@ -88,7 +88,7 @@ blocked 会写 scoped `17.json` 和 state；条件解除后，公共循环从同
 
 任一锚点缺失或 session ID 不一致都拒绝恢复，不能静默创建替代 session 或补造历史。
 
-fresh 全仓 clean 时零 Agent、零负责人决策、零 conversation，直接记录 `tip_sha = base_sha`。
+fresh 全仓 clean 时零 Agent、零负责人决策、零 conversation，直接记录当前 HEAD 为 `tip_sha`；可以等于 base，也可以是已包含当前 main 的后续提交，原始 `base_sha` 保持不变。
 
 ## 完成与交接
 
