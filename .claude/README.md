@@ -44,9 +44,7 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 
 ### 开发账号与凭据边界
 
-- PCM 或 Agent 为目标产品创建或调整、最终保留在交付开发数据中且交付后仍可登录的所有开发账号及密码，都是受版本控制的产品交付信息，包括普通用户、业务角色、产品管理员和产品超级管理员。真实开发账号应项目专用、不冒用真实个人身份、在开发数据中真实存在且可登录；真实开发数据不等于真实个人或生产数据。不得将这些账号称为演示账号、体验账号或假账号，也不得附加演示租户、隔离业务数据、生产禁用 Seed 等部署阶段限制。
-- 项目约定的受跟踪 README 或独立账号文档必须记录适用开发环境、登录入口、角色、账号、密码、Seed/reset 方式及必要已有开发数据说明。账号创建、修改或删除时同步文档；开发完成前逐个核验账号真实存在、密码可登录、角色一致和已有开发数据可见。Seed/reset 保持幂等、不重复且不覆盖其管理范围外的已有账号或数据。临时测试后删除或事务回滚、未保留在最终交付开发状态中的短期账号无需逐个记录。
-- 凭据是否公开按认证目标判断：用于登录目标产品的交付开发账号公开；PCM 或目标产品用于访问其它系统或资源的数据库、对象存储、SMTP、OAuth client secret、API key、私钥、令牌、Git、云、服务器、基础设施账号、PCM 工具和媒体 Provider 凭据及真实个人认证信息仍属秘密。`docs/ignore/` 可继续保存真正私密的开发资源资料，但不承担目标产品账号交接。
+凭据分类遵循根目录 [Agent 工作规范](../AGENTS.md)。账号交付由需求规划、技术设计和开发能力按各自职责落实；创建、文档交接、真实登录验证及初始化／重置的完整执行要求见 [开发规范](skills/dev-workflow/SKILL.md#真实环境与数据闸门)。
 
 开始文档设计或开发前，根据当前任务至少检查：
 
@@ -156,6 +154,8 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 .claude/
 ├── README.md
 ├── AI Agent开发流程设计.md
+├── rules/
+│   └── model-prompts.md     # 仅匹配 PCM Demo 的 Python 文件
 ├── agents/
 │   ├── dev.md
 │   └── reviewer.md
@@ -251,21 +251,16 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 └── settings.local.json
 ```
 
-项目执行时可以另有 `.claude/rules/` 保存项目级稳定规则。普通运行不创建专属过程目录、Manifest、Run ID 或阶段报告；需要长期保留的事实进入产品文档、活动 TRD、代码、测试、Git 或项目已有记录位置。
+`.claude/rules/` 保存按文件路径生效的项目规则；当前 [模型 prompt 编写规则](rules/model-prompts.md) 仅匹配 `pcm-demo/**/*.py`，普通产品开发不会因加载 Skill 而触发。新增规则应按适用文件设置 `paths`，不带 `paths` 的规则仍会全局加载。
 
-`media-assets` 统一负责已有资产复用、图库检索、单张定制生成、调用方传入及本次取得文件的检查与固化，以及测试 fixture。其 `providers/` 维护显式准入 catalog 和适配说明，不扫描目录或自动安装来源；`assets/fixtures/` 是受跟踪测试输入的维护入口，不承载产品界面资产、业务数据、对象存储数据或工作区私有凭据。
+普通运行不创建专属过程目录、Manifest、Run ID 或阶段报告；需要长期保留的事实进入产品文档、活动 TRD、代码、测试、Git 或项目已有记录位置。
 
-承担 UI 设计或开发任务的 Agent 应主动从内容识别、场景理解、品牌表达和产品展示评估媒体价值；有明确收益且在授权范围内时自行落实，不等待用户点名，也不要求每个页面配图。已有合适资产优先复用，真实通用摄影适合检索，品牌化或特定构图可以直接生成，fixture 只用于测试；不存在必须先穷尽图库的固定顺序，也不新增固定 PCM 步骤。
+媒体价值判断遵循根目录工作规范；获取、检查、固化和测试 fixture 的执行约定统一见 [media-assets](skills/media-assets/SKILL.md)。工具内部入口：
 
-图库检索与下载使用 `.claude/skills/media-assets/scripts/pixabay.py`：先执行 `search -q "明确查询词"` 获取有限候选，再执行 `download --id <选中的ID> -f <明确文件路径>` 下载单个选中资源。支持图片与视频，复用 24 小时的私有查询缓存；不自动翻页或批量下载。参数与缓存位置见 [Pixabay Provider 说明](skills/media-assets/providers/pixabay/README.md)，不再为普通调用临时编写程序。
-
-定制生成从产品工作区根目录执行固定入口，并传入明确 PNG 落点：
-
-```bash
-uv run --no-project .claude/skills/media-assets/scripts/generate_image.py -p "视觉描述" -f <明确.png路径>
-```
-
-脚本通过 PEP 723 与 `uv` 隔离准备已声明工具依赖，不向目标产品增加依赖；工作区工具配置使用进程环境优先、当前工作区根 `.env` 次之的读取顺序，不读取 `~/.env`。普通单图直接执行，不额外创建计划、过程报告或 prompt 文件；失败时依据真实命令错误报告，不静默切换服务。完整参数、配置与响应合同见 [`openai-compatible-image` Provider 说明](skills/media-assets/providers/openai-compatible-image/README.md)。首次接入、维护或真实错误明确显示接口不兼容时再查官方文档，普通生成不重复联网研究或重写脚本。
+- [Provider catalog](skills/media-assets/providers/README.md)：已准入来源及适配说明。
+- [Pixabay](skills/media-assets/providers/pixabay/README.md)：图库检索、下载命令、配置与缓存。
+- [定制生成](skills/media-assets/providers/openai-compatible-image/README.md)：固定生成命令、参数及配置。
+- [测试 fixture](skills/media-assets/assets/fixtures/README.md)：测试输入及复制、维护边界。
 
 `tailwind-theme` 只面向实际采用 Tailwind CSS v4 CSS-first 语义颜色变量的前端。它按需读取 tweakcn 当前动态 registry，但只消费经过校验的 light/dark 颜色白名单并把最终值固化进目标项目；网络不可用或没有合适 preset 时依据项目事实生成自定义配色，不把动态 URL、完整远程 CSS、字体、圆角、阴影或其它非颜色 token 变成产品依赖。
 

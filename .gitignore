@@ -6,7 +6,7 @@
 *~
 
 # Claude Code local settings (per-user, not committed)
-#.claude/settings.local.json
+/.claude/settings.local.json
 
 # editor files
 .vscode/*
@@ -29,15 +29,21 @@
 .playwright-cli/
 .playwright-mcp/
 
-# Python 测试覆盖率数据库
+# Python 测试与运行产物
 **/.coverage
+**/.coverage.*
+**/.pytest_cache/
+**/__pycache__/
+**/*.py[cod]
+/.ruff_cache/
 
 # 工作区媒体脚本的 Python 缓存
 /.claude/skills/media-assets/scripts/__pycache__/
 
 # 根目录若产生 .env 不得入库；各子仓库另有各自规则
-.env*
-!.env.example
+/.env
+/.env.*
+!/.env.example
 
 # 前后端为独立 Git 仓库，不由根仓库跟踪其内容
 /frontend/
@@ -47,7 +53,11 @@
 .claude/worktrees/
 
 # Claude Agent Plugin runtime files
-.agents/plugins/**/.in_use/
-.agents/plugins/**/__pycache__/
+.agents/plugins/**/.in_use
+.agents/plugins/**/__pycache__
 .agents/plugins/**/*.pyc
 .agents/plugins/**/.orphaned_at
+.agents/plugins/**/coverage-ui.json
+
+# .pcm
+/.pcm/
