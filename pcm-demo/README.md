@@ -76,6 +76,7 @@ uv sync
 | --- | --- |
 | `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL`、`LLM_MODEL_EFFORT` | AI-compatible 结构化决策、提取与 JSON 修复共用配置；effort 可留空，不发送 `reasoning.effort` |
 | `PCM_AGENT_BASE_URL`、`PCM_AGENT_AUTH_TOKEN` | Claude Agent SDK 使用的 Anthropic Messages 网关与受保护 Bearer token；Base URL 不包含 `/v1` |
+| `CLAUDE_CODE_AUTO_COMPACT_WINDOW` | SDK 子进程使用的原生自动压缩窗口，正整数 Token 数，默认 `400000` |
 | `PCM_WORKSPACE_ROOT` | 所有目标产品项目的外部父目录，必须位于当前能力仓库之外 |
 | `PCM_MAX_CONCURRENT_PROJECTS` | 当前 Demo checkout 同时执行的产品项目上限，默认 `2` |
 | `PCM_TEMPLATE_CATALOG` | 基础工程候选目录 JSON |
@@ -89,9 +90,11 @@ uv sync
 
 已有开发配置需把 `PCM_AGENT_API_KEY` 的有效值迁移到 `PCM_AGENT_AUTH_TOKEN`，旧键不再作为认证输入接受；真实凭据继续保持 Git 忽略，POSIX 下使用 `0600`。修改后重新启动 PCM 进程加载新代码与配置，不修改已有 conversation 或运行状态。
 
+自动压缩只使用原生 `CLAUDE_CODE_AUTO_COMPACT_WINDOW`，由 Settings/AgentConfig 显式传到实际 SDK 子进程；废弃的 `PCM_AGENT_AUTO_COMPACT_TOKENS` 不作为别名。该值控制自动压缩窗口，不是摘要大小或上游容量承诺，实际触发点取决于内置 CLI 的模型窗口及保留空间。PCM 不增加手工压缩或恢复前预检，也不通过修改全局 settings、MAX_CONTEXT 或百分比参数叠加控制。明确的 SDK 上下文超限会记录原因并停止同输入自动重试；普通 API 错误仍按原有有界策略处理，不因普通业务文字提到超限而触发该分类。
+
 ### 模型策略
 
-Claude Agent 的模型与推理强度只在受跟踪的 [`model-policy.toml`](model-policy.toml) 配置，不再读取 `.env` 中的 `PCM_AGENT_MODEL_LOW/MEDIUM/HIGH`。`.env` 只保留 Agent 连接与认证；AI-compatible 继续使用独立的共用 `LLM_*` 配置。
+Claude Agent 的模型与推理强度只在受跟踪的 [`model-policy.toml`](model-policy.toml) 配置，不再读取 `.env` 中的 `PCM_AGENT_MODEL_LOW/MEDIUM/HIGH`。`.env` 保留 Agent 连接、认证与原生自动压缩窗口；AI-compatible 继续使用独立的共用 `LLM_*` 配置。
 
 ```toml
 [profiles]
@@ -115,7 +118,7 @@ routine = { model = "gpt-5.6-sol[1m]", effort = "medium" }
 - 修改前主动停止编排，再执行原 `run_all.py --resume <run-id>`。完整入口每次启动只读取一次策略并传给所有步骤子进程，启动时打印最终分配表；运行中改文件不生效。独立 `run_step` 或模块入口使用各自本次进程加载的策略，不监听文件变化。
 - 策略必须完整且有效；未知任务、缺失分配、不存在的 profile、空模型或非法 Agent effort 明确失败，不使用默认模型、环境变量或命令行覆盖兜底。内部子进程传递内容不持久化，也不作为用户配置入口。
 
-第 15～17 步仍恢复同一 development session，但允许各步选择不同真实模型与 effort。每次首次调用和 resume 都显式传入本次启动已确定的组合，不重建或清空原 session；最大 turn、负责人决策轮数、重试、三态和完成条件不变。
+第 15、16 步恢复同一 development session。第 17 步首次有待提交变更时独立创建提交 session，并将其 ID 保存到 `claude_sessions.requirement_commit_<ID>`；继续、repair 和重试只恢复该提交会话，不重复创建，也不携带开发历史。全部仓库干净时仍零 Agent 调用。各步模型与 effort 继续使用本次启动的策略，不因会话隔离变更 Git、三态或完成条件；旧失败提交仍绑定开发 session 时须先备份并明确迁移，不自动清空旧记录。
 
 公共 runner 将 SDK 与插件的标准模型别名通过 `modelOverrides` 统一注册为本次选定的真实模型，默认子代理也使用同一模型；这只是兼容注册，不再是一套低中高策略。`options.model` 直接使用配置的完整 ID，不自动添加或移除 `[1m]`。PCM 仍核验 init 模型与配置一致，但实际出站路由与 effort 解释由网关负责。`total_cost_usd` 是 SDK 估算，不代表订阅账户真实扣款。
 

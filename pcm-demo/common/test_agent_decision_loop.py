@@ -11,11 +11,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 from claude_agent_sdk import (
+    AssistantMessage,
     CLIConnectionError,
     CLINotFoundError,
     ProcessError,
     ResultMessage,
     SystemMessage,
+    TextBlock,
 )
 from pydantic import SecretStr
 
@@ -45,6 +47,12 @@ from common.openai_responses import ResponsesFailure  # noqa: E402
 from common.files import write_json  # noqa: E402
 from config import AgentConfig  # noqa: E402
 from model_policy import get_agent_profile  # noqa: E402
+
+
+CONTEXT_WINDOW_API_ERROR = (
+    "API Error: 400 Your input exceeds the context window of this model. "
+    "Please adjust your input and try again."
+)
 
 
 class FakeAgentRunner:
@@ -1461,6 +1469,34 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertNotIn("retry_requested", serialized)
 
+    async def test_context_window_failure_preserves_sdk_signal_without_requesting_retry(self) -> None:
+        value = self.result(
+            "",
+            is_error=True,
+            api_error_status=400,
+            retry_requested=False,
+        )
+        value.context_window_exceeded = True
+        value.assistant_error = "unknown"
+        value.sdk_errors = [CONTEXT_WINDOW_API_ERROR]
+
+        with self.assertRaises(AgentExecutionFailure) as raised:
+            await self.run_loop(
+                FakeAgentRunner([value]),
+                FakeDecisionRunner([]),
+            )
+
+        self.assertFalse(raised.exception.retry_requested)
+        self.assertIn("上下文窗口", str(raised.exception))
+        saved = json.loads(
+            (self.run_dir / raised.exception.diagnostic_path).read_text(encoding="utf-8")
+        )
+        self.assertEqual(saved["details"]["assistant_error"], "unknown")
+        self.assertEqual(saved["details"]["api_error_status"], 400)
+        self.assertIsNone(saved["details"]["terminal_reason"])
+        self.assertTrue(saved["details"]["context_window_exceeded"])
+        self.assertEqual(saved["details"]["sdk_errors"], [CONTEXT_WINDOW_API_ERROR])
+
     async def test_agent_runner_exception_preserves_safe_cause_and_traceback_in_log(self) -> None:
         async def failed_runner(*_args: object, **_kwargs: object) -> ClaudeRunResult:
             try:
@@ -1557,12 +1593,15 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
             "PCM_TEMPLATE_REPOSITORY": "git@example.invalid/template.git",
             "PCM_AGENT_WORKSPACE_ENV_FILE": "/protected/agent-workspace.env",
             "PCM_DEV_RESOURCE_LIST": "/protected/resources.md",
+            "PCM_AGENT_AUTO_COMPACT_TOKENS": "800000",
+            "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "123",
         }
         with patch.dict(os.environ, inherited):
             env = filtered_env(self.agent_config, "medium-model")
         for key in inherited:
             with self.subTest(key=key):
-                self.assertEqual(env[key], "")
+                expected = "400000" if key == "CLAUDE_CODE_AUTO_COMPACT_WINDOW" else ""
+                self.assertEqual(env[key], expected)
 
     def test_agent_auth_and_model_routing_do_not_inherit_parent_settings(self) -> None:
         inherited = {
@@ -1725,6 +1764,138 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.total_cost_usd, 0.02)
         self.assertEqual(updates[-1].usage, result.usage)
         self.assertEqual(updates[-1].model_usage, result.model_usage)
+
+    async def test_synthetic_context_window_api_error_is_terminal_without_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            write_json(workspace / "plugins-lock.json", {"version": 1, "plugins": []})
+
+            async def fake_query(*_args: object, **_kwargs: object):
+                yield SystemMessage(
+                    subtype="init",
+                    data={"session_id": "session-1", "cwd": str(workspace)},
+                )
+                yield AssistantMessage(
+                    content=[TextBlock(CONTEXT_WINDOW_API_ERROR)],
+                    model="<synthetic>",
+                    error="unknown",
+                )
+
+            with patch("common.claude_agent.query", new=fake_query):
+                result = await run_claude(
+                    "测试提示",
+                    cwd=workspace,
+                    model="medium-model",
+                    effort="high",
+                )
+
+        self.assertTrue(result.context_window_exceeded)
+        self.assertEqual(result.assistant_error, "unknown")
+        self.assertEqual(result.api_error_status, 400)
+        self.assertIsNone(result.terminal_reason)
+        self.assertEqual(result.sdk_errors, [CONTEXT_WINDOW_API_ERROR])
+        self.assertFalse(result.retry_requested)
+        self.assertTrue(result.has_errors)
+
+    async def test_similar_text_and_other_400_errors_keep_stream_failure_policy(self) -> None:
+        messages = [
+            AssistantMessage(
+                content=[TextBlock(CONTEXT_WINDOW_API_ERROR)],
+                model="medium-model",
+            ),
+            AssistantMessage(
+                content=[TextBlock(CONTEXT_WINDOW_API_ERROR)],
+                model="<synthetic>",
+                parent_tool_use_id="tool-1",
+                error="unknown",
+            ),
+            AssistantMessage(
+                content=[TextBlock("API Error: 400 Another invalid request.")],
+                model="<synthetic>",
+                error="unknown",
+            ),
+        ]
+        streams = [[message] for message in messages]
+        streams.append([
+            AssistantMessage(content=[TextBlock(CONTEXT_WINDOW_API_ERROR)], model="<synthetic>", error="unknown"),
+            messages[-1],
+        ])
+        streams.append([
+            AssistantMessage(content=[TextBlock(CONTEXT_WINDOW_API_ERROR)], model="<synthetic>", error="unknown"),
+            ResultMessage(
+                subtype="success", duration_ms=1, duration_api_ms=1, is_error=True,
+                num_turns=1, session_id="session-1", api_error_status=429, terminal_reason="api_error",
+            ),
+        ])
+        for stream in streams:
+            with self.subTest(stream=stream), tempfile.TemporaryDirectory() as directory:
+                workspace = Path(directory)
+                write_json(
+                    workspace / "plugins-lock.json",
+                    {"version": 1, "plugins": []},
+                )
+
+                async def fake_query(*_args: object, **_kwargs: object):
+                    for message in stream:
+                        yield message
+                    raise ProcessError("stream failed", exit_code=1)
+
+                with patch("common.claude_agent.query", new=fake_query):
+                    result = await run_claude(
+                        "测试提示",
+                        cwd=workspace,
+                        model="medium-model",
+                        effort="high",
+                    )
+
+                self.assertFalse(result.context_window_exceeded)
+                self.assertIsNone(result.assistant_error)
+                expected_status = next((item.api_error_status for item in stream if isinstance(item, ResultMessage)), None)
+                self.assertEqual(result.api_error_status, expected_status)
+                self.assertTrue(result.retry_requested)
+
+    async def test_normal_result_clears_earlier_context_window_api_error_signal(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            write_json(workspace / "plugins-lock.json", {"version": 1, "plugins": []})
+
+            async def fake_query(*_args: object, **_kwargs: object):
+                yield AssistantMessage(
+                    content=[TextBlock(CONTEXT_WINDOW_API_ERROR)],
+                    model="<synthetic>",
+                    error="unknown",
+                )
+                yield AssistantMessage(
+                    content=[TextBlock("压缩后正常完成")],
+                    model="medium-model",
+                )
+                yield ResultMessage(
+                    subtype="success",
+                    duration_ms=1,
+                    duration_api_ms=1,
+                    is_error=False,
+                    num_turns=1,
+                    session_id="session-1",
+                    result="压缩后正常完成",
+                    terminal_reason="completed",
+                )
+
+            with patch("common.claude_agent.query", new=fake_query):
+                result = await run_claude(
+                    "测试提示",
+                    cwd=workspace,
+                    model="medium-model",
+                    effort="high",
+                )
+
+        self.assertFalse(result.context_window_exceeded)
+        self.assertIsNone(result.assistant_error)
+        self.assertIsNone(result.api_error_status)
+        self.assertEqual(result.terminal_reason, "completed")
+        self.assertIsNone(result.exception)
+        self.assertEqual(result.text, "压缩后正常完成")
+        self.assertFalse(result.has_errors)
+        self.assertFalse(result.retry_requested)
 
     async def test_invalid_model_or_effort_fails_before_query(self) -> None:
         with patch("common.claude_agent.query") as mocked:

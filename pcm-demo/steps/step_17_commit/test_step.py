@@ -49,7 +49,7 @@ def commit_all(repository: Path, message: str = "test commit") -> str:
 
 def agent_result(
     cwd: Path,
-    session: str = "development-session-1",
+    session: str = "commit-session-1",
     text: str = "已处理当前提交任务。",
 ) -> ClaudeRunResult:
     return ClaudeRunResult(
@@ -329,6 +329,9 @@ class RequirementCommitTests(unittest.TestCase):
 
         async def agent(prompt: str, **kwargs: Any) -> ClaudeRunResult:
             calls.append({"prompt": prompt, **kwargs})
+            self.assertNotIn(
+                "requirement_commit_BR-001", read_state(run_dir)["claude_sessions"]
+            )
             self.commit_names(workspace, names)
             value = agent_result(kwargs["cwd"])
             kwargs["on_update"](value)
@@ -351,46 +354,21 @@ class RequirementCommitTests(unittest.TestCase):
             (profile.model, profile.effort),
         )
         self.assertNotIn("max_budget_usd", calls[0])
-        self.assertEqual(
-            calls[0]["prompt"],
-            "/commit-changes\n"
-            "请提交当前需求 `BR-001 账户访问` 在以下仓库中的全部已有变更：\n"
-            "- root: `.`\n"
-            "- web: `web`\n"
-            "- api: `api`\n\n"
-            "统一需求分支：`req/br-001`\n"
-            "只 commit，不 push。",
-        )
-        self.assertEqual(calls[0]["resume_session_id"], "development-session-1")
-        self.assertEqual(MAX_DECISION_ROUNDS, 32)
+        self.assertTrue(calls[0]["prompt"].startswith(f"/{commit_step.SKILL_NAME}\n"))
+        for value in ("BR-001", "账户访问", "req/br-001", "- root: `.`", "- web: `web`", "- api: `api`"):
+            self.assertIn(value, calls[0]["prompt"])
+        self.assertIsNone(calls[0]["resume_session_id"])
         self.assertEqual(len(decision_prompts), 1)
-        for required in (
-            "全部白名单仓库仍在统一需求分支",
-            "仅当仍有读取 Git 状态",
-            "现有变更无法原样安全提交",
-            "只处理 Git 提交",
-            "不 push",
-        ):
-            self.assertIn(required, decision_prompts[0])
-        for forbidden in (
-            "第 15 步",
-            "第 16 步",
-            "第 17 步",
-            "本步骤",
-            "上游开发步骤",
-            "PCM",
-            "current_node",
-            "session",
-            "不得运行 lint",
-            "不得创建或修改 .gitignore",
-            "浏览器验收",
-            "安全审查",
-        ):
+        self.assertIn(commit_step.REQUIREMENT_COMMIT_DECISION_RULES, decision_prompts[0])
+        for forbidden in ("docs/trd", "第 15 步", "第 16 步", "第 17 步", "current_node", "session"):
             self.assertNotIn(forbidden, calls[0]["prompt"])
             self.assertNotIn(forbidden, decision_prompts[0])
         saved_state = read_state(run_dir)
         key = "requirement_commit_BR-001"
-        self.assertEqual(saved_state["claude_sessions"][key], "development-session-1")
+        self.assertEqual(saved_state["claude_sessions"][key], "commit-session-1")
+        self.assertEqual(saved_state["claude_sessions"]["development_BR-001"], "development-session-1")
+        self.assertEqual(saved_state["claude_sessions"]["rule_retrospective_BR-001"], "development-session-1")
+        self.assertEqual(saved_state["requirement_cycle"]["development_session_id"], "development-session-1")
         self.assertEqual(
             saved_state["decision_conversations"][key]["path"],
             "conversations/requirement_commit_BR-001.json",
@@ -402,11 +380,12 @@ class RequirementCommitTests(unittest.TestCase):
             "system", "assistant", "user", "assistant",
         ])
 
-    def test_failure_retries_with_development_session(self) -> None:
+    def test_failure_before_init_reenters_without_session_then_captures_commit_session(self) -> None:
         run_dir, workspace, state, _bases = self.make_run()
         self.dirty(workspace, ["root"])
 
         async def interrupted(prompt: str, **kwargs: Any) -> ClaudeRunResult:
+            self.assertIsNone(kwargs["resume_session_id"])
             raise ConnectionError("temporary disconnect")
 
         with self.assertRaisesRegex(RuntimeError, "Agent SDK 执行异常"):
@@ -417,13 +396,65 @@ class RequirementCommitTests(unittest.TestCase):
             )
         failed_state = read_state(run_dir)
         key = "requirement_commit_BR-001"
-        self.assertEqual(
-            failed_state["claude_sessions"][key], "development-session-1"
-        )
+        self.assertNotIn(key, failed_state["claude_sessions"])
         self.assertEqual(
             failed_state["decision_conversations"][key]["path"],
             "conversations/requirement_commit_BR-001.json",
         )
+        conversation = json.loads(
+            (run_dir / "conversations/requirement_commit_BR-001.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual([message["role"] for message in conversation["messages"]], ["system", "assistant"])
+        conversation["messages"][0]["content"] = "既有冻结 system，不随模板更新"
+        conversation["messages"][1]["content"] = "/commit-changes\n既有提交指令"
+        history_path = run_dir / "conversations/requirement_commit_BR-001.json"
+        history_path.write_text(json.dumps(conversation, ensure_ascii=False), encoding="utf-8")
+        calls: list[dict[str, Any]] = []
+
+        async def recovered(prompt: str, **kwargs: Any) -> ClaudeRunResult:
+            calls.append({"prompt": prompt, **kwargs})
+            self.commit_names(workspace, ["root"])
+            value = agent_result(kwargs["cwd"])
+            kwargs["on_update"](value)
+            return value
+
+        async def completed(messages, config, *, system_prompt):
+            self.assertEqual(system_prompt, conversation["messages"][0]["content"])
+            return decision("completed")
+
+        self.execute(
+            run_dir, failed_state, agent_runner=recovered,
+            decision_runner=completed, config_loader=lambda: object(),
+        )
+        self.assertEqual(len(calls), 1)
+        self.assertIsNone(calls[0]["resume_session_id"])
+        self.assertEqual(calls[0]["prompt"], conversation["messages"][1]["content"])
+        self.assertEqual(json.loads(history_path.read_text())["messages"][:2], conversation["messages"])
+        completed_state = read_state(run_dir)
+        self.assertEqual(completed_state["claude_sessions"][key], "commit-session-1")
+        self.assertEqual(completed_state["requirement_cycle"]["development_session_id"], "development-session-1")
+
+    def test_failure_after_init_retries_with_captured_commit_session(self) -> None:
+        run_dir, workspace, state, _bases = self.make_run()
+        self.dirty(workspace, ["root"])
+
+        async def interrupted(prompt: str, **kwargs: Any) -> ClaudeRunResult:
+            self.assertIsNone(kwargs["resume_session_id"])
+            init = agent_result(kwargs["cwd"])
+            init.text = ""
+            init.result_subtype = None
+            kwargs["on_update"](init)
+            raise ConnectionError("temporary disconnect after init")
+
+        with self.assertRaisesRegex(RuntimeError, "Agent SDK 执行异常"):
+            self.execute(
+                run_dir, state, agent_runner=interrupted,
+                decision_runner=lambda *args, **kwargs: None,
+                config_loader=lambda: object(),
+            )
+        failed_state = read_state(run_dir)
+        key = "requirement_commit_BR-001"
+        self.assertEqual(failed_state["claude_sessions"][key], "commit-session-1")
         calls: list[dict[str, Any]] = []
 
         async def recovered(prompt: str, **kwargs: Any) -> ClaudeRunResult:
@@ -440,11 +471,7 @@ class RequirementCommitTests(unittest.TestCase):
             run_dir, failed_state, agent_runner=recovered,
             decision_runner=completed, config_loader=lambda: object(),
         )
-        self.assertEqual(len(calls), 1)
-        self.assertEqual(
-            calls[0]["resume_session_id"], "development-session-1"
-        )
-        self.assertTrue(calls[0]["prompt"].startswith("/commit-changes\n"))
+        self.assertEqual(calls[0]["resume_session_id"], "commit-session-1")
 
     def test_continue_then_completed_reuses_session(self) -> None:
         run_dir, workspace, state, _bases = self.make_run()
@@ -482,7 +509,7 @@ class RequirementCommitTests(unittest.TestCase):
             config_loader=lambda: object(),
         )
         self.assertEqual(len(calls), 2)
-        self.assertEqual(calls[1]["resume_session_id"], "development-session-1")
+        self.assertEqual(calls[1]["resume_session_id"], "commit-session-1")
         self.assertEqual(calls[1]["prompt"], git_continue)
         self.assertEqual(sum(call["prompt"].count("/commit-changes") for call in calls), 1)
 
@@ -508,10 +535,16 @@ class RequirementCommitTests(unittest.TestCase):
         )
         self.assertEqual(len(calls), 2)
         self.assertEqual(calls[1]["prompt"], REPOSITORY_REPAIR_PROMPT)
-        self.assertEqual(calls[1]["resume_session_id"], "development-session-1")
+        self.assertEqual(calls[1]["resume_session_id"], "commit-session-1")
         for required in (
             "使用 commit-changes",
-            "提交这些已有变更",
+            "精确修改 .gitignore",
+            "核验归属和可再生性后逐路径清理非交付临时产物",
+            "hook 要求的纯格式修复",
+            "禁止业务语义变更",
+            "禁止删除未知资产、数据、秘密、受保护 tracked 文件或 staged 内容",
+            "禁止 git clean 和宽泛删除",
+            "更窄只读权限、范围和已有 staged 意图始终优先",
             "只 commit，不 push",
         ):
             self.assertIn(required, calls[1]["prompt"])
@@ -588,35 +621,75 @@ class RequirementCommitTests(unittest.TestCase):
             decision_runner=completed, config_loader=lambda: object(),
         )
         self.assertEqual(calls[0]["prompt"], BLOCKED_RESUME_PROMPT)
-        self.assertEqual(calls[0]["resume_session_id"], "development-session-1")
+        self.assertEqual(calls[0]["resume_session_id"], "commit-session-1")
 
     def test_incomplete_resume_anchors_are_rejected(self) -> None:
-        variants = ("session", "reference", "conversation")
+        variants = ("session", "reference", "conversation", "reply_without_session", "init_without_session")
         for variant in variants:
             with self.subTest(variant=variant):
                 run_dir, workspace, state, _bases = self.make_run()
                 self.dirty(workspace, ["root"])
                 key = "requirement_commit_BR-001"
+                path = run_dir / f"conversations/{key}.json"
                 if variant == "session":
                     state["claude_sessions"][key] = "commit-session-1"
                 elif variant == "reference":
                     state["decision_conversations"] = {
                         key: {"path": f"conversations/{key}.json"}
                     }
-                else:
-                    path = run_dir / f"conversations/{key}.json"
+                elif variant == "conversation":
                     path.parent.mkdir(parents=True, exist_ok=True)
                     path.write_text("{}", encoding="utf-8")
+                else:
+                    state["decision_conversations"] = {
+                        key: {"path": f"conversations/{key}.json"}
+                    }
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    context = commit_step._context(run_dir, state, advanced=False)
+                    history = [
+                        {"role": "system", "content": commit_step._decision_spec(context).decision_system_prompt},
+                        {"role": "assistant", "content": commit_step.initial_prompt(context)},
+                    ]
+                    if variant == "reply_without_session":
+                        history.append({"role": "user", "content": "Agent 已有回复"})
+                    else:
+                        state[key] = {"init": {"cwd": str(workspace)}}
+                    path.write_text(json.dumps({"messages": history}, ensure_ascii=False), encoding="utf-8")
                 write_state(run_dir, state)
 
                 async def unexpected(*args: Any, **kwargs: Any) -> Any:
                     raise AssertionError("残缺锚点不应调用 Agent 或负责人")
 
-                with self.assertRaisesRegex(RuntimeError, "恢复缺少|没有复用"):
+                with self.assertRaisesRegex(RuntimeError, "恢复缺少|决策历史|session|Agent 回复"):
                     self.execute(
                         run_dir, state, agent_runner=unexpected,
                         decision_runner=unexpected, config_loader=lambda: object(),
                     )
+
+    def test_legacy_development_alias_requires_explicit_migration(self) -> None:
+        run_dir, workspace, state, _bases = self.make_run()
+        self.dirty(workspace, ["root"])
+        key = "requirement_commit_BR-001"
+        state["claude_sessions"][key] = "development-session-1"
+        state["decision_conversations"] = {
+            key: {"path": f"conversations/{key}.json"}
+        }
+        path = run_dir / f"conversations/{key}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"messages": [
+            {"role": "system", "content": "旧 system"},
+            {"role": "assistant", "content": "旧初始提交提示"},
+        ]}, ensure_ascii=False), encoding="utf-8")
+        write_state(run_dir, state)
+
+        async def unexpected(*args: Any, **kwargs: Any) -> Any:
+            raise AssertionError("旧开发 session 别名不得被静默丢弃或复用")
+
+        with self.assertRaisesRegex(RuntimeError, "旧开发 session.*迁移"):
+            self.execute(
+                run_dir, state, agent_runner=unexpected,
+                decision_runner=unexpected, config_loader=lambda: object(),
+            )
 
     def test_untracked_and_symlink_boundaries(self) -> None:
         run_dir, workspace, state, _bases = self.make_run()

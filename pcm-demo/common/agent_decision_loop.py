@@ -410,6 +410,9 @@ def _safe_exception_type(value: ClaudeRunResult) -> str | None:
 
 def _agent_reason(value: ClaudeRunResult | None, error: BaseException | None = None) -> str:
     if value is not None:
+        if value.context_window_exceeded:
+            detail = value.sdk_errors[0] if value.sdk_errors else "Agent SDK API 请求失败（HTTP 400）"
+            return f"Claude Agent SDK 输入超过当前模型上下文窗口：{redact_text(detail)}"
         if value.sdk_errors:
             return redact_text(value.sdk_errors[0])
         if isinstance(value.exception_details, dict):
@@ -446,6 +449,13 @@ def _safe_agent_result(
         "has_errors": value.has_errors,
         "exception_type": _safe_exception_type(value),
     }
+    if value.context_window_exceeded or value.assistant_error is not None:
+        result.update(
+            {
+                "assistant_error": value.assistant_error,
+                "context_window_exceeded": value.context_window_exceeded,
+            }
+        )
     if failure is not None:
         result.update({"message": str(failure), "diagnostic_path": failure.diagnostic_path})
     return result
@@ -507,6 +517,13 @@ def persist_agent_failure(
             "terminal_reason": value.terminal_reason,
             "sdk_errors": value.sdk_errors,
         }
+        if value.context_window_exceeded or value.assistant_error is not None:
+            details.update(
+                {
+                    "assistant_error": value.assistant_error,
+                    "context_window_exceeded": value.context_window_exceeded,
+                }
+            )
     path = write_diagnostic(
         run_dir,
         f"{key}-agent.json",

@@ -26,6 +26,10 @@ from common.error_diagnostics import exception_diagnostics, redact_text
 from config import AgentConfig
 
 CLAUDE_AGENT_TIMEOUT_SECONDS = 10 * 60 * 60
+_CONTEXT_WINDOW_API_ERROR = (
+    "API Error: 400 Your input exceeds the context window of this model. "
+    "Please adjust your input and try again."
+)
 
 
 class _QueryRaisedTimeout(RuntimeError):
@@ -52,6 +56,8 @@ class ClaudeRunResult:
     retry_requested: bool = False
     usage: dict[str, Any] | None = None
     model_usage: dict[str, Any] | None = None
+    assistant_error: str | None = None
+    context_window_exceeded: bool = False
 
 
 def filtered_env(config: AgentConfig, model: str) -> dict[str, str]:
@@ -98,6 +104,7 @@ def filtered_env(config: AgentConfig, model: str) -> dict[str, str]:
             "PCM_TEMPLATE_REPOSITORY": "",
             "PCM_AGENT_WORKSPACE_ENV_FILE": "",
             "PCM_DEV_RESOURCE_LIST": "",
+            "CLAUDE_CODE_AUTO_COMPACT_WINDOW": str(config.auto_compact_window),
             "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS": "0",
         }
     )
@@ -145,6 +152,30 @@ def load_plugins(cwd: Path) -> list[dict[str, str]]:
     return plugins
 
 
+def _context_window_api_error(message: AssistantMessage) -> tuple[str, str] | None:
+    if (
+        message.parent_tool_use_id is not None
+        or message.model != "<synthetic>"
+        or message.error is None
+    ):
+        return None
+    texts = [block.text for block in message.content if isinstance(block, TextBlock)]
+    if len(texts) != 1 or texts[0].strip() != _CONTEXT_WINDOW_API_ERROR:
+        return None
+    return message.error, texts[0].strip()
+
+
+def _result_finished_normally(result: ResultMessage | None) -> bool:
+    return bool(
+        result is not None
+        and result.subtype == "success"
+        and not result.is_error
+        and not result.errors
+        and _api_error_status(result) is None
+        and result.terminal_reason in {None, "completed"}
+    )
+
+
 def _api_error_status(value: Any) -> int | None:
     status = getattr(value, "api_error_status", None)
     if isinstance(status, int) and not isinstance(status, bool):
@@ -168,7 +199,10 @@ def _retry_requested(
     terminal_reason: str | None,
     error: BaseException | None = None,
     has_result: bool = False,
+    context_window_exceeded: bool = False,
 ) -> bool:
+    if context_window_exceeded:
+        return False
     if terminal_reason in {"aborted_streaming", "aborted_tools"}:
         return False
     if api_error_status is not None or terminal_reason in {"api_error", "blocking_limit"}:
@@ -237,6 +271,8 @@ async def run_claude(
     exception_details: dict[str, Any] | None = None
     api_error_status: int | None = None
     caught_error: BaseException | None = None
+    assistant_error: str | None = None
+    context_window_api_error: str | None = None
     known_secrets = _anthropic_secrets(agent_config)
     options = ClaudeAgentOptions(
         cwd=cwd,
@@ -266,7 +302,7 @@ async def run_claude(
             raise _QueryRaisedTimeout(str(error)) from error
 
     async def consume_messages() -> None:
-        nonlocal init, result, reply_text
+        nonlocal init, result, reply_text, assistant_error, context_window_api_error
         async for message in guarded_messages():
             if isinstance(message, SystemMessage) and message.subtype == "init":
                 init = {
@@ -299,12 +335,27 @@ async def run_claude(
                         )
                     )
             elif isinstance(message, AssistantMessage) and message.parent_tool_use_id is None:
-                texts.extend(
-                    block.text for block in message.content if isinstance(block, TextBlock)
-                )
+                context_error = _context_window_api_error(message)
+                if context_error is not None:
+                    assistant_error, context_window_api_error = context_error
+                else:
+                    if message.model == "<synthetic>" and message.error is not None:
+                        assistant_error = None
+                        context_window_api_error = None
+                    texts.extend(
+                        block.text for block in message.content if isinstance(block, TextBlock)
+                    )
             elif isinstance(message, ResultMessage):
                 result = message
                 reply_text = _agent_reply(texts, result)
+                context_window_exceeded = bool(
+                    context_window_api_error
+                    and _api_error_status(result) in {None, 400}
+                    and not _result_finished_normally(result)
+                )
+                result_sdk_errors = _sdk_errors(result.errors, known_secrets) or []
+                if context_window_exceeded and context_window_api_error not in result_sdk_errors:
+                    result_sdk_errors.insert(0, context_window_api_error)
                 if on_update:
                     on_update(
                         ClaudeRunResult(
@@ -321,13 +372,16 @@ async def run_claude(
                             exception=None,
                             api_error_status=_api_error_status(result),
                             terminal_reason=result.terminal_reason,
-                            has_errors=bool(result.errors) or result.is_error,
-                            sdk_errors=_sdk_errors(result.errors, known_secrets),
+                            has_errors=bool(result.errors) or result.is_error or context_window_exceeded,
+                            sdk_errors=result_sdk_errors or None,
                             retry_requested=_retry_requested(
                                 api_error_status=_api_error_status(result),
                                 terminal_reason=result.terminal_reason,
                                 has_result=True,
+                                context_window_exceeded=context_window_exceeded,
                             ),
+                            assistant_error=assistant_error if context_window_exceeded else None,
+                            context_window_exceeded=context_window_exceeded,
                         )
                     )
 
@@ -382,9 +436,41 @@ async def run_claude(
     elif model_mismatch:
         exception = f"Agent 实际模型不一致：期望 {model}，实际 {observed_model}"
         exception_type = "ModelMismatchError"
-    final_api_error_status = (_api_error_status(result) if result else None) or api_error_status
+    context_window_exceeded = bool(
+        context_window_api_error
+        and ((_api_error_status(result) if result else None) or api_error_status) in {None, 400}
+        and not _result_finished_normally(result)
+    )
+    final_api_error_status = (
+        (_api_error_status(result) if result else None)
+        or api_error_status
+        or (400 if context_window_exceeded else None)
+    )
     final_terminal_reason = result.terminal_reason if result else None
+    final_sdk_errors = _sdk_errors(result.errors if result else None, known_secrets) or []
+    if context_window_exceeded and context_window_api_error not in final_sdk_errors:
+        final_sdk_errors.insert(0, context_window_api_error)
+    if (
+        context_window_exceeded
+        and exception is None
+        and not session_mismatch
+        and not model_mismatch
+    ):
+        message = (
+            "Claude Agent SDK 输入超过当前模型上下文窗口："
+            f"{context_window_api_error}"
+        )
+        exception = f"ContextWindowExceededError: {message}"
+        exception_type = "ContextWindowExceededError"
+        exception_details = {
+            "type": exception_type,
+            "message": message,
+            "chain": [],
+            "traceback": [],
+        }
     final_text = reply_text if reply_text is not None else _agent_reply(texts, result)
+    if context_window_exceeded and not final_text:
+        final_text = context_window_api_error or ""
     return ClaudeRunResult(
         init=init,
         text=final_text,
@@ -399,10 +485,11 @@ async def run_claude(
         exception=exception,
         api_error_status=final_api_error_status,
         terminal_reason=final_terminal_reason,
-        has_errors=bool(exception)
+        has_errors=context_window_exceeded
+        or bool(exception)
         or (bool(result.errors) or result.is_error if result else True),
         exception_type=exception_type,
-        sdk_errors=_sdk_errors(result.errors if result else None, known_secrets),
+        sdk_errors=final_sdk_errors or None,
         exception_details=exception_details,
         retry_requested=False
         if session_mismatch or model_mismatch
@@ -411,5 +498,8 @@ async def run_claude(
             terminal_reason=final_terminal_reason,
             error=caught_error,
             has_result=result is not None,
+            context_window_exceeded=context_window_exceeded,
         ),
+        assistant_error=assistant_error if context_window_exceeded else None,
+        context_window_exceeded=context_window_exceeded,
     )

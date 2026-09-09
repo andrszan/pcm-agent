@@ -9,6 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_ENV_FILE = Path(__file__).with_name(".env")
 CAPABILITY_REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_CLAUDE_CODE_AUTO_COMPACT_WINDOW = 400000
 
 
 class Settings(BaseSettings):
@@ -19,6 +20,11 @@ class Settings(BaseSettings):
     pcm_agent_base_url: str | None = Field(default=None, validation_alias="PCM_AGENT_BASE_URL")
     pcm_agent_auth_token: SecretStr | None = Field(
         default=None, validation_alias="PCM_AGENT_AUTH_TOKEN", repr=False
+    )
+    claude_code_auto_compact_window: int = Field(
+        default=DEFAULT_CLAUDE_CODE_AUTO_COMPACT_WINDOW,
+        validation_alias="CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+        ge=1,
     )
     pcm_workspace_root: Path | None = Field(default=None, validation_alias="PCM_WORKSPACE_ROOT")
     pcm_max_concurrent_projects: int = Field(
@@ -43,12 +49,27 @@ class Settings(BaseSettings):
 
 
 class AgentConfig:
-    def __init__(self, base_url: str, auth_token: SecretStr) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        auth_token: SecretStr,
+        auto_compact_window: int = DEFAULT_CLAUDE_CODE_AUTO_COMPACT_WINDOW,
+    ) -> None:
+        if (
+            not isinstance(auto_compact_window, int)
+            or isinstance(auto_compact_window, bool)
+            or auto_compact_window <= 0
+        ):
+            raise ValueError("CLAUDE_CODE_AUTO_COMPACT_WINDOW 必须是正整数")
         self.base_url = base_url.rstrip("/")
         self.auth_token = auth_token
+        self.auto_compact_window = auto_compact_window
 
     def __repr__(self) -> str:
-        return f"AgentConfig(base_url={self.base_url!r}, auth_token=SecretStr('**********'))"
+        return (
+            f"AgentConfig(base_url={self.base_url!r}, auth_token=SecretStr('**********'), "
+            f"auto_compact_window={self.auto_compact_window!r})"
+        )
 
     @classmethod
     def load(cls, env_file: Path | None = None) -> "AgentConfig":
@@ -63,7 +84,11 @@ class AgentConfig:
         base_url = settings.pcm_agent_base_url.rstrip("/")
         if base_url.endswith("/v1"):
             raise ValueError("PCM_AGENT_BASE_URL 不得包含 /v1")
-        return cls(base_url, settings.pcm_agent_auth_token)
+        return cls(
+            base_url,
+            settings.pcm_agent_auth_token,
+            settings.claude_code_auto_compact_window,
+        )
 
 
 class LLMConfig:

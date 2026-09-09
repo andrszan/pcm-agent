@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from common.agent_decision_loop import AgentDecisionLoopSpec, ResumeMessage, run_agent_decision_loop
+from common.agent_decision_loop import AgentDecisionLoopSpec, ResumeMessage, _validate_messages, run_agent_decision_loop
 from common.claude_agent import run_claude
 from common.decision import render_decision_system_prompt, request_decision
 from common.state import (
@@ -26,14 +26,17 @@ SKILL_NAME = "commit-changes"
 MAX_DECISION_ROUNDS = 32
 COMMIT_MAX_TURNS = 9999
 REPOSITORY_REPAIR_PROMPT = (
-    "白名单仓库仍有未提交变更。请继续使用 commit-changes 提交这些已有变更，"
+    "白名单仓库仍有未提交变更。请继续使用 commit-changes 完成提交准备并提交：可读取 Git 状态和候选 diff、"
+    "确认提交范围、精确暂存、创建本地提交，必要时精确修改 .gitignore、核验归属和可再生性后逐路径清理非交付临时产物，"
+    "或完成 hook 要求的纯格式修复，并核验提交结果；禁止业务语义变更，禁止删除未知资产、数据、秘密、受保护 tracked 文件或 staged 内容，"
+    "禁止 git clean 和宽泛删除。调用方给出的更窄只读权限、范围和已有 staged 意图始终优先。"
     "完成后确认所有仓库的工作区和暂存区干净；只 commit，不 push。"
 )
 REQUIREMENT_COMMIT_DECISION_RULES = """- completed：已有变更均已提交或原本无变更；全部白名单仓库仍在统一需求分支，且工作区和暂存区干净。
-- continue：仅当仍有读取 Git 状态、确认提交范围、精确暂存、创建本地提交或核验提交结果等提交动作可继续完成时使用。
-- blocked：仅用于缺少 Git 作者身份、签名凭据、外部授权，或现有变更无法原样安全提交的情况。
+- continue：仅当仍可在提交准备范围内继续时使用。提交准备范围只包括读取 Git 状态和候选 diff、确认提交范围、精确暂存、创建本地提交、必要时精确修改 .gitignore、核验归属和可再生性后逐路径清理非交付临时产物、hook 要求的纯格式修复，以及核验提交结果。
+- blocked：仅用于缺少 Git 作者身份、签名凭据、外部授权，或在上述范围内无法安全完成提交的情况。
 
-当前需求的实现、验证、审查与规则复盘均已完成；只处理 Git 提交，不重新开发或重新验收，不 push。"""
+实现、验证、审查与规则复盘均已完成，不重新开发或重新验收。禁止业务语义变更；禁止删除未知资产、数据、秘密、受保护 tracked 文件或 staged 内容；禁止 git clean 和宽泛删除；不 merge、不 rebase、不改写历史、不 push。调用方给出的更窄只读权限、范围和已有 staged 意图始终优先。"""
 _HEX = set("0123456789abcdef")
 _RESULT_FIELDS = {"step", "name", "status", "summary", "applicable", "outputs", "blocked", "error", "requirement_id", "branch", "repositories"}
 
@@ -309,11 +312,13 @@ def initial_prompt(context: dict[str, Any]) -> str:
         for item in context["repositories"]
     )
     return f"""/commit-changes
-请提交当前需求 `{context['requirement_id']} {context['title']}` 在以下仓库中的全部已有变更：
+需求：`{context['requirement_id']} {context['title']}`
+有序权威仓库：
 {repositories}
-
 统一需求分支：`{context['branch']}`
-只 commit，不 push。"""
+
+已验收交接：实现、验证、审查与规则复盘均已完成，不重新开发或重新验收。
+提交准备范围：读取 Git 状态和候选 diff、确认提交范围、精确暂存、创建本地提交、必要时精确修改 .gitignore、核验归属和可再生性后逐路径清理非交付临时产物，或完成 hook 要求的纯格式修复，并核验提交结果；禁止业务语义变更，禁止删除未知资产、数据、秘密、受保护 tracked 文件或 staged 内容，禁止 git clean 和宽泛删除。调用方给出的更窄只读权限、范围和已有 staged 意图始终优先。只 commit，不 push。"""
 
 
 def _fresh_success(
@@ -354,6 +359,16 @@ def _complete_facts(context: dict[str, Any], saved: dict[str, Any] | None = None
     return facts
 
 
+def _conversation_messages(path: Path) -> list[dict[str, Any]]:
+    data = _read_json(path, "需求提交决策历史不可读取")
+    messages = data.get("messages")
+    _require(set(data) == {"messages"}, "需求提交决策历史内容不符合约定")
+    try:
+        return _validate_messages(messages)
+    except RuntimeError as error:
+        raise RuntimeError("需求提交决策历史消息不符合约定") from error
+
+
 def _execution_scene(run_dir: Path, state: dict[str, Any], context: dict[str, Any]) -> bool:
     key, expected = context["key"], f"conversations/{context['key']}.json"
     sessions, references = state.get("claude_sessions"), state.get("decision_conversations")
@@ -365,27 +380,45 @@ def _execution_scene(run_dir: Path, state: dict[str, Any], context: dict[str, An
     started = key in state or session_present or reference_present or conversation.exists() or conversation.is_symlink() or state.get("status") == "blocked"
     if not started:
         return False
+
     session = sessions.get(key) if isinstance(sessions, dict) else None
     reference = references.get(key) if isinstance(references, dict) else None
-    _require(
-        session == context["development_session_id"],
-        "需求提交没有复用原开发 session",
-    )
+    if session == context["development_session_id"]:
+        raise RuntimeError("需求提交仍使用旧开发 session 别名，需要先显式迁移为独立提交 session")
     _require(isinstance(reference, dict) and reference.get("path") == expected, "需求提交恢复缺少原决策历史引用")
     _require(not conversation.is_symlink() and conversation.is_file(), "需求提交恢复缺少原决策历史")
-    return True
-
-
-def _prepare_session(state: dict[str, Any], context: dict[str, Any]) -> None:
-    sessions = state.get("claude_sessions")
-    _require(isinstance(sessions, dict), "Claude session 状态不符合约定")
-    alias = sessions.get(context["key"])
+    messages = _conversation_messages(conversation)
     _require(
-        alias in {None, context["development_session_id"]},
-        "需求提交恢复没有原开发 session 别名",
+        len(messages) >= 2
+        and messages[1]["role"] == "assistant"
+        and bool(messages[1]["content"].strip()),
+        "需求提交决策历史缺少初始负责人指令",
     )
-    if alias is None:
-        sessions[context["key"]] = context["development_session_id"]
+
+    if session is None:
+        section = state.get(key)
+        last_agent_result = section.get("last_agent_result") if isinstance(section, dict) else None
+        _require(
+            len(messages) == 2
+            and not session_present
+            and state.get("status") != "blocked"
+            and (
+                not isinstance(section, dict)
+                or (
+                    "init" not in section
+                    and section.get("pending_agent_text") is None
+                    and (
+                        not isinstance(last_agent_result, dict)
+                        or not last_agent_result.get("session_id")
+                    )
+                )
+            ),
+            "需求提交已有 Agent 回复或 session 事实但缺少提交 session 别名",
+        )
+        return True
+
+    _require(isinstance(session, str) and bool(session), "需求提交 session ID 不符合约定")
+    return True
 
 
 def _decision_spec(context: dict[str, Any]) -> AgentDecisionLoopSpec:
@@ -527,7 +560,6 @@ async def run(
     _verify_boundary(context, facts)
     if not scene and not any(fact["dirty"] for fact in facts):
         return _fresh_success(run_dir, state, context, facts)
-    _prepare_session(state, context)
     if state.get("status") != "blocked":
         _running(run_dir, state)
 

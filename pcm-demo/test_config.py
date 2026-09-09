@@ -37,6 +37,42 @@ class ConfigTest(unittest.TestCase):
         self.assertFalse(hasattr(config, "resolve_model"))
         self.assertNotIn("agent-secret", repr(config))
 
+    def test_loads_positive_native_auto_compact_window(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {}, clear=True):
+            env_file = self.write_env(
+                directory,
+                "\n".join(
+                    [
+                        "PCM_AGENT_BASE_URL=http://localhost:8317",
+                        "PCM_AGENT_AUTH_TOKEN=agent-secret",
+                        "CLAUDE_CODE_AUTO_COMPACT_WINDOW=400001",
+                    ]
+                ),
+            )
+            config = AgentConfig.load(env_file)
+
+        self.assertEqual(config.auto_compact_window, 400001)
+
+    def test_rejects_non_positive_native_auto_compact_window(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {}, clear=True):
+            env_file = self.write_env(
+                directory,
+                "\n".join(
+                    [
+                        "PCM_AGENT_BASE_URL=http://localhost:8317",
+                        "PCM_AGENT_AUTH_TOKEN=agent-secret",
+                        "CLAUDE_CODE_AUTO_COMPACT_WINDOW=0",
+                    ]
+                ),
+            )
+            with self.assertRaisesRegex(ValueError, "CLAUDE_CODE_AUTO_COMPACT_WINDOW"):
+                AgentConfig.load(env_file)
+
+    def test_agent_config_constructor_keeps_default_compatibility(self) -> None:
+        config = AgentConfig("http://localhost:8317", SecretStr("agent-secret"))
+
+        self.assertEqual(config.auto_compact_window, 400000)
+
     def test_process_environment_overrides_agent_env_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             env_file = self.write_env(
@@ -45,17 +81,19 @@ class ConfigTest(unittest.TestCase):
                     [
                         "PCM_AGENT_BASE_URL=http://from-file",
                         "PCM_AGENT_AUTH_TOKEN=file-secret",
+                        "CLAUDE_CODE_AUTO_COMPACT_WINDOW=400001",
                     ]
                 ),
             )
             with patch.dict(
                 os.environ,
-                {"PCM_AGENT_AUTH_TOKEN": "environment-secret"},
-                clear=False,
+                {"PCM_AGENT_AUTH_TOKEN": "environment-secret", "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "500001"},
+                clear=True,
             ):
                 config = AgentConfig.load(env_file)
 
         self.assertEqual(config.auth_token.get_secret_value(), "environment-secret")
+        self.assertEqual(config.auto_compact_window, 500001)
 
     def test_legacy_api_key_does_not_replace_required_auth_token(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

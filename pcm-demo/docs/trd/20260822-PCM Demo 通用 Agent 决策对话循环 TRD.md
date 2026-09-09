@@ -79,6 +79,8 @@ flowchart LR
 - 返回 session、完整回复、终止语义、turn 数和成本；
 - 保留 API status、terminal reason 和安全异常类型。
 
+自动压缩仅配置原生 `CLAUDE_CODE_AUTO_COMPACT_WINDOW`，默认正整数 `400000`，从 Settings/AgentConfig 显式传入 SDK 子进程；不采用 PCM 别名、MAX_CONTEXT 或额外百分比参数。runner 保持 `query()`，长调用中的压缩由原生 harness 执行，不增加恢复预检、手工压缩或同会话救援流程。配置窗口不是摘要目标大小，实际触发点受内置 CLI 的模型窗口和保留空间影响。
+
 不负责：
 
 - 读写 PCM 步骤状态；
@@ -400,15 +402,16 @@ Prompt 投递采用 at-least-once 语义。自动恢复指令使用幂等的“�
 |---|---|
 | `success` + 正常 terminal reason | 保存完整回复并裁决 |
 | `error_max_turns` / `error_max_budget_usd` + session + 回复 | 允许裁决，但必须恢复并取得后续正常 success |
-| 任意 API 状态或明确 `api_error` terminal reason | 保存 `failed`，同时发出不持久化的外层重试请求 |
-| 无 ResultMessage，且原因为 SDK 连接失败或 CLI 进程失败 | 保存 `failed`，同时发出不持久化的外层重试请求 |
+| 本次 SDK API 错误明确为上下文超限，且未在同次调用中恢复成功 | `failed`，准确诊断，不请求同输入自动重试 |
+| 其它 API 状态或明确 `api_error` terminal reason | 保存 `failed`，同时发出不持久化的外层重试请求 |
+| 无 ResultMessage，且原因为 SDK 连接失败或 CLI 进程失败（未确认为上下文超限） | 保存 `failed`，同时发出不持久化的外层重试请求 |
 | 无 ResultMessage 的其它异常 | `failed`，不自动重试 |
 | CLI 未安装、消息解析或协议异常 | `failed`，不自动重试 |
 | session/cwd/Skill/slash command 不一致 | `failed`，不自动重试 |
 | `aborted_streaming` / `aborted_tools` | `failed`，不自动重试 |
 | `success` 携带其它未知 terminal reason | `failed`，不自动重试 |
 
-已取得结构化 ResultMessage 后的尾随进程异常不单独请求外层重试，避免重复执行已经产生副作用的 Agent 工作；若该 Result 本身带 API 状态或 `api_error` 终止，仍由结构化 API 事实请求重试。max-turn/max-budget 结果继续按既有可恢复语义在公共循环内处理，其它异常不进入决策循环。`ClaudeRunResult` 同时保留 `ResultMessage.errors`、`api_error_status`、`terminal_reason` 和捕获异常的安全正文、异常链与 traceback 位置。公共循环在 Agent 失败时覆盖写入 `logs/<领域键>-agent.json`，`last_agent_result`、步骤结果和 stderr 只保存具体安全原因及 `diagnostic_path`；第 17 步同样通过公共循环复用这些诊断与恢复能力。
+已取得结构化 ResultMessage 后的尾随进程异常不单独请求外层重试，避免重复执行已经产生副作用的 Agent 工作；若该 Result 本身带 API 状态或 `api_error` 终止，除明确上下文超限外仍由结构化 API 事实请求重试。超限只从 SDK API 错误标识及窄化错误格式识别，不扫描普通业务或工具正文；不能把所有 400 都视为超限，也不能因同次调用早期曾超限而否定后续正常成功。max-turn/max-budget 结果继续按既有可恢复语义在公共循环内处理，其它异常不进入决策循环。`ClaudeRunResult` 同时保留 `ResultMessage.errors`、`api_error_status`、`terminal_reason` 和捕获异常的安全正文、异常链与 traceback 位置。公共循环在 Agent 失败时覆盖写入 `logs/<领域键>-agent.json`，`last_agent_result`、步骤结果和 stderr 只保存具体安全原因及 `diagnostic_path`；第 17 步同样通过公共循环复用这些诊断与恢复能力。
 
 ## 9. `blocked` 与 `failed`
 
@@ -477,7 +480,11 @@ Prompt 投递采用 at-least-once 语义。自动恢复指令使用幂等的“�
 | 9 `engineering-architecture` | 必须基于固定权威输入形成工程架构文档；文档 repair 后，仅在根仓存在且仅存在固定文档未提交变化时才在原 session 调用 `commit-changes` | 固定文档非空、非符号链接、tracked；全体权威仓库当前为自身 top-level / `main` / clean |
 | 10 `ui-ux-framework` | 仅第 8 步严格交接含 `frontend` 时适用；不适用路径按执行产物存在性拒绝并零副作用 | 适用时固定文档非空、非符号链接、tracked；全体权威仓库当前 clean；不适用时 `applicable:false`、空 outputs |
 | 11 `requirement-breakdown` | 基于严格第 2/5/7/8/9/10 交接形成固定 Backlog；只在唯一根仓文档未提交变化时调用 `commit-changes` | 固定 Backlog 非空、非符号链接、tracked；全体权威仓库当前为自身 top-level / `main` / clean |
-| 17 `commit-changes` | 在一个产品根 session 中提交当前需求的有序权威仓库白名单；负责人处理确认、意外、blocked和继续 | 各仓仍在统一需求分支，`base ≤ main ≤ HEAD == target`（祖先关系），无进行中的 Git 操作，工作树与暂存区 clean；记录实际 `tip_sha` |
+| 17 `commit-changes` | 在产品根创建独立提交 session，处理当前需求的有序权威仓库白名单；同一提交会话内继续、修复和恢复 | 各仓仍在统一需求分支，`base ≤ main ≤ HEAD == target`（祖先关系），无进行中的 Git 操作，工作树与暂存区 clean；记录实际 `tip_sha` |
+
+第 17 步保留第 15/16 步的开发 session 与完成事实，但不再以其 ID 预填提交别名。首次有变更时不传 resume，公共循环捕获新 ID 到 `claude_sessions.requirement_commit_<ID>`；后续只恢复该提交会话。全仓 clean 和已有完整成功结果不额外创建会话。init 前失败且只保存初始指令、没有 ID 或 Agent 回复的准备态可重新开始；已发生交接却丢失 session/历史的损坏状态不允许用新会话掩盖。旧失败提交仍绑定开发 session 时须明确备份迁移，只处理该提交尝试的元数据与当前对话，不自动删除开发历史。
+
+提交准备允许精确 `.gitignore`、逐路径清理已确认可再生的非交付临时产物，以及 hook 纯格式修复；未知资产、数据和秘密不删除，不使用宽泛清理，不修改业务逻辑、接口/数据语义或测试断言。调用方更窄的范围与只读约束仍优先，不因第 17 步许可放宽其它步骤。
 
 需求收尾保留创建需求时的 `base_sha`，不要求首次提交时 HEAD 仍等于 base，也不要求当前 main 永远停在 base。第 17 步首次、提交后和恢复均以捕获的 SHA 校验 `base ≤ main ≤ tip`；功能分支已有提交时可以继续提交，所有仓库干净时记录当前 tip，不制造空提交。已保存成功结果的恢复仍须与当前 tip 精确一致。
 
