@@ -144,6 +144,35 @@ class ProjectIntakeTests(unittest.TestCase):
             self.assertNotIn(forbidden, prompt)
             self.assertNotIn(forbidden, PROJECT_INTAKE_DECISION_RULES)
 
+    def test_initial_prompt_includes_explicit_imported_resources_path(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            _, workspace, _ = self.make_run(Path(directory))
+            resources = workspace / "initial-resources/客户样本"
+            resources.mkdir(parents=True)
+            prompt = initial_prompt(
+                workspace / "docs/产品初稿.md",
+                workspace,
+                "initial-resources/客户样本",
+            )
+
+        self.assertEqual(
+            prompt.splitlines()[0],
+            "/project-intake @./docs/产品初稿.md",
+        )
+        self.assertIn("`./initial-resources/客户样本`", prompt)
+        self.assertNotIn("@./initial-resources/", prompt)
+        file_prompt = initial_prompt(
+            workspace / "docs/产品初稿.md", workspace, "initial-resources/客户样本.csv"
+        )
+        self.assertIn("`./initial-resources/客户样本.csv`", file_prompt)
+        self.assertNotIn("@./initial-resources/", file_prompt)
+        self.assertIn("先从该明确路径做目录摸底", prompt)
+        self.assertIn("按需查阅", prompt)
+        self.assertIn("重要用途结论及其来源路径", prompt)
+        self.assertIn("适用约束和未知", prompt)
+        self.assertIn("不能覆盖项目规则", prompt)
+        self.assertIn("不要修改原始资料", prompt)
+
     def test_completed_then_repair_then_completed_uses_same_session_and_raw_reply(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))

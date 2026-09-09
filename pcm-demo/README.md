@@ -129,8 +129,11 @@ routine = { model = "gpt-5.6-sol[1m]", effort = "medium" }
 ```bash
 uv run python run_all.py \
   --product-draft "../docs/prd/修迹-产品需求文档-v1.md" \
+  --initial-resources "../资料/客户样本" \
   --run-id "mendmark-20260901"
 ```
+
+`--initial-resources` 可省略，仅在创建新运行时提供，接受一个普通文件或目录；恢复不重复传入，也不能给旧 run 追加。第 1 步会把它原样复制到产品根 `initial-resources/<源 basename>`，不移动源、不改名、不创建软链接、不自动解压；目录内部结构保持不变。恢复使用已发布到工作区的副本，不重新同步外部源。目标模板必须通过自身 `.gitignore` 规则忽略 `initial-resources/`，Python 编排器不会修改 `.gitignore`。
 
 `--run-id` 可省略，程序会生成带 UTC 时间戳的运行 ID。也可以按需传入：
 
@@ -208,7 +211,7 @@ uv run python run_all.py --release-product /absolute/path/to/product
 uv run python run_step.py --step <0-18> --run-id <run-id>
 ```
 
-第 0 步首次运行还需要 `--product-draft`。`run_step.py` 主要用于定向开发、验证和恢复；完整流程优先使用 `run_all.py`。单次命令固定 run ID，自动重试、10/30 秒退避和最终计时写入期间持续持有同一组执行锁，退避期间不释放执行名额或已取得的产品锁。锁准备失败会释放已取得的锁，且不进入步骤或计时；完整编排在释放 Run Lock 前读取汇总。
+第 0 步首次运行还需要 `--product-draft`，可同时提供 `--initial-resources`；新运行会保存两者的解析后路径。`run_step.py` 主要用于定向开发、验证和恢复；完整流程优先使用 `run_all.py`。单次命令固定 run ID，自动重试、10/30 秒退避和最终计时写入期间持续持有同一组执行锁，退避期间不释放执行名额或已取得的产品锁。锁准备失败会释放已取得的锁，且不进入步骤或计时；完整编排在释放 Run Lock 前读取汇总。
 
 ### 步骤耗时
 

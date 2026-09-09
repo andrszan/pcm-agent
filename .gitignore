@@ -61,3 +61,6 @@
 
 # .pcm
 /.pcm/
+
+# 产品项目的”初始资料与资源“存放的指定文件夹
+initial-resources/

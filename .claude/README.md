@@ -92,7 +92,7 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 
 | Skill | 职责 |
 |---|---|
-| `project-intake` | 通过对话收敛最终产品范围、核心任务、用户语言、复杂度取舍和需要尽早验证的高风险假设 |
+| `project-intake` | 通过对话收敛最终产品范围、核心任务、用户语言、复杂度取舍和需要尽早验证的高风险假设；对调用方资料按需摸底，将用途结论、来源与重要未知写入产品定义，不默认全量读取或将附件全部纳入范围 |
 | `solution-design` | 基于已组装的工程事实确定项目级技术方向、系统边界和跨模块技术方案 |
 | `project-readiness` | 建立当前自动化开发周期唯一的开发资源准备基线，实际准备外部服务、运行凭据和受保护配置，并维护脱敏清单 |
 | `project-bootstrap` | 将已有基础工程项目化，按既有资源绑定迁移配置接线，并完成适用安装、构建、启动和基础验证 |
@@ -190,7 +190,9 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 │   │   ├── SKILL.md
 │   │   └── evals/evals.json
 │   ├── project-bootstrap/SKILL.md
-│   ├── project-intake/SKILL.md
+│   ├── project-intake/
+│   │   ├── SKILL.md
+│   │   └── evals/evals.json
 │   ├── project-readiness/
 │   │   ├── SKILL.md
 │   │   └── evals/evals.json

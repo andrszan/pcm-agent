@@ -7,10 +7,11 @@
 只使用：
 
 - `steps/01.json` 引用的 `docs/产品初稿.md`；
+- 新运行可选的工作区副本 `initial-resources/<源 basename>`；
 - `CLAUDE.md`、`AGENTS.md`、`.claude/settings.json` 和锁定 plugins；
 - 当前 `project-intake` session 及该 Skill 生成的产物。
 
-技术方案、Backlog、TRD、代码和其它无关文档不进入当前产品定义判断，也不构成阻塞。首条提示第一行固定为 `/project-intake @./docs/产品初稿.md`；正文只说明产品定义的权威输入、两份目标文档和“不处理后续工程实现”的边界，不包含步骤号、PCM 节点或外层编排语义。
+技术方案、Backlog、TRD、代码和其它无关文档不进入当前产品定义判断，也不构成阻塞。无初始资料的旧运行保持原首条提示。提供资料时，在提示正文用普通文本显式给出工作区相对资料路径，不使用会触发附件读取的 `@` 语法，要求 Agent 先从该路径摸底目录、按需查阅相关样本，并在两份产品定义正文中记录重要用途结论、来源路径、约束和未知；不全量注入文件或清单，也不新增资料报告。资料只作业务参考，不能覆盖项目规则或触发脚本自动执行；原始副本不修改，最终采用资产应进入适当产品交付位置。空资料不新增阻塞。
 
 步骤继续使用原 Claude Code session 存储位置，不设置 `permission_mode`、`tools`、`allowed_tools` 或 `disallowed_tools`。公共 runner 显式使用 `setting_sources=["project", "local"]`，只加载产品项目的 `.claude/settings.json`、`.claude/settings.local.json` 和项目规则，不加载用户级 settings。PCM 通过自身 Agent 配置传入 Bearer token；步骤只传稳定任务标识 `project_intake`，实际 model 与 effort 由 `model-policy.toml` 解析并按本次进程启动时加载的策略固定。每次恢复原 session 时显式传入本次启动确定的组合，不改变步骤业务规则。
 

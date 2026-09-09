@@ -29,6 +29,18 @@ class RunStepRetryTests(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
+    def test_initial_resources_rejected_outside_creation_steps(self) -> None:
+        with (
+            patch.object(sys, "argv", [
+                "run_step.py", "--step", "2", "--run-id", "existing",
+                "--initial-resources", "资料",
+            ]),
+            contextlib.redirect_stderr(io.StringIO()),
+            self.assertRaises(SystemExit) as raised,
+        ):
+            _REAL_PARSE_ARGS()
+        self.assertEqual(raised.exception.code, 2)
+
     def test_resume_message_help_explains_blocked_utf8_contract(self) -> None:
         stdout = io.StringIO()
         with (
@@ -362,6 +374,38 @@ raise SystemExit(run_step.retrying_main())
                 (1, 1, "project:01_create_workspace"),
             )
 
+    def test_step_zero_records_resolved_initial_resources_path(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            demo_root = Path(directory)
+            draft = demo_root / "draft.md"
+            draft.write_text(
+                "## A. 产品身份与文档边界\n产品。\n"
+                "## C. 用户与使用场景\n用户。\n"
+                "## D. 核心价值与业务闭环\n闭环。\n"
+                "## E. 产品范围\n范围。\n"
+                "## P. 产品验收\n验收。\n",
+                encoding="utf-8",
+            )
+            resources = demo_root / "资料"
+            resources.mkdir()
+            args = Mock(
+                run_id="test-run",
+                product_draft=draft,
+                initial_resources=resources,
+            )
+            with patch.object(run_step, "DEMO_ROOT", demo_root):
+                run_dir, completed = run_step.run_step_zero(args)
+            state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+            self.assertEqual(completed["status"], "success")
+            self.assertEqual(
+                state["initial_resources"],
+                {
+                    "source_path": str(resources.resolve()),
+                    "basename": "资料",
+                    "published_path": None,
+                },
+            )
+
     def test_step_zero_advanced_state_is_not_downgraded(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             demo_root = Path(directory)
@@ -383,6 +427,56 @@ raise SystemExit(run_step.retrying_main())
 
             self.assertEqual((run_dir / "state.json").read_bytes(), before)
 
+    def test_existing_runs_reject_adding_initial_resources_without_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            demo_root = Path(directory).resolve()
+            draft = demo_root / "draft.md"
+            draft.write_text("产品初稿", encoding="utf-8")
+            resources = demo_root / "资料.txt"
+            resources.write_text("客户资料", encoding="utf-8")
+            for step in (0, 1):
+                for legacy in (False, True):
+                    with self.subTest(step=step, legacy=legacy):
+                        run_id = f"old-{step}-{legacy}"
+                        run_dir = demo_root / "runs" / run_id
+                        (run_dir / "steps").mkdir(parents=True)
+                        state = {
+                            "run_id": run_id,
+                            "status": "failed",
+                            "current_step": step,
+                            "input": {"source_path": str(draft)},
+                        }
+                        if not legacy:
+                            state.update({
+                                "phase": "project_initialization",
+                                "step": step,
+                                "current_node": (
+                                    run_step.PRODUCT_DRAFT_NODE if step == 0
+                                    else run_step.CREATE_WORKSPACE_NODE
+                                ),
+                            })
+                        state_path = run_dir / "state.json"
+                        state_path.write_text(json.dumps(state), encoding="utf-8")
+                        result_path = run_dir / "steps" / f"{step:02d}.json"
+                        result_path.write_text('{"status": "failed"}', encoding="utf-8")
+                        before = (state_path.read_bytes(), result_path.read_bytes())
+                        args = Mock(
+                            run_id=run_id, product_draft=None, initial_resources=resources
+                        )
+                        with (
+                            patch.object(run_step, "DEMO_ROOT", demo_root),
+                            patch.object(run_step, "run_product_draft") as draft_runner,
+                            self.assertRaisesRegex(RuntimeError, "已有运行不能追加"),
+                        ):
+                            if step == 0:
+                                run_step.run_step_zero(args)
+                            else:
+                                run_step.load_or_create_step_one_run(args)
+                        draft_runner.assert_not_called()
+                        self.assertEqual(
+                            (state_path.read_bytes(), result_path.read_bytes()), before
+                        )
+
     def test_step_one_success_writes_result_before_advancing_state(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -394,6 +488,9 @@ raise SystemExit(run_step.retrying_main())
             final_path = workspace_root / "project"
             (final_path / "docs").mkdir(parents=True)
             (final_path / "docs/产品初稿.md").write_bytes(draft.read_bytes())
+            (final_path / "initial-resources").mkdir()
+            (final_path / "initial-resources/removed-source.txt").write_text("saved copy", encoding="utf-8")
+            removed_source = root / "removed-source.txt"
             staging_path = workspace_root / "project.pcm-tmp-test-run"
             workspace_env_file = root / "agent-workspace.env"
             workspace_env_file.write_bytes(b"MEDIA_KEY=test-value\n")
@@ -412,6 +509,11 @@ raise SystemExit(run_step.retrying_main())
                     "published_path": None,
                 },
                 "project": {"project_directory_name": "project"},
+                "initial_resources": {
+                    "source_path": str(removed_source),
+                    "basename": "removed-source.txt",
+                    "published_path": str(final_path / "initial-resources/removed-source.txt"),
+                },
                 "workspace": {
                     "root": str(workspace_root.resolve()),
                     "staging_path": str(staging_path.resolve()),
@@ -444,6 +546,7 @@ raise SystemExit(run_step.retrying_main())
                 ),
                 patch.object(run_step, "verify_published_content", return_value=True),
                 patch.object(run_step, "workspace_env_is_ignored", return_value=True),
+                patch.object(run_step, "initial_resources_are_ignored", autospec=True, return_value=True),
                 patch.object(run_step, "inspect_root_repository", return_value=repository),
                 patch.object(run_step, "write_step_result", side_effect=record_result),
                 patch.object(run_step, "write_state", side_effect=record_state),

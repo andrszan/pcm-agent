@@ -55,11 +55,14 @@ from steps.step_01_create_workspace import (
     WorkspaceBlocked,
     clone_and_verify,
     extract_project_identity,
+    initial_resources_are_ignored,
     initialize_root_repository,
     inspect_clone,
     inspect_root_repository,
     prepare_staging,
     publish,
+    reject_nested_workspace,
+    validate_initial_resources,
     verify_clone,
     verify_prepared,
     verify_published_content,
@@ -193,6 +196,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="运行已实现的 PCM Demo 步骤")
     parser.add_argument("--step", type=int, required=True)
     parser.add_argument("--product-draft", "--prd", dest="product_draft", type=Path)
+    parser.add_argument("--initial-resources", type=Path)
     parser.add_argument("--workspace-root", type=Path)
     parser.add_argument("--catalog-path", type=Path)
     parser.add_argument("--run-id")
@@ -203,6 +207,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--coordination-locks", help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if args.initial_resources is not None and args.step not in {0, 1}:
+        parser.error("--initial-resources 只能在第 0 或 1 步创建新运行时提供")
     if args.resume_message_file is not None and not args.run_id:
         parser.error("--resume-message-file 需要 --run-id")
     return args
@@ -225,6 +231,45 @@ def require_draft(path: Path | None) -> Path:
     if not resolved.is_file():
         raise ValueError(f"产品初稿不存在或不可读：{resolved}")
     return resolved
+
+
+def requested_initial_resources(args: argparse.Namespace) -> Path | None:
+    value = getattr(args, "initial_resources", None)
+    return validate_initial_resources(value) if isinstance(value, Path) else None
+
+
+def recorded_initial_resources(state: dict[str, Any]) -> Path | None:
+    record = state.get("initial_resources")
+    if not isinstance(record, dict):
+        return None
+    source_path = record.get("source_path")
+    basename = record.get("basename")
+    if not isinstance(source_path, str) or not isinstance(basename, str):
+        raise RuntimeError("运行状态中的初始资料记录无效")
+    source = Path(source_path)
+    if source.name != basename:
+        raise RuntimeError("运行状态中的初始资料名称无效")
+    return source
+
+
+def bind_initial_resources(
+    state: dict[str, Any], requested: Path | None, *, new_run: bool = False
+) -> Path | None:
+    recorded = recorded_initial_resources(state)
+    if recorded is not None:
+        if requested is not None and requested != recorded:
+            raise RuntimeError("--initial-resources 与已有运行记录不一致")
+        return recorded
+    if requested is None:
+        return None
+    if not new_run:
+        raise RuntimeError("已有运行不能追加 --initial-resources，请创建新运行")
+    state["initial_resources"] = {
+        "source_path": str(requested),
+        "basename": requested.name,
+        "published_path": None,
+    }
+    return requested
 
 
 def run_dir_for(run_id: str) -> Path:
@@ -390,6 +435,7 @@ def has_step_success(run_dir: Path, step: int) -> bool:
 
 
 def load_or_create_step_one_run(args: argparse.Namespace) -> tuple[Path, dict[str, Any], Path]:
+    requested_resources = requested_initial_resources(args)
     if args.run_id and run_dir_for(args.run_id).is_dir():
         run_dir = run_dir_for(args.run_id)
         state = read_state(run_dir)
@@ -417,6 +463,7 @@ def load_or_create_step_one_run(args: argparse.Namespace) -> tuple[Path, dict[st
         draft_path = Path(state["input"]["source_path"])
         if args.product_draft and args.product_draft.resolve() != draft_path:
             raise RuntimeError("--product-draft 与已有运行记录不一致")
+        bind_initial_resources(state, requested_resources)
         return run_dir, state, draft_path
 
     draft_path = require_draft(args.product_draft)
@@ -442,6 +489,7 @@ def load_or_create_step_one_run(args: argparse.Namespace) -> tuple[Path, dict[st
         "blocked": None,
         "error": None,
     }
+    bind_initial_resources(state, requested_resources, new_run=True)
     write_state(run_dir, state)
     return run_dir, state, draft_path
 
@@ -497,6 +545,15 @@ def complete_step_one(
     project_name = state["project"]["project_directory_name"]
     final_path = workspace_root / project_name
     staging_path = workspace_root / f"{project_name}.pcm-tmp-{run_id}"
+    resources_record = state.get("initial_resources")
+    resources_source = recorded_initial_resources(state)
+    resources_relative = (
+        f"initial-resources/{resources_source.name}"
+        if resources_source is not None
+        else None
+    )
+    if resources_source is not None:
+        reject_nested_workspace(resources_source, final_path, staging_path)
 
     if "workspace" in state:
         recorded = state["workspace"]
@@ -533,7 +590,9 @@ def complete_step_one(
         if (
             phase == "prepared_verified"
             and not staging_path.exists()
-            and verify_published_content(final_path, source_hash, workspace_env_bytes)
+            and verify_published_content(
+                final_path, source_hash, workspace_env_bytes, resources_relative
+            )
         ):
             state["publication_phase"] = "published"
             write_state(run_dir, state)
@@ -541,7 +600,9 @@ def complete_step_one(
         elif (
             phase in {"published", "git_initialized"}
             and not staging_path.exists()
-            and verify_published_content(final_path, source_hash, workspace_env_bytes)
+            and verify_published_content(
+                final_path, source_hash, workspace_env_bytes, resources_relative
+            )
         ):
             pass
         else:
@@ -560,8 +621,19 @@ def complete_step_one(
     if phase == "clone_verified":
         if not verify_clone(staging_path, state["template"]):
             raise RuntimeError("临时 clone 与已有运行证据不一致")
+        resources_for_copy = (
+            validate_initial_resources(resources_source)
+            if resources_source is not None
+            else None
+        )
+        if resources_for_copy is not None:
+            reject_nested_workspace(resources_for_copy, final_path, staging_path)
         prepare_staging(
-            staging_path, draft_bytes, source_hash, workspace_env_bytes
+            staging_path,
+            draft_bytes,
+            source_hash,
+            workspace_env_bytes,
+            resources_for_copy,
         )
         ensure_runtime(
             staging_path, coordination["product_key"], run_id, record
@@ -575,7 +647,9 @@ def complete_step_one(
         phase = "prepared_verified"
 
     if phase == "prepared_verified" and not final_path.exists():
-        if not verify_prepared(staging_path, source_hash, workspace_env_bytes):
+        if not verify_prepared(
+            staging_path, source_hash, workspace_env_bytes, resources_relative
+        ):
             raise RuntimeError("临时工作区与发布前证据不一致")
         publish(staging_path, final_path)
         state["publication_phase"] = "published"
@@ -585,7 +659,7 @@ def complete_step_one(
     if phase == "published":
         if (
             not verify_published_content(
-                final_path, source_hash, workspace_env_bytes
+                final_path, source_hash, workspace_env_bytes, resources_relative
             )
             or staging_path.exists()
         ):
@@ -593,6 +667,10 @@ def complete_step_one(
         root_repository = initialize_root_repository(final_path)
         if not workspace_env_is_ignored(final_path):
             raise RuntimeError("最终项目根 Git 必须忽略 .env")
+        if resources_relative is not None and not initial_resources_are_ignored(
+            final_path
+        ):
+            raise RuntimeError("最终项目根 Git 必须忽略 initial-resources/")
         state["root_repository"] = root_repository
         state["publication_phase"] = "git_initialized"
         write_state(run_dir, state)
@@ -601,13 +679,17 @@ def complete_step_one(
     if phase != "git_initialized":
         raise RuntimeError(f"第 1 步发布阶段不符合预期：{phase}")
     if (
-        not verify_published_content(final_path, source_hash, workspace_env_bytes)
+        not verify_published_content(final_path, source_hash, workspace_env_bytes, resources_relative)
         or staging_path.exists()
     ):
         raise RuntimeError("最终项目工作区核验失败")
     root_repository = inspect_root_repository(final_path)
     if not workspace_env_is_ignored(final_path):
         raise RuntimeError("最终项目根 Git 必须忽略 .env")
+    if resources_relative is not None and not initial_resources_are_ignored(
+        final_path
+    ):
+        raise RuntimeError("最终项目根 Git 必须忽略 initial-resources/")
     if state.get("root_repository") != root_repository:
         raise RuntimeError("根 Git 仓库与已有运行证据不一致")
     if sha256(draft_path) != source_hash:
@@ -615,6 +697,8 @@ def complete_step_one(
     if read_agent_workspace_env_file(workspace_env_file) != workspace_env_bytes:
         raise RuntimeError("第 1 步发布期间 AI Agent 工作区环境配置发生变化")
     published_draft = final_path / "docs" / "产品初稿.md"
+    if isinstance(resources_record, dict) and resources_relative is not None:
+        resources_record["published_path"] = str(final_path / resources_relative)
     completed = workspace_result(
         "success",
         "已从固定模板发布独立产品项目工作区，安装受保护的 Agent 工作区配置，"
@@ -982,6 +1066,7 @@ def sha256_bytes(data: bytes) -> str:
 def run_step_zero(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
     run_dir: Path | None = None
     state: dict[str, Any] | None = None
+    requested_resources = requested_initial_resources(args)
     if args.run_id:
         candidate = run_dir_for(args.run_id)
         if candidate.is_dir():
@@ -1010,18 +1095,19 @@ def run_step_zero(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
     else:
         draft_path = require_draft(args.product_draft)
 
+    run_id = args.run_id or new_run_id()
+    next_state = state if state is not None else {"run_id": run_id}
+    bind_initial_resources(next_state, requested_resources, new_run=state is None)
     before_hash = sha256(draft_path)
     result = run_product_draft(draft_path)
     after_hash = sha256(draft_path)
     if before_hash != after_hash:
         raise RuntimeError("第 0 步意外修改了产品初稿")
-    run_id = args.run_id or new_run_id()
     if run_dir is None:
         run_dir = create_run_dir(DEMO_ROOT / "runs", run_id)
     write_step_result(run_dir, 0, result)
     next_step = 1 if result["status"] == "success" else 0
     next_node = CREATE_WORKSPACE_NODE if result["status"] == "success" else PRODUCT_DRAFT_NODE
-    next_state = state or {"run_id": run_id}
     next_state.update(
         {
             "status": result["status"],

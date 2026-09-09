@@ -4,7 +4,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from stat import S_IMODE, S_ISREG
+from stat import S_IMODE, S_ISDIR, S_ISREG
 from typing import Any
 
 from common.files import sha256
@@ -59,7 +59,7 @@ def verify_required_paths(root: Path) -> bool:
     return all((root / path).exists() for path in REQUIRED_PATHS)
 
 
-def workspace_env_is_ignored(root: Path) -> bool:
+def git_path_is_ignored(root: Path, relative: str) -> bool:
     try:
         result = subprocess.run(
             [
@@ -70,7 +70,7 @@ def workspace_env_is_ignored(root: Path) -> bool:
                 "--quiet",
                 "--no-index",
                 "--",
-                ".env",
+                relative,
             ],
             cwd=root,
             text=True,
@@ -87,6 +87,85 @@ def workspace_env_is_ignored(root: Path) -> bool:
         return False
     message = (result.stderr or result.stdout).strip()
     raise RuntimeError(f"Git 忽略规则核验失败：{message}")
+
+
+def workspace_env_is_ignored(root: Path) -> bool:
+    return git_path_is_ignored(root, ".env")
+
+
+def initial_resources_are_ignored(root: Path) -> bool:
+    return git_path_is_ignored(root, "initial-resources/")
+
+
+def validate_initial_resources(path: Path) -> Path:
+    source = path.absolute()
+    try:
+        source_stat = source.lstat()
+    except OSError as error:
+        raise ValueError(f"初始资料不存在或不可读取：{source}") from error
+    if source.is_symlink() or not (
+        S_ISREG(source_stat.st_mode) or S_ISDIR(source_stat.st_mode)
+    ):
+        raise ValueError(f"初始资料必须是非符号链接的普通文件或目录：{source}")
+    if source.name in {"", ".", ".."}:
+        raise ValueError(f"初始资料路径缺少可用名称：{source}")
+    if S_ISDIR(source_stat.st_mode):
+        for current_root, directories, files in os.walk(source, followlinks=False):
+            for name in [*directories, *files]:
+                current = Path(current_root) / name
+                current_stat = current.lstat()
+                if current.is_symlink() or not (
+                    S_ISREG(current_stat.st_mode) or S_ISDIR(current_stat.st_mode)
+                ):
+                    raise ValueError(f"初始资料包含符号链接或特殊文件：{current}")
+    return source.resolve()
+
+
+def reject_nested_workspace(source: Path, *targets: Path) -> None:
+    if not source.is_dir():
+        return
+    for target in targets:
+        try:
+            target.resolve().relative_to(source.resolve())
+        except ValueError:
+            continue
+        raise RuntimeError("初始资料目录不能递归包含目标项目或临时工作区")
+
+
+def _verify_resource_copy(path: Path) -> bool:
+    try:
+        path_stat = path.lstat()
+    except OSError:
+        return False
+    if path.is_symlink() or not (
+        S_ISREG(path_stat.st_mode) or S_ISDIR(path_stat.st_mode)
+    ):
+        return False
+    if S_ISDIR(path_stat.st_mode):
+        try:
+            return all(_verify_resource_copy(child) for child in path.iterdir())
+        except OSError:
+            return False
+    return True
+
+
+def copy_initial_resources(staging: Path, source: Path) -> str:
+    relative = Path("initial-resources") / source.name
+    container = staging / relative.parent
+    if os.path.lexists(container):
+        raise RuntimeError("临时工作区已存在 initial-resources，拒绝覆盖未知目录或半复制现场")
+    container.mkdir()
+    destination = staging / relative
+    try:
+        if source.is_dir():
+            shutil.copytree(source, destination, symlinks=False)
+        else:
+            shutil.copy2(source, destination)
+    except Exception as error:
+        raise RuntimeError("复制初始资料失败，已保留半复制现场") from error
+    if not _verify_resource_copy(destination):
+        raise RuntimeError("初始资料副本核验失败，已保留现场")
+    return relative.as_posix()
 
 
 def verify_workspace_env(root: Path, expected_bytes: bytes) -> bool:
@@ -123,7 +202,10 @@ def verify_clone(staging: Path, template: dict[str, str]) -> bool:
 
 
 def verify_published_content(
-    root: Path, source_hash: str, workspace_env_bytes: bytes
+    root: Path,
+    source_hash: str,
+    workspace_env_bytes: bytes,
+    initial_resources_path: str | None = None,
 ) -> bool:
     if root.is_symlink():
         return False
@@ -136,12 +218,23 @@ def verify_published_content(
         and sha256(published_draft) == source_hash
         and verify_required_paths(root)
         and verify_workspace_env(root, workspace_env_bytes)
+        and (
+            initial_resources_path is None
+            or _verify_resource_copy(root / initial_resources_path)
+        )
     )
 
 
-def verify_prepared(root: Path, source_hash: str, workspace_env_bytes: bytes) -> bool:
+def verify_prepared(
+    root: Path,
+    source_hash: str,
+    workspace_env_bytes: bytes,
+    initial_resources_path: str | None = None,
+) -> bool:
     return (
-        verify_published_content(root, source_hash, workspace_env_bytes)
+        verify_published_content(
+            root, source_hash, workspace_env_bytes, initial_resources_path
+        )
         and not (root / ".git").exists()
     )
 
@@ -261,6 +354,7 @@ def prepare_staging(
     draft_bytes: bytes,
     source_hash: str,
     workspace_env_bytes: bytes,
+    initial_resources: Path | None = None,
 ) -> Path:
     require_real_directory(staging, "临时工作区")
     git_dir = staging / ".git"
@@ -286,12 +380,21 @@ def prepare_staging(
     with os.fdopen(descriptor, "wb") as file:
         os.fchmod(file.fileno(), 0o600)
         file.write(workspace_env_bytes)
+    initial_resources_path = (
+        copy_initial_resources(staging, initial_resources)
+        if initial_resources is not None
+        else None
+    )
     if (
         git_dir.exists()
         or sorted(path.name for path in docs_dir.iterdir()) != ["产品初稿.md"]
         or sha256(published_draft) != source_hash
         or not verify_required_paths(staging)
         or not verify_workspace_env(staging, workspace_env_bytes)
+        or (
+            initial_resources_path is not None
+            and not _verify_resource_copy(staging / initial_resources_path)
+        )
     ):
         raise RuntimeError("临时工作区初始化核验失败")
     return published_draft

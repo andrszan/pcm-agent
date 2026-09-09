@@ -74,6 +74,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     source.add_argument("--product-status", type=Path)
     source.add_argument("--release-product", type=Path)
     parser.add_argument("--run-id")
+    parser.add_argument("--initial-resources", type=Path)
     parser.add_argument("--workspace-root", type=Path)
     parser.add_argument("--catalog-path", type=Path)
     parser.add_argument(
@@ -82,6 +83,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="仅用于当前 blocked：读取 UTF-8 文件作为人工负责人恢复指令",
     )
     args = parser.parse_args(argv)
+    if args.initial_resources is not None and args.product_draft is None:
+        parser.error("--initial-resources 只能用于提供产品初稿的新运行")
     if args.resume and args.run_id:
         parser.error("--resume 不能与 --run-id 同时使用")
     if args.resume_message_file is not None and not args.resume:
@@ -295,8 +298,25 @@ def build_step_command(
         if draft is None:
             raise RuntimeError("第 0 步恢复状态缺少产品初稿路径")
         command.extend(["--product-draft", str(draft.resolve())])
-    if step == 1 and args.workspace_root is not None:
-        command.extend(["--workspace-root", str(args.workspace_root.resolve())])
+        resources = args.initial_resources
+        if resources is None and state is not None:
+            resource_record = state.get("initial_resources")
+            source_path = (
+                resource_record.get("source_path")
+                if isinstance(resource_record, dict)
+                else None
+            )
+            if isinstance(source_path, str) and source_path:
+                resources = Path(source_path)
+        if resources is not None:
+            command.extend(["--initial-resources", str(resources.absolute())])
+    if step == 1:
+        if args.initial_resources is not None:
+            command.extend(
+                ["--initial-resources", str(args.initial_resources.absolute())]
+            )
+        if args.workspace_root is not None:
+            command.extend(["--workspace-root", str(args.workspace_root.resolve())])
     if step == 3 and args.catalog_path is not None:
         command.extend(["--catalog-path", str(args.catalog_path.resolve())])
     resume_message_file = getattr(args, "resume_message_file", None)
@@ -325,6 +345,8 @@ def fresh_command(run_id: str, args: argparse.Namespace) -> str:
         "--run-id",
         run_id,
     ]
+    if args.initial_resources is not None:
+        command.extend(["--initial-resources", str(args.initial_resources.absolute())])
     if args.workspace_root is not None:
         command.extend(["--workspace-root", str(args.workspace_root.resolve())])
     if args.catalog_path is not None:

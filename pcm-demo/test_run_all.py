@@ -14,6 +14,7 @@ from unittest.mock import Mock, patch
 import model_policy
 import run_all
 from common.files import write_json
+from steps.step_01_create_workspace import validate_initial_resources
 
 
 class RunAllTests(unittest.TestCase):
@@ -44,6 +45,7 @@ class RunAllTests(unittest.TestCase):
         *,
         resume: str | None = "test-run",
         product_draft: Path | None = None,
+        initial_resources: Path | None = None,
         run_id: str | None = None,
         workspace_root: Path | None = None,
         catalog_path: Path | None = None,
@@ -52,6 +54,7 @@ class RunAllTests(unittest.TestCase):
         return Namespace(
             resume=resume,
             product_draft=product_draft,
+            initial_resources=initial_resources,
             run_id=run_id,
             workspace_root=workspace_root,
             catalog_path=catalog_path,
@@ -234,10 +237,13 @@ class RunAllTests(unittest.TestCase):
         workspace_root = self.root / "workspace root"
         catalog_path = self.root / "catalog.json"
         draft = self.root / "draft.md"
+        resources = self.root / "资料"
+        resources.mkdir()
         args = self.args(
             resume=None,
             run_id="test-run",
             product_draft=draft,
+            initial_resources=resources,
             workspace_root=workspace_root,
             catalog_path=catalog_path,
         )
@@ -245,10 +251,28 @@ class RunAllTests(unittest.TestCase):
         step_one = run_all.build_step_command(1, "test-run", args, {})
         step_three = run_all.build_step_command(3, "test-run", args, {})
         self.assertIn("--product-draft", step_zero)
+        self.assertIn("--initial-resources", step_zero)
         self.assertNotIn("--workspace-root", step_zero)
+        self.assertIn("--initial-resources", step_one)
         self.assertIn("--workspace-root", step_one)
         self.assertNotIn("--catalog-path", step_one)
         self.assertIn("--catalog-path", step_three)
+
+    def test_initial_resources_symlink_is_not_resolved_before_input_validation(self) -> None:
+        target = self.root / "实际资料.txt"
+        target.write_text("资料", encoding="utf-8")
+        source = self.root / "资料链接.txt"
+        source.symlink_to(target)
+        args = self.args(
+            resume=None, product_draft=self.root / "draft.md", initial_resources=source
+        )
+        for step in (0, 1):
+            command = run_all.build_step_command(step, "test-run", args, None)
+            forwarded = Path(command[command.index("--initial-resources") + 1])
+            self.assertEqual(forwarded, source.absolute())
+            with self.assertRaisesRegex(ValueError, "非符号链接"):
+                validate_initial_resources(forwarded)
+        self.assertIn(str(source.absolute()), run_all.fresh_command("test-run", args))
 
     def test_full_fresh_sequence_stops_after_first_completed_requirement(self) -> None:
         draft = self.root / "draft.md"
@@ -567,6 +591,10 @@ class RunAllTests(unittest.TestCase):
             run_all.parse_args(["--product-draft", "draft.md", "--resume", "run"])
         with self.assertRaises(SystemExit):
             run_all.parse_args(["--resume", "run", "--run-id", "other"])
+        with self.assertRaises(SystemExit):
+            run_all.parse_args(["--resume", "run", "--initial-resources", "资料"])
+        with self.assertRaises(SystemExit):
+            run_all.parse_args(["--product-status", "project", "--initial-resources", "资料"])
         with self.assertRaises(SystemExit):
             run_all.parse_args(
                 ["--product-draft", "draft.md", "--resume-message-file", "message"]

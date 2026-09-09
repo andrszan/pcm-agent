@@ -28,12 +28,16 @@ from config import (
 )
 from steps.step_01_create_workspace.project_identity import SYSTEM_PROMPT, validate_identity
 from steps.step_01_create_workspace.workspace import (
+    copy_initial_resources,
+    initial_resources_are_ignored,
     initialize_root_repository,
     inspect_clone,
     inspect_repository,
     inspect_root_repository,
     parse_default_branch,
     prepare_staging,
+    reject_nested_workspace,
+    validate_initial_resources,
     verify_clone,
     verify_prepared,
     verify_workspace_env,
@@ -662,8 +666,26 @@ class WorkspaceStepTests(unittest.TestCase):
 
             draft_hash = hashlib.sha256(draft).hexdigest()
             workspace_env = b"KEY=\x00value"
-            prepare_staging(staging, draft, draft_hash, workspace_env)
-            self.assertTrue(verify_prepared(staging, draft_hash, workspace_env))
+            resources = Path(directory) / "source-materials"
+            (resources / "nested").mkdir(parents=True)
+            (resources / "nested/sample.txt").write_text("sample", encoding="utf-8")
+            prepare_staging(
+                staging, draft, draft_hash, workspace_env, resources
+            )
+            self.assertTrue(
+                verify_prepared(
+                    staging,
+                    draft_hash,
+                    workspace_env,
+                    "initial-resources/source-materials",
+                )
+            )
+            self.assertEqual(
+                (staging / "initial-resources/source-materials/nested/sample.txt").read_text(
+                    encoding="utf-8"
+                ),
+                "sample",
+            )
             self.assertTrue(verify_workspace_env(staging, workspace_env))
             self.assertEqual((staging / ".env").read_bytes(), workspace_env)
             self.assertEqual((staging / ".env").stat().st_mode & 0o777, 0o600)
@@ -676,6 +698,85 @@ class WorkspaceStepTests(unittest.TestCase):
                 [path.name for path in (staging / "docs").iterdir()], ["产品初稿.md"]
             )
             self.assertFalse((staging / ".git").exists())
+    def test_initial_resources_copy_file_and_directory_without_changing_source(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_file = root / "sample.txt"
+            source_file.write_bytes(b"")
+            staging_file = root / "staging-file"
+            staging_file.mkdir()
+            self.assertEqual(
+                copy_initial_resources(staging_file, validate_initial_resources(source_file)),
+                "initial-resources/sample.txt",
+            )
+            self.assertTrue(source_file.exists())
+            self.assertEqual((staging_file / "initial-resources/sample.txt").read_bytes(), b"")
+
+            source_dir = root / "samples"
+            (source_dir / "nested").mkdir(parents=True)
+            (source_dir / "nested/data.bin").write_bytes(b"data")
+            staging_dir = root / "staging-dir"
+            staging_dir.mkdir()
+            copy_initial_resources(staging_dir, validate_initial_resources(source_dir))
+            self.assertEqual(
+                (staging_dir / "initial-resources/samples/nested/data.bin").read_bytes(),
+                b"data",
+            )
+            self.assertTrue((source_dir / "nested/data.bin").exists())
+
+    def test_initial_resources_reject_symlink_special_file_and_nested_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "target.txt"
+            target.write_text("target", encoding="utf-8")
+            link = root / "link.txt"
+            link.symlink_to(target)
+            with self.assertRaisesRegex(ValueError, "符号链接"):
+                validate_initial_resources(link)
+
+            source = root / "source"
+            source.mkdir()
+            (source / "nested-link").symlink_to(target)
+            with self.assertRaisesRegex(ValueError, "符号链接或特殊文件"):
+                validate_initial_resources(source)
+            (source / "nested-link").unlink()
+            fifo = source / "pipe"
+            os.mkfifo(fifo)
+            with self.assertRaisesRegex(ValueError, "符号链接或特殊文件"):
+                validate_initial_resources(source)
+            fifo.unlink()
+            target_workspace = source / "products/project"
+            with self.assertRaisesRegex(RuntimeError, "递归包含"):
+                reject_nested_workspace(source.resolve(), target_workspace)
+
+    def test_half_copy_is_preserved_and_not_overwritten(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            source.mkdir()
+            (source / "data.txt").write_text("data", encoding="utf-8")
+            staging = root / "staging"
+            staging.mkdir()
+            with patch("shutil.copytree", side_effect=OSError("interrupted")):
+                with self.assertRaisesRegex(RuntimeError, "保留半复制现场"):
+                    copy_initial_resources(staging, source)
+            self.assertTrue((staging / "initial-resources").is_dir())
+            with self.assertRaisesRegex(RuntimeError, "拒绝覆盖"):
+                copy_initial_resources(staging, source)
+
+    def test_initial_resources_ignore_check_uses_repository_rules_only(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(["git", "init", "-b", "main"], cwd=root, check=True, capture_output=True)
+            (root / "initial-resources").mkdir()
+            (root / "initial-resources/sample.txt").write_text("sample", encoding="utf-8")
+            self.assertFalse(
+                initial_resources_are_ignored(root)
+            )
+            (root / ".gitignore").write_text("initial-resources/\n", encoding="utf-8")
+            self.assertTrue(
+                initial_resources_are_ignored(root)
+            )
 
 
 if __name__ == "__main__":
