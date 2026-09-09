@@ -1,8 +1,9 @@
 [profiles]
+# model: gpt-6-astra / gpt-5.6-sol / gpt-5.6-terra / gpt-5.6-luna
 # effort: low / medium / high / xhigh / max
-planning = { model = "gpt-6-astra[1m]", effort = "high" }
-building = { model = "gpt-6-astra[1m]", effort = "medium" }
-routine = { model = "gpt-6-astra[1m]", effort = "low" }
+planning = { model = "gpt-6-astra[1m]", effort = "low" }
+building = { model = "gpt-5.6-sol[1m]", effort = "medium" }
+routine = { model = "gpt-5.6-terra[1m]", effort = "low" }
 
 [steps]
 "2" = "planning"
@@ -16,5 +17,5 @@ routine = { model = "gpt-6-astra[1m]", effort = "low" }
 "11" = "planning"
 "14" = "building"
 "15" = "building"
-"16" = "routine"
+"16" = "building"
 "17" = "routine"
