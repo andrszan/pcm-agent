@@ -79,7 +79,7 @@ flowchart LR
 - 返回 session、完整回复、终止语义、turn 数和成本；
 - 保留 API status、terminal reason 和安全异常类型。
 
-自动压缩仅配置原生 `CLAUDE_CODE_AUTO_COMPACT_WINDOW`，默认正整数 `400000`，从 Settings/AgentConfig 显式传入 SDK 子进程；不采用 PCM 别名、MAX_CONTEXT 或额外百分比参数。runner 保持 `query()`，长调用中的压缩由原生 harness 执行，不增加恢复预检、手工压缩或同会话救援流程。配置窗口不是摘要目标大小，实际触发点受内置 CLI 的模型窗口和保留空间影响。
+自动压缩仅配置原生 `CLAUDE_CODE_AUTO_COMPACT_WINDOW`，默认正整数 `500000`，从 Settings/AgentConfig 显式传入 SDK 子进程；不采用 PCM 别名、MAX_CONTEXT 或额外百分比参数。runner 保持 `query()`，长调用中的压缩由原生 harness 执行，不增加恢复预检、手工压缩或同会话救援流程。配置窗口不是摘要目标大小，实际触发点受内置 CLI 的模型窗口和保留空间影响。
 
 不负责：
 

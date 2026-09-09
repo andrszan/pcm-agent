@@ -9,7 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_ENV_FILE = Path(__file__).with_name(".env")
 CAPABILITY_REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_CLAUDE_CODE_AUTO_COMPACT_WINDOW = 400000
+DEFAULT_CLAUDE_CODE_AUTO_COMPACT_WINDOW = 500000
 
 
 class Settings(BaseSettings):

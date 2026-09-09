@@ -76,7 +76,7 @@ uv sync
 | --- | --- |
 | `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL`、`LLM_MODEL_EFFORT` | AI-compatible 结构化决策、提取与 JSON 修复共用配置；effort 可留空，不发送 `reasoning.effort` |
 | `PCM_AGENT_BASE_URL`、`PCM_AGENT_AUTH_TOKEN` | Claude Agent SDK 使用的 Anthropic Messages 网关与受保护 Bearer token；Base URL 不包含 `/v1` |
-| `CLAUDE_CODE_AUTO_COMPACT_WINDOW` | SDK 子进程使用的原生自动压缩窗口，正整数 Token 数，默认 `400000` |
+| `CLAUDE_CODE_AUTO_COMPACT_WINDOW` | SDK 子进程使用的原生自动压缩窗口，正整数 Token 数，默认 `500000` |
 | `PCM_WORKSPACE_ROOT` | 所有目标产品项目的外部父目录，必须位于当前能力仓库之外 |
 | `PCM_MAX_CONCURRENT_PROJECTS` | 当前 Demo checkout 同时执行的产品项目上限，默认 `2` |
 | `PCM_TEMPLATE_CATALOG` | 基础工程候选目录 JSON |

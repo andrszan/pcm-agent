@@ -71,7 +71,7 @@ class ConfigTest(unittest.TestCase):
     def test_agent_config_constructor_keeps_default_compatibility(self) -> None:
         config = AgentConfig("http://localhost:8317", SecretStr("agent-secret"))
 
-        self.assertEqual(config.auto_compact_window, 400000)
+        self.assertEqual(config.auto_compact_window, 500000)
 
     def test_process_environment_overrides_agent_env_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

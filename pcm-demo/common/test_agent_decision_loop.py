@@ -1767,7 +1767,7 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             workspace = Path(directory)
             write_json(workspace / "plugins-lock.json", {"version": 1, "plugins": []})
-            body = "API Error: 400 unknown provider for model gpt-6-sol api_key=agent-secret " + "x" * 5000
+            body = "API Error: 400 unknown provider for model gpt-5.6-astra api_key=agent-secret " + "x" * 5000
 
             async def fake_query(*_args: object, **_kwargs: object):
                 yield AssistantMessage(
@@ -1781,7 +1781,7 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
 
             with patch("common.claude_agent.query", new=fake_query):
                 result = await run_claude(
-                    "测试提示", cwd=workspace, model="gpt-6-sol", effort="high"
+                    "测试提示", cwd=workspace, model="gpt-5.6-astra", effort="high"
                 )
 
         self.assertEqual(
@@ -1790,7 +1790,7 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNotNone(result.sdk_errors)
         self.assertTrue(result.sdk_errors[0].startswith(
-            "API Error: 400 unknown provider for model gpt-6-sol"
+            "API Error: 400 unknown provider for model gpt-5.6-astra"
         ))
         self.assertNotIn("agent-secret", result.sdk_errors[0])
         self.assertIn("api_key=[REDACTED]", result.sdk_errors[0])
@@ -1806,7 +1806,7 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
             )
             saved = json.loads((run_dir / failure.diagnostic_path).read_text(encoding="utf-8"))
         self.assertTrue(str(failure).startswith(
-            "API Error: 400 unknown provider for model gpt-6-sol"
+            "API Error: 400 unknown provider for model gpt-5.6-astra"
         ))
         self.assertEqual(saved["details"]["sdk_errors"], result.sdk_errors)
         self.assertEqual(

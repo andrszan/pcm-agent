@@ -3,7 +3,7 @@
 # effort: low / medium / high / xhigh / max
 planning = { model = "gpt-6-astra[1m]", effort = "low" }
 building = { model = "gpt-5.6-sol[1m]", effort = "medium" }
-routine = { model = "gpt-5.6-terra[1m]", effort = "low" }
+routine = { model = "gpt-5.6-sol[1m]", effort = "low" }
 
 [steps]
 "2" = "planning"
