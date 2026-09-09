@@ -44,9 +44,8 @@ LEGACY_COMPLETION_MESSAGES = (
     "已完成 solution-design：总体技术方案已生成并通过完成条件与工程事实核验。",
 )
 
-SOLUTION_DESIGN_DECISION_RULES = """- completed：固定技术方案文档已写入；基于实际工程事实明确了系统边界、主要技术选择、交付单元、跨单元协作、关键风险和未决事项，并清晰区分工程事实、确认决定、目标、假设和待确认事项；没有把业务实现或 Git 写操作混入工作。
-- continue：文档、事实核对或方案内容尚不完整，但可使用已有资料和工具继续完成。
-- blocked：只能用于缺少当前环境无法取得的真实外部账号、凭据、私有数据、授权、专用设备、付费服务或线下动作。"""
+SOLUTION_DESIGN_DECISION_RULES = """- completed：固定技术方案文档已写入。
+- continue：文档、事实核对或方案内容尚不完整，但可使用已有资料和工具继续完成。"""
 
 DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     key=CONVERSATION_KEY,
@@ -216,7 +215,7 @@ def initial_prompt(
     project_references = "\n".join(f"- @./{output}" for output in outputs)
     assembly_json = json.dumps(prompt_assembly(assembly), ensure_ascii=False, indent=2)
     return f"""/solution-design
-我授权你直接在当前项目创建或更新总体技术方案文档。请基于真实工程事实完成设计，不实施业务功能。
+请依据以下权威资料和实际工程，创建或更新唯一固定产物 `docs/design/技术方案.md`。
 
 权威产品定义：
 {product_references}
@@ -232,9 +231,7 @@ def initial_prompt(
 {assembly_json}
 ```
 
-读取足以支撑方案主张的产品定义、准备清单、已有文档和实际工程事实，创建或更新唯一固定产物 `docs/design/技术方案.md`。文档必须区分当前工程事实、已确认决定、目标状态、假设和待确认事项；明确系统上下文与边界、交付单元和职责、数据所有权与依赖方向、跨单元关键流程及协作方式；记录主要技术取舍的理由、代价、替代方案和重新讨论条件，以及有影响范围的风险和未决事项。方案须与已组装、已项目化的工程一致，不重新选择模板或组装工程。
-
-不得实现或修改业务代码、工程配置、迁移或基础设施；不得初始化、暂存、提交、建分支、合并或推送 Git；不得泄露秘密。最终完整回复须列出文档路径、支撑方案的工程事实、确认的边界与选择、风险假设未决事项、未验证范围，以及本轮未执行的实现或 Git 操作。"""
+只允许修改该固定产物，不重新选择模板或组装工程，不得执行 Git 写操作。"""
 
 
 async def run(

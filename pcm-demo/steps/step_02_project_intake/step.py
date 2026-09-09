@@ -29,9 +29,8 @@ OUTPUTS = (
 MAX_DECISION_ROUNDS = 32
 PROJECT_INTAKE_MAX_TURNS = 9999
 
-PROJECT_INTAKE_DECISION_RULES = """completed 表示两份正式产品定义文档已经生成，且当前事实足以确认其非空并可用。
-continue 表示还需给出明确指令以澄清产品或完成、修复这两份文档。
-blocked 仅表示缺少当前环境无法取得的真实外部账号、凭据、私有数据、客户授权、专用设备、素材、付费服务或线下动作。"""
+PROJECT_INTAKE_DECISION_RULES = """- completed：表示两份正式产品定义文档已经生成，且当前事实足以确认其非空并可用。
+- continue：表示还需给出明确指令以澄清产品或完成、修复这两份文档。"""
 
 DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     key=CONVERSATION_KEY,

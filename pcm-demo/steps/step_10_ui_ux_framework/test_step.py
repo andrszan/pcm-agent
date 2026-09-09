@@ -346,21 +346,10 @@ class UIUXFrameworkTests(unittest.TestCase):
             prompt = prompts[0]
             self.assertTrue(prompt.startswith("/ui-ux-framework\n"))
             for required in (
-                "docs/requirements/项目需求说明.md",
-                "docs/requirements/产品功能说明.md",
-                "docs/requirements/项目准备清单.md",
-                "docs/design/技术方案.md",
-                ARCHITECTURE_OUTPUT_PATH.as_posix(),
-                FRAMEWORK_PATH.as_posix(),
-                "@./frontend",
-                "默认 Target",
-                "依据和重议条件",
-                "高影响",
-                "references/",
-                "assets/",
-                "资源不是项目默认实现",
-                "不得开展单项需求设计",
-                "不得执行 Git 写操作",
+                "docs/requirements/项目需求说明.md", "docs/requirements/产品功能说明.md",
+                "docs/requirements/项目准备清单.md", "docs/design/技术方案.md",
+                ARCHITECTURE_OUTPUT_PATH.as_posix(), FRAMEWORK_PATH.as_posix(), "@./frontend",
+                "bootstrap 模式", "不得开展单项需求设计", "不得执行 Git 写操作",
             ):
                 self.assertIn(required, prompt)
             for forbidden in ("第 10 步", "PCM", "节点", "session", "Skill", "/commit-changes"):
@@ -369,25 +358,12 @@ class UIUXFrameworkTests(unittest.TestCase):
             self.assertTrue(decision_prompts)
             for system_prompt in decision_prompts:
                 for required in (
-                    "App Shell Contract",
-                    "产品表面",
-                    "区域职责",
-                    "导航层级",
-                    "页面模式",
-                    "常规滚动所有者",
-                    "sticky 基准",
-                    "窄屏转换",
-                    "Current",
-                    "已确认 Target",
-                    "默认 Target",
-                    "具体待确认",
-                    "已知偏差",
-                    "非目标",
-                    "事实依据和重议条件",
+                    "固定产品级 UI/UX 框架文档已生成",
+                    "前端工程事实核验",
+                    "关键体验方向",
                     "真正高影响的具体取舍",
-                    "continue",
                     "要求 Agent 回写",
-                    "整份框架泛化为待确认",
+                    "不得泛化为待确认",
                 ):
                     self.assertIn(required, system_prompt)
 

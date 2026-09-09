@@ -42,9 +42,8 @@ FRAMEWORK_REPAIR_PROMPT = (
 COMMIT_REPAIR_PROMPT = """/commit-changes
 只授权处理产品根 Git 仓库中的固定文档 `docs/ui-ux/framework.md`。请核验该文档；仅当它存在未提交变更时，暂存并提交这一个文件，然后确认产品根仓库工作区干净。不得暂存、提交或修改任何其他路径，不得处理子仓库，不得建分支、改写历史或 push。若固定文档相对当前提交没有变化，直接报告无变更，不得制造变更。"""
 
-UI_UX_FRAMEWORK_DECISION_RULES = """- completed：固定产品级 UI/UX 框架文档已生成，基于权威产品定义、项目准备清单、总体技术方案、工程架构设计和实际前端工程，明确产品级体验原则、信息与交互框架、跨需求一致性约束、可访问性及响应式基线、设计资产与协作边界；适用范围的 App Shell Contract 已闭合，明确产品表面、区域职责、导航层级、页面模式、常规滚动所有者、sticky 基准和窄屏转换；明确区分 Current、已确认 Target、默认 Target、具体待确认、已知偏差和非目标，默认 Target 有事实依据和重议条件；只剩真正高影响的具体取舍时，负责人可用 continue 作出决定并要求 Agent 回写，不接受将整份框架泛化为待确认；没有越界开展单项需求或页面实现。
-- continue：框架文档、前端工程事实核验或关键体验方向仍可在当前项目中补全；对真正高影响的具体取舍，直接作出决定并要求 Agent 回写，其余可由事实收敛的内容不得泛化为待确认。
-- blocked：只能用于缺少当前环境无法取得的真实外部账号、凭据、私有数据、授权、专用设备、付费服务或线下动作。"""
+UI_UX_FRAMEWORK_DECISION_RULES = """- completed：固定产品级 UI/UX 框架文档已生成。
+- continue：框架文档、前端工程事实核验或关键体验方向仍可在当前项目中补全；对真正高影响的具体取舍，直接作出决定并要求 Agent 回写，其余可由事实收敛的内容不得泛化为待确认。"""
 
 DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     key=CONVERSATION_KEY,
@@ -499,32 +498,23 @@ def advance_success(
     return saved
 
 
-def initial_prompt(
-    product_outputs: list[str],
-    architecture_path: Path,
-) -> str:
+def initial_prompt(product_outputs: list[str], architecture_path: Path) -> str:
     product_references = "\n".join(f"- @./{output}" for output in product_outputs)
     return f"""/ui-ux-framework
-我授权你在当前项目按 bootstrap 模式建立产品级 UI/UX 框架。请基于权威领域资料和实际前端工程创建或更新唯一固定产物 `docs/ui-ux/framework.md`。
+调用方授权你按 bootstrap 模式，依据以下权威资料和实际前端创建或更新唯一固定产物 `docs/ui-ux/framework.md`。
 
 权威产品定义：
 {product_references}
-
 项目准备事实：
 - @./{CHECKLIST.as_posix()}
-
 总体技术方案：
 - @./{DESIGN_PATH.as_posix()}
-
 工程架构设计：
 - @./{architecture_path.as_posix()}
-
 权威前端工程：
 - @./frontend
 
-文档仅定义跨需求适用的产品级体验框架：产品体验目标与原则、信息和交互框架、跨需求一致性约束、内容与反馈基线、可访问性和响应式基线、设计资产边界及协作规则。必须区分 Current、已确认 Target、默认 Target、具体待确认、已知偏差和非目标；能由项目事实安全推导的低风险结构直接收敛为写明依据和重议条件的默认 Target，只有实质高影响、会改变跨需求体验骨架、迁移成本或兼容性的具体分歧交由负责人决定。按需读取本能力自带的 `references/` 或 `assets/` 辅助判断，但资源不是项目默认实现，不得将示例内容当作项目事实。
-
-只允许创建或更新固定产物。不得开展单项需求设计，不得设计或实现页面、CSS、组件或主题，不得修改或新增测试、迁移、业务代码、工程配置、项目规则或其他文档，不得执行 Git 写操作，不得处理或披露秘密。最终完整回复须列出文档路径、依据的产品和工程事实、主要框架方向、风险与待确认事项、未验证范围。"""
+只定义跨需求适用的产品级体验框架。只允许修改该固定产物，不得开展单项需求设计或实现，不得修改其它文档、代码、测试、配置、依赖或规则，不得执行 Git 写操作或处理秘密。"""
 
 
 async def run(

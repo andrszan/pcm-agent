@@ -226,7 +226,7 @@ class EngineeringArchitectureTests(unittest.TestCase):
 
             async def agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
                 calls.append((prompt, kwargs["resume_session_id"]))  # type: ignore[index]
-                if prompt.startswith("固定工程架构设计文档缺失"):
+                if "工程架构设计.md` 缺失或为空" in prompt:
                     self.write_document(workspace)
                 elif prompt.splitlines()[0] == "/commit-changes":
                     self.commit_document(workspace)
@@ -239,51 +239,15 @@ class EngineeringArchitectureTests(unittest.TestCase):
             repair_prompt = next(
                 prompt
                 for prompt, _ in calls
-                if prompt.startswith("固定工程架构设计文档缺失")
+                if "工程架构设计.md` 缺失或为空" in prompt
             )
-            for required in (
-                ARCHITECTURE_PATH.as_posix(),
-                "当前工程架构合同",
-                "每个适用且含相关业务代码的交付单元",
-                "有限 Current/Target 地图",
-                "[当前]/[目标]/[按需]/[迁移]",
-                "目录/模块职责",
-                "公开/私有边界",
-                "允许/禁止依赖",
-                "稳定业务 owner",
-                "边界内部文件名、数量和等价拆分",
-                "巨型路由/页面",
-                "通用收纳目录",
-                "同名平铺文件",
-                "跨所有者合并",
-                "绕过公开出口",
-                "至少一个代表性文件放置演练",
-                "根仓或另一单元概述不得替代",
-                "应用装配/路由页面",
-                "业务功能",
-                "远程/局部/跨页面状态",
-                "传输到展示模型映射",
-                "共享 UI 准入",
-                "入口/契约",
-                "编排/规则",
-                "持久化/外部适配",
-                "事务/授权/错误/副作用/重试/恢复",
-                "双端均含业务代码时两端各至少一个演练",
-                "不适用必须基于事实",
-                "frontend/backend 本地架构文档",
-                "固定框架、FSD、DDD、Clean、目录模板或行数阈值",
-                "千行仅触发职责调查",
-                "最小迁移和可观察演进",
-                "不得虚构 Current",
-                "不得创建目标目录",
-                "不得修改任何其他文件",
-                "不得执行 Git 写操作",
-            ):
+            for required in (ARCHITECTURE_PATH.as_posix(), "仅创建或补全", "不修改其它文件", "Git 写操作"):
                 self.assertIn(required, repair_prompt)
+            self.assertNotIn("Current/Target", repair_prompt)
             sessions = [
                 value
                 for prompt, value in calls
-                if prompt.startswith("固定工程架构设计文档缺失")
+                if "工程架构设计.md` 缺失或为空" in prompt
                 or prompt.splitlines()[0] == "/commit-changes"
             ]
             self.assertEqual(sessions, ["session-1", "session-1"])
@@ -424,47 +388,16 @@ class EngineeringArchitectureTests(unittest.TestCase):
             prompt = prompts[0]
             self.assertTrue(prompt.startswith("/engineering-architecture\n"))
             for required in (
+                "/engineering-architecture",
+                ARCHITECTURE_PATH.as_posix(),
                 "docs/requirements/项目需求说明.md",
                 "docs/requirements/产品功能说明.md",
                 "docs/requirements/项目准备清单.md",
                 "docs/design/技术方案.md",
-                ARCHITECTURE_PATH.as_posix(),
                 "@./frontend",
                 "@./backend",
-                "逐交付单元闭合",
-                "每个适用且含相关业务代码的交付单元",
-                "Current/Target",
-                "[当前]/[目标]/[按需]/[迁移]",
-                "架构决策矩阵",
-                "目录/模块职责",
-                "公开/私有边界",
-                "允许/禁止依赖",
-                "稳定业务 owner",
-                "边界内部文件名、数量和等价拆分",
-                "巨型路由/页面",
-                "通用 `components`、`hooks`、`services`、`shared` 收纳位置",
-                "同名平铺文件",
-                "跨所有者合并",
-                "公开出口绕过",
-                "至少有一个代表性文件放置演练",
-                "根仓或另一单元概述不得替代",
-                "应用装配/路由页面",
-                "业务功能",
-                "远程/局部/跨页面状态",
-                "传输到展示模型映射",
-                "共享 UI 准入",
-                "入口/契约",
-                "编排/规则",
-                "持久化/外部适配",
-                "事务/授权/错误/副作用/重试/恢复",
-                "双端均含业务代码时，两端各至少有一个演练",
-                "不适用必须基于事实",
-                "frontend/backend 本地架构文档",
-                "固定框架、FSD、DDD、Clean、目录模板或行数阈值",
-                "千行仅触发职责调查",
-                "最小迁移和可观察演进",
-                "不得实现业务功能",
-                "执行 Git 写操作",
+                "只允许修改该固定产物",
+                "Git 写操作",
             ):
                 self.assertIn(required, prompt)
             for forbidden in ("第 9 步", "PCM", "节点", "session", "/commit-changes"):
@@ -522,36 +455,12 @@ class EngineeringArchitectureTests(unittest.TestCase):
                 '"frontend"',
                 '"backend"',
                 f'"固定输出": "{ARCHITECTURE_PATH.as_posix()}"',
-                "每个适用且含相关业务代码的交付单元",
-                "有限 Current/Target 地图",
-                "[当前]/[目标]/[按需]/[迁移]",
-                "架构决策矩阵",
-                "公开/私有边界",
-                "允许/禁止依赖",
-                "稳定业务 owner",
-                "边界内部文件名、数量和等价拆分",
-                "巨型路由/页面",
-                "通用收纳目录",
-                "同名平铺文件",
-                "跨所有者合并",
-                "公开出口绕过",
-                "至少有一个代表性文件放置演练",
-                "根仓或另一单元概述不能替代",
-                "应用装配/路由页面",
-                "业务功能",
-                "远程/局部/跨页面状态",
-                "传输到展示模型映射",
-                "共享 UI 准入",
-                "入口/契约",
-                "编排/规则",
-                "持久化/外部适配",
-                "事务/授权/错误/副作用/重试/恢复",
-                "frontend 和 backend 各至少有一个演练",
-                "frontend/backend 本地架构文档",
-                "固定框架、FSD、DDD、Clean、目录模板或行数阈值",
-                "千行仅触发职责调查",
-                "最小迁移和可观察演进",
-                "当前下游所需的高影响架构决定已收敛",
+                "固定工程架构设计文档已生成",
+                "逐交付单元工程归属合同",
+                "稳定边界与内部粒度区分",
+                "Current 偏差迁移",
+                "工程事实核验",
+                "下游所需高影响架构决定",
             ):
                 self.assertIn(required, system_prompt)
             responsibility = system_prompt.split("<responsibility>", 1)[1].split(
@@ -560,26 +469,7 @@ class EngineeringArchitectureTests(unittest.TestCase):
             completion = system_prompt.split("<completion>", 1)[1].split(
                 "</completion>", 1
             )[0]
-            self.assertIn(
-                "每个适用且含相关业务代码的交付单元", completion
-            )
-            for contract in (
-                "应用装配/路由页面",
-                "业务功能",
-                "远程/局部/跨页面状态",
-                "传输到展示模型映射",
-                "共享 UI 准入",
-                "入口/契约",
-                "编排/规则",
-                "持久化/外部适配",
-                "事务/授权/错误/副作用/重试/恢复",
-                "frontend 和 backend 各至少有一个演练",
-            ):
-                self.assertIn(contract, completion)
-                self.assertNotIn(contract, responsibility)
-            self.assertNotIn(
-                "每个适用且含相关业务代码的交付单元", responsibility
-            )
+            self.assertIn("逐交付单元工程归属合同", completion)
             self.assertNotIn("- completed：", responsibility)
 
     def test_agent_out_of_scope_changes_fail_before_decision(self) -> None:

@@ -368,46 +368,23 @@ class RequirementBreakdownTests(unittest.TestCase):
                 prompt = prompts[0]
                 self.assertTrue(prompt.startswith("/requirement-breakdown\n"))
                 for required in (
-                    ARCHITECTURE_OUTPUT_PATH.as_posix(),
-                    BACKLOG_PATH.as_posix(),
-                    "已确认 Target",
-                    "演进既有产品表面",
-                    "独立可观察的用户结果",
-                    "其它需求开始前确实必须完成",
-                    "默认 Target",
-                    "依据和重议条件",
+                    ARCHITECTURE_OUTPUT_PATH.as_posix(), BACKLOG_PATH.as_posix(),
+                    "权威实际工程", "不得写入需求开发状态", "不得执行 Git 写操作",
                 ):
                     self.assertIn(required, prompt)
                 if applicable:
                     self.assertIn(UI_UX_FRAMEWORK_PATH.as_posix(), prompt)
                 else:
-                    self.assertIn("当前产品没有适用的产品级体验框架文档", prompt)
+                    self.assertIn("当前产品不适用。", prompt)
                 for forbidden in ("第 11 步", "PCM", "节点", "session", "Skill", "/commit-changes"):
                     self.assertNotIn(forbidden, prompt)
 
                 self.assertTrue(decision_prompts)
                 for system_prompt in decision_prompts:
                     for required in (
-                        "已确认 Target",
-                        "演进既有产品表面",
-                        "独立可观察的用户结果",
-                        "其它需求开始前确实必须完成",
-                        "迁移 BR",
-                        "严格依赖",
-                        "体验约束",
-                        "默认 Target",
-                        "依据和重议条件",
-                        "偏离默认 Target",
-                        "跨需求体验骨架",
-                        "框架文档",
-                        "页面",
-                        "组件",
-                        "CSS",
-                        "目录",
-                        "工程依赖",
-                        "外部条件",
-                        "depends_on",
-                        "正式 BR ID",
+                        "固定 Backlog 文档已生成",
+                        "Backlog、工程事实核验或需求拆分仍可在当前项目中补全",
+                        '"产品级体验框架"',
                     ):
                         self.assertIn(required, system_prompt)
                     self.assertNotIn("Skill", system_prompt)

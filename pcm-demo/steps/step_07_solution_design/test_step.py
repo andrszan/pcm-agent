@@ -216,8 +216,13 @@ class SolutionDesignTests(unittest.TestCase):
             self.assertTrue(prompt.startswith("/solution-design\n"))
             self.assertIn("docs/requirements/项目需求说明.md", prompt)
             self.assertIn("docs/design/技术方案.md", prompt)
-            self.assertIn("系统上下文与边界", prompt)
-            self.assertIn("不得实现或修改业务代码", prompt)
+            self.assertIn("docs/requirements/产品功能说明.md", prompt)
+            self.assertIn("docs/requirements/项目准备清单.md", prompt)
+            self.assertIn("@./frontend", prompt)
+            self.assertIn('"commit_sha"', prompt)
+            self.assertIn("只允许修改该固定产物", prompt)
+            self.assertIn("不重新选择模板或组装工程", prompt)
+            self.assertIn("不得执行 Git 写操作", prompt)
             for forbidden in (
                 "git_url",
                 "origin",

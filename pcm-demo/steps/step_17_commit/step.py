@@ -25,18 +25,11 @@ PHASE = "phase_1_requirement_development"
 SKILL_NAME = "commit-changes"
 MAX_DECISION_ROUNDS = 32
 COMMIT_MAX_TURNS = 9999
-REPOSITORY_REPAIR_PROMPT = (
-    "白名单仓库仍有未提交变更。请继续使用 commit-changes 完成提交准备并提交：可读取 Git 状态和候选 diff、"
-    "确认提交范围、精确暂存、创建本地提交，必要时精确修改 .gitignore、核验归属和可再生性后逐路径清理非交付临时产物，"
-    "或完成 hook 要求的纯格式修复，并核验提交结果；禁止业务语义变更，禁止删除未知资产、数据、秘密、受保护 tracked 文件或 staged 内容，"
-    "禁止 git clean 和宽泛删除。调用方给出的更窄只读权限、范围和已有 staged 意图始终优先。"
-    "完成后确认所有仓库的工作区和暂存区干净；只 commit，不 push。"
-)
+REPOSITORY_REPAIR_PROMPT = "检测到白名单仓库仍有未提交变更。请按原提交授权只补做必要的精确暂存、提交或安全清理，并确认所有白名单仓库工作区与暂存区干净；只 commit，不 push。"
 REQUIREMENT_COMMIT_DECISION_RULES = """- completed：已有变更均已提交或原本无变更；全部白名单仓库仍在统一需求分支，且工作区和暂存区干净。
 - continue：仅当仍可在提交准备范围内继续时使用。提交准备范围只包括读取 Git 状态和候选 diff、确认提交范围、精确暂存、创建本地提交、必要时精确修改 .gitignore、核验归属和可再生性后逐路径清理非交付临时产物、hook 要求的纯格式修复，以及核验提交结果。
 - blocked：仅用于缺少 Git 作者身份、签名凭据、外部授权，或在上述范围内无法安全完成提交的情况。
-
-实现、验证、审查与规则复盘均已完成，不重新开发或重新验收。禁止业务语义变更；禁止删除未知资产、数据、秘密、受保护 tracked 文件或 staged 内容；禁止 git clean 和宽泛删除；不 merge、不 rebase、不改写历史、不 push。调用方给出的更窄只读权限、范围和已有 staged 意图始终优先。"""
+"""
 _HEX = set("0123456789abcdef")
 _RESULT_FIELDS = {"step", "name", "status", "summary", "applicable", "outputs", "blocked", "error", "requirement_id", "branch", "repositories"}
 
@@ -307,18 +300,16 @@ def _completion_repair(context: dict[str, Any]) -> str | None:
 
 
 def initial_prompt(context: dict[str, Any]) -> str:
-    repositories = "\n".join(
-        f"- {item['name']}: `{'.' if item['name'] == 'root' else item['name']}`"
-        for item in context["repositories"]
-    )
+    repositories = "\n".join(f"- {item['name']}: `{'.' if item['name'] == 'root' else item['name']}`" for item in context["repositories"])
     return f"""/commit-changes
+请提交当前已验收需求的变更，不重新开发或验收。
+
 需求：`{context['requirement_id']} {context['title']}`
+统一需求分支：`{context['branch']}`
 有序权威仓库：
 {repositories}
-统一需求分支：`{context['branch']}`
 
-已验收交接：实现、验证、审查与规则复盘均已完成，不重新开发或重新验收。
-提交准备范围：读取 Git 状态和候选 diff、确认提交范围、精确暂存、创建本地提交、必要时精确修改 .gitignore、核验归属和可再生性后逐路径清理非交付临时产物，或完成 hook 要求的纯格式修复，并核验提交结果；禁止业务语义变更，禁止删除未知资产、数据、秘密、受保护 tracked 文件或 staged 内容，禁止 git clean 和宽泛删除。调用方给出的更窄只读权限、范围和已有 staged 意图始终优先。只 commit，不 push。"""
+仅在上述白名单仓库和统一需求分支创建本地提交；不得切换或创建分支、merge、rebase、改写历史或 push。"""
 
 
 def _fresh_success(

@@ -44,9 +44,8 @@ BACKLOG_REPAIR_PROMPT = (
 COMMIT_REPAIR_PROMPT = """/commit-changes
 只授权处理产品根 Git 仓库中的固定文档 `docs/backlog/backlog.md`。请核验该文档；仅当它存在未提交变更时，暂存并提交这一个文件，然后确认产品根仓库工作区干净。不得暂存、提交或修改任何其他路径，不得处理子仓库，不得建分支、改写历史或 push。若固定文档相对当前提交没有变化，直接报告无变更，不得制造变更。"""
 
-REQUIREMENT_BREAKDOWN_DECISION_RULES = """- completed：固定 Backlog 文档已生成，基于权威产品定义、项目准备清单、总体技术方案、工程架构设计、产品级体验框架（如适用）和实际工程，形成可独立交付、可验证、顺序合理的正式需求条目，说明范围、目标、验收要点、依赖和风险；已确认 Target 只有同时要求演进既有产品表面、迁移本身形成独立可观察的用户结果、且其它需求开始前确实必须完成时，才创建迁移 BR 和严格依赖，不满足时写为相关 BR 的体验约束；默认 Target 只作为体验约束并保留依据和重议条件，不创建迁移 BR 或严格依赖；偏离默认 Target 或改变跨需求体验骨架时列为具体待确认；框架文档、页面、组件、CSS、目录、工程依赖、外部条件及其它非正式 BR ID 均不得写成严格依赖；depends_on 只指向开始前必须完成的正式 BR ID；不把需求开发状态写入 Backlog，不越界实施需求。
-- continue：Backlog、工程事实核验或需求拆分仍可在当前项目中补全。
-- blocked：只能用于缺少当前环境无法取得的真实外部账号、凭据、私有数据、授权、专用设备、付费服务或线下动作。"""
+REQUIREMENT_BREAKDOWN_DECISION_RULES = """- completed：固定 Backlog 文档已生成。
+- continue：Backlog、工程事实核验或需求拆分仍可在当前项目中补全。"""
 
 DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     key=CONVERSATION_KEY,
@@ -458,46 +457,27 @@ def advance_success(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
     return saved
 
 
-def initial_prompt(
-    product_outputs: list[str],
-    architecture_path: Path,
-    ui_ux_framework: bool,
-    names: list[str],
-) -> str:
+def initial_prompt(product_outputs: list[str], architecture_path: Path, ui_ux_framework: bool, names: list[str]) -> str:
     product_references = "\n".join(f"- @./{output}" for output in product_outputs)
-    engineering_references = "\n".join(
-        "- 产品根工程：@./" if name == "root" else f"- {name} 工程：@./{name}"
-        for name in names
-    )
-    experience_framework = (
-        f"- @./{UI_UX_FRAMEWORK_PATH.as_posix()}"
-        if ui_ux_framework
-        else "- 当前产品没有适用的产品级体验框架文档。"
-    )
+    engineering_references = "\n".join("- 产品根工程：@./" if name == "root" else f"- {name} 工程：@./{name}" for name in names)
+    experience_framework = f"- @./{UI_UX_FRAMEWORK_PATH.as_posix()}" if ui_ux_framework else "- 当前产品不适用。"
     return f"""/requirement-breakdown
-调用方已充分授权你直接生成正式 Backlog。请基于全部权威输入创建或更新唯一固定产物 `docs/backlog/backlog.md`。
+调用方授权你依据以下权威输入创建或更新唯一固定产物 `docs/backlog/backlog.md`。
 
 权威产品定义：
 {product_references}
-
 项目准备事实：
 - @./{CHECKLIST.as_posix()}
-
 总体技术方案：
 - @./{DESIGN_PATH.as_posix()}
-
 工程架构设计：
 - @./{architecture_path.as_posix()}
-
 产品级体验框架：
 {experience_framework}
-
 权威实际工程：
 {engineering_references}
 
-Backlog 必须形成可独立交付、可验证、顺序合理的正式需求条目，说明每项需求的范围、目标、验收要点、依赖和风险，保持与产品、设计和工程事实一致。处理跨需求体验决定时，只有已确认 Target 同时要求演进既有产品表面、迁移形成独立可观察的用户结果且其它需求开始前确实必须完成，才创建迁移 BR 和严格依赖；否则写为相关 BR 的体验约束。默认 Target 只作为体验约束并保留依据和重议条件，不创建迁移 BR 或严格依赖；偏离默认 Target 或改变跨需求体验骨架时列为待确认。不得在 Backlog 中写入“待开发”“开发中”“已完成”“阻塞”等需求开发状态；业务对象或业务流程自身的状态可作为需求内容。不得猜测缺失事实或将未确认事项当作已确认决定。
-
-只允许创建或更新固定 Backlog 文档。不得修改或新增其他文档、业务代码、测试、迁移、工程配置或项目规则；不得执行 Git 写操作，不得处理或披露秘密。最终完整回复须列出文档路径、依据的产品和工程事实、拆分出的主要需求与依赖风险、待确认事项和未验证范围。"""
+只允许修改固定 Backlog 文档，不得写入需求开发状态，不得修改其它文档、代码、测试、配置或规则，不得执行 Git 写操作或处理秘密。"""
 
 
 async def run(

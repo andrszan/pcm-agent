@@ -160,21 +160,10 @@ class DevelopmentTests(unittest.TestCase):
             self.assertIn("BR-001 账户访问", prompts[0])
             self.assertIn("docs/trd/BR-001.md", prompts[0])
             self.assertNotIn("@docs/", prompts[0])
-            self.assertIn("按活动 TRD 中适用的体验决定和工程架构约束执行", prompts[0])
             for required in (
-                "每个受影响交付单元",
-                "稳定业务 owner",
-                "目录/包/模块边界",
-                "公开出口",
-                "私有禁区",
-                "依赖方向",
-                "架构约束/模块归属→改动位置与依赖关系→diff/导入/调用证据→实际结果映射",
-                "边界内部文件粒度可按真实职责调整",
-                "巨型入口/页面",
-                "通用收纳目录",
-                "同名平铺文件",
-                "架构 delta",
-                "不得静默降级",
+                "权威活动 TRD",
+                "保留待提交变更",
+                "不得 stage/commit",
             ):
                 self.assertIn(required, prompts[0])
             self.assertIn("不得修改 `.claude/rules/`", prompts[0])

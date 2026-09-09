@@ -193,34 +193,14 @@ class ProjectReadinessTests(unittest.TestCase):
         )
 
         self.assertEqual(prompt.splitlines()[0], "/project-readiness")
-        self.assertIn("产品定义是当前最终产品范围的权威输入", prompt)
-        self.assertIn("实际工程", prompt)
-        self.assertIn("可信开发资源清单：@/resource-list", prompt)
-        self.assertIn("任意格式的动态候选池", prompt)
-        self.assertIn("当前自动化开发周期唯一的开发资源准备基线", prompt)
-        self.assertIn("请先检查所属仓库受保护实际配置中已有的非空运行凭据和资源绑定", prompt)
-        self.assertIn("已有绑定满足开发合同时必须原样保留", prompt)
-        self.assertIn("不得用候选池中的维护、共享或更宽权限身份替换", prompt)
-        self.assertIn("清单中的资源匹配和证据只能描述最终选定绑定", prompt)
-        self.assertIn("不得提及、比较或说明未采用候选", prompt)
-        self.assertIn("实际 `.env`", prompt)
-        self.assertIn("`.env.example`", prompt)
-        self.assertIn("最终写入项目配置的运行凭据", prompt)
-        self.assertIn("后续开发无需重新读取共享资源清单", prompt)
-        self.assertIn("必须把最终项目运行凭据和资源绑定持久化", prompt)
-        self.assertIn("POSIX 通常为 `0600`", prompt)
-        self.assertIn("只允许以下两类阻塞", prompt)
-        self.assertIn("只服务生产部署或生产运行的正式域名、DNS/TLS", prompt)
-        self.assertIn("项目准备清单只记录通过准入的当前开发必需外部资源", prompt)
-        self.assertIn("不得在正文任何位置列举或命名", prompt)
-        self.assertIn("不得建立“未纳入清单”", prompt)
-        self.assertIn("开发 SMTP TLS、localhost 回调、开发白名单", prompt)
-        self.assertIn("只有非管理、非生产的共享开发身份", prompt)
-        self.assertIn("共享管理或根凭据、生产身份", prompt)
-        self.assertIn("不得作为最终运行凭据", completion_repair_prompt())
-        self.assertIn("列表接口只返回获授权项目资源", prompt)
-        self.assertIn("产品规则、隐私保留和其它设计决定", prompt)
-        self.assertIn("依赖安装、业务代码、migration、Seed", prompt)
+        for required in (
+            "权威产品定义",
+            "实际工程",
+            "可信开发资源清单：@/resource-list",
+            "基础工程选择白名单",
+            "执行 Git 写操作",
+        ):
+            self.assertIn(required, prompt)
         self.assertNotIn("当前只核验进入基础工程项目化前条件", prompt)
         self.assertIn('"applicable": true', prompt)
         self.assertIn('"id": "frontend-template"', prompt)
@@ -234,22 +214,13 @@ class ProjectReadinessTests(unittest.TestCase):
             self.assertNotIn(forbidden, prompt)
             self.assertNotIn(forbidden, PROJECT_READINESS_DECISION_RULES)
 
-    def test_decision_rules_cover_required_capabilities_without_production_scope(self) -> None:
+    def test_decision_rules_keep_readiness_completion_contract_concise(self) -> None:
         for required in (
-            "开发所需接口能力、可用配额、回调注册、白名单、沙箱范围",
-            "缺少或不可用的开发资源、能力和复验条件",
-            "匹配候选前已优先验证实际受保护配置中现有的非空运行凭据与资源绑定",
-            "不把候选凭据的探针结果误记为最终项目凭据结果",
-            "清单中的资源匹配和脱敏证据只描述最终选定绑定",
-            "包括“未使用候选管理身份”之类否定表述",
-            "清单正文任何位置提及纯生产事项、非当前必需候选或后续内部工作时返回 continue",
-            "不得把它们改写为未纳入、范围外、未来事项、非阻塞或无状态记录",
-            "不得包含生产域名、生产回调、生产配额",
-            "开发 SMTP TLS、localhost 回调、开发白名单、沙箱范围和开发配额",
-            "共享开发身份，且调用方明确授权、作用范围满足开发合同，才可以兼容使用",
-            "共享管理或根凭据、生产身份",
-            "无法派生合格开发身份时属于第二类阻塞",
-            "列表接口只返回获授权项目资源且范围外访问被拒绝",
+            "completed：开发资源准备基线已建立，必需资源均真实可用",
+            "continue：仍有可用当前资料和工具安全完成",
+            "只补齐缺失、失效或不合格绑定",
+            "删除清单中的未采用候选和范围外事项",
+            "不换个标签保留，也不开展范围外工作",
         ):
             self.assertIn(required, PROJECT_READINESS_DECISION_RULES)
 
@@ -277,30 +248,7 @@ class ProjectReadinessTests(unittest.TestCase):
                     "最高项目负责人、工程负责人、专业开发者和 Agent 专家",
                     "assistant 是你此前发给 Agent 的指令或结构化回复",
                     "user 是 Agent 返回给你的完整执行结果",
-                    "当前开发的资源准备基线",
-                    "开发必需外部资源在候选池中缺失、当前环境无法安全生成且无兼容替代",
-                    "已匹配资源真实不可用、凭据无效、权限不足、隔离不合格",
-                    "开发所需接口能力、可用配额、回调/白名单",
-                    "只服务生产部署或生产运行的正式域名、DNS/TLS",
-                    "匹配候选前已优先验证实际受保护配置中现有的非空运行凭据与资源绑定",
-                    "不把候选凭据的探针结果误记为最终项目凭据结果",
-                    "清单中的资源匹配和脱敏证据只描述最终选定绑定",
-                    "包括“未使用候选管理身份”之类否定表述",
-                    "项目准备清单不是范围外事项账本",
-                    "正文任何位置都不得列举、命名或汇总",
-                    "未纳入清单",
-                    "开发 SMTP TLS、localhost 回调、开发白名单",
-                    "共享开发身份，且调用方明确授权、作用范围满足开发合同，才可以兼容使用",
-                    "共享管理或根凭据、生产身份",
-                    "无法派生合格开发身份时属于第二类阻塞",
-                    "列表接口只返回获授权项目资源且范围外访问被拒绝",
-                    "清单正文任何位置仍提及纯生产事项、非当前必需候选或后续内部工作时不能 completed",
-                    "即使它们位于“未纳入清单”、范围外说明或无状态汇总中",
-                    "不得包含生产域名、生产回调、生产配额",
-                    "最终写入配置的运行凭据",
-                    "最终项目凭据与资源绑定都已持久化",
-                    "POSIX 通常为 0600",
-                    "清单文字或 Agent 自述不能单独证明 ready",
+                    PROJECT_READINESS_DECISION_RULES,
                     "# 定义",
                     "适用工程",
                     "基础工程选择",
@@ -382,15 +330,9 @@ class ProjectReadinessTests(unittest.TestCase):
             self.assertEqual(len(calls), 2)
             self.assertTrue(str(calls[0]["prompt"]).startswith("/project-readiness"))
             self.assertEqual(calls[1]["resume_session_id"], "session-1")
-            self.assertIn("不要只补文档后宣称完成", str(calls[1]["prompt"]))
-            self.assertIn("每项 ready 外部资源的项目凭据持久化", str(calls[1]["prompt"]))
-            self.assertIn("最小行为/隔离验证", str(calls[1]["prompt"]))
-            self.assertIn("只重建当前开发必需外部资源清单", str(calls[1]["prompt"]))
-            self.assertIn("正文任何位置不得列举依赖安装、后续业务实现、产品设计、纯生产事项", str(calls[1]["prompt"]))
-            self.assertIn("不得建立“未纳入清单”", str(calls[1]["prompt"]))
-            self.assertIn("清单只描述最终选定绑定", str(calls[1]["prompt"]))
-            self.assertIn("不得提及或比较未采用候选", str(calls[1]["prompt"]))
-            self.assertIn("共享管理或根凭据、生产身份", str(calls[1]["prompt"]))
+            self.assertIn("检测到 `docs/requirements/项目准备清单.md` 缺失或为空", str(calls[1]["prompt"]))
+            self.assertIn("必要资源准备与真实验证", str(calls[1]["prompt"]))
+            self.assertNotIn("共享管理或根凭据", str(calls[1]["prompt"]))
             self.assertEqual(decision_inputs[0][-1], {"role": "user", "content": "Agent 原文 1", "timestamp": decision_inputs[0][-1]["timestamp"]})
             self.assertNotIn("pending_agent_prompt", read_state(run_dir)["project_readiness"])
 

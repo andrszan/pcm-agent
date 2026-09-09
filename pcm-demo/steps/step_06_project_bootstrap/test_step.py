@@ -256,20 +256,15 @@ class ProjectBootstrapTests(unittest.TestCase):
             self.assertTrue(bootstrap_prompt.startswith("/project-bootstrap\n"))
             self.assertIn("docs/requirements/项目需求说明.md", bootstrap_prompt)
             self.assertIn("@./frontend", bootstrap_prompt)
-            self.assertIn("产品根 README", bootstrap_prompt)
-            self.assertIn("真实浏览器", bootstrap_prompt)
-            self.assertIn("实际 `.env`", bootstrap_prompt)
-            self.assertIn("@./.pcm/runtime.json", bootstrap_prompt)
-            self.assertIn("不得自行递增、随机选择", bootstrap_prompt)
-            self.assertIn("环境变量改名", bootstrap_prompt)
-            self.assertIn("配置结构迁移", bootstrap_prompt)
-            self.assertIn("同一既有资源绑定和真实值", bootstrap_prompt)
-            self.assertIn("资源身份、endpoint 与权限范围", bootstrap_prompt)
-            self.assertIn("不得重新选择、创建、派生、轮换或替换", bootstrap_prompt)
-            self.assertIn("工程接线无法继续修复", bootstrap_prompt)
-            self.assertIn("不得修改权威产品定义或项目准备清单", bootstrap_prompt)
-            self.assertIn("不得初始化、暂存、提交", bootstrap_prompt)
-            self.assertIn("不要选择或生成项目专属主题配色", bootstrap_prompt)
+            for required in (
+                "@./.pcm/runtime.json",
+                "组装白名单",
+                "复用既有资源绑定",
+                "不得重新选择、创建、派生、轮换或替换凭据",
+                "不选择项目专属配色",
+                "执行 Git 写操作",
+            ):
+                self.assertIn(required, bootstrap_prompt)
             for forbidden in ("git_url", "origin", "第 6 步", "PCM", "节点", "阶段", "调用Skill"):
                 self.assertNotIn(forbidden, bootstrap_prompt)
             self.assertEqual(calls[0]["max_turns"], PROJECT_BOOTSTRAP_MAX_TURNS)
@@ -282,13 +277,10 @@ class ProjectBootstrapTests(unittest.TestCase):
             ]))
             self.assertTrue(theme_prompt.startswith("/tailwind-theme\n"))
             for required in (
-                "Tailwind CSS v4 CSS-first",
                 "@./frontend",
-                "完整 light/dark",
-                "tweakcn",
-                "不得修改字体",
-                "真实浏览器",
-                "不得初始化、暂存、提交",
+                "light/dark",
+                "仅修改颜色值",
+                "不得执行 Git 写操作",
             ):
                 self.assertIn(required, theme_prompt)
             for forbidden in ("git_url", "origin", "第 6 步", "PCM", "节点", "阶段", "session"):
@@ -307,7 +299,7 @@ class ProjectBootstrapTests(unittest.TestCase):
                     "产品根 README 和各适用工程的项目身份",
                     "已完成的项目准备基线",
                     "配置迁移与既有资源边界",
-                    "不把模板默认主题认定为项目专属主题",
+                    "项目化或上述验证尚未完成",
                 ):
                     self.assertIn(required, bootstrap_system_prompt)
                 self.assertNotEqual(

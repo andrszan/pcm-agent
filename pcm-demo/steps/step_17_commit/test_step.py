@@ -537,17 +537,14 @@ class RequirementCommitTests(unittest.TestCase):
         self.assertEqual(calls[1]["prompt"], REPOSITORY_REPAIR_PROMPT)
         self.assertEqual(calls[1]["resume_session_id"], "commit-session-1")
         for required in (
-            "使用 commit-changes",
-            "精确修改 .gitignore",
-            "核验归属和可再生性后逐路径清理非交付临时产物",
-            "hook 要求的纯格式修复",
-            "禁止业务语义变更",
-            "禁止删除未知资产、数据、秘密、受保护 tracked 文件或 staged 内容",
-            "禁止 git clean 和宽泛删除",
-            "更窄只读权限、范围和已有 staged 意图始终优先",
+            "检测到白名单仓库仍有未提交变更",
+            "精确暂存",
+            "安全清理",
+            "所有白名单仓库工作区与暂存区干净",
             "只 commit，不 push",
         ):
             self.assertIn(required, calls[1]["prompt"])
+        self.assertNotIn("hook 要求", calls[1]["prompt"])
 
     def test_decision_round_limit_stops_before_fourth_agent_call(self) -> None:
         run_dir, workspace, state, _bases = self.make_run()

@@ -42,13 +42,11 @@ LEGACY_COMPLETION_MESSAGES = (
     "已完成 project-bootstrap：基础工程已完成项目化并通过完成条件与工程边界核验。",
 )
 
-BOOTSTRAP_DECISION_RULES = """- completed：产品根 README 和各适用工程的项目身份、基础配置、必要文档及安全确认的模板残留已经收口；允许为匹配工程实际加载合同维护受保护的实际 `.env` 或等价配置、调整环境变量名称和配置结构并同步无秘密公开示例，但必须复用同一既有资源绑定，保留 endpoint、权限范围和秘密值，不重新选择、创建、派生、轮换或替换外部资源或凭据；每个适用工程的依赖安装、检查、测试、构建、启动和基础联调均已真实通过或明确不适用；涉及界面时已用真实浏览器检查代表性页面及阻断性控制台、网络错误；保持可替换的 Tailwind 语义颜色基础设施，不把模板默认主题认定为项目专属主题，也不在本任务选择或生成项目专属配色；没有项目化范围内的失败或未验证项，且未实施业务功能或 Git 写操作。
-- continue：项目化修改、配置读取或迁移、工程接线、安装、检查、测试、构建、启动、健康检查、联调、浏览器验证或完成证据尚不完整，但可使用既有准备事实、工程和工具继续修复并重跑。
-- blocked：只能用于已经使用既有配置排除工程接线问题后，当前环境无法恢复的既有外部账号、授权、凭据、服务、私有数据、专用设备、付费条件或线下动作本身不可用；必须说明实际失败入口和补验条件，不得通过重新选择、创建、派生、轮换或替换资源或凭据消除阻塞。"""
+BOOTSTRAP_DECISION_RULES = """- completed：产品根 README 和各适用工程的项目身份、配置、文档及模板残留已完成项目化。
+- continue：项目化或上述验证尚未完成，可用既有工程、配置和工具继续修复。"""
 
-TAILWIND_THEME_DECISION_RULES = """- completed：已经确认当前 frontend 符合 Tailwind CSS v4 CSS-first 合同，唯一识别实际活动全局样式入口和既有 dark selector；根据权威产品定义选择经校验的 tweakcn preset 或生成自定义配色，完整落实并验证项目专属 light/dark 语义颜色；只修改允许的颜色值和确实缺失的颜色映射，字体、圆角、阴影、间距、tracking、布局、组件、页面和业务逻辑保持不变；适用前端构建与真实浏览器 light/dark 切换、实际渲染、控制台和失败网络请求检查均已完成，没有未验证项，也没有 Git 写操作。
-- continue：主题方向、light/dark 颜色集合、允许范围内的修改、前端构建或真实两种模式渲染证据尚不完整，但可基于当前产品定义、Tailwind v4 工程和已有工具继续完成或修正。
-- blocked：只能用于当前环境无法取得、且完成真实主题验收不可替代的外部品牌资料、授权素材、私有数据、专用设备、付费服务或线下动作；tweakcn 网络不可用必须回退到自定义配色，本地版本、主题入口、dark selector、工作树或文件结构冲突不得作为 blocked。"""
+TAILWIND_THEME_DECISION_RULES = """- completed：基于 Tailwind CSS v4 CSS-first 的实际样式入口和 dark selector，完整落实并验证项目专属 light/dark 语义颜色。
+- continue：配色、颜色落实或上述验证尚未完成，可用当前产品定义、工程和工具继续修正；tweakcn 网络不可用必须回退到自定义配色。"""
 
 DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     key=CONVERSATION_KEY,
@@ -357,57 +355,36 @@ def initial_prompt(
     runtime_path: str | None = None,
 ) -> str:
     product_references = "\n".join(f"- @./{output}" for output in product_outputs)
-    project_references = "\n".join(
-        f"- @./{output}" for output in assembly.get("outputs", [])
-    )
-    runtime_reference = (
-        f"\n当前产品本机运行配置：\n- @./{runtime_path}\n"
-        if runtime_path is not None
-        else ""
-    )
+    project_references = "\n".join(f"- @./{output}" for output in assembly.get("outputs", []))
+    runtime_reference = f"- @./{runtime_path}" if runtime_path else "- 未提供。"
     assembly_json = json.dumps(prompt_assembly(assembly), ensure_ascii=False, indent=2)
     return f"""/project-bootstrap
-调用方已授权你直接在当前项目完成有限范围的基础工程项目化，并执行真实安装、检查、测试、构建、启动、浏览器检查和基础联调。
+调用方授权你依据以下权威输入完成基础工程项目化。
 
 权威产品定义：
 {product_references}
-
 项目准备事实：
 - @./{checklist}
-
-实际适用工程：
+实际工程：
 {project_references}
+本机运行配置：
 {runtime_reference}
-组装白名单事实：
+组装白名单：
 ```json
 {assembly_json}
 ```
 
-请依据这些输入和当前工程事实完成产品根 README、适用工程身份、基础配置、必要运行说明及可安全确认的模板残留收口。已提供本机运行配置时，使用其中已分配的 host、port 和 endpoint 完成启动、前后端连接、CORS、健康检查和浏览器入口接线；不得自行递增、随机选择或依赖框架静默切换端口，端口被未知进程占用时报告冲突且不终止未知进程。保持或建立可替换的 Tailwind 语义颜色基础设施，但不要选择或生成项目专属主题配色，也不要把模板默认主题认定为最终产品主题。按锁文件和工程说明完成所有适用的依赖安装、静态或类型检查、测试、构建、启动；验证后端健康与就绪入口，存在前端时用真实浏览器读取代表性页面并检查阻断性控制台和失败网络请求，前后端同时适用时完成最小真实联调。失败时先修复项目化范围内的配置读取、变量迁移、脚本、代码、代理、服务启动、健康入口、前后端连接、测试或浏览器入口问题并重跑。完成前删除本轮测试或模板遗留的未忽略 `.coverage` 覆盖率数据库，或将这类可再生产物加入所属仓库的 `.gitignore`；不得把覆盖率数据库作为项目文件保留。
-
-已提供的准备基线、受保护运行配置和资源身份是项目化的既定输入。可以按工程实际加载合同维护每个适用仓库被 Git 忽略的实际 `.env` 或等价本地配置，以及对应 `.env.example` 或既有公开配置示例；必要时允许环境变量改名和配置结构迁移。迁移只能复用同一既有资源绑定和真实值，必须保留资源身份、endpoint 与权限范围；不得重新选择、创建、派生、轮换或替换外部资源或凭据，公开示例不得包含秘密。
-
-若真实工程命令仍失败，只有在确认工程接线无法继续修复且既有资源、授权、凭据、服务、设备或付费条件本身不可用时，才保留验收标准并报告具体失败入口、影响、未验证范围和补验条件；不得用替代资源或新凭据规避阻塞。
-
-不得修改权威产品定义或项目准备清单，不得提前实现业务页面、导航、数据模型、业务接口、认证权限、迁移、业务数据、总体技术方案或工程架构；不得初始化、暂存、提交、建分支、合并或推送 Git；不得泄露秘密。最终完整回复须说明处理的工程、主要变更和保留项、每项真实验证结果、浏览器或联调结果，以及未验证范围、阻塞或后续事项。"""
+必须复用既有资源绑定，不得重新选择、创建、派生、轮换或替换凭据。保持可替换的 Tailwind 语义颜色基础设施，但不选择项目专属配色。不得修改权威输入、执行 Git 写操作或泄露秘密。"""
 
 
 def tailwind_theme_initial_prompt(product_outputs: list[str]) -> str:
     product_references = "\n".join(f"- @./{output}" for output in product_outputs)
     return f"""/tailwind-theme
-调用方已授权你依据当前产品事实，为现有 Tailwind CSS v4 CSS-first 前端形成并落实项目专属主题配色。
-
-权威产品定义：
+调用方授权你依据以下权威产品定义和实际前端落实项目专属 light/dark 语义颜色：
 {product_references}
-
-实际前端：
 - @./frontend
 
-请从权威产品定义、目标用户、核心任务、信息密度和当前前端事实提取颜色方向；从经过校验的 tweakcn 内置主题中选择明显适配项，或在没有合适 preset、网络不可用或远程数据不合格时生成自定义配色。必须同时完成完整 light/dark 语义颜色，定位实际活动全局样式入口并保留项目现有 dark selector。
-
-只允许修改语义颜色值和确实缺失的 `@theme inline` 颜色映射。不得修改字体、字阶、圆角、阴影、间距、tracking、布局、组件、页面、主题切换交互或业务功能；不得安装、升级或迁移 Tailwind，不得初始化组件库，不得导入完整远程 CSS 或非颜色 token。
-
-按当前前端工程已有命令完成适用静态检查、测试和构建，并在真实浏览器中分别切换 light/dark，实际读取代表性页面渲染、computed color、控制台和失败网络请求。不得初始化、暂存、提交、建分支、合并或推送 Git；不得泄露秘密。最终完整回复须说明主题来源、选择依据、实际修改文件、light/dark 完整性、所有真实验证结果和未解决限制。"""
+完成项目专属 light/dark 语义颜色。仅修改颜色值及确实缺失的颜色映射，不修改其它样式、布局、组件或功能；不得执行 Git 写操作或泄露秘密。"""
 
 
 async def run(
