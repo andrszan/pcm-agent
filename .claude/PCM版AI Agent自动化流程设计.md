@@ -17,7 +17,7 @@ PCM 自动化流程接收一份产品初稿及可选的客户初始资料；资�
 → 基础工程选型
 → 基础工程组装
 → 项目准备核验
-→ 基础工程项目化与项目专属主题配色
+→ 基础工程项目化与项目专属基础视觉主题
 → 总体技术方案
 → 首次提交适用仓库
 → 必要的工程架构设计和按需 UI/UX 框架
@@ -403,15 +403,15 @@ Demo 和默认 PCM 流程只进行本地文件修改、测试、构建、服务�
 - 完成条件：所有进入项目准备清单的当前开发必需外部资源均真实可用；不存在两类阻塞：开发必需外部资源在候选池中缺失、当前环境无法安全生成且无兼容替代，或已匹配资源真实不可用、凭据无效、权限不足、隔离不合格，或缺少开发所需接口能力、可用配额、回调/白名单及其它既定能力。清单、管理凭据、Mock、截图或 Agent 自述不能单独证明完成。
 - 自动化说明：依赖安装、migration、Seed、业务实现、项目内测试账号、完整联调和浏览器验收由后续开发步骤完成。只服务生产部署或生产运行的正式域名、DNS/TLS、生产资源与凭据、生产回调与配额、监控、备份恢复、容量和发布安全属于开发及清单准入范围外。项目准备清单正文任何位置都不得列举、命名或汇总这些事项，也不得以“未纳入清单”、范围外、未来事项、非阻塞、无状态或 `not-applicable` 章节保留它们；开发 SMTP TLS、localhost 回调、开发白名单、沙箱范围和开发配额仍按当前开发用途纳入。产品规则和隐私治理同样不写入清单。已有成功结果只有在当前 `scope_contract`、清单和产品定义指纹一致时才可幂等复用。
 
-### 第 6 步：项目化基础工程与主题配色
+### 第 6 步：项目化基础工程与基础视觉主题
 
 - 能力：同一数字步骤顺序显式调用 `project-bootstrap`，并在 `steps/04.json.outputs` 含 `frontend` 时显式调用 `tailwind-theme`。两个 Skill 使用独立 Claude session、独立 decision conversation、独立 XML system snapshot 和私有恢复状态，不由前一个 Skill 隐式调用后一个，也不新增步骤编号或内部节点。
 - 输入：基础工程、产品定义、基础工程选型结论和经过严格指纹核验的准备基线；已有项目可另外提供既有技术方案。主题调用只引用两份产品定义和实际 frontend，工程事实由 Agent 现场读取，不依赖尚未执行的 UI/UX 框架产物。
-- 项目化：`project-bootstrap` 完成项目身份、基础配置、文档和最小联调，保持或建立可替换的 Tailwind 语义颜色基础设施，但不选择或生成项目专属主题，也不把模板默认色认定为最终产品主题。配置可以为匹配工程实际加载合同迁移键名与结构并同步无秘密公开示例，但必须复用同一既有资源绑定和真实值，保持资源身份、endpoint 与权限范围，不重新选择、创建、派生、轮换或替换外部资源或凭据。
+- 项目化：`project-bootstrap` 完成项目身份、基础配置、文档和最小联调，保持或建立可替换的 Tailwind 基础主题接线，但不选择或生成项目专属主题，也不把模板默认样式认定为最终产品主题。配置可以为匹配工程实际加载合同迁移键名与结构并同步无秘密公开示例，但必须复用同一既有资源绑定和真实值，保持资源身份、endpoint 与权限范围，不重新选择、创建、派生、轮换或替换外部资源或凭据。
 - 主题适用性：无 frontend 时只运行项目化并以 `tailwind_theme:false` 跳过主题。存在 frontend 时，bootstrap 完成后由 Python 确认 `frontend/package.json` 直接声明可明确判断为 major 4 的 `tailwindcss`，并在 frontend 自身 Git 可见且未忽略的 CSS 中找到 `@import "tailwindcss"` CSS-first 证据；版本不明确、非 v4 或缺少 CSS-first 证据属于本地模板合同 `failed`，不创建主题 session，也不作为 `blocked`。
-- 主题动作：`tailwind-theme` 根据产品定义和当前前端选择经校验的 tweakcn preset 或生成 custom，同时落实完整 light/dark 语义颜色；网络不可用时必须 custom fallback。只允许修改颜色值和必要颜色映射，不修改字体、圆角、阴影、间距、tracking、布局、组件、页面、主题切换交互或业务功能，不安装、升级或迁移 Tailwind，也不执行 Git 写操作。完成前运行适用前端检查、测试和构建，并在真实浏览器中切换 light/dark、读取实际渲染和 computed color，检查控制台及失败网络请求。
+- 主题动作：`tailwind-theme` 根据产品定义和当前前端优先完整采用随 Skill 分发的本地 tweakcn 官方预设，整体适合时只做必要适配，没有合适基础时才完整自定义；不在运行时联网发现或更新主题。交付包含完整 light/dark 语义颜色，以及字体与基础排版、圆角、阴影、边框、间距和 tracking 等基础视觉参数，适合的默认值可以保留。允许主题 token、必要 Tailwind 映射、基础样式和字体加载接线；整体替换主题拥有的内容，保留工程 import、dark 策略和非主题样式，不重构布局、组件、页面、主题切换交互或业务功能，不安装、升级或迁移 Tailwind，也不执行 Git 写操作。完成前运行适用前端检查、测试和构建，并在真实浏览器中切换 light/dark，检查实际渲染、字体加载、computed styles、间距对尺寸的影响、控制台及失败网络请求。
 - 输出：完成项目化与条件性主题处理的工程。`steps/06.json.outputs` 继续等于第 4 步实际适用工程，顶层 `applicable` 语义不变，新增真实布尔 `tailwind_theme`，严格满足 `tailwind_theme == ("frontend" in outputs)`；字段缺失、类型错误或不一致的旧 success 不可复用。
-- 完成条件：适用安装、检查、测试、构建、启动、健康检查、真实浏览器检查和基础联调通过；有 frontend 时项目专属 light/dark 主题及真实两种模式渲染也完成。两个独立领域都 completed 后才写 success 并推进第 7 步，留下待提交变更。
+- 完成条件：适用安装、检查、测试、构建、启动、健康检查、真实浏览器检查和基础联调通过；有 frontend 时项目专属基础视觉主题及真实 light/dark 两种模式渲染也完成。两个独立领域都 completed 后才写 success 并推进第 7 步，留下待提交变更。
 - 恢复：仍停留在 `project:06_bootstrap_foundation`。bootstrap completed/theme 未开始、theme 中断或 blocked 时，重跑先只复验 bootstrap，再创建或恢复 `tailwind_theme`；theme 失败不重新执行 bootstrap Agent。bootstrap blocked 时不创建主题执行产物。result 已写而 state 未推进时按严格 marker、前序交接、Tailwind gate 和 Git 事实只补状态。
 - 自动化说明：发现模板残留、配置读取、变量迁移、脚本、代码、代理、启动、健康入口、前后端连接或测试入口问题时在项目化领域修正并重跑；主题或验证可继续完成时在主题领域修正并重跑。`blocked` 仍只用于当前环境无法取得的不可替代外部条件；本地版本、文件、主题入口、工作树或状态冲突为 `failed`，不得用替代资源、新凭据或降低验证标准规避。第 8 步自然提交主题变更，第 10 步只把已提交主题视为 Current，不重新调用主题能力。
 - 当前验证：第 6 步 14 项、第 7 步 9 项、相关第 6/7/8/10 步 58 项、公共循环与入口 64 项及全量 351 项自动化通过。隔离 run `step06-tailwind-theme-20260831` 已确认 bootstrap Skill/slash command、产品 cwd 与原 session 加载；内置 Explore 未识别模型后，run-local 同 session 恢复实际执行 43 turns 并修改项目，但 SDK 以 `terminal_reason=api_error` 结束且没有完整 Agent 回复，后续严格拒绝不合法 `pending_agent_text`，未进入独立 theme session。该结果只证明真实通道失败和恢复保护生效，不构成 `/tailwind-theme`、实际 CSS light/dark 修改或浏览器集成成功证据。

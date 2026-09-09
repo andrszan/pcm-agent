@@ -45,8 +45,10 @@ LEGACY_COMPLETION_MESSAGES = (
 BOOTSTRAP_DECISION_RULES = """- completed：产品根 README 和各适用工程的项目身份、配置、文档及模板残留已完成项目化。
 - continue：项目化或上述验证尚未完成，可用既有工程、配置和工具继续修复。"""
 
-TAILWIND_THEME_DECISION_RULES = """- completed：基于 Tailwind CSS v4 CSS-first 的实际样式入口和 dark selector，完整落实并验证项目专属 light/dark 语义颜色。
-- continue：配色、颜色落实或上述验证尚未完成，可用当前产品定义、工程和工具继续修正；tweakcn 网络不可用必须回退到自定义配色。"""
+FOUNDATION_THEME_SCOPE = "颜色（light/dark）、字体与基础排版、圆角、阴影、边框、spacing、tracking"
+
+TAILWIND_THEME_DECISION_RULES = f"""- completed：基于 Tailwind CSS v4 CSS-first 的实际样式入口和 dark selector，完整落实并验证项目专属基础视觉主题 token（{FOUNDATION_THEME_SCOPE}）。
+- continue：基础视觉主题 token 的选择、落实或上述验证尚未完成，可用当前产品定义、工程和工具继续修正；本地官方完整 preset 优先，允许必要适配；没有合适基础时以 custom 兜底。"""
 
 DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     key=CONVERSATION_KEY,
@@ -280,7 +282,7 @@ def advance_success(
     saved = result(
         "success",
         (
-            "project-bootstrap 已完成基础工程项目化和验证，tailwind-theme 已完成项目专属 light/dark 配色。"
+            f"project-bootstrap 已完成基础工程项目化和验证，tailwind-theme 已完成项目专属完整基础视觉主题 token（{FOUNDATION_THEME_SCOPE}）。"
             if tailwind_theme
             else "project-bootstrap 已完成基础工程项目化和验证；当前无 frontend，tailwind-theme 已跳过。"
         ),
@@ -374,17 +376,17 @@ def initial_prompt(
 {assembly_json}
 ```
 
-必须复用既有资源绑定，不得重新选择、创建、派生、轮换或替换凭据。保持可替换的 Tailwind 语义颜色基础设施，但不选择项目专属配色。不得修改权威输入、执行 Git 写操作或泄露秘密。"""
+必须复用既有资源绑定，不得重新选择、创建、派生、轮换或替换凭据。保持可替换的 Tailwind 基础视觉主题基础设施，但不选择项目专属主题。不得修改权威输入、执行 Git 写操作或泄露秘密。"""
 
 
 def tailwind_theme_initial_prompt(product_outputs: list[str]) -> str:
     product_references = "\n".join(f"- @./{output}" for output in product_outputs)
     return f"""/tailwind-theme
-调用方授权你依据以下权威产品定义和实际前端落实项目专属 light/dark 语义颜色：
+调用方授权你依据以下权威产品定义和实际前端落实项目专属完整基础视觉主题：
 {product_references}
 - @./frontend
 
-完成项目专属 light/dark 语义颜色。仅修改颜色值及确实缺失的颜色映射，不修改其它样式、布局、组件或功能；不得执行 Git 写操作或泄露秘密。"""
+完成项目专属基础视觉主题 token（{FOUNDATION_THEME_SCOPE}）。优先采用随本能力分发的本地 tweakcn 官方完整 preset，并按产品定义和现有工程做必要适配；没有合适 preset 时以 custom 兜底。不得在运行时联网获取主题。只修改基础视觉 token、必要映射、基础样式和字体加载接线，适合的默认值可以保留；保留非主题工程内容；不得重构页面、组件、布局或业务功能，不得执行 Git 写操作或泄露秘密。"""
 
 
 async def run(
@@ -525,8 +527,10 @@ async def run(
                 "产品定义": product_output_contents(workspace, product_outputs),
                 "实际前端": ["frontend"],
                 "主题合同": (
-                    "当前 frontend 必须保持 Tailwind CSS v4 CSS-first；完整 light/dark 项目专属语义颜色必须同时落实并真实验证；"
-                    "只允许颜色值和必要颜色映射，不修改字体、圆角、阴影、间距、tracking、布局、组件、页面或业务。"
+                    f"当前 frontend 必须保持 Tailwind CSS v4 CSS-first；完整项目专属基础视觉主题 token（{FOUNDATION_THEME_SCOPE}）必须落实并真实验证；"
+                    "优先采用随本能力分发的本地 tweakcn 官方完整 preset，并按产品定义和现有工程做必要适配；没有合适 preset 时以 custom 兜底；"
+                    "不得在运行时联网获取主题；只修改基础视觉 token、必要映射、基础样式和字体加载接线，适合的默认值可以保留；保留非主题工程内容；"
+                    "不重构页面、组件、布局、主题切换交互或业务功能。"
                 ),
             },
         ),

@@ -110,7 +110,7 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 
 | Skill | 依赖与边界 |
 |---|---|
-| `tailwind-theme` | 适用于 Tailwind CSS v4 CSS-first 前端；根据项目事实和明确主题要求选择经校验的 tweakcn 内置主题或生成自定义配色，只落实完整 light/dark 语义颜色并验证真实渲染，不修改字体、圆角、阴影、布局、组件或业务页面，也不自动安装 Tailwind 或组件库 |
+| `tailwind-theme` | 适用于 Tailwind CSS v4 CSS-first 前端；优先完整采用本地 tweakcn 官方预设，允许必要适配，没有合适基础时才自定义；落实并验证 light/dark 语义颜色、字体与基础排版、圆角、阴影、边框和间距等基础视觉主题，不重构布局、组件或业务页面，也不自动安装 Tailwind 或组件库 |
 | `ui-component-patterns` | 适用于 React + shadcn/ui Base UI + Tailwind CSS v4 的具体 Chat、认证、业务卡片、结构化表单和真实趋势场景；从本地受控参考中选择少量候选并按真实业务、品牌、数据和状态二次设计，不安装或复制 registry，不决定 Shell、信息架构或主题；Radix 及其它不兼容栈无副作用跳过 |
 | `playwright-cli` | 依赖当前环境已具备的对应浏览器运行工具；用于真实浏览器操作与验证，核心 Skills 不得把它作为隐藏必需 Skill |
 | `media-assets` | 工作区固有、按需调用的开发期媒体工具；统一负责已有资产复用、图库检索、单张定制生成、传入与生成结果检查、资产固化及测试 fixture，不构成产品运行时依赖 |
@@ -204,6 +204,11 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 │   ├── tailwind-theme/
 │   │   ├── SKILL.md
 │   │   ├── references/theme-selection.md
+│   │   ├── assets/tweakcn/
+│   │   │   ├── README.md
+│   │   │   ├── LICENSE
+│   │   │   ├── catalog.json
+│   │   │   └── themes/
 │   │   └── evals/
 │   │       ├── evals.json
 │   │       └── files/
@@ -264,7 +269,7 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 - [定制生成](skills/media-assets/providers/openai-compatible-image/README.md)：固定生成命令、参数及配置。
 - [测试 fixture](skills/media-assets/assets/fixtures/README.md)：测试输入及复制、维护边界。
 
-`tailwind-theme` 只面向实际采用 Tailwind CSS v4 CSS-first 语义颜色变量的前端。它按需读取 tweakcn 当前动态 registry，但只消费经过校验的 light/dark 颜色白名单并把最终值固化进目标项目；网络不可用或没有合适 preset 时依据项目事实生成自定义配色，不把动态 URL、完整远程 CSS、字体、圆角、阴影或其它非颜色 token 变成产品依赖。
+`tailwind-theme` 面向实际采用 Tailwind CSS v4 CSS-first 的前端，负责完整基础视觉主题而不只配色。`assets/tweakcn/` 以轻量 `catalog.json` 和逐主题 `themes/<slug>.json` 保存完整官方预设及来源、许可；运行时只读本地候选，不自动联网更新，维护者按资源 README 显式维护。默认完整采用预设，允许为明确品牌、工程适配和验证问题做有限调整，没有合适基础时才完整自定义。颜色、字体与基础排版、圆角、阴影、边框和 spacing/tracking 按类型校验后固化到目标项目，并检查真实消费者与两种模式渲染；不盲目覆盖全局 CSS，不把整个主题库或 registry 变成产品运行依赖。
 
 `ui-component-patterns` 只面向实际采用 React、shadcn/ui Base UI 与 Tailwind CSS v4 的具体 UI 实现场景。其 `assets/react-shadcn/base-tailwind-v4/` 保存固定上游 commit 的独立 registry block、preview 内部模块和明确标记为派生的 example 函数摘录；不复制基础 primitives、完整 gallery、可运行 demo 或正式预览。Agent 每次只读取最相关的少量候选，并使用目标项目自己的业务、品牌、数据、状态、组件和 token 二次设计；MIT 代码许可不自动覆盖商标、远程媒体或演示中的安全、监管和商业声明。
 
@@ -302,7 +307,7 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 
 ### 空白项目怎么开始？
 
-先使用 `project-intake` 收敛目标用户、产品范围、核心流程和外部约束；需要模板选型时，基于当前可读参考资料完成选型并组装适用基础工程。随后使用 `project-readiness` 建立当前自动化开发周期唯一的开发资源准备基线，实际准备并核验后续编码和开发联调所需的外部资源、权限和开发配置；生产发布条件不属于该基线。基线完成后执行 `project-bootstrap` 项目化工程；当前存在 Tailwind CSS v4 CSS-first 前端且尚无项目专属主题配色时，在项目化完成后、初始提交前条件性调用 `tailwind-theme`，同时落实并验证 light/dark 语义颜色，不新增固定编号步骤。然后基于真实工程事实调用 `solution-design` 形成总体技术方案。默认完整顺序见人工流程文档，但每个 Skill 仍可独立调用。
+先使用 `project-intake` 收敛目标用户、产品范围、核心流程和外部约束；需要模板选型时，基于当前可读参考资料完成选型并组装适用基础工程。随后使用 `project-readiness` 建立当前自动化开发周期唯一的开发资源准备基线，实际准备并核验后续编码和开发联调所需的外部资源、权限和开发配置；生产发布条件不属于该基线。基线完成后执行 `project-bootstrap` 项目化工程；当前存在 Tailwind CSS v4 CSS-first 前端时，在项目化完成后、初始提交前条件性调用 `tailwind-theme`，优先采用本地官方预设，落实并验证包含 light/dark 的完整基础视觉主题，不新增固定编号步骤。然后基于真实工程事实调用 `solution-design` 形成总体技术方案。默认完整顺序见人工流程文档，但每个 Skill 仍可独立调用。
 
 ### 小改动或 Bug 修复也要走完整流程吗？
 

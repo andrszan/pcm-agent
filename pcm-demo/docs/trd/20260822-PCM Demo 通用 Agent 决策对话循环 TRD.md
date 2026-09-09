@@ -451,7 +451,7 @@ Prompt 投递采用 at-least-once 语义。自动恢复指令使用幂等的“�
 - `completed` 只表示负责人根据 Agent 执行结果相信当前任务完成，步骤程序仍以现有文件、Git、命令和交接 verifier 二次核验；
 - 首行 slash command 只属于 Agent initial prompt；该 prompt 正文不写步骤编号、PCM 节点、阶段、session 或 Skill 编排；
 - `request_decision` 的 system prompt 为必传参数，并原样传给一次 `responses.parse`；Pydantic `AgentDecision` 是唯一结构化输出合同，没有公共默认 system prompt、公共 JSON 追加 prompt 或格式重试；
-- 项目上下文范围固定为：第 2 步初稿原文和目标路径；第 5 步产品定义原文、适用工程、选型白名单投影及资源清单仅路径/可读性；第 6 步的 `project_bootstrap` spec 使用产品定义原文、准备清单原文、适用工程和组装白名单投影，`tailwind_theme` spec 另以产品定义原文、实际 frontend 和主题颜色边界形成独立 snapshot；第 7 步使用产品定义原文、准备清单原文、适用工程和组装白名单投影；第 8 步合法有序 `applicable_repositories`；第 9～11 步各自的固定领域输入、权威工程和固定输出路径。第 8～11 步其余只读 Git 核验与 verifier 仍由步骤私有实现；
+- 项目上下文范围固定为：第 2 步初稿原文和目标路径；第 5 步产品定义原文、适用工程、选型白名单投影及资源清单仅路径/可读性；第 6 步的 `project_bootstrap` spec 使用产品定义原文、准备清单原文、适用工程和组装白名单投影，`tailwind_theme` spec 另以产品定义原文、实际 frontend 和基础视觉主题边界形成独立 snapshot；第 7 步使用产品定义原文、准备清单原文、适用工程和组装白名单投影；第 8 步合法有序 `applicable_repositories`；第 9～11 步各自的固定领域输入、权威工程和固定输出路径。第 8～11 步其余只读 Git 核验与 verifier 仍由步骤私有实现；
 - 选型和组装投影不包含 `git_url`、`origin`、`remote`。资源清单正文和 `.env` 不进入项目上下文；资源清单仍按步骤 Agent initial prompt 的既有授权处理；
 - 项目上下文只做标准 XML 转义；
 - repair prompt 只说明程序发现的固定缺口。
