@@ -1399,7 +1399,7 @@ PCM_DEV_RESOURCE_LIST=
 配置职责：
 
 - `LLM_*` 用于 OpenAI-compatible Responses API，包括 AI-compatible 决策调用和第 12 步 Backlog 静态字段结构化提取；
-- `PCM_AGENT_BASE_URL`、`PCM_AGENT_AUTH_TOKEN` 用于 Claude Agent SDK 的 Anthropic Messages 网关和受保护 Bearer 认证；Base URL 不包含 `/v1`；旧 `PCM_AGENT_API_KEY` 的有效值需迁移到新键，不保留旧键读取兼容；
+- `PCM_AGENT_BASE_URL`、`PCM_AGENT_AUTH_TOKEN` 用于 Claude Agent SDK 的 Anthropic Messages 网关和受保护 Bearer 认证；Base URL 不包含 `/v1`；
 - `PCM_AGENT_MODEL_LOW`、`PCM_AGENT_MODEL_MEDIUM`、`PCM_AGENT_MODEL_HIGH` 将代码中的低、中、高档位映射为网关真实模型名；
 - `PCM_WORKSPACE_ROOT` 是独立产品项目父目录；
 - `PCM_MAX_CONCURRENT_PROJECTS` 是当前 Demo checkout 同时执行的产品项目上限，正整数，默认 `2`；

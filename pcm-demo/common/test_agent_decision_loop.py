@@ -1587,7 +1587,6 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
             "LLM_MODEL_EFFORT": "high",
             "PCM_MODEL_POLICY_SNAPSHOT": "private-policy",
             "PCM_AGENT_AUTH_TOKEN": "private-pcm-token",
-            "PCM_AGENT_API_KEY": "legacy-private-key",
             "PCM_WORKSPACE_ROOT": "/products",
             "PCM_TEMPLATE_CATALOG": "/catalog.json",
             "PCM_TEMPLATE_REPOSITORY": "git@example.invalid/template.git",
@@ -1744,7 +1743,6 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("agent-secret", captured_options[0].settings)
         self.assertEqual(captured_options[0].env["CLAUDE_CODE_SUBAGENT_MODEL"], "medium-model")
         self.assertEqual(captured_options[0].env["PCM_AGENT_AUTH_TOKEN"], "")
-        self.assertEqual(captured_options[0].env["PCM_AGENT_API_KEY"], "")
         self.assertEqual(
             captured_options[0].env["CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"], "0"
         )

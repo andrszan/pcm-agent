@@ -97,7 +97,6 @@ def filtered_env(config: AgentConfig, model: str) -> dict[str, str]:
             "PCM_MODEL_POLICY_SNAPSHOT": "",
             "PCM_AGENT_BASE_URL": "",
             "PCM_AGENT_AUTH_TOKEN": "",
-            "PCM_AGENT_API_KEY": "",
             "PCM_WORKSPACE_ROOT": "",
             "PCM_MAX_CONCURRENT_PROJECTS": "",
             "PCM_TEMPLATE_CATALOG": "",

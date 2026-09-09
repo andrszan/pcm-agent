@@ -95,21 +95,6 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(config.auth_token.get_secret_value(), "environment-secret")
         self.assertEqual(config.auto_compact_window, 500001)
 
-    def test_legacy_api_key_does_not_replace_required_auth_token(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            env_file = self.write_env(
-                directory,
-                "\n".join(
-                    [
-                        "PCM_AGENT_BASE_URL=http://localhost:8317",
-                        "PCM_AGENT_API_KEY=legacy-secret",
-                    ]
-                ),
-            )
-            with patch.dict(os.environ, {}, clear=True):
-                with self.assertRaisesRegex(ValueError, "PCM_AGENT_AUTH_TOKEN"):
-                    AgentConfig.load(env_file)
-
     def test_reports_all_missing_agent_configuration(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             env_file = self.write_env(directory, "UNRELATED=value\n")

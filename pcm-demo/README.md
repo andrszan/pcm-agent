@@ -88,8 +88,6 @@ uv sync
 
 公共 runner 使用 `setting_sources=["project", "local"]`，保留产品项目的 settings、权限、Skills 和显式 Plugin 加载，不加载用户级 settings 或用户级 Skills。原 session 存储位置不变。项目的 `settings.env` 仍遵循 Claude Code 的优先级，不应在产品设置中另配 PCM 网关、认证或模型路由。
 
-已有开发配置需把 `PCM_AGENT_API_KEY` 的有效值迁移到 `PCM_AGENT_AUTH_TOKEN`，旧键不再作为认证输入接受；真实凭据继续保持 Git 忽略，POSIX 下使用 `0600`。修改后重新启动 PCM 进程加载新代码与配置，不修改已有 conversation 或运行状态。
-
 自动压缩只使用原生 `CLAUDE_CODE_AUTO_COMPACT_WINDOW`，由 Settings/AgentConfig 显式传到实际 SDK 子进程；废弃的 `PCM_AGENT_AUTO_COMPACT_TOKENS` 不作为别名。该值控制自动压缩窗口，不是摘要大小或上游容量承诺，实际触发点取决于内置 CLI 的模型窗口及保留空间。PCM 不增加手工压缩或恢复前预检，也不通过修改全局 settings、MAX_CONTEXT 或百分比参数叠加控制。明确的 SDK 上下文超限会记录原因并停止同输入自动重试；普通 API 错误仍按原有有界策略处理，不因普通业务文字提到超限而触发该分类。
 
 ### 模型策略

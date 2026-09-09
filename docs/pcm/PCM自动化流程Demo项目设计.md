@@ -685,7 +685,7 @@ PCM_DEV_RESOURCE_LIST=
 职责分工：
 
 - `LLM_*`：AI-compatible Responses API；
-- `PCM_AGENT_BASE_URL`、`PCM_AGENT_AUTH_TOKEN`：Claude Agent SDK 使用的 Anthropic Messages 网关和受保护 Bearer token；Base URL 是紧邻 `/v1/messages` 之前的 API 根，不包含 `/v1`；旧 `PCM_AGENT_API_KEY` 的有效值需迁移到新键，旧键不再作为认证输入接受；
+- `PCM_AGENT_BASE_URL`、`PCM_AGENT_AUTH_TOKEN`：Claude Agent SDK 使用的 Anthropic Messages 网关和受保护 Bearer token；Base URL 是紧邻 `/v1/messages` 之前的 API 根，不包含 `/v1`；
 - `PCM_AGENT_MODEL_LOW`、`PCM_AGENT_MODEL_MEDIUM`、`PCM_AGENT_MODEL_HIGH`：代码中低、中、高语义档位对应的网关真实模型名；
 - `PCM_WORKSPACE_ROOT`：所有产品项目的独立父目录；
 - `PCM_MAX_CONCURRENT_PROJECTS`：当前 Demo checkout 同时执行的产品项目上限，正整数，默认 `2`；
