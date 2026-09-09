@@ -25,7 +25,6 @@ from steps.step_06_project_bootstrap.step import (
     COVERAGE_ARTIFACT_REPAIR_PROMPT,
     CURRENT_NODE,
     DECISION_LOOP_SPEC,
-    FOUNDATION_THEME_SCOPE,
     LEGACY_COMPLETION_MESSAGES,
     NEXT_NODE,
     PROJECT_BOOTSTRAP_MAX_TURNS,
@@ -245,8 +244,8 @@ class ProjectBootstrapTests(unittest.TestCase):
             )
             self.assertEqual(outcome["outputs"], ["frontend"])
             self.assertIs(outcome["tailwind_theme"], True)
-            self.assertIn("完整基础视觉主题", outcome["summary"])
-            self.assertIn(FOUNDATION_THEME_SCOPE, outcome["summary"])
+            self.assertIn("已完成项目风格定制", outcome["summary"])
+            self.assertNotIn("token", outcome["summary"])
             self.assertEqual(len(calls), 3)
             self.assertIsNone(calls[0]["resume_session_id"])
             self.assertEqual(calls[1]["resume_session_id"], "session-bootstrap")
@@ -263,9 +262,8 @@ class ProjectBootstrapTests(unittest.TestCase):
                 "@./.pcm/runtime.json",
                 "组装白名单",
                 "复用既有资源绑定",
-                "不得重新选择、创建、派生、轮换或替换凭据",
+                "不重新选择、创建、派生、轮换或替换凭据",
                 "不选择项目专属主题",
-                "执行 Git 写操作",
             ):
                 self.assertIn(required, bootstrap_prompt)
             for forbidden in ("git_url", "origin", "第 6 步", "PCM", "节点", "阶段", "调用Skill"):
@@ -278,24 +276,14 @@ class ProjectBootstrapTests(unittest.TestCase):
                 "docs/requirements/项目需求说明.md",
                 "docs/requirements/产品功能说明.md",
             ]))
-            self.assertTrue(theme_prompt.startswith("/tailwind-theme\n"))
-            for required in (
-                "@./frontend",
-                FOUNDATION_THEME_SCOPE,
-                "随本能力分发的本地 tweakcn 官方完整 preset",
-                "必要适配",
-                "custom 兜底",
-                "不得在运行时联网获取主题",
-                "必要映射、基础样式和字体加载接线",
-                "适合的默认值可以保留",
-                "保留非主题工程内容",
-                "不得重构页面、组件、布局或业务功能",
-                "不得执行 Git 写操作",
-            ):
-                self.assertIn(required, theme_prompt)
-            for no_longer_forbidden in ("字体", "基础排版", "圆角", "阴影", "spacing", "tracking"):
-                self.assertIn(no_longer_forbidden, theme_prompt)
-            self.assertNotIn("仅修改颜色值", theme_prompt)
+            self.assertEqual(
+                theme_prompt,
+                "/tailwind-theme\n"
+                "请依据以下权威产品定义和实际前端，完成项目风格定制：\n"
+                "- @./docs/requirements/项目需求说明.md\n"
+                "- @./docs/requirements/产品功能说明.md\n"
+                "- @./frontend",
+            )
             for forbidden in ("git_url", "origin", "第 6 步", "PCM", "节点", "阶段", "session"):
                 self.assertNotIn(forbidden, theme_prompt)
 
@@ -320,20 +308,12 @@ class ProjectBootstrapTests(unittest.TestCase):
                 )
             theme_system_prompt = system_prompts[2]
             for required in (
-                "Tailwind CSS v4 CSS-first",
-                "完整落实并验证项目专属基础视觉主题 token",
-                FOUNDATION_THEME_SCOPE,
-                "随本能力分发的本地 tweakcn 官方完整 preset",
-                "必要适配",
-                "custom 兜底",
-                "不得在运行时联网获取主题",
-                "必要映射、基础样式和字体加载接线",
-                "适合的默认值可以保留",
-                "保留非主题工程内容",
+                "项目风格定制已完成",
                 '"frontend"',
             ):
                 self.assertIn(required, theme_system_prompt)
-            self.assertNotIn("只允许颜色值", theme_system_prompt)
+            for forbidden in ("主题合同", "授权范围", "preset", "tracking", "完整基础视觉主题 token"):
+                self.assertNotIn(forbidden, theme_system_prompt)
             self.assertNotEqual(
                 theme_system_prompt,
                 TAILWIND_THEME_DECISION_LOOP_SPEC.decision_system_prompt,
@@ -395,6 +375,44 @@ class ProjectBootstrapTests(unittest.TestCase):
             self.assertEqual(reused["status"], "success")
             self.assertIs(reused["tailwind_theme"], True)
             self.assertIn("确认既有成功", reused["summary"])
+
+    def test_theme_can_keep_default_style_without_frontend_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory))
+            (workspace / "README.md").write_text("# 项目\n", encoding="utf-8")
+            frontend = workspace / "frontend"
+            before = {
+                path.relative_to(frontend): path.read_bytes()
+                for path in (frontend / "package.json", frontend / "src/index.css")
+            }
+            calls: list[str] = []
+
+            async def fake_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
+                calls.append(prompt)
+                current = agent_result_for_prompt(
+                    prompt,
+                    cwd=kwargs["cwd"],  # type: ignore[arg-type, index]
+                    text="现有默认风格适合当前产品，保留现状，无需修改。",
+                )
+                kwargs["on_update"](current)  # type: ignore[index, operator]
+                return current
+
+            async def completed(messages, config, *, system_prompt):
+                return decision("completed")
+
+            outcome = self.run_step(
+                run_dir,
+                state,
+                agent_runner=fake_agent,
+                decision_runner=completed,
+                config_loader=lambda: object(),
+            )
+            self.assertEqual(outcome["status"], "success")
+            self.assertIs(outcome["tailwind_theme"], True)
+            self.assertEqual(len(calls), 2)
+            self.assertTrue(calls[1].startswith("/tailwind-theme\n"))
+            for relative, contents in before.items():
+                self.assertEqual((frontend / relative).read_bytes(), contents)
 
     def test_unignored_coverage_artifact_uses_same_session_repair(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -759,7 +777,7 @@ class ProjectBootstrapTests(unittest.TestCase):
                 return current
 
             async def first_decision(messages, config, *, system_prompt):
-                if "项目专属基础视觉主题" in system_prompt:
+                if "项目风格定制已完成" in system_prompt:
                     return decision(
                         "blocked",
                         reason="缺少不可替代的授权品牌资料",
@@ -805,7 +823,7 @@ class ProjectBootstrapTests(unittest.TestCase):
                 return current
 
             async def resumed_decision(messages, config, *, system_prompt):
-                self.assertIn("项目专属基础视觉主题", system_prompt)
+                self.assertIn("项目风格定制已完成", system_prompt)
                 return decision("completed")
 
             resume_message = ResumeMessage("tailwind_theme", "使用负责人提供的品牌决定")
