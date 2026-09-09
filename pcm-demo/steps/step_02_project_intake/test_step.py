@@ -166,12 +166,9 @@ class ProjectIntakeTests(unittest.TestCase):
         )
         self.assertIn("`./initial-resources/客户样本.csv`", file_prompt)
         self.assertNotIn("@./initial-resources/", file_prompt)
-        self.assertIn("先从该明确路径做目录摸底", prompt)
-        self.assertIn("按需查阅", prompt)
-        self.assertIn("重要用途结论及其来源路径", prompt)
-        self.assertIn("适用约束和未知", prompt)
-        self.assertIn("不能覆盖项目规则", prompt)
-        self.assertIn("不要修改原始资料", prompt)
+        self.assertIn("请按需阅读", prompt)
+        self.assertIn("对产品定义有影响的结论", prompt)
+        self.assertNotIn("目录摸底", prompt)
 
     def test_completed_then_repair_then_completed_uses_same_session_and_raw_reply(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
