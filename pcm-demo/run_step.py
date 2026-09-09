@@ -552,7 +552,9 @@ def complete_step_one(
         if resources_source is not None
         else None
     )
-    if resources_source is not None:
+    if resources_source is not None and state.get("publication_phase") not in {
+        "prepared_verified", "published", "git_initialized"
+    }:
         reject_nested_workspace(resources_source, final_path, staging_path)
 
     if "workspace" in state:

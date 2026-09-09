@@ -545,6 +545,10 @@ raise SystemExit(run_step.retrying_main())
                     return_value=(workspace_env_file.resolve(), "env_file"),
                 ),
                 patch.object(run_step, "verify_published_content", return_value=True),
+                patch.object(
+                    run_step, "reject_nested_workspace",
+                    side_effect=AssertionError("已发布副本恢复不得重新探测源目录"),
+                ),
                 patch.object(run_step, "workspace_env_is_ignored", return_value=True),
                 patch.object(run_step, "initial_resources_are_ignored", autospec=True, return_value=True),
                 patch.object(run_step, "inspect_root_repository", return_value=repository),
