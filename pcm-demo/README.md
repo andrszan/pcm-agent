@@ -90,6 +90,16 @@ uv sync
 
 自动压缩只使用原生 `CLAUDE_CODE_AUTO_COMPACT_WINDOW`，由 Settings/AgentConfig 显式传到实际 SDK 子进程；废弃的 `PCM_AGENT_AUTO_COMPACT_TOKENS` 不作为别名。该值控制自动压缩窗口，不是摘要大小或上游容量承诺，实际触发点取决于内置 CLI 的模型窗口及保留空间。PCM 不增加手工压缩或恢复前预检，也不通过修改全局 settings、MAX_CONTEXT 或百分比参数叠加控制。明确的 SDK 上下文超限会记录原因并停止同输入自动重试；普通 API 错误仍按原有有界策略处理，不因普通业务文字提到超限而触发该分类。
 
+### Agent 统一代理配置
+
+在 PCM 自身的 `pcm-demo/.env` 配置可选的 `HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY`，公共 `AgentConfig.load()` 与 SDK runner 会为所有产品统一加载并传入 SDK 子进程。终端、`launchd`、单步骤和完整流程共用该入口，不需要逐产品写入 plist、产品 `.env` 或 settings。这里不改变独立 AI-compatible 决策客户端的代理配置。
+
+- 进程环境优先于 PCM `.env`，同一来源中非空小写键优先于大写键；传入 SDK 时同步大小写值，避免工具取值不一致。
+- 空值沿用配置的既有语义，视为未配置，不会覆盖另一来源的非空值。海外直连节点应移除或留空本机文件中的代理，同时清除启动环境中不需要的代理；不能仅用空的环境变量覆盖文件中的代理。
+- 未配置时不强制任何代理，保留父进程环境继承。使用实际可达的 HTTP 代理入口，不将 `ALL_PROXY` 的 SOCKS 地址转换成 Claude Code 的 HTTP 代理。
+- `NO_PROXY` 按真实网络配置，使用代理时建议包含 `localhost,127.0.0.1,::1` 及必要内网域名；程序不擅自扩充或删改例外。代理地址及认证信息只保存在受保护的 PCM 配置中，示例不含实际代理或凭据。
+- 每次创建 SDK 子进程时读取配置，不热更新已经运行的子进程。保留 WebFetch 安全预检；网络验证以实际工具结果为准，SDK 最终 `success` 不代表 WebFetch 成功。浏览器、Git、包管理器及 MCP 的代理支持仍需分别验证。
+
 ### 模型策略
 
 Claude Agent 的模型与推理强度只在受跟踪的 [`model-policy.toml`](model-policy.toml) 配置，不再读取 `.env` 中的 `PCM_AGENT_MODEL_LOW/MEDIUM/HIGH`。`.env` 保留 Agent 连接、认证与原生自动压缩窗口；AI-compatible 继续使用独立的共用 `LLM_*` 配置。

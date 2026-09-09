@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from stat import S_ISREG
 
-from pydantic import Field, SecretStr
+from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_ENV_FILE = Path(__file__).with_name(".env")
@@ -48,12 +48,44 @@ class Settings(BaseSettings):
     )
 
 
+class AgentProxySettings(BaseSettings):
+    http_proxy: SecretStr | None = Field(
+        default=None, validation_alias=AliasChoices("http_proxy", "HTTP_PROXY"), repr=False
+    )
+    https_proxy: SecretStr | None = Field(
+        default=None, validation_alias=AliasChoices("https_proxy", "HTTPS_PROXY"), repr=False
+    )
+    no_proxy: str | None = Field(
+        default=None, validation_alias=AliasChoices("no_proxy", "NO_PROXY"), repr=False
+    )
+
+    # 代理大小写有明确优先级，不改变其它 PCM 配置的大小写兼容行为。
+    model_config = SettingsConfigDict(
+        env_file=DEFAULT_ENV_FILE,
+        env_file_encoding="utf-8",
+        env_ignore_empty=True,
+        case_sensitive=True,
+        extra="ignore",
+    )
+
+    def environment(self) -> dict[str, str]:
+        env: dict[str, str] = {}
+        for key in ("http_proxy", "https_proxy", "no_proxy"):
+            value = getattr(self, key)
+            if value is not None:
+                text = value.get_secret_value() if isinstance(value, SecretStr) else value
+                env[key] = env[key.upper()] = text
+        return env
+
+
 class AgentConfig:
     def __init__(
         self,
         base_url: str,
         auth_token: SecretStr,
         auto_compact_window: int = DEFAULT_CLAUDE_CODE_AUTO_COMPACT_WINDOW,
+        *,
+        proxy_settings: AgentProxySettings | None = None,
     ) -> None:
         if (
             not isinstance(auto_compact_window, int)
@@ -64,6 +96,7 @@ class AgentConfig:
         self.base_url = base_url.rstrip("/")
         self.auth_token = auth_token
         self.auto_compact_window = auto_compact_window
+        self.proxy_settings = proxy_settings
 
     def __repr__(self) -> str:
         return (
@@ -88,6 +121,9 @@ class AgentConfig:
             base_url,
             settings.pcm_agent_auth_token,
             settings.claude_code_auto_compact_window,
+            proxy_settings=AgentProxySettings(
+                _env_file=env_file if env_file is not None else DEFAULT_ENV_FILE
+            ),
         )
 
 

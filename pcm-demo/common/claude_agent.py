@@ -7,6 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, get_args
+from urllib.parse import unquote, urlsplit
 from xml.sax.saxutils import escape
 
 from claude_agent_sdk import (
@@ -108,6 +109,8 @@ def filtered_env(config: AgentConfig, model: str) -> dict[str, str]:
         }
     )
     env.pop("CLAUDE_CONFIG_DIR", None)
+    if config.proxy_settings is not None:
+        env.update(config.proxy_settings.environment())
     return env
 
 
@@ -226,6 +229,18 @@ def _retry_requested(
 
 def _anthropic_secrets(config: AgentConfig) -> list[str]:
     values = [config.auth_token.get_secret_value()]
+    if config.proxy_settings is not None:
+        for value in (config.proxy_settings.http_proxy, config.proxy_settings.https_proxy):
+            if value is None:
+                continue
+            proxy = value.get_secret_value()
+            values.append(proxy)
+            try:
+                password = urlsplit(proxy).password
+            except ValueError:
+                continue
+            if password:
+                values.extend((password, unquote(password)))
     values.extend(
         value
         for key in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_REFRESH_TOKEN")
