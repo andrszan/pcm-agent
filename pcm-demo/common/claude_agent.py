@@ -151,6 +151,21 @@ def load_plugins(cwd: Path) -> list[dict[str, str]]:
     return plugins
 
 
+def _synthetic_api_error(message: AssistantMessage) -> tuple[str, str] | None:
+    if (
+        message.parent_tool_use_id is not None
+        or message.model != "<synthetic>"
+        or message.error is None
+    ):
+        return None
+    body = "\n".join(
+        block.text for block in message.content if isinstance(block, TextBlock)
+    ).strip()
+    if not body.startswith("API Error:"):
+        return None
+    return message.error, body
+
+
 def _context_window_api_error(message: AssistantMessage) -> tuple[str, str] | None:
     if (
         message.parent_tool_use_id is not None
@@ -271,6 +286,7 @@ async def run_claude(
     api_error_status: int | None = None
     caught_error: BaseException | None = None
     assistant_error: str | None = None
+    synthetic_api_error_body: str | None = None
     context_window_api_error: str | None = None
     known_secrets = _anthropic_secrets(agent_config)
     options = ClaudeAgentOptions(
@@ -301,7 +317,7 @@ async def run_claude(
             raise _QueryRaisedTimeout(str(error)) from error
 
     async def consume_messages() -> None:
-        nonlocal init, result, reply_text, assistant_error, context_window_api_error
+        nonlocal init, result, reply_text, assistant_error, synthetic_api_error_body, context_window_api_error
         async for message in guarded_messages():
             if isinstance(message, SystemMessage) and message.subtype == "init":
                 init = {
@@ -334,12 +350,23 @@ async def run_claude(
                         )
                     )
             elif isinstance(message, AssistantMessage) and message.parent_tool_use_id is None:
+                api_error = _synthetic_api_error(message)
                 context_error = _context_window_api_error(message)
                 if context_error is not None:
                     assistant_error, context_window_api_error = context_error
+                    synthetic_api_error_body = redact_text(
+                        context_error[1], known_secrets=known_secrets
+                    )
                 else:
-                    if message.model == "<synthetic>" and message.error is not None:
+                    if api_error is not None:
                         assistant_error = None
+                        context_window_api_error = None
+                        synthetic_api_error_body = redact_text(
+                            api_error[1], known_secrets=known_secrets
+                        )
+                    elif message.model == "<synthetic>" and message.error is not None:
+                        assistant_error = None
+                        synthetic_api_error_body = None
                         context_window_api_error = None
                     texts.extend(
                         block.text for block in message.content if isinstance(block, TextBlock)
@@ -353,6 +380,12 @@ async def run_claude(
                     and not _result_finished_normally(result)
                 )
                 result_sdk_errors = _sdk_errors(result.errors, known_secrets) or []
+                if (
+                    synthetic_api_error_body
+                    and not _result_finished_normally(result)
+                    and synthetic_api_error_body not in result_sdk_errors
+                ):
+                    result_sdk_errors.insert(0, synthetic_api_error_body)
                 if context_window_exceeded and context_window_api_error not in result_sdk_errors:
                     result_sdk_errors.insert(0, context_window_api_error)
                 if on_update:
@@ -447,6 +480,12 @@ async def run_claude(
     )
     final_terminal_reason = result.terminal_reason if result else None
     final_sdk_errors = _sdk_errors(result.errors if result else None, known_secrets) or []
+    if (
+        synthetic_api_error_body
+        and not _result_finished_normally(result)
+        and synthetic_api_error_body not in final_sdk_errors
+    ):
+        final_sdk_errors.insert(0, synthetic_api_error_body)
     if context_window_exceeded and context_window_api_error not in final_sdk_errors:
         final_sdk_errors.insert(0, context_window_api_error)
     if (

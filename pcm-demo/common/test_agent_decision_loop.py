@@ -1763,6 +1763,80 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(updates[-1].usage, result.usage)
         self.assertEqual(updates[-1].model_usage, result.model_usage)
 
+    async def test_synthetic_api_error_body_precedes_generic_sdk_exception(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            write_json(workspace / "plugins-lock.json", {"version": 1, "plugins": []})
+            body = "API Error: 400 unknown provider for model gpt-6-sol api_key=agent-secret " + "x" * 5000
+
+            async def fake_query(*_args: object, **_kwargs: object):
+                yield AssistantMessage(
+                    content=[TextBlock(body)], model="<synthetic>", error="unknown"
+                )
+                yield ResultMessage(
+                    subtype="success", duration_ms=1, duration_api_ms=1,
+                    is_error=True, num_turns=1, session_id="session-1", errors=[],
+                )
+                raise RuntimeError("Claude Code returned an error result: success")
+
+            with patch("common.claude_agent.query", new=fake_query):
+                result = await run_claude(
+                    "测试提示", cwd=workspace, model="gpt-6-sol", effort="high"
+                )
+
+        self.assertEqual(
+            result.exception,
+            "RuntimeError: Claude Code returned an error result: success",
+        )
+        self.assertIsNotNone(result.sdk_errors)
+        self.assertTrue(result.sdk_errors[0].startswith(
+            "API Error: 400 unknown provider for model gpt-6-sol"
+        ))
+        self.assertNotIn("agent-secret", result.sdk_errors[0])
+        self.assertIn("api_key=[REDACTED]", result.sdk_errors[0])
+        self.assertIn("[truncated]", result.sdk_errors[0])
+        self.assertFalse(result.context_window_exceeded)
+        self.assertFalse(result.retry_requested)
+
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = Path(directory)
+            state: dict[str, object] = {}
+            failure = persist_agent_failure(
+                run_dir, state, key="model", state_key="agent", value=result
+            )
+            saved = json.loads((run_dir / failure.diagnostic_path).read_text(encoding="utf-8"))
+        self.assertTrue(str(failure).startswith(
+            "API Error: 400 unknown provider for model gpt-6-sol"
+        ))
+        self.assertEqual(saved["details"]["sdk_errors"], result.sdk_errors)
+        self.assertEqual(
+            saved["exception"]["message"],
+            "Claude Code returned an error result: success",
+        )
+
+    async def test_synthetic_non_api_business_text_is_not_promoted_to_error(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            write_json(workspace / "plugins-lock.json", {"version": 1, "plugins": []})
+
+            async def fake_query(*_args: object, **_kwargs: object):
+                yield AssistantMessage(
+                    content=[TextBlock("业务文本")], model="<synthetic>", error="unknown"
+                )
+                yield ResultMessage(
+                    subtype="success", duration_ms=1, duration_api_ms=1,
+                    is_error=True, num_turns=1, session_id="session-1", errors=[],
+                )
+
+            with patch("common.claude_agent.query", new=fake_query):
+                result = await run_claude(
+                    "测试提示", cwd=workspace, model="medium-model", effort="high"
+                )
+
+        self.assertIsNone(result.sdk_errors)
+        self.assertEqual(result.text, "业务文本")
+        self.assertFalse(result.context_window_exceeded)
+
     async def test_synthetic_context_window_api_error_is_terminal_without_retry(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             workspace = Path(directory)
