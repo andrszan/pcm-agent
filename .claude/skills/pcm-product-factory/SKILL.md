@@ -3,6 +3,7 @@ name: "pcm-product-factory"
 description: "Use when 需要面向大学生毕业设计市场筛选易理解、可销售、可开发的完整 Web 应用产品方向，完成符合产品气质的品牌命名，并形成可供后续产品定义使用的初版 PRD 时。"
 argument-hint: <产品领域、已有题目、产品约束或“生成一个新方向”>
 disable-model-invocation: true
+allowed-tools: Read, Glob, Grep, WebSearch, WebFetch, Write, Edit
 ---
 
 # PCM Web 毕业设计产品选题与 PRD 工厂

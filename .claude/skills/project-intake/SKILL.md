@@ -3,6 +3,7 @@ name: project-intake
 description: Use when 需要通过持续对话理解一个新项目、澄清产品需求、整理功能范围，或基于最新事实更新产品定义时。
 argument-hint: <项目名、初步想法、资料路径，或希望继续讨论的产品问题>
 disable-model-invocation: true
+allowed-tools: Read, Glob, Grep, Write, Edit
 ---
 
 # project-intake — 项目沟通与产品定义

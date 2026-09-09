@@ -3,6 +3,7 @@ name: solution-design
 description: Use when 需要基于调用方提供的产品、交付和约束资料，以及当前项目代码与运行事实，设计或更新项目级总体技术方案，明确系统边界、交付单元、跨模块协作、用户可见语义、稳定技术约定和关键取舍时。
 argument-hint: <项目名、相关资料、工程路径、已确认决定或希望讨论的总体技术问题>
 disable-model-invocation: true
+allowed-tools: Read, Glob, Grep, Bash, Write, Edit
 ---
 
 # solution-design — 项目级总体技术方案设计

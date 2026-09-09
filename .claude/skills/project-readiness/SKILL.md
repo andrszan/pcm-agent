@@ -3,6 +3,7 @@ name: project-readiness
 description: Use when 需要根据调用方资料和当前项目事实，识别并真实准备当前自动化开发所需的外部服务、账号、凭据、素材、设备和本地配置，核验资源可用性并维护脱敏项目准备清单时。
 argument-hint: <项目名、相关资料、工程路径和调用方可提供的资源信息>
 disable-model-invocation: true
+allowed-tools: Read, Glob, Grep, Bash, Write, Edit
 ---
 
 # project-readiness — 项目准备状态与清单维护

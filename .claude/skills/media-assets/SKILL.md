@@ -2,6 +2,7 @@
 name: media-assets
 description: Use when 官网首屏、产品介绍、内容封面等界面需要复用或检索图片、视频，生成单张图片，或需要检查并固化传入与生成结果、维护上传测试 fixture 时；即使任务没有点名素材来源也适用。也适用于明确开发需求下供开发数据及 Seed 引用的有限批量素材获取。不负责产品运行时媒体服务。
 argument-hint: <资源用途、目标项目或目录、视觉要求、已有文件、来源约束和写入范围>
+allowed-tools: Read, Glob, Grep, Write, Edit, Bash(uv run --no-project .claude/skills/media-assets/scripts/pixabay.py *), Bash(uv run --no-project .claude/skills/media-assets/scripts/generate_image.py *)
 ---
 
 # media-assets — 开发期媒体获取、生成与固化

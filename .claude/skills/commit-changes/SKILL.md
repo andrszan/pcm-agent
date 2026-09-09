@@ -2,6 +2,7 @@
 name: commit-changes
 description: Use when 需要检查目标 Git 仓库的已有变更，按可独立理解的功能结果规划一个或多个提交，精确暂存并创建本地提交时；保护调用方已有修改和暂存意图，默认只 commit、不 push。
 argument-hint: <仓库路径、变更目标或明确文件范围，可选 expected_head>
+allowed-tools: Read, Glob, Grep, Bash(git *), Write, Edit
 ---
 
 # commit-changes — 精确、安全地提交 Git 变更

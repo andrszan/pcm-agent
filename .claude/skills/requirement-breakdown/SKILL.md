@@ -3,6 +3,7 @@ name: requirement-breakdown
 description: Use when 需要从用户目标、产品场景和现有系统出发，将项目或增量范围拆分为有明确产品结果、范围、前置依赖和建议开发顺序的大需求 Backlog，或重构已有 Backlog 时；不用于详细交互设计、技术设计、开发执行或运行期状态管理。
 argument-hint: <项目资料、现有代码、已有需求清单或希望拆分的范围>
 disable-model-invocation: true
+allowed-tools: Read, Glob, Grep, Write, Edit
 ---
 
 # requirement-breakdown — 大需求拆分与 Backlog 规划

@@ -3,6 +3,7 @@ name: project-data-baseline
 description: Use when 项目主要业务已经开发并集成完成，需要独立执行数据交付收尾，建立或收口完整、自然、可操作的初始数据及 init/reset 入口，并完成真实恢复、角色使用和交接验证时；直接实现交付，不限于生成设计文档。
 argument-hint: <目标项目、已完成范围、现有资料或数据收尾约束>
 disable-model-invocation: true
+allowed-tools: Read, Glob, Grep, Bash, Write, Edit, TaskOutput, Agent(dev), Agent(reviewer)
 ---
 
 # project-data-baseline — 项目数据基线收口
