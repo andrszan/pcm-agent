@@ -99,7 +99,7 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 | `product-experience-audit` | 对当前完整集成产品执行跨需求、跨模块、跨页面的全项目级体验审计，输出经核验候选、重复项和覆盖缺口，不修改正式 Backlog |
 | `product-feedback-triage` | 核验、拆解、去重和分级人工产品反馈，并按项目约定形成候选变更项 |
 | `engineering-architecture` | 在单份项目架构文档中，按每个适用业务代码交付单元设计可核验的 Current/Target、职责/边界/依赖和代表性文件归属；默认不修改 `AGENTS.md` |
-| `ui-ux-framework` | 建立、校正或演进跨需求稳定的产品表面、App Shell Contract、内容语言、视觉和交互框架；按需读取技术中立布局资源或明确记录来源、许可与未知边界的框架源码快照，后者不代表项目技术选型；不负责单需求设计或开发后验收 |
+| `ui-ux-framework` | 建立、校正或演进跨需求稳定的产品表面、App Shell Contract、内容语言、视觉和交互框架；可主动调用，也支持设计或开发时只查阅布局预览与兼容源码，不重做既定框架；不接管单需求设计、实现或开发后验收 |
 | `requirement-breakdown` | 完整覆盖最终产品范围，拆成有明确结果、依赖和验收方向的 Backlog，并建议首条验证切片 |
 | `trd-design` | 为一个内聚需求设计产品行为、体验复杂度、关键内容意图和技术实现，形成或更新活动 TRD |
 | `dev-workflow` | 实现功能、Bug 或重构，以自动化、真实运行、浏览器、实际渲染和独立审查证明功能与体验结果 |
@@ -242,10 +242,6 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 │   │   │   ├── app-shell-contract.md
 │   │   │   ├── layout-resource-library.md
 │   │   │   └── layout-selection-guide.md
-│   │   ├── assets/layout-patterns/
-│   │   │   ├── list-detail-workspace/
-│   │   │   ├── sidebar-workspace/
-│   │   │   └── top-navigation/
 │   │   ├── assets/layout-source-snapshots/shadcn-ui/
 │   │   │   ├── summary-to-record-workbench/
 │   │   │   ├── context-switching-navigation-shell/
@@ -273,7 +269,7 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 
 `ui-component-patterns` 只面向实际采用 React、shadcn/ui Base UI 与 Tailwind CSS v4 的具体 UI 实现场景。其 `assets/react-shadcn/base-tailwind-v4/` 保存固定上游 commit 的独立 registry block、preview 内部模块和明确标记为派生的 example 函数摘录；不复制基础 primitives、完整 gallery、可运行 demo 或正式预览。Agent 每次只读取最相关的少量候选，并使用目标项目自己的业务、品牌、数据、状态、组件和 token 二次设计；MIT 代码许可不自动覆盖商标、远程媒体或演示中的安全、监管和商业声明。
 
-`ui-ux-framework` 的布局资源分为两层：`assets/layout-patterns/` 是技术中立、原生、自包含且可运行的固定六文件模式；`assets/layout-source-snapshots/` 是记录上游来源、许可与未知边界、带有外部依赖且不可独立运行的部分框架源码快照，只用于分析结构、交互和实现假设，不代表项目技术栈或组件选型。两类资源都按需只读最相关单套，Agent 必须依据目标项目的真实用户、任务、层级、设备、技术栈和品牌事实二次设计，不能复制后只换皮。具体索引与维护合同以 `ui-ux-framework/references/layout-resource-library.md` 为准。
+`ui-ux-framework` 的 `assets/layout-source-snapshots/` 保存带实际预览、上游依赖与许可边界的部分框架源码快照，不保证独立运行。先依据任务和实际技术栈筛选少量候选、查看预览比较，再深入选中源码；React + shadcn/ui 项目优先考察兼容的本地 shadcn/ui 资源，不将现有资源当作设计上限。允许复用许可明确、技术兼容且适用的布局与响应式代码，接入真实业务、权限、路由、组件和 token，不照搬品牌、fixture 或演示逻辑。开发时仅查阅资源不要求重做框架或写文档。当前尚未收录独立纯图片资源；源码与纯图片的具体选择、使用和维护规则以 `ui-ux-framework/references/layout-resource-library.md` 为准。
 
 ## 8. 使用边界摘要
 

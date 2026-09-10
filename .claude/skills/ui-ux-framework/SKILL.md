@@ -1,8 +1,7 @@
 ---
 name: ui-ux-framework
-description: Use when 需要建立或演进跨需求一致的产品级 UI/UX 框架，包括产品表面、信息架构、App Shell Contract、导航、页面模式、sticky 与滚动模型、共享视觉体系、交互状态、响应式、可访问性和品牌与受控定制边界；只在用户主动调用时执行，不用于单需求设计、开发后验收、一次性页面美化、完整视觉稿、前端代码开发或默认套用导航模板。
+description: Use when 需要建立或演进跨需求一致的产品级 UI/UX 框架，包括产品表面、信息架构、App Shell Contract、导航、页面模式、sticky 与滚动模型、共享视觉体系、交互状态、响应式、可访问性和品牌与受控定制边界；也适用于设计或开发中按需查阅布局预览与兼容源码参考，可由 Agent 主动调用。仅查阅资源不重做框架，不接管单需求设计、前端实现或开发后验收，不默认套用导航模板。
 argument-hint: <项目范围、现有设计资料或框架演进问题>
-disable-model-invocation: true
 allowed-tools: Read, Glob, Grep, Bash, Write, Edit, TodoWrite
 ---
 
@@ -28,7 +27,7 @@ allowed-tools: Read, Glob, Grep, Bash, Write, Edit, TodoWrite
 - 定义桌面、平板、移动端、打印、键盘、焦点、对比度和 reduced motion 原则；
 - 区分稳定产品体验、共享内容与视觉体系、品牌表达与受控定制；
 - 从真实实现中识别跨需求框架失真，并提出校正或演进方案；
-- 按需使用技术中立的布局参考资源帮助比较结构，不把资源当作项目默认实现；
+- 按需比较布局预览、查阅兼容源码，为设计与开发提供参考，不把资源当作项目默认实现；
 - 在高影响决定确认后，维护项目已有约定中的产品级 UI/UX 文档。
 
 本能力不负责：
@@ -42,6 +41,8 @@ allowed-tools: Read, Glob, Grep, Bash, Write, Edit, TodoWrite
 
 单需求资料和真实实现都可以作为框架判断输入。只有问题会影响多个需求、产品表面、主导航、Shell、共享表达、视觉语义或品牌与受控定制边界时，才进入本能力的修改范围。
 
+仅查阅资源时，依据当前任务、已有框架决定和实际技术栈读取索引、少量候选预览及选中源码，说明适用部分、复用边界和局限后结束；不进入下文的框架建立、文档写入或确认流程，不因缺少框架文档阻塞查阅，也不改变既定 Shell。页面实现和验证仍由当前开发任务负责。只有发现确属跨需求的框架问题时，才评估框架演进。
+
 ## 独立性与事实优先
 
 本能力不依赖固定上游、下游、专属文档、Manifest 或具名工具。已有设计资料可以读取；资料缺失时，继续依据产品说明、代码和可运行页面判断，不能安全推断的高影响事项列为待确认决定。
@@ -52,11 +53,11 @@ allowed-tools: Read, Glob, Grep, Bash, Write, Edit, TodoWrite
 |---|---|
 | 区分产品 Shell、页面模式与滚动模型，比较真实布局方向 | [`references/layout-selection-guide.md`](./references/layout-selection-guide.md) |
 | 正式确定或演进 Shell、导航、sticky、滚动与响应式合同 | [`references/app-shell-contract.md`](./references/app-shell-contract.md) |
-| 需要结构与交互参考，或维护布局资源 | [`references/layout-resource-library.md`](./references/layout-resource-library.md) 及其中选中的单个资源 |
+| 需要结构、构图或交互参考，或维护布局资源 | [`references/layout-resource-library.md`](./references/layout-resource-library.md)、少量候选预览及选中资源的源码 |
 
-`assets/layout-patterns/` 保持技术中立、原生、自包含、可运行和固定六文件；`assets/layout-source-snapshots/` 保存部分第三方框架源码快照，带有上游依赖和许可，不保证独立运行，只用于分析结构、交互与实现假设，不构成项目技术栈或组件选型。每次只读取与当前问题最相关的一套；选择源码快照时先读 README，再按需读取 source。
+`assets/layout-source-snapshots/` 保存部分第三方框架源码快照，带有上游依赖和许可，不保证独立运行。按实际技术栈优先选择兼容参考；React + shadcn/ui 项目优先考察本地 shadcn/ui 资源，但仍核对组件版本、Base UI／Radix、路由和依赖，不因资源存在而决定技术栈或布局。先依据用户任务筛选少量候选，读取 README 并查看预览比较构图、层级和密度，再深入选中源码；不全量加载，也不把现有资源作为设计上限。
 
-参考资源只证明一种结构如何工作。使用时按“项目事实 → 借用原理 → 项目化表达 → 有依据差异 → 真实验证”完成转译；不得复制后只替换 Logo、颜色或文案，也不得复制 fixture、品牌、token、固定宽度、断点或 demo logic。相同或不同的关键决定都必须有项目事实依据，不要求随机变化。具体规则见 [`references/layout-resource-library.md`](./references/layout-resource-library.md)。
+允许复用许可明确、技术兼容且适合当前任务的布局结构、组件组合和响应式代码，使用项目自己的业务、路由、权限、组件与 token 接线；尺寸和断点按内容与目标视口核验，不一概禁止保留，也不为了原创强制重写。不照搬不适用的导航、品牌、fixture 或 demo logic。参考不证明目标项目的交互和响应式已经成立，后续实现仍需真实验证；具体选择、复用和纯图片参考规则见 [`references/layout-resource-library.md`](./references/layout-resource-library.md)。
 
 开始前读取足以支撑判断的真实上下文，通常包括：
 
@@ -164,7 +165,7 @@ allowed-tools: Read, Glob, Grep, Bash, Write, Edit, TodoWrite
 
 ### 3. 提取驱动因素并比较方案
 
-框架方向应由任务频率、内容与数据管理的主次、设备、角色、页面规模、信息密度、跨上下文切换、品牌边界和迁移成本解释。需要布局选择时，先按需读取 `references/layout-selection-guide.md`；需要结构参考时只读取资源目录中最接近当前问题的单个示例。
+框架方向应由任务频率、内容与数据管理的主次、设备、角色、页面规模、信息密度、跨上下文切换、品牌边界和迁移成本解释。需要布局选择时，先按需读取 `references/layout-selection-guide.md`；在收敛方向前可以比较少量相关预览，让参考参与构图判断，确定方向后再深入选中源码。
 
 比较少量有实质任务或架构差异的可信方向，并推荐其一。只有一个方向符合事实时直接说明依据，不为凑数制造替代方案。至少说明：
 
