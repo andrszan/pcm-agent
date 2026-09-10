@@ -1,6 +1,6 @@
 ---
 name: ui-component-patterns
-description: Use when React + shadcn/ui Base UI + Tailwind CSS v4 项目正在实现本地库已收录的流式/附件 Chat、双栏登录、发票摘要、配送地址、团队邀请、通知偏好、分类 FAQ 或折线趋势场景，需要在编码前选择受控组合参考并按当前业务、品牌、数据和状态二次设计时；即使用户没有点名本 Skill，只要这些具体场景正在避免基础组件堆砌或重复手搓也应使用。不用于一般 shadcn 组件任务、registry/docs/add/update、Radix 或其它不兼容栈、只改主题、产品级 Shell/信息架构、单个原子组件调整或开发后验收。
+description: Use when React + shadcn/ui Base UI + Tailwind CSS v4 项目正在实现本地库已收录的流式/附件 Chat、双栏登录、发票摘要、配送地址、团队邀请、通知偏好、分类 FAQ、折线趋势、区域加载反馈或 Markdown 内容阅读场景，需要在编码前选择受控组合参考并按当前业务、品牌、数据和状态二次设计时；即使用户没有点名本 Skill，只要这些具体场景正在避免基础组件堆砌或重复手搓也应使用。不用于一般 shadcn 组件任务、registry/docs/add/update、Radix 或其它不兼容栈、只改主题、产品级 Shell/信息架构、单个原子组件调整或开发后验收。
 argument-hint: <目标前端路径、具体 UI 场景、业务数据、状态与品牌约束>
 allowed-tools: Read, Glob, Grep, Bash, Write, Edit, TodoWrite
 ---
@@ -23,7 +23,7 @@ allowed-tools: Read, Glob, Grep, Bash, Write, Edit, TodoWrite
 2. Tailwind CSS 为 v4，并能定位活动 CSS-first 入口；
 3. shadcn primitives 实际基于 `@base-ui/react`；
 4. 当前组件使用 Base UI `render` 等组合方式，而不是 Radix `asChild`；
-5. 当前请求涉及具体 Chat、附件、认证、表单、业务卡片或真实时间趋势场景；
+5. 当前请求涉及具体 Chat、附件、认证、表单、业务卡片、真实时间趋势、区域加载反馈或 Markdown 内容阅读场景；
 6. 调用方需要实现时，已经授权相应项目文件写入。
 
 至少结合 `package.json`、`components.json`、实际 imports 和已有组件实现判断。不能只凭“使用 shadcn”、preset 名称或参考素材路径推断兼容。
@@ -124,6 +124,13 @@ allowed-tools: Read, Glob, Grep, Bash, Write, Edit, TodoWrite
 - tooltip、轴、辅助结论和行动语义可被用户理解；
 - 表单、设置、审批队列、普通数据表或“后台页面”不自动需要统计卡和图表；
 - 项目没有现有 Chart/Recharts 依赖时不安装。
+
+## Loading 与 Markdown 约束
+
+- Loading 表达实际等待，不把装饰动画解释为业务阶段；加载区域由调用方控制，不能覆盖或重新定义 App Shell，尊重 reduced motion。
+- Markdown 复用目标项目已有解析与高亮能力；核对代码块状态隔离、复制成功与失败、长行与表格局部滚动以及明暗主题，不为参考源码补装依赖。
+- 保留 Markdown 默认安全解析边界，不默认启用 raw HTML；图片来源、链接策略和流式内容按真实项目处理。
+- 用户导入的 `loading`、`markdown` 目前来源与许可待确认，只供本地维护验证；不得推断 collection 的 shadcn MIT License 覆盖它们。生产复用前必须核实授权。
 
 ## 边界
 
