@@ -23,8 +23,8 @@ ui-ux-framework/
 ```
 
 - [`references/layout-selection-guide.md`](./references/layout-selection-guide.md)：区分 Shell、页面模式与滚动模型，按项目事实比较布局方向。
-- [`references/app-shell-contract.md`](./references/app-shell-contract.md)：区域图、滚动所有者、sticky 基准、响应式转换和 Current/Target 合同。
-- [`references/layout-resource-library.md`](./references/layout-resource-library.md)：资源索引、选择与复用、源码及纯图片资源的唯一权威维护规则。
+- [`references/app-shell-contract.md`](./references/app-shell-contract.md)：七种可组合的区域示例，以及导航、滚动、sticky 和窄屏变化的按需记录要点；新项目直接写目标，既有项目调整时再说明现状与迁移。
+- [`references/layout-resource-library.md`](./references/layout-resource-library.md)：现有资源索引、代码复用边界与维护规则。
 - `assets/layout-source-snapshots/`：带实际预览的部分框架源码快照，保留上游依赖与许可，不保证独立运行；符合许可与技术兼容条件的适用代码可以复用。
 - `evals/evals.json`：职责边界、参考选择和资源查阅行为的验证用例。
 
@@ -41,4 +41,4 @@ ui-ux-framework/
 
 源码快照的 provider 保留 README 与许可；每个语义目录保留 README、`source/` 和实际存在的预览。记录来源、依赖、局限和许可，未知信息不推断，不承诺部分快照独立运行。
 
-纯图片参考可以独立于代码收录，以成熟产品截图为主、生成概念图为补充；当前尚未收录独立纯图片资源。来源、授权、视口、用途、概念标识及索引维护规则统一见 [`layout-resource-library.md`](./references/layout-resource-library.md)，不预建空目录或批量图库。
+本能力引导 Agent 按项目选择、组合和完善主框架，不提供逐页实现规格或固定审批表单。现有 assets 以代码组织和交互写法为主，附带预览提供构图与审美参考，不要求另建图库；示例未闭合的路由、当前项、折叠、sticky 和响应式行为仍需在实际项目补齐。具体页面美化与实现由实际设计和开发完成。
