@@ -60,7 +60,7 @@ SYSTEM_PROMPT = """<task>
 class ProjectIdentityInput(BaseModel):
     product_draft: str = Field(
         min_length=1,
-        description="用于确定产品选题和项目目录名的完整产品初稿。",
+        description="用于确定产品选题和项目目录名的产品输入，可以是一句话想法或已有资料。",
     )
 
 

@@ -333,7 +333,7 @@ raise SystemExit(run_step.retrying_main())
         with tempfile.TemporaryDirectory() as directory:
             demo_root = Path(directory)
             draft = demo_root / "draft.md"
-            draft.write_text("## A. 产品身份与文档边界\n未完成\n", encoding="utf-8")
+            draft.write_text(" \n\t", encoding="utf-8")
             args = Mock(run_id="test-run", product_draft=draft)
             with patch.object(run_step, "DEMO_ROOT", demo_root):
                 run_dir, failed = run_step.run_step_zero(args)
@@ -351,11 +351,7 @@ raise SystemExit(run_step.retrying_main())
                 )
 
                 draft.write_text(
-                    "## A. 产品身份与文档边界\n产品。\n"
-                    "## C. 用户与使用场景\n用户。\n"
-                    "## D. 核心价值与业务闭环\n闭环。\n"
-                    "## E. 产品范围\n范围。\n"
-                    "## P. 产品验收\n验收。\n",
+                    "做一个供档案修复人员使用的手稿拼合 Web 工具。",
                     encoding="utf-8",
                 )
                 resumed_dir, completed = run_step.run_step_zero(args)

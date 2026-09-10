@@ -26,7 +26,11 @@ from config import (
     load_template_repository,
     load_workspace_root,
 )
-from steps.step_01_create_workspace.project_identity import SYSTEM_PROMPT, validate_identity
+from steps.step_01_create_workspace.project_identity import (
+    SYSTEM_PROMPT,
+    ProjectIdentityInput,
+    validate_identity,
+)
 from steps.step_01_create_workspace.workspace import (
     copy_initial_resources,
     initial_resources_are_ignored,
@@ -68,6 +72,10 @@ class WorkspaceStepTests(unittest.TestCase):
                 resolve_workspace_output(workspace, "/tmp/产品初稿.md")
             with self.assertRaisesRegex(ValueError, "超出产品工作区"):
                 resolve_workspace_output(workspace, "../产品初稿.md")
+
+    def test_identity_input_accepts_one_sentence_without_rewriting(self) -> None:
+        draft = "做一个供档案修复人员使用的手稿拼合 Web 工具。"
+        self.assertEqual(ProjectIdentityInput(product_draft=draft).product_draft, draft)
 
     def test_identity_contract(self) -> None:
         identity = validate_identity(

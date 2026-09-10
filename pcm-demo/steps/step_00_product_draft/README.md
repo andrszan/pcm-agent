@@ -1,40 +1,29 @@
-# 第 0 步：形成产品初稿
+# 第 0 步：接收产品初稿
 
 ## 目标
 
-判断输入是否已经是完整产品初稿。当前黄金产品初稿已经具备产品身份、用户场景、核心闭环、产品范围和验收标准，因此通过确定性检查后无副作用跳过。
+接收产品输入，不判断产品设计是否完整。一句话想法、自由格式说明或已有 PRD 都可以进入后续流程；不要求 Markdown 标题、章节或功能清单。
 
-本步骤不调用 AI、不创建工作区、不修改初稿，也不生成正式产品文档。
+本步骤不调用 AI、不创建工作区、不扩写或修改初稿。第 1 步建立工作区，第 2 步通过产品定义沟通形成正式需求与功能文档。
 
-## 输入
+## 输入与运行
 
-- `--product-draft`：产品初稿的本地 UTF-8 Markdown 路径；
-- `--run-id`：可选的运行标识。
+`--product-draft` 接收本地 UTF-8 文本文件路径，不限制扩展名；`--run-id` 为可选运行标识。文件可以只有一句话。仍保留文件入口，不提供内联字符串或交互式聊天参数。
 
-## 运行
-
-在 `pcm-demo/` 目录执行：
+在 `pcm-demo/` 目录运行：
 
 ```bash
 uv run python run_step.py \
   --step 0 \
-  --product-draft ../docs/prd/修迹-产品需求文档-v1.md \
-  --run-id step00-mendmark
+  --product-draft /absolute/path/to/idea.txt \
+  --run-id my-product
 ```
 
-也可以使用兼容旧命令的 `--prd` 参数，但新脚本建议使用 `--product-draft`。
+`--prd` 仍是 `--product-draft` 的兼容别名。
 
 ## 判断与结果
 
-程序检查以下 Markdown 二级标题且每个标题后有正文：
-
-- `## A. 产品身份与文档边界`
-- `## C. 用户与使用场景`
-- `## D. 核心价值与业务闭环`
-- `## E. 产品范围`
-- `## P. 产品验收`
-
-完整时结果为：
+输入可读、可按 UTF-8 解码且不是纯空白时返回 `success`，不生成新初稿：
 
 ```json
 {
@@ -42,27 +31,20 @@ uv run python run_step.py \
   "status": "success",
   "applicable": false,
   "outputs": [],
-  "skip_reason": "输入已经是完整产品初稿"
+  "skip_reason": "已有非空产品输入，无需生成初稿。"
 }
 ```
 
-缺少文件或必要章节时返回 `failed`，不会伪造成功。
+空文件或纯空白返回 `failed`，错误类型为 `empty_product_draft`；文件读取或解码失败由入口按现有错误处理报告，不进入后续步骤。没有完整产品方案不属于输入错误。
 
-## 产物与验证
+运行证据仍保存在 `runs/<run-id>/state.json`、`steps/00.json` 及适用的诊断日志中；入口核验源文件哈希未改变。第 1 步原样发布为目标工作区的 `docs/产品初稿.md`，源文件扩展名不改变这一交接路径。
 
-运行证据保存在：
+此前因旧章节门禁失败的运行，可使用原 run ID 恢复；不重置已经推进到后续步骤的状态。
 
-```text
-runs/<run-id>/
-├── state.json
-├── steps/00.json
-└── logs/
-```
-
-验证源文件未被修改：
+## 验证
 
 ```bash
-shasum -a 256 ../docs/prd/修迹-产品需求文档-v1.md
+uv run python -m unittest steps.step_00_product_draft.test_step test_run_step_retry -v
 ```
 
-第 1 步会从同一个 run 继续建立项目工作区，并把初稿写入项目的 `docs/产品初稿.md`。
+覆盖一句话、自由标题、旧 PRD、空白、读取与解码错误，以及失败恢复和源文件不变性。
