@@ -34,10 +34,13 @@ CONVERSATION_KEY = "project_bootstrap"
 SKILL_NAME = "project-bootstrap"
 TAILWIND_THEME_CONVERSATION_KEY = "tailwind_theme"
 TAILWIND_THEME_SKILL_NAME = "tailwind-theme"
+BRAND_ASSETS_CONVERSATION_KEY = "brand_assets"
+BRAND_ASSETS_SKILL_NAME = "media-assets"
 CHECKLIST = Path("docs/requirements/项目准备清单.md")
 MAX_DECISION_ROUNDS = 32
 PROJECT_BOOTSTRAP_MAX_TURNS = 9999
 TAILWIND_THEME_MAX_TURNS = 9999
+BRAND_ASSETS_MAX_TURNS = 9999
 LEGACY_COMPLETION_MESSAGES = (
     "已完成 project-bootstrap：基础工程已完成项目化并通过完成条件与工程边界核验。",
 )
@@ -47,6 +50,9 @@ BOOTSTRAP_DECISION_RULES = """- completed：产品根 README 和各适用工程�
 
 TAILWIND_THEME_DECISION_RULES = """- completed：项目风格定制已完成。
 - continue：本次风格定制尚未完成，可用当前产品定义、工程和工具继续处理。"""
+
+BRAND_ASSETS_DECISION_RULES = """- completed：基础品牌资产已交付并完成适用接入，允许合理复用或合格兜底。
+- continue：品牌资产准备或接入仍有明确未完成事项，可以使用现有资料、工程和工具继续处理。"""
 
 DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     key=CONVERSATION_KEY,
@@ -67,6 +73,17 @@ TAILWIND_THEME_DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
     task="tailwind_theme",
     decision_system_prompt=render_decision_system_prompt(
         TAILWIND_THEME_DECISION_RULES, {}
+    ),
+)
+BRAND_ASSETS_DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
+    key=BRAND_ASSETS_CONVERSATION_KEY,
+    state_key="brand_assets",
+    skill_name=BRAND_ASSETS_SKILL_NAME,
+    max_decision_rounds=MAX_DECISION_ROUNDS,
+    max_turns=BRAND_ASSETS_MAX_TURNS,
+    task="brand_assets",
+    decision_system_prompt=render_decision_system_prompt(
+        BRAND_ASSETS_DECISION_RULES, {}
     ),
 )
 README_REPAIR_PROMPT = "产品根 README 缺失或为空。请仅补齐该文件的项目身份和必要基础运行说明，然后报告结果。"
@@ -275,14 +292,18 @@ def advance_success(
     run_dir: Path,
     state: dict[str, Any],
     outputs: list[str],
+    *,
+    brand_assets: bool = False,
 ) -> dict[str, Any]:
     tailwind_theme = "frontend" in outputs
     saved = result(
         "success",
         (
-            "project-bootstrap 已完成基础工程项目化和验证，tailwind-theme 已完成项目风格定制。"
+            "project-bootstrap 已完成基础工程项目化和验证，tailwind-theme 已完成项目风格定制，基础品牌资产已完成适用接入。"
+            if brand_assets
+            else "project-bootstrap 已完成基础工程项目化和验证，tailwind-theme 已完成项目风格定制。"
             if tailwind_theme
-            else "project-bootstrap 已完成基础工程项目化和验证；当前无 frontend，tailwind-theme 已跳过。"
+            else "project-bootstrap 已完成基础工程项目化和验证；当前无 frontend，tailwind-theme 和品牌资产准备已跳过。"
         ),
         applicable=bool(outputs),
         outputs=outputs,
@@ -385,6 +406,26 @@ def tailwind_theme_initial_prompt(product_outputs: list[str]) -> str:
 - @./frontend"""
 
 
+def brand_assets_initial_prompt(
+    product_outputs: list[str], runtime_path: str | None = None
+) -> str:
+    product_references = "\n".join(f"- @./{output}" for output in product_outputs)
+    runtime_reference = f"- @./{runtime_path}" if runtime_path else "- 未提供。"
+    return f"""/media-assets
+为当前产品准备并接入一套一致的基础品牌资产，覆盖页面品牌标识和浏览器 favicon，其它资产按实际用途决定。
+
+权威产品定义：
+{product_references}
+实际前端：
+- @./frontend
+本机运行配置：
+{runtime_reference}
+
+优先复用已有正式资产；需要新制作时结合产品定义和当前前端主题，保持品牌文字可编辑。生成、选择、派生、实际查看、质量检查、前端接入及适用验证由你完成。
+整套资产共享最多 8 次生成调用，首次生成包含在内，满足用途即可停止；继续或恢复时沿用已有候选和已用次数，不重新分配额度。生成服务不可用或额度耗尽仍无合适结果时，采用合格的简洁 SVG 或文字标识兜底。
+最终资产进入目标前端的实际资产位置并完成必要引用，不重构无关页面或主题。报告采用方式、最终资产和接入结果，以及实际尚未解决的事项。"""
+
+
 async def run(
     run_dir: Path,
     state: dict[str, Any],
@@ -420,6 +461,14 @@ async def run(
             raise RuntimeError("tailwind-theme 仅在 frontend 适用时运行")
         verify_git_boundaries(verified_workspace, verified_outputs)
         verify_tailwind_v4_frontend(verified_workspace)
+        return coverage_artifact_repair(verified_workspace, verified_outputs)
+
+    def brand_assets_completion_verifier() -> str | None:
+        verified_workspace, _, verified_assembly, _ = validate_inputs(run_dir, state)
+        verified_outputs = verified_assembly["outputs"]
+        if "frontend" not in verified_outputs:
+            raise RuntimeError("品牌资产准备仅在 frontend 适用时运行")
+        verify_git_boundaries(verified_workspace, verified_outputs)
         return coverage_artifact_repair(verified_workspace, verified_outputs)
 
     if position == (STEP + 1, STEP + 1, NEXT_NODE) and state.get("status") == "success":
@@ -549,4 +598,41 @@ async def run(
             tailwind_theme_decision.required_inputs,
             outputs,
         )
-    return advance_success(run_dir, state, outputs)
+
+    brand_context: dict[str, Any] = {
+        "产品定义": product_output_contents(workspace, product_outputs),
+        "实际前端": ["frontend"],
+    }
+    if runtime_path is not None:
+        brand_context["产品本机运行配置"] = {"path": runtime_path}
+    brand_assets_spec = replace(
+        BRAND_ASSETS_DECISION_LOOP_SPEC,
+        decision_system_prompt=render_decision_system_prompt(
+            BRAND_ASSETS_DECISION_RULES,
+            brand_context,
+        ),
+    )
+    brand_assets_decision = await run_agent_decision_loop(
+        run_dir,
+        state,
+        workspace,
+        brand_assets_spec,
+        brand_assets_initial_prompt(product_outputs, runtime_path),
+        brand_assets_completion_verifier,
+        agent_runner=agent_runner,
+        decision_runner=decision_runner,
+        config_loader=config_loader,
+        resume_message=resume_message,
+    )
+    if brand_assets_decision.verdict == "blocked":
+        verified_workspace, _, verified_assembly, _ = validate_inputs(run_dir, state)
+        verified_outputs = verified_assembly["outputs"]
+        verify_git_boundaries(verified_workspace, verified_outputs)
+        if coverage_artifact_repair(verified_workspace, verified_outputs) is not None:
+            raise RuntimeError("品牌资产准备仍包含未删除或未忽略的 .coverage 覆盖率数据库")
+        raise ProjectBootstrapBlocked(
+            brand_assets_decision.reason,
+            brand_assets_decision.required_inputs,
+            outputs,
+        )
+    return advance_success(run_dir, state, outputs, brand_assets=True)

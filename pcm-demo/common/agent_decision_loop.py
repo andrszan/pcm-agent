@@ -162,7 +162,7 @@ _RESUME_STEP_NODES = {
 _RESUME_STATIC_KEYS = {
     2: ("project_intake",),
     5: ("project_readiness",),
-    6: ("project_bootstrap", "tailwind_theme"),
+    6: ("project_bootstrap", "tailwind_theme", "brand_assets"),
     7: ("solution_design",),
     8: ("initialize_repositories",),
     9: ("engineering_architecture",),

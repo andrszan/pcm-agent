@@ -11,7 +11,7 @@ from pathlib import Path
 DEMO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(DEMO_ROOT))
 
-from common.agent_decision_loop import ResumeMessage
+from common.agent_decision_loop import AgentExecutionFailure, ResumeMessage
 from common.claude_agent import ClaudeRunResult
 from common.files import write_json
 from common.state import read_state, write_state
@@ -22,6 +22,8 @@ from steps.step_05_project_readiness.step import (
     result as readiness_result,
 )
 from steps.step_06_project_bootstrap.step import (
+    BRAND_ASSETS_DECISION_LOOP_SPEC,
+    BRAND_ASSETS_MAX_TURNS,
     COVERAGE_ARTIFACT_REPAIR_PROMPT,
     CURRENT_NODE,
     DECISION_LOOP_SPEC,
@@ -32,6 +34,7 @@ from steps.step_06_project_bootstrap.step import (
     TAILWIND_THEME_DECISION_LOOP_SPEC,
     TAILWIND_THEME_MAX_TURNS,
     ProjectBootstrapBlocked,
+    brand_assets_initial_prompt,
     result,
     run,
     tailwind_theme_initial_prompt,
@@ -67,12 +70,17 @@ def agent_result_for_prompt(
     cwd: Path,
     text: str | None = None,
 ) -> ClaudeRunResult:
-    is_theme = prompt.startswith("/tailwind-theme\n")
+    if prompt.startswith("/tailwind-theme\n"):
+        session, skill, default_text = "session-theme", "tailwind-theme", "主题完整回复"
+    elif prompt.startswith("/media-assets\n"):
+        session, skill, default_text = "session-brand", "media-assets", "品牌资产完整回复"
+    else:
+        session, skill, default_text = "session-bootstrap", "project-bootstrap", "项目化完整回复"
     return agent_result(
         cwd=cwd,
-        session="session-theme" if is_theme else "session-bootstrap",
-        text=text or ("主题完整回复" if is_theme else "项目化完整回复"),
-        skills=["tailwind-theme"] if is_theme else ["project-bootstrap"],
+        session=session,
+        text=text or default_text,
+        skills=[skill],
     )
 
 
@@ -244,15 +252,18 @@ class ProjectBootstrapTests(unittest.TestCase):
             )
             self.assertEqual(outcome["outputs"], ["frontend"])
             self.assertIs(outcome["tailwind_theme"], True)
-            self.assertIn("已完成项目风格定制", outcome["summary"])
+            self.assertIn("基础品牌资产已完成适用接入", outcome["summary"])
             self.assertNotIn("token", outcome["summary"])
-            self.assertEqual(len(calls), 3)
+            self.assertEqual(len(calls), 4)
             self.assertIsNone(calls[0]["resume_session_id"])
             self.assertEqual(calls[1]["resume_session_id"], "session-bootstrap")
             self.assertEqual(calls[1]["prompt"], README_REPAIR_PROMPT)
             self.assertIsNone(calls[2]["resume_session_id"])
+            self.assertIsNone(calls[3]["resume_session_id"])
             self.assertEqual(TAILWIND_THEME_MAX_TURNS, 9999)
             self.assertEqual(calls[2]["max_turns"], TAILWIND_THEME_MAX_TURNS)
+            self.assertEqual(BRAND_ASSETS_MAX_TURNS, 9999)
+            self.assertEqual(calls[3]["max_turns"], BRAND_ASSETS_MAX_TURNS)
 
             bootstrap_prompt = calls[0]["prompt"]
             self.assertTrue(bootstrap_prompt.startswith("/project-bootstrap\n"))
@@ -287,7 +298,34 @@ class ProjectBootstrapTests(unittest.TestCase):
             for forbidden in ("git_url", "origin", "第 6 步", "PCM", "节点", "阶段", "session"):
                 self.assertNotIn(forbidden, theme_prompt)
 
-            self.assertEqual(len(system_prompts), 3)
+            brand_prompt = calls[3]["prompt"]
+            self.assertEqual(
+                brand_prompt,
+                brand_assets_initial_prompt(
+                    [
+                        "docs/requirements/项目需求说明.md",
+                        "docs/requirements/产品功能说明.md",
+                    ],
+                    ".pcm/runtime.json",
+                ),
+            )
+            for required in (
+                "/media-assets",
+                "页面品牌标识和浏览器 favicon",
+                "共享最多 8 次生成调用",
+                "首次生成包含在内",
+                "恢复时沿用已有候选和已用次数",
+                "不重新分配额度",
+                "生成服务不可用或额度耗尽仍无合适结果",
+                "简洁 SVG 或文字标识兜底",
+                "实际查看、质量检查",
+                "@./.pcm/runtime.json",
+            ):
+                self.assertIn(required, brand_prompt)
+            for forbidden in ("第 6 步", "PCM", "节点", "阶段", "程序计数", "预算状态"):
+                self.assertNotIn(forbidden, brand_prompt)
+
+            self.assertEqual(len(system_prompts), 4)
             for system_prompt in system_prompts:
                 for tag in ("role", "project_context", "responsibility", "completion", "output"):
                     self.assertIn(f"<{tag}>", system_prompt)
@@ -318,6 +356,19 @@ class ProjectBootstrapTests(unittest.TestCase):
                 theme_system_prompt,
                 TAILWIND_THEME_DECISION_LOOP_SPEC.decision_system_prompt,
             )
+            brand_system_prompt = system_prompts[3]
+            for required in (
+                "基础品牌资产已交付并完成适用接入",
+                "仍有明确未完成事项",
+                '"frontend"',
+            ):
+                self.assertIn(required, brand_system_prompt)
+            for forbidden in ("读取文件", "查看图片", "逐项证明", "8 次", "生成次数"):
+                self.assertNotIn(forbidden, brand_system_prompt)
+            self.assertNotEqual(
+                brand_system_prompt,
+                BRAND_ASSETS_DECISION_LOOP_SPEC.decision_system_prompt,
+            )
 
             saved = read_state(run_dir)
             self.assertEqual((saved["step"], saved["current_node"]), (7, NEXT_NODE))
@@ -326,6 +377,7 @@ class ProjectBootstrapTests(unittest.TestCase):
                 {
                     "project_bootstrap": "session-bootstrap",
                     "tailwind_theme": "session-theme",
+                    "brand_assets": "session-brand",
                 },
             )
             bootstrap_history = json.loads(
@@ -356,9 +408,22 @@ class ProjectBootstrapTests(unittest.TestCase):
             self.assertEqual(
                 json.loads(theme_history[-1]["content"])["verdict"], "completed"
             )
+            brand_history = json.loads(
+                (run_dir / "conversations/brand_assets.json").read_text(
+                    encoding="utf-8"
+                )
+            )["messages"]
+            self.assertEqual(
+                [item["role"] for item in brand_history],
+                ["system", "assistant", "user", "assistant"],
+            )
+            self.assertEqual(
+                json.loads(brand_history[-1]["content"])["verdict"], "completed"
+            )
 
             saved.pop("project_bootstrap", None)
             saved.pop("tailwind_theme", None)
+            saved.pop("brand_assets", None)
             saved.pop("claude_sessions", None)
             saved.pop("decision_conversations", None)
             write_state(run_dir, saved)
@@ -375,6 +440,7 @@ class ProjectBootstrapTests(unittest.TestCase):
             self.assertEqual(reused["status"], "success")
             self.assertIs(reused["tailwind_theme"], True)
             self.assertIn("确认既有成功", reused["summary"])
+            self.assertNotIn("品牌", reused["summary"])
 
     def test_theme_can_keep_default_style_without_frontend_changes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -409,8 +475,9 @@ class ProjectBootstrapTests(unittest.TestCase):
             )
             self.assertEqual(outcome["status"], "success")
             self.assertIs(outcome["tailwind_theme"], True)
-            self.assertEqual(len(calls), 2)
+            self.assertEqual(len(calls), 3)
             self.assertTrue(calls[1].startswith("/tailwind-theme\n"))
+            self.assertTrue(calls[2].startswith("/media-assets\n"))
             for relative, contents in before.items():
                 self.assertEqual((frontend / relative).read_bytes(), contents)
 
@@ -444,10 +511,11 @@ class ProjectBootstrapTests(unittest.TestCase):
             )
             self.assertEqual(saved["status"], "success")
             self.assertIs(saved["tailwind_theme"], True)
-            self.assertEqual(len(calls), 3)
+            self.assertEqual(len(calls), 4)
             self.assertEqual(calls[1]["resume_session_id"], "session-bootstrap")
             self.assertEqual(calls[1]["prompt"], COVERAGE_ARTIFACT_REPAIR_PROMPT)
             self.assertTrue(calls[2]["prompt"].startswith("/tailwind-theme\n"))
+            self.assertTrue(calls[3]["prompt"].startswith("/media-assets\n"))
 
     def test_blocked_decision_preserves_domain_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -812,18 +880,24 @@ class ProjectBootstrapTests(unittest.TestCase):
 
             async def resumed_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
                 resumed_calls.append({"prompt": prompt, **kwargs})
-                self.assertEqual(kwargs["resume_session_id"], "session-theme")
-                current = agent_result(
-                    cwd=kwargs["cwd"],  # type: ignore[arg-type, index]
-                    session="session-theme",
-                    text="主题恢复完成",
-                    skills=["tailwind-theme"],
-                )
+                if prompt == "使用负责人提供的品牌决定":
+                    self.assertEqual(kwargs["resume_session_id"], "session-theme")
+                    current = agent_result(
+                        cwd=kwargs["cwd"],  # type: ignore[arg-type, index]
+                        session="session-theme",
+                        text="主题恢复完成",
+                        skills=["tailwind-theme"],
+                    )
+                else:
+                    self.assertTrue(prompt.startswith("/media-assets\n"))
+                    self.assertIsNone(kwargs["resume_session_id"])
+                    current = agent_result_for_prompt(
+                        prompt, cwd=kwargs["cwd"]  # type: ignore[arg-type, index]
+                    )
                 kwargs["on_update"](current)  # type: ignore[index, operator]
                 return current
 
             async def resumed_decision(messages, config, *, system_prompt):
-                self.assertIn("项目风格定制已完成", system_prompt)
                 return decision("completed")
 
             resume_message = ResumeMessage("tailwind_theme", "使用负责人提供的品牌决定")
@@ -837,9 +911,183 @@ class ProjectBootstrapTests(unittest.TestCase):
             )
             self.assertIs(outcome["tailwind_theme"], True)
             self.assertTrue(resume_message.consumed)
+            self.assertEqual(len(resumed_calls), 2)
+            self.assertEqual(resumed_calls[0]["prompt"], "使用负责人提供的品牌决定")
+            self.assertTrue(resumed_calls[1]["prompt"].startswith("/media-assets\n"))
+            self.assertFalse(resumed_calls[0]["prompt"].startswith("/project-bootstrap\n"))
+
+    def test_brand_agent_failure_resumes_brand_session_without_rerunning_previous_agents(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory))
+            (workspace / "README.md").write_text("# 项目\n", encoding="utf-8")
+            calls: list[str] = []
+
+            async def failing_brand_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
+                calls.append(prompt)
+                current = agent_result_for_prompt(
+                    prompt, cwd=kwargs["cwd"]  # type: ignore[arg-type, index]
+                )
+                if prompt.startswith("/media-assets\n"):
+                    current.result_subtype = "error"
+                    current.is_error = True
+                    current.has_errors = True
+                kwargs["on_update"](current)  # type: ignore[index, operator]
+                return current
+
+            async def completed(messages, config, *, system_prompt):
+                return decision("completed")
+
+            with self.assertRaises(AgentExecutionFailure):
+                self.run_step(
+                    run_dir,
+                    state,
+                    agent_runner=failing_brand_agent,
+                    decision_runner=completed,
+                    config_loader=lambda: object(),
+                )
+            self.assertEqual(
+                [prompt.splitlines()[0] for prompt in calls],
+                ["/project-bootstrap", "/tailwind-theme", "/media-assets"],
+            )
+
+            resumed_calls: list[dict] = []
+
+            async def resumed_brand_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
+                resumed_calls.append({"prompt": prompt, **kwargs})
+                self.assertTrue(prompt.startswith("/media-assets\n"))
+                self.assertEqual(kwargs["resume_session_id"], "session-brand")
+                current = agent_result_for_prompt(
+                    prompt, cwd=kwargs["cwd"]  # type: ignore[arg-type, index]
+                )
+                kwargs["on_update"](current)  # type: ignore[index, operator]
+                return current
+
+            outcome = self.run_step(
+                run_dir,
+                read_state(run_dir),
+                agent_runner=resumed_brand_agent,
+                decision_runner=completed,
+                config_loader=lambda: object(),
+            )
+            self.assertEqual(outcome["status"], "success")
+            self.assertEqual(len(resumed_calls), 1)
+
+    def test_historical_frontend_success_does_not_create_or_claim_brand_assets(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory))
+            (workspace / "README.md").write_text("# 项目\n", encoding="utf-8")
+            historical = result(
+                "success",
+                "历史基础工程成功。",
+                outputs=["frontend"],
+                tailwind_theme=True,
+            )
+            write_json(run_dir / "steps/06.json", historical)
+            state.update(
+                {
+                    "status": "success",
+                    "step": 7,
+                    "current_step": 7,
+                    "current_node": NEXT_NODE,
+                }
+            )
+            write_state(run_dir, state)
+            before = (run_dir / "steps/06.json").read_bytes()
+
+            async def unexpected(*args, **kwargs):
+                raise AssertionError("历史成功不应调用 Agent 或负责人")
+
+            outcome = self.run_step(
+                run_dir,
+                state,
+                agent_runner=unexpected,
+                decision_runner=unexpected,
+            )
+            self.assertEqual(outcome["status"], "success")
+            self.assertNotIn("品牌", outcome["summary"])
+            self.assertEqual((run_dir / "steps/06.json").read_bytes(), before)
+            self.assertFalse((run_dir / "conversations/brand_assets.json").exists())
+            saved = read_state(run_dir)
+            self.assertNotIn("brand_assets", saved)
+            self.assertNotIn("brand_assets", saved.get("claude_sessions", {}))
+
+    def test_brand_blocked_resumes_brand_without_rerunning_previous_agents(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory))
+            (workspace / "README.md").write_text("# 项目\n", encoding="utf-8")
+            calls: list[dict] = []
+
+            async def first_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
+                calls.append({"prompt": prompt, **kwargs})
+                current = agent_result_for_prompt(
+                    prompt, cwd=kwargs["cwd"]  # type: ignore[arg-type, index]
+                )
+                kwargs["on_update"](current)  # type: ignore[index, operator]
+                return current
+
+            async def block_brand(messages, config, *, system_prompt):
+                if "基础品牌资产已交付" in system_prompt:
+                    return decision(
+                        "blocked",
+                        reason="缺少不可替代的品牌决定",
+                        required_inputs=["提供品牌决定"],
+                    )
+                return decision("completed")
+
+            with self.assertRaises(ProjectBootstrapBlocked):
+                self.run_step(
+                    run_dir,
+                    state,
+                    agent_runner=first_agent,
+                    decision_runner=block_brand,
+                    config_loader=lambda: object(),
+                )
+            self.assertEqual(
+                [call["prompt"].splitlines()[0] for call in calls],
+                ["/project-bootstrap", "/tailwind-theme", "/media-assets"],
+            )
+
+            resumed_state = read_state(run_dir)
+            resumed_state.update(
+                {
+                    "status": "blocked",
+                    "blocked": {
+                        "reason": "缺少不可替代的品牌决定",
+                        "required_inputs": ["提供品牌决定"],
+                    },
+                }
+            )
+            write_state(run_dir, resumed_state)
+            resumed_calls: list[dict] = []
+
+            async def resumed_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
+                resumed_calls.append({"prompt": prompt, **kwargs})
+                self.assertEqual(kwargs["resume_session_id"], "session-brand")
+                current = agent_result(
+                    cwd=kwargs["cwd"],  # type: ignore[arg-type, index]
+                    session="session-brand",
+                    text="品牌资产恢复完成",
+                    skills=["media-assets"],
+                )
+                kwargs["on_update"](current)  # type: ignore[index, operator]
+                return current
+
+            async def completed(messages, config, *, system_prompt):
+                return decision("completed")
+
+            resume_message = ResumeMessage("brand_assets", "使用负责人提供的品牌决定")
+            outcome = self.run_step(
+                run_dir,
+                resumed_state,
+                agent_runner=resumed_agent,
+                decision_runner=completed,
+                config_loader=lambda: object(),
+                resume_message=resume_message,
+            )
+            self.assertEqual(outcome["status"], "success")
+            self.assertTrue(resume_message.consumed)
             self.assertEqual(len(resumed_calls), 1)
             self.assertEqual(resumed_calls[0]["prompt"], "使用负责人提供的品牌决定")
-            self.assertFalse(resumed_calls[0]["prompt"].startswith("/project-bootstrap\n"))
 
     def test_bootstrap_manual_resume_is_consumed_before_new_theme_loop(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

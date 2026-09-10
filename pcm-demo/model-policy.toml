@@ -10,6 +10,7 @@ routine = { model = "gpt-5.6-sol[1m]", effort = "low" }
 "5" = "planning"
 "6.bootstrap" = "building"
 "6.theme" = "building"
+"6.brand" = "building"
 "7" = "planning"
 "8" = "routine"
 "9" = "planning"

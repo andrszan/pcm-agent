@@ -16,6 +16,7 @@ _STEP_TASKS = {
     "5": "project_readiness",
     "6.bootstrap": "project_bootstrap",
     "6.theme": "tailwind_theme",
+    "6.brand": "brand_assets",
     "7": "solution_design",
     "8": "initialize_repositories",
     "9": "engineering_architecture",

@@ -26,6 +26,7 @@ routine = { model = "routine-model", effort = "medium" }
 "5" = "planning"
 "6.bootstrap" = "building"
 "6.theme" = "building"
+"6.brand" = "building"
 "7" = "planning"
 "8" = "routine"
 "9" = "planning"
@@ -60,6 +61,7 @@ class ModelPolicyTest(unittest.TestCase):
             "project_readiness": ("planning", "planning-model", "high"),
             "project_bootstrap": ("building", "building-model", "high"),
             "tailwind_theme": ("building", "building-model", "high"),
+            "brand_assets": ("building", "building-model", "high"),
             "solution_design": ("planning", "planning-model", "high"),
             "initialize_repositories": ("routine", "routine-model", "medium"),
             "engineering_architecture": ("planning", "planning-model", "high"),

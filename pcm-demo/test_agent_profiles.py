@@ -5,6 +5,7 @@ import unittest
 from steps.step_02_project_intake.step import DECISION_LOOP_SPEC as PROJECT_INTAKE
 from steps.step_05_project_readiness.step import DECISION_LOOP_SPEC as PROJECT_READINESS
 from steps.step_06_project_bootstrap.step import (
+    BRAND_ASSETS_DECISION_LOOP_SPEC as BRAND_ASSETS,
     DECISION_LOOP_SPEC as PROJECT_BOOTSTRAP,
     TAILWIND_THEME_DECISION_LOOP_SPEC as TAILWIND_THEME,
 )
@@ -25,6 +26,7 @@ class AgentProfileTest(unittest.TestCase):
             PROJECT_READINESS: "project_readiness",
             PROJECT_BOOTSTRAP: "project_bootstrap",
             TAILWIND_THEME: "tailwind_theme",
+            BRAND_ASSETS: "brand_assets",
             SOLUTION_DESIGN: "solution_design",
             ENGINEERING_ARCHITECTURE: "engineering_architecture",
             UI_UX_FRAMEWORK: "ui_ux_framework",

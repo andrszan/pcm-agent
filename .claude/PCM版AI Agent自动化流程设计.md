@@ -17,7 +17,7 @@ PCM 自动化流程接收产品想法或初稿及可选的客户初始资料；�
 → 基础工程选型
 → 基础工程组装
 → 项目准备核验
-→ 基础工程项目化与项目风格定制
+→ 基础工程项目化、项目风格定制与基础品牌资产准备
 → 总体技术方案
 → 首次提交适用仓库
 → 必要的工程架构设计和按需 UI/UX 框架
@@ -101,7 +101,7 @@ Python 程序直接负责：
 
 AI 不能用口头结论代替真实文件、Git、测试、构建、服务或浏览器证据。
 
-PCM 为 Claude Agent SDK 显式配置独立 Anthropic Messages 网关与受保护 Bearer token；Agent 的真实模型名和 `effort` 只由 `pcm-demo/model-policy.toml` 的组合预设与步骤分配决定，不再使用 `.env` 的低/中/高模型映射。第 6 步 bootstrap/theme 可分别配置；Agent effort 支持 `low/medium/high/xhigh/max`，实际有效档位受 CLI、网关和目标模型能力约束，PCM 不自行降档或兜底。`run_all` 启动或恢复时读取一次策略并向所有步骤子进程传递，运行中修改文件不生效；独立步骤入口按本次进程加载，调整策略需主动停止后重新执行。启动打印最终分配表，不引入热更新、持久化策略快照或多层覆盖。第 15～17 步仍恢复同一 development session，但允许各步使用不同真实模型和 effort。
+PCM 为 Claude Agent SDK 显式配置独立 Anthropic Messages 网关与受保护 Bearer token；Agent 的真实模型名和 `effort` 只由 `pcm-demo/model-policy.toml` 的组合预设与步骤分配决定，不再使用 `.env` 的低/中/高模型映射。第 6 步 bootstrap/theme/brand 可分别配置；Agent effort 支持 `low/medium/high/xhigh/max`，实际有效档位受 CLI、网关和目标模型能力约束，PCM 不自行降档或兜底。`run_all` 启动或恢复时读取一次策略并向所有步骤子进程传递，运行中修改文件不生效；独立步骤入口按本次进程加载，调整策略需主动停止后重新执行。启动打印最终分配表，不引入热更新、持久化策略快照或多层覆盖。第 15～17 步仍恢复同一 development session，但允许各步使用不同真实模型和 effort。
 
 公共 runner 只加载 `project/local` settings，置空继承的模型别名、显示元数据与冲突认证；标准模型别名通过会话级 `modelOverrides` 统一注册为本次选定模型，子代理默认模型同步为主模型，不再要求维护独立三档映射。每次首次调用和 resume 都显式传入本次启动已确定的 model/effort，不配置 fallback model 或 `max_budget_usd`，既有最大 turn、负责人决策轮数、三态、重试和完成规则保持不变。模型策略属于外层配置，不进入领域 prompt。AI-compatible 继续共用 `LLM_BASE_URL/LLM_API_KEY/LLM_MODEL`，新增可选 `LLM_MODEL_EFFORT`；非空时全部主请求与 JSON 修复请求显式发送 `reasoning.effort`，留空则不传，不与 Agent 的五档配置混用。
 
@@ -402,18 +402,21 @@ Demo 和默认 PCM 流程只进行本地文件修改、测试、构建、服务�
 - 完成条件：所有进入项目准备清单的当前开发必需外部资源均真实可用；不存在两类阻塞：开发必需外部资源在候选池中缺失、当前环境无法安全生成且无兼容替代，或已匹配资源真实不可用、凭据无效、权限不足、隔离不合格，或缺少开发所需接口能力、可用配额、回调/白名单及其它既定能力。清单、管理凭据、Mock、截图或 Agent 自述不能单独证明完成。
 - 自动化说明：依赖安装、migration、Seed、业务实现、项目内测试账号、完整联调和浏览器验收由后续开发步骤完成。只服务生产部署或生产运行的正式域名、DNS/TLS、生产资源与凭据、生产回调与配额、监控、备份恢复、容量和发布安全属于开发及清单准入范围外。项目准备清单正文任何位置都不得列举、命名或汇总这些事项，也不得以“未纳入清单”、范围外、未来事项、非阻塞、无状态或 `not-applicable` 章节保留它们；开发 SMTP TLS、localhost 回调、开发白名单、沙箱范围和开发配额仍按当前开发用途纳入。产品规则和隐私治理同样不写入清单。已有成功结果只有在当前 `scope_contract`、清单和产品定义指纹一致时才可幂等复用。
 
-### 第 6 步：项目化基础工程与项目风格定制
+### 第 6 步：项目化基础工程、项目风格定制与基础品牌资产
 
-- 能力：同一数字步骤顺序显式调用 `project-bootstrap`，并在 `steps/04.json.outputs` 含 `frontend` 时显式调用 `tailwind-theme`。两个 Skill 使用独立 Claude session、独立 decision conversation、独立 XML system snapshot 和私有恢复状态，不由前一个 Skill 隐式调用后一个，也不新增步骤编号或内部节点。
+- 能力：同一数字步骤顺序显式调用 `project-bootstrap`；当 `steps/04.json.outputs` 含 `frontend` 时，再依次调用 `tailwind-theme` 和 `media-assets`。三个领域任务 `project_bootstrap`、`tailwind_theme`、`brand_assets` 各自使用独立 Claude session、decision conversation、XML system snapshot 和私有恢复状态，不由 Skill 彼此隐式调用，也不新增步骤编号或内部节点。
 - 输入：基础工程、产品定义、基础工程选型结论和经过严格指纹核验的准备基线；已有项目可另外提供既有技术方案。主题调用只引用两份产品定义和实际 frontend，工程事实由 Agent 现场读取，不依赖尚未执行的 UI/UX 框架产物。
 - 项目化：`project-bootstrap` 完成项目身份、基础配置、文档和最小联调，保持或建立可替换的 Tailwind 基础主题接线，但不选择或生成项目专属主题，也不把模板默认样式认定为最终产品主题。配置可以为匹配工程实际加载合同迁移键名与结构并同步无秘密公开示例，但必须复用同一既有资源绑定和真实值，保持资源身份、endpoint 与权限范围，不重新选择、创建、派生、轮换或替换外部资源或凭据。
 - 主题适用性：无 frontend 时只运行项目化并以 `tailwind_theme:false` 跳过主题。存在 frontend 时，bootstrap 完成后由 Python 确认 `frontend/package.json` 直接声明可明确判断为 major 4 的 `tailwindcss`，并在 frontend 自身 Git 可见且未忽略的 CSS 中找到 `@import "tailwindcss"` CSS-first 证据；版本不明确、非 v4 或缺少 CSS-first 证据属于本地模板合同 `failed`，不创建主题 session，也不作为 `blocked`。
 - 主题动作：`tailwind-theme` 初始提示只引用两份产品定义和实际 frontend，并请求依据产品和前端完成风格定制。Agent 可自主选择保留默认、采用全部或部分 preset、适配或 custom，按实际改动执行相称验证并诚实报告；具体规则以 [`tailwind-theme` Skill](skills/tailwind-theme/SKILL.md) 为唯一真源，不在步骤合同重复固定属性范围、选择顺序或全套检查。
-- 输出：完成项目化与条件性风格定制处理的工程。`steps/06.json.outputs` 继续等于第 4 步实际适用工程，顶层 `applicable` 语义不变，新增真实布尔 `tailwind_theme`，严格满足 `tailwind_theme == ("frontend" in outputs)`；有 frontend 时 success 摘要的风格定制部分只写“已完成项目风格定制”。字段缺失、类型错误或不一致的旧 success 不可复用。
-- 完成条件：适用安装、检查、测试、构建、启动、健康检查、真实浏览器检查和基础联调通过；有 frontend 时项目风格定制任务完成，并按实际改动完成相称验证或准确说明未验证范围。两个独立领域都 completed 后才写 success 并推进第 7 步，留下待提交变更。
-- 恢复：仍停留在 `project:06_bootstrap_foundation`。bootstrap completed/theme 未开始、theme 中断或 blocked 时，重跑先只复验 bootstrap，再创建或恢复 `tailwind_theme`；theme 失败不重新执行 bootstrap Agent。bootstrap blocked 时不创建主题执行产物。result 已写而 state 未推进时按严格 marker、前序交接、Tailwind gate 和 Git 事实只补状态。
-- 自动化说明：发现模板残留、配置读取、变量迁移、脚本、代码、代理、启动、健康入口、前后端连接或测试入口问题时在项目化领域修正并重跑；主题或验证可继续完成时在主题领域修正并重跑。`blocked` 仍只用于当前环境无法取得的不可替代外部条件；本地版本、文件、主题入口、工作树或状态冲突为 `failed`，不得用替代资源、新凭据或降低验证标准规避。第 8 步自然提交主题变更，第 10 步只把已提交主题视为 Current，不重新调用主题能力。
-- 当前验证：第 6 步 14 项、第 7 步 9 项、相关第 6/7/8/10 步 58 项、公共循环与入口 64 项及全量 351 项自动化通过。隔离 run `step06-tailwind-theme-20260831` 已确认 bootstrap Skill/slash command、产品 cwd 与原 session 加载；内置 Explore 未识别模型后，run-local 同 session 恢复实际执行 43 turns 并修改项目，但 SDK 以 `terminal_reason=api_error` 结束且没有完整 Agent 回复，后续严格拒绝不合法 `pending_agent_text`，未进入独立 theme session。该结果只证明真实通道失败和恢复保护生效，不构成 `/tailwind-theme`、实际 CSS light/dark 修改或浏览器集成成功证据。
+- 品牌资产：theme 完成后，Agent 依据产品定义、当前 frontend 和适用运行配置调用 `media-assets`，交付同一视觉身份的页面品牌标识与 favicon，其它资产按需。优先复用，品牌文字保持可编辑，Agent 负责实际看图、质量、派生、接入及验证。整套共享最多 8 次生成调用，仅作为提示约束，继续或恢复不重置，满足用途即停；额度耗尽或生成服务不可用时允许合格简洁 SVG／文字标识兜底。负责人只根据回复防漏，不读文件或复做视觉验收；Python 不增加预算状态、次数核验或图像评分。
+- 输出：完成项目化、条件性风格定制与品牌资产准备的工程。`steps/06.json.outputs` 继续等于第 4 步实际适用工程，顶层 `applicable` 语义不变，保留真实布尔 `tailwind_theme`，严格满足 `tailwind_theme == ("frontend" in outputs)`；有 frontend 时 success 摘要的风格定制部分只写“已完成项目风格定制”。字段缺失、类型错误或不一致的旧 success 不可复用。品牌任务不增加 result 必需字段，也不收紧历史 success 准入。
+- 完成条件：适用安装、检查、测试、构建、启动、健康检查、真实浏览器检查和基础联调通过；有 frontend 时项目风格定制任务完成，并按实际改动完成相称验证或准确说明未验证范围；品牌资产已交付并完成适用接入，允许合理复用或合格兜底。各独立适用领域 completed 后才写 success 并推进第 7 步，留下待提交变更；负责人不要求逐项完成声明。
+- 恢复：仍停留在 `project:06_bootstrap_foundation`。前序任务 completed 后只复验、不重跑 Agent；品牌失败或 blocked 时恢复原品牌会话，人工消息只投递当前 blocked 领域，前序 blocked 不创建后续执行产物。品牌 completed 后推进中断不重复生成；result 已写而 state 未推进时按严格 marker、前序交接、Tailwind gate 和 Git 事实只补状态。已成功历史第 6 步不补跑品牌，也不宣称已补齐；未完成旧 bootstrap/theme 沿用原 snapshot/session，完成后再创建品牌任务。
+- 自动化说明：发现模板残留、配置读取、变量迁移、脚本、代码、代理、启动、健康入口、前后端连接或测试入口问题时在项目化领域修正并重跑；主题或验证可继续完成时在主题领域修正并重跑。`blocked` 仍只用于当前环境无法取得的不可替代外部条件；本地版本、文件、主题入口、工作树或状态冲突为 `failed`，不得用替代资源、新凭据或降低验证标准规避。第 8 步自然提交主题与品牌资产变更，第 10 步把已提交主题及品牌资产视为 Current，负责跨页面使用规则，不重新调用主题或生成能力。
+- 历史验证（主题任务接入时）：第 6 步 14 项、第 7 步 9 项、相关第 6/7/8/10 步 58 项、公共循环与入口 64 项及全量 351 项自动化通过。隔离 run `step06-tailwind-theme-20260831` 已确认 bootstrap Skill/slash command、产品 cwd 与原 session 加载；内置 Explore 未识别模型后，run-local 同 session 恢复实际执行 43 turns 并修改项目，但 SDK 以 `terminal_reason=api_error` 结束且没有完整 Agent 回复，后续严格拒绝不合法 `pending_agent_text`，未进入独立 theme session。该结果只证明真实通道失败和恢复保护生效，不构成 `/tailwind-theme`、实际 CSS light/dark 修改或浏览器集成成功证据。
+
+- 品牌任务验证（2026-09-10）：最终 PCM Demo 全量 534 项 unittest、compileall、diff 检查及独立审查通过；隔离真实生成与 SVG 兜底／复用场景均经真实负责人判定 completed，并完成 Playwright 图片加载、favicon 引用和页面呈现检查。生成服务曾返回 500／503 和不匹配尺寸，最终显式匹配实际尺寸取得合格 PNG；未放宽 Provider 校验。探针轮数、提示版本、来源与覆盖边界见[基础品牌资产准备 TRD](../pcm-demo/docs/trd/20260910-PCM%20Demo%20基础品牌资产准备%20TRD.md)。
 
 ### 第 7 步：总体技术方案
 

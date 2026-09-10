@@ -114,6 +114,7 @@ routine = { model = "gpt-5.6-sol[1m]", effort = "medium" }
 # 以下为分配示例；完整必需任务清单见实际策略文件。
 "6.bootstrap" = "building"
 "6.theme" = "building"
+"6.brand" = "building"
 "14" = "building"
 "15" = "building"
 "16" = "routine"
@@ -121,7 +122,7 @@ routine = { model = "gpt-5.6-sol[1m]", effort = "medium" }
 ```
 
 - 批量调整：修改一个 profile 的真实 `model` 或 `effort`，所有引用它的步骤一起调整。profile 名字不代表模型强弱，多个 profile 可以使用同一模型。
-- 单步调整：新增或选择一个完整组合，再修改对应步骤的 profile。第 6 步项目化与主题可分别配置；步骤代码只保留稳定任务标识，不写模型或 effort。
+- 单步调整：新增或选择一个完整组合，再修改对应步骤的 profile。第 6 步项目化、主题与品牌资产可分别配置；步骤代码只保留稳定任务标识，不写模型或 effort。
 - 支持的 Agent effort 为 `low/medium/high/xhigh/max`；具体模型的有效档位仍受实际 CLI、网关和服务能力约束，PCM 不自行替换档位。`LLM_MODEL_EFFORT` 按 AI-compatible 服务支持的值填写，不套用 Agent 五档白名单；留空不同于显式 `none`。
 - 修改前主动停止编排，再执行原 `run_all.py --resume <run-id>`。完整入口每次启动只读取一次策略并传给所有步骤子进程，启动时打印最终分配表；运行中改文件不生效。独立 `run_step` 或模块入口使用各自本次进程加载的策略，不监听文件变化。
 - 策略必须完整且有效；未知任务、缺失分配、不存在的 profile、空模型或非法 Agent effort 明确失败，不使用默认模型、环境变量或命令行覆盖兜底。内部子进程传递内容不持久化，也不作为用户配置入口。
@@ -131,6 +132,12 @@ routine = { model = "gpt-5.6-sol[1m]", effort = "medium" }
 公共 runner 将 SDK 与插件的标准模型别名通过 `modelOverrides` 统一注册为本次选定的真实模型，默认子代理也使用同一模型；这只是兼容注册，不再是一套低中高策略。`options.model` 直接使用配置的完整 ID，不自动添加或移除 `[1m]`。PCM 仍核验 init 模型与配置一致，但实际出站路由与 effort 解释由网关负责。`total_cost_usd` 是 SDK 估算，不代表订阅账户真实扣款。
 
 每次 Agent 执行区间记录 `task/model/effort` 和原始 `usage/model_usage/total_cost_usd`，AI-compatible 的每次主请求与修复请求分别保存到同一步骤的 `ai_executions`。`model_usage` 包括子代理，不能与仅主循环的 `usage` 重复相加；当前单输入 `query()` 各次独立，resume 不覆盖此前调用。未知用量保持空值，旧记录不补造、不重置。字段与统计口径见 [计时与用量说明](docs/timing.md)。
+
+### 基础品牌资产
+
+第 6 步在项目化、条件性主题任务之后，为存在 frontend 的产品独立执行 `brand_assets`，由 Agent 调用 `media-assets` 准备页面品牌标识和 favicon，并完成质量检查及适用接入。其它品牌图片按实际用途决定，优先复用正式资产，品牌文字保持可编辑。
+
+整套共享最多 8 次生成调用，由 Agent 在提示约束下自行调度；满足用途即可停止，继续或恢复不重置额度，必要时采用合格简洁 SVG／文字标识兜底。负责人只根据结果防漏，不读文件或复做视觉验收；PCM 不增加程序计数或预算机制。任务使用独立会话，恢复不重跑已完成的项目化和主题；历史第 6 步 success 不自动补跑品牌任务。详见[第 6 步说明](steps/step_06_project_bootstrap/README.md)。
 
 ## 运行方式
 

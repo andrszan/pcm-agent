@@ -204,12 +204,14 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
                 "claude_sessions": {
                     "project_bootstrap": "session-bootstrap",
                     "tailwind_theme": "session-theme",
+                    "brand_assets": "session-brand",
                 },
                 "decision_conversations": {
                     "project_bootstrap": {
                         "path": "conversations/project_bootstrap.json"
                     },
                     "tailwind_theme": {"path": "conversations/tailwind_theme.json"},
+                    "brand_assets": {"path": "conversations/brand_assets.json"},
                 },
             }
         )
@@ -233,6 +235,17 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
                     {"role": "system", "content": "system"},
                     {"role": "assistant", "content": "初始提示"},
                     {"role": "user", "content": "Agent 回复"},
+                    {"role": "assistant", "content": decision("completed").model_dump_json()},
+                ]
+            },
+        )
+        write_json(
+            conversations / "brand_assets.json",
+            {
+                "messages": [
+                    {"role": "system", "content": "system"},
+                    {"role": "assistant", "content": "初始提示"},
+                    {"role": "user", "content": "Agent 回复"},
                     {"role": "assistant", "content": blocked.model_dump_json()},
                     {"role": "assistant", "content": BLOCKED_RESUME_PROMPT},
                     {
@@ -250,7 +263,7 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
 
         message = prepare_resume_message(message_path, self.run_dir, self.state, 6)
 
-        self.assertEqual(message.target_key, "tailwind_theme")
+        self.assertEqual(message.target_key, "brand_assets")
         self.assertEqual(message.content.encode("utf-8"), raw)
         self.assertFalse(message.consumed)
 
