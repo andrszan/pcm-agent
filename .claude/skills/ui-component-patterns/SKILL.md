@@ -35,7 +35,7 @@ allowed-tools: Read, Glob, Grep, Bash, Write, Edit, TodoWrite
 - 只调整 Tailwind light/dark 配色、字体或品牌 token；
 - 决定产品级 Shell、主导航、信息架构或全局页面模式；
 - 只修改一个 Button、Input、Dialog 或其它原子组件；
-- 需要搜索、安装、更新 shadcn registry、preset 或项目依赖；
+- 任务只是搜索、安装、更新 shadcn registry、preset 或项目依赖，而非实现已收录场景；
 - 只做开发后浏览器验收、发布判断或代码审查；
 - 本地库没有真正匹配当前任务的资产。
 
@@ -99,7 +99,7 @@ allowed-tools: Read, Glob, Grep, Bash, Write, Edit, TodoWrite
 - InputGroup 内使用 `InputGroupInput` 或 `InputGroupTextarea`；
 - 不把 Base UI 示例机械翻译成 Radix，也不安装第二套 primitive library。
 
-缺失 registry component 或 package 时，报告精确缺口和受影响能力；选择本地参考本身不构成安装授权。只有调用方当前任务已经明确要求并授权依赖变更时，才按目标项目既有组件管理方式另行处理，不能把本 Skill 变成隐藏的 registry 搜索、`shadcn add`、preset 应用或 package install 流程。
+缺失 registry component 或 package 时，报告精确缺口和受影响能力；选择本地参考本身不构成安装授权。调用方已明确要求实现或调试时，可按目标项目现有包管理器安装完成该任务所需的合理依赖并同步 lockfile，不必逐包重复询问，也不得为避免依赖而删除已要求的功能；不能借此扩大为无关的 registry 搜索、`shadcn add`、preset 应用或依赖更新。
 
 ## Chat 约束
 
@@ -123,12 +123,12 @@ allowed-tools: Read, Glob, Grep, Bash, Write, Edit, TodoWrite
 - 数据、series、时间范围、单位、locale、时区和缺失值来自真实合同；
 - tooltip、轴、辅助结论和行动语义可被用户理解；
 - 表单、设置、审批队列、普通数据表或“后台页面”不自动需要统计卡和图表；
-- 项目没有现有 Chart/Recharts 依赖时不安装。
+- 没有真实趋势需求时不添加 Chart/Recharts；确需实现而缺少依赖时，按上述实现任务的依赖授权边界补齐。
 
 ## Loading 与 Markdown 约束
 
 - Loading 表达实际等待，不把装饰动画解释为业务阶段；加载区域由调用方控制，不能覆盖或重新定义 App Shell，尊重 reduced motion。
-- Markdown 复用目标项目已有解析与高亮能力；核对代码块状态隔离、复制成功与失败、长行与表格局部滚动以及明暗主题，不为参考源码补装依赖。
+- Markdown 保留任务要求的解析、Prism 高亮、行号和 `next-themes` 明暗/system 主题能力；核对 SSR/hydration、未知语言 fallback、代码块状态隔离、复制成功与失败、长行与表格局部滚动。已明确要求实现或调试时可安装必要合理依赖，不得以避免依赖为由降级功能。
 - 保留 Markdown 默认安全解析边界，不默认启用 raw HTML；图片来源、链接策略和流式内容按真实项目处理。
 - 用户导入的 `loading`、`markdown` 目前来源与许可待确认，只供本地维护验证；不得推断 collection 的 shadcn MIT License 覆盖它们。生产复用前必须核实授权。
 

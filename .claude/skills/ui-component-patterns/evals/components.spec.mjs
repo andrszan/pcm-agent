@@ -20,7 +20,12 @@ try {
   await reader.getByRole("heading", { name: "阅读验证", exact: true }).waitFor()
   assert.equal(await reader.locator("table").count(), 1)
   assert.equal(await reader.locator('input[type="checkbox"]:checked').count(), 1)
-  assert.equal(await reader.locator("pre").count(), 4)
+  assert.equal(await reader.locator("pre").count(), 13)
+  await reader.locator('.token').first().waitFor()
+  assert(await reader.locator('.react-syntax-highlighter-line-number').count() >= 13)
+  for (const language of ['tsx', 'typescript', 'javascript', 'json', 'bash', 'python', 'go', 'java', 'sql', 'markdown']) {
+    assert(await reader.locator(`pre code.language-${language} .token`).count() > 0, `${language} 应有语法着色`)
+  }
   assert.equal(await reader.locator("[node]").count(), 0)
   assert.equal(await reader.locator('a[href^="javascript:"]').count(), 0)
   assert.equal(await page.evaluate(() => window.__markdownInjected), undefined)
@@ -30,23 +35,31 @@ try {
   await wrap.focus()
   await page.keyboard.press("Enter")
   assert.equal(await reader.getByRole("button", { name: "取消自动换行", exact: true }).count(), 1)
-  assert.equal(await reader.getByRole("button", { name: "自动换行", exact: true }).count(), 3)
+  assert.equal(await reader.getByRole("button", { name: "自动换行", exact: true }).count(), 12)
   assert.equal(await page.evaluate(() => document.activeElement?.textContent), "取消自动换行")
   assert.equal(await reader.locator("pre").nth(0).evaluate(el => getComputedStyle(el).whiteSpace), "pre-wrap")
   assert.equal(await reader.locator("pre").nth(1).evaluate(el => getComputedStyle(el).whiteSpace), "pre")
+  assert(await reader.locator('pre .token').first().evaluate(el => el.getBoundingClientRect().height <= parseFloat(getComputedStyle(el).lineHeight) * 1.5), '换行不能把const挤成竖列')
   await page.getByRole("button", { name: "追加内容", exact: true }).click()
   assert.equal(await reader.getByRole("button", { name: "取消自动换行", exact: true }).count(), 1)
 
   await reader.getByRole("button", { name: "复制", exact: true }).first().click()
   await reader.getByRole("button", { name: "已复制", exact: true }).waitFor()
   const clipboard = await page.evaluate(() => navigator.clipboard.readText())
-  assert.equal(clipboard, `${await reader.locator("pre code").first().textContent()}\n`)
+  assert.equal(clipboard, `const samePrefix = "${"长行验证".repeat(45)}"\n`)
   assert.equal(await reader.getByRole("button", { name: "已复制", exact: true }).count(), 1)
 
-  // 仅注入权限失败分支；成功路径以上使用真实 Clipboard API。
+  // API 拒绝时先验证真实 execCommand 兼容复制，再注入全部失败分支。
   await page.evaluate(() => Object.defineProperty(navigator.clipboard, "writeText", { configurable: true, value: async () => { throw new DOMException("denied", "NotAllowedError") } }))
-  await reader.getByRole("button", { name: "复制", exact: true }).first().click()
-  await reader.getByRole("button", { name: "复制失败", exact: true }).waitFor()
+  const fallbackBlock = reader.locator('pre').nth(1).locator('..')
+  await fallbackBlock.getByRole('button', { name: '复制', exact: true }).click()
+  await fallbackBlock.getByRole('button', { name: '已复制', exact: true }).waitFor()
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), clipboard)
+  assert.equal(await page.locator('textarea').count(), 0)
+  assert.equal(await page.evaluate(() => document.activeElement?.textContent), '已复制')
+  await page.evaluate(() => { document.execCommand = () => false })
+  await fallbackBlock.getByRole('button', { name: '已复制', exact: true }).click()
+  await fallbackBlock.getByRole('button', { name: '复制失败', exact: true }).waitFor()
 
   await page.evaluate(() => {
     window.__copyRequests = []
@@ -60,8 +73,11 @@ try {
   await page.evaluate(() => window.__copyRequests[0].resolve())
   assert.equal(await racingBlock.getByRole("button", { name: "复制失败", exact: true }).count(), 1)
 
-  await page.getByRole("button", { name: "底层操作 0", exact: true }).click()
-  await page.getByRole("button", { name: "底层操作 1", exact: true }).waitFor()
+  const bottomButton = page.getByRole("button", { name: "底层操作 0", exact: true })
+  await bottomButton.scrollIntoViewIfNeeded()
+  const box = await bottomButton.boundingBox()
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+  assert.equal(await bottomButton.count(), 1, "覆盖层应阻挡底层指针操作")
   assert.equal(await page.getByRole("region", { name: "覆盖加载", exact: true }).getByRole("status").evaluate(el => getComputedStyle(el).position), "absolute")
   assert.equal(await page.getByRole("region", { name: "父容器加载", exact: true }).getByRole("status").evaluate(el => getComputedStyle(el).minHeight), "0px")
 
@@ -71,16 +87,25 @@ try {
   assert.equal(await page.locator(".loading-page-ring").first().evaluate(el => getComputedStyle(el).animationName), "loading-page-ring-spin")
 
   await page.screenshot({ path: resolve(output, "desktop-light.png"), fullPage: true })
-  const light = await reader.locator("pre").first().evaluate(el => getComputedStyle(el).color)
+  const color = () => reader.locator('.token').first().evaluate(el => getComputedStyle(el).color)
+  const light = await color()
   await page.getByRole("button", { name: "切换主题", exact: true }).click()
-  const dark = await reader.locator("pre").first().evaluate(el => getComputedStyle(el).color)
+  await page.waitForFunction(light => getComputedStyle(document.querySelector('.token')).color !== light, light)
+  const dark = await color()
   assert.notEqual(light, dark)
   await page.screenshot({ path: resolve(output, "desktop-dark.png"), fullPage: true })
+  await page.emulateMedia({ colorScheme: 'light' })
+  await page.getByRole('button', { name: '跟随系统', exact: true }).click()
+  await page.waitForFunction(light => getComputedStyle(document.querySelector('.token')).color === light, light)
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await page.waitForFunction(dark => getComputedStyle(document.querySelector('.token')).color === dark, dark)
+  assert.equal(await page.evaluate(() => localStorage.getItem('theme')), 'system')
   await page.setViewportSize({ width: 375, height: 812 })
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "移动端页面不得横向溢出")
   await page.screenshot({ path: resolve(output, "mobile-dark.png"), fullPage: true })
+  await reader.locator('pre').first().locator('..').screenshot({ path: resolve(output, 'mobile-code-detail.png') })
   assert.deepEqual(errors, [], "浏览器不得出现运行错误")
-  console.log("PASS: Markdown/GFM、安全边界、代码块状态隔离、键盘焦点、内容追加、真实复制、复制失败、加载区域、reduced motion、明暗主题、375px响应式")
+  console.log("PASS: Markdown/GFM、十种语言Prism高亮与行号、light/dark/system、复制及fallback/失败/竞态、状态隔离、键盘焦点、加载覆盖、reduced motion、375px换行")
 } finally {
   await browser.close()
 }

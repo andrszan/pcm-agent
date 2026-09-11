@@ -9,7 +9,7 @@
 - 使用 React/TSX，并核对当前 React 版本与所选源码 API 的兼容性；
 - shadcn/ui Base UI；
 - Tailwind CSS v4；
-- 已经具备资产依赖的 primitives 和 packages。
+- 核对资产依赖的 primitives 和 packages；明确实现或调试任务内可按项目方式补齐必要合理依赖。
 
 不能仅凭 `components.json` 或“使用 shadcn”推断兼容。至少结合 `package.json`、实际 `@base-ui/react` imports 和现有组件组合 API 判断。Radix、React Aria、Vue、其它 CSS 框架或证据冲突时不读取源码并无副作用跳过。
 
@@ -61,10 +61,10 @@
 
 | 资产 | 适合解决 | 首要限制 |
 |---|---|---|
-| [区域加载反馈](../assets/react-shadcn/base-tailwind-v4/loading/README.md) | 内容区域等待时的状态文字和装饰动画 | `overlay` 不阻止操作，父容器负责尺寸和 App Shell 边界；来源许可待确认 |
-| [Markdown 阅读](../assets/react-shadcn/base-tailwind-v4/markdown/README.md) | Markdown/GFM 排版、代码复制和长行换行 | PCM 基础模板尚缺 `react-markdown`、`remark-gfm`；不含语法着色或行号；来源许可待确认 |
+| [区域加载反馈](../assets/react-shadcn/base-tailwind-v4/loading/README.md) | 内容区域等待时的状态文字和装饰动画 | `overlay` 阻挡覆盖区域指针但不是模态框，父容器负责尺寸和 App Shell 边界；来源许可待确认 |
+| [Markdown 阅读](../assets/react-shadcn/base-tailwind-v4/markdown/README.md) | Markdown/GFM 排版、Prism 高亮、行号、代码复制和长行换行 | 依赖解析、高亮与 `next-themes`；来源许可待确认 |
 
-两项均按目标项目已有组件、`cn` 和语义 token 适配，不为使用参考自动安装依赖。隔离宿主中的构建和浏览器验证不代表目标产品已经具备依赖或完成接入。
+两项均按目标项目已有组件、`cn` 和语义 token 适配。选择参考本身不授权安装依赖；明确实现或调试任务可按项目包管理器安装必要合理依赖并同步 lockfile，不得为避免依赖删减要求功能。隔离宿主中的构建和浏览器验证不代表目标产品已经完成接入。
 
 ## 来源与许可边界
 

@@ -33,7 +33,7 @@ const LoadingPage: FC<LoadingPageProps> = ({
       "relative flex items-center justify-center",
       variant === "inline" && "min-h-[120px]",
       variant === "overlay" &&
-        "pointer-events-none absolute inset-0 z-10 bg-background/60 backdrop-blur-sm",
+        "absolute inset-0 z-50 bg-background/60 backdrop-blur-sm",
       variant === "fullscreen" && "h-full min-h-[60vh] w-full",
       className,
     )}

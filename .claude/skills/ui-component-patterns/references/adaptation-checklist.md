@@ -8,7 +8,7 @@
 - shadcn primitives 实际基于 `@base-ui/react`；
 - 现有组合使用 Base UI `render`，不是 Radix `asChild`；
 - 目标项目已经具备所选资产需要的 registry components 和 packages；
-- 缺失依赖时报告精确缺口，不执行 `shadcn add`、registry 搜索、包安装或技术栈迁移。
+- 缺失依赖时说明精确缺口；明确实现或调试任务可按项目包管理器安装必要合理依赖并同步 lockfile，不必逐包询问，不得为了避免依赖删除所需功能。仅选择参考不授权安装，也不授权无关的 registry 搜索、preset 更新或技术栈迁移。
 
 ## 2. 任务与借用原理
 

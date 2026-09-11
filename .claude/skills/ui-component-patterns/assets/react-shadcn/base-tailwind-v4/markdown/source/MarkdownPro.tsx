@@ -10,12 +10,62 @@ import React, {
 import Markdown, { type Components, type ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Check, Copy, WrapText } from "lucide-react";
+import { useTheme } from "next-themes";
+import { PrismLight as SyntaxHighlighter } from "react-syntax-highlighter";
+import bash from "react-syntax-highlighter/dist/esm/languages/prism/bash";
+import go from "react-syntax-highlighter/dist/esm/languages/prism/go";
+import java from "react-syntax-highlighter/dist/esm/languages/prism/java";
+import javascript from "react-syntax-highlighter/dist/esm/languages/prism/javascript";
+import json from "react-syntax-highlighter/dist/esm/languages/prism/json";
+import markdownLang from "react-syntax-highlighter/dist/esm/languages/prism/markdown";
+import python from "react-syntax-highlighter/dist/esm/languages/prism/python";
+import sql from "react-syntax-highlighter/dist/esm/languages/prism/sql";
+import tsx from "react-syntax-highlighter/dist/esm/languages/prism/tsx";
+import typescript from "react-syntax-highlighter/dist/esm/languages/prism/typescript";
+import oneLight from "react-syntax-highlighter/dist/esm/styles/prism/one-light";
+import vscDarkPlus from "react-syntax-highlighter/dist/esm/styles/prism/vsc-dark-plus";
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
+
+SyntaxHighlighter.registerLanguage("tsx", tsx);
+SyntaxHighlighter.registerLanguage("typescript", typescript);
+SyntaxHighlighter.registerLanguage("ts", typescript);
+SyntaxHighlighter.registerLanguage("javascript", javascript);
+SyntaxHighlighter.registerLanguage("js", javascript);
+SyntaxHighlighter.registerLanguage("json", json);
+SyntaxHighlighter.registerLanguage("bash", bash);
+SyntaxHighlighter.registerLanguage("shell", bash);
+SyntaxHighlighter.registerLanguage("python", python);
+SyntaxHighlighter.registerLanguage("py", python);
+SyntaxHighlighter.registerLanguage("go", go);
+SyntaxHighlighter.registerLanguage("golang", go);
+SyntaxHighlighter.registerLanguage("java", java);
+SyntaxHighlighter.registerLanguage("sql", sql);
+SyntaxHighlighter.registerLanguage("md", markdownLang);
+SyntaxHighlighter.registerLanguage("markdown", markdownLang);
+
+const HIGHLIGHT_LANGUAGES = new Set([
+  "tsx",
+  "typescript",
+  "ts",
+  "javascript",
+  "js",
+  "json",
+  "bash",
+  "shell",
+  "python",
+  "py",
+  "go",
+  "golang",
+  "java",
+  "sql",
+  "md",
+  "markdown",
+]);
 
 type Locale = "zh-CN" | "en-US";
 type CopyStatus = "copied" | "failed";
@@ -60,10 +110,13 @@ function LanguageBadge({ lang }: { lang: string }) {
 function CodeBlock({
   node: _node,
   className,
+  style,
   children,
   ...props
 }: React.ComponentPropsWithoutRef<"pre"> & ExtraProps) {
   const dict = useContext(DictionaryContext);
+  const { resolvedTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
   const [isWrapped, setIsWrapped] = useState(false);
   const [copyStatus, setCopyStatus] = useState<CopyStatus>();
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -76,17 +129,22 @@ function CodeBlock({
     ? child
     : null;
   const raw = String(childElement?.props.children ?? "");
-  const language =
-    /(?:^|\s)language-([^\s]+)/.exec(childElement?.props.className || "")?.[1] ||
-    dict.code;
+  const detectedLanguage = /(?:^|\s)language-([^\s]+)/.exec(
+    childElement?.props.className || "",
+  )?.[1];
+  const languageLabel = detectedLanguage || dict.code;
+  const highlightLanguage =
+    detectedLanguage && HIGHLIGHT_LANGUAGES.has(detectedLanguage)
+      ? detectedLanguage
+      : undefined;
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    setMounted(true);
+    return () => {
       copyAttempt.current += 1;
       if (copyTimer.current) clearTimeout(copyTimer.current);
-    },
-    []
-  );
+    };
+  }, []);
 
   const handleCopy = async () => {
     const attempt = ++copyAttempt.current;
@@ -112,11 +170,12 @@ function CodeBlock({
       : copyStatus === "failed"
         ? dict.copyFailed
         : dict.copy;
+  const code = raw.replace(/\n$/, "");
 
   return (
     <div className="group relative my-3 min-w-0 rounded-lg border bg-card shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-        <LanguageBadge lang={language} />
+        <LanguageBadge lang={languageLabel} />
         <div className="flex flex-wrap items-center gap-2 opacity-80 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
           <button
             type="button"
@@ -133,7 +192,7 @@ function CodeBlock({
             onClick={handleCopy}
             className={cn(
               "inline-flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors hover:bg-muted-foreground/10",
-              copyStatus === "failed" && "text-destructive"
+              copyStatus === "failed" && "text-destructive",
             )}
             title={copyLabel}
             aria-live="polite"
@@ -147,21 +206,62 @@ function CodeBlock({
           </button>
         </div>
       </div>
-      <pre
-        className={cn(
-          "m-0 min-w-0 bg-transparent p-4 font-mono text-sm leading-6",
-          isWrapped
-            ? "whitespace-pre-wrap break-all"
-            : "overflow-x-auto whitespace-pre",
-          className
-        )}
-        tabIndex={0}
-        {...props}
-      >
-        <code className={childElement?.props.className}>
-          {raw.replace(/\n$/, "")}
-        </code>
-      </pre>
+      {mounted ? (
+        <SyntaxHighlighter
+          className={className}
+          language={highlightLanguage}
+          style={resolvedTheme === "dark" ? vscDarkPlus : oneLight}
+          customStyle={{
+            ...style,
+            margin: 0,
+            padding: "1rem",
+            background: "transparent",
+            fontSize: "0.875rem",
+            lineHeight: "1.5",
+            overflowX: isWrapped ? "visible" : "auto",
+            whiteSpace: isWrapped ? "pre-wrap" : "pre",
+            wordBreak: isWrapped ? "break-all" : "normal",
+          }}
+          codeTagProps={{
+            className: childElement?.props.className,
+            style: {
+              whiteSpace: isWrapped ? "pre-wrap" : "pre",
+              overflowWrap: isWrapped ? "break-word" : "normal",
+              wordBreak: isWrapped ? "break-all" : "normal",
+            },
+          }}
+          showLineNumbers
+          lineProps={isWrapped ? { style: { display: "block", paddingLeft: "3em", textIndent: "-3em" } } : undefined}
+          lineNumberStyle={{
+            textIndent: 0,
+            minWidth: "3em",
+            paddingRight: "1em",
+            textAlign: "right",
+            userSelect: "none",
+            opacity: 0.5,
+          }}
+          wrapLongLines={isWrapped}
+          tabIndex={0}
+          {...props}
+        >
+          {code}
+        </SyntaxHighlighter>
+      ) : (
+        <pre
+          style={style}
+          className={cn(
+            "m-0 min-w-0 bg-transparent p-4 font-mono text-sm leading-6",
+            isWrapped
+              ? "whitespace-pre-wrap break-all"
+              : "overflow-x-auto whitespace-pre",
+            className,
+          )}
+          tabIndex={0}
+          {...props}
+        >
+          <code className={childElement?.props.className}>{code}</code>
+        </pre>
+      )}
     </div>
   );
 }
@@ -171,7 +271,7 @@ const MARKDOWN_COMPONENTS: Components = {
     <a
       className={cn(
         "break-all text-primary underline underline-offset-4",
-        className
+        className,
       )}
       target="_blank"
       rel="noopener noreferrer"
@@ -184,7 +284,7 @@ const MARKDOWN_COMPONENTS: Components = {
     <p
       className={cn(
         "my-2 whitespace-pre-wrap text-[0.95rem] leading-7",
-        className
+        className,
       )}
       {...props}
     >
@@ -196,7 +296,7 @@ const MARKDOWN_COMPONENTS: Components = {
     <img
       className={cn(
         "my-3 h-auto max-w-full rounded-md border shadow-sm",
-        className
+        className,
       )}
       alt={alt || ""}
       loading="lazy"
@@ -223,7 +323,7 @@ const MARKDOWN_COMPONENTS: Components = {
     <li
       className={cn(
         "marker:text-primary/70 [&>p:first-child]:inline",
-        className
+        className,
       )}
       {...props}
     >
@@ -269,7 +369,7 @@ const MARKDOWN_COMPONENTS: Components = {
     <code
       className={cn(
         "rounded border border-muted bg-muted/60 px-1.5 py-0.5 font-mono text-sm text-foreground",
-        className
+        className,
       )}
       {...props}
     >
@@ -298,7 +398,7 @@ export default function MarkdownPro({
           "[&_*_ul]:list-[circle] [&_*_ul]:pl-6 [&_*_ol]:list-[lower-alpha] [&_*_ol]:pl-6",
           "[&>img]:my-3 [&>img]:rounded-md [&>img]:border [&>img]:shadow-sm",
           "[&>blockquote]:my-4 [&>blockquote]:border-l-4 [&>blockquote]:pl-4 [&>blockquote]:italic [&>blockquote]:text-muted-foreground",
-          className
+          className,
         )}
       >
         <Markdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
@@ -310,12 +410,50 @@ export default function MarkdownPro({
 }
 
 export async function copyToClipboard(text: string): Promise<boolean> {
-  if (typeof navigator === "undefined" || !navigator.clipboard) return false;
+  if (typeof navigator !== "undefined" && navigator.clipboard) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Clipboard API 可能被权限或安全上下文拒绝，继续使用兼容 fallback。
+    }
+  }
+
+  if (typeof document === "undefined") return false;
+
+  const activeElement =
+    document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const selection = window.getSelection();
+  const ranges = selection
+    ? Array.from({ length: selection.rangeCount }, (_, index) =>
+        selection.getRangeAt(index).cloneRange(),
+      )
+    : [];
+  const textArea = document.createElement("textarea");
+  textArea.value = text;
+  textArea.readOnly = true;
+  textArea.setAttribute("aria-hidden", "true");
+  Object.assign(textArea.style, {
+    position: "fixed",
+    left: "-999999px",
+    top: "-999999px",
+    opacity: "0",
+    pointerEvents: "none",
+  });
 
   try {
-    await navigator.clipboard.writeText(text);
-    return true;
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    return document.execCommand("copy");
   } catch {
     return false;
+  } finally {
+    textArea.remove();
+    activeElement?.focus({ preventScroll: true });
+    if (selection) {
+      selection.removeAllRanges();
+      ranges.forEach(range => selection.addRange(range));
+    }
   }
 }
