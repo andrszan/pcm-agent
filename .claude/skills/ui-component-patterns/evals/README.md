@@ -49,4 +49,4 @@ SSR 脚本用 Node `renderToString` 生成真实 HTML，浏览器使用 `hydrate
 
 严格类型检查、客户端构建、Node SSR 构建与渲染、客户端和 hydration 两套浏览器回归均通过，代表性明暗/移动端截图已阅读。实际发现并修复了 `pre.style` 与高亮主题对象的类型冲突，以及开启行号和换行时 token 被 flex 挤成竖列的问题。
 
-没有修改外部 PCM 模板或产品依赖，没有执行 PCM Python 全流程或 Next.js 构建。两项导入资产的来源与许可仍待确认；功能验证不代替来源核验。
+没有修改外部 PCM 模板或产品依赖，没有执行 PCM Python 全流程或 Next.js 构建。

@@ -626,15 +626,15 @@
       "id": "loading-region",
       "category": "loading",
       "relativePath": "loading",
-      "provider": "user-import",
-      "status": "local-maintenance-only",
+      "provider": "user-developed",
+      "status": "authorized",
       "applicableWhen": ["内容区域等待，需要文字状态和装饰动画"],
-      "notApplicableWhen": ["按钮级加载", "需要模态阻止操作", "未经许可确认的产品复用"],
+      "notApplicableWhen": ["按钮级加载", "需要模态阻止操作"],
       "sources": [{
         "repository": null,
         "commit": null,
         "path": "loading-page/LoadingPage.tsx",
-        "sourceKind": "user-import",
+        "sourceKind": "user-developed",
         "contentMode": "derived",
         "localFiles": ["source/LoadingPage.tsx"],
         "transformations": ["改为标准 React style 与专属动画名", "去除 RAG 阶段假设", "增加 reduced motion", "保留父容器内覆盖和指针阻挡行为"]
@@ -646,22 +646,22 @@
       },
       "baseUiApis": [],
       "replaceBeforeUse": ["局部 cn", "等待文案", "父容器尺寸、定位和层级"],
-      "knownGaps": ["来源和许可待确认", "overlay 仅阻挡指针，不锁定键盘焦点或充当模态框", "不负责超时、错误或重试"],
-      "license": {"spdx": null, "file": null, "notes": ["用户导入，原项目和许可未知；不继承 collection 的 shadcn MIT License。"]}
+      "knownGaps": ["overlay 仅阻挡指针，不锁定键盘焦点或充当模态框", "不负责超时、错误或重试"],
+      "license": {"spdx": null, "file": null, "notes": ["用户自研并授权使用。"]}
     },
     {
       "id": "markdown-reader",
       "category": "markdown",
       "relativePath": "markdown",
-      "provider": "user-import",
-      "status": "local-maintenance-only",
+      "provider": "user-developed",
+      "status": "authorized",
       "applicableWhen": ["Markdown/GFM 内容阅读，需要代码复制和换行"],
-      "notApplicableWhen": ["目标项目缺少依赖且调用方明确禁止安装", "需要 Markdown 编辑器", "未经许可确认的产品复用"],
+      "notApplicableWhen": ["目标项目缺少依赖且调用方明确禁止安装", "需要 Markdown 编辑器"],
       "sources": [{
         "repository": null,
         "commit": null,
         "path": "markdown/MarkdownPro.tsx",
-        "sourceKind": "user-import",
+        "sourceKind": "user-developed",
         "contentMode": "derived",
         "localFiles": ["source/MarkdownPro.tsx"],
         "transformations": ["保留 Prism 高亮、行号和原有语言注册", "使用 resolvedTheme 正确跟随明暗/system，挂载后高亮以保持 hydration 一致", "独立代码块状态与稳定 renderer", "过滤 AST node 属性", "保留复制 fallback 并补齐失败反馈、临时节点和异步清理", "使用局部换行样式避免高亮 token 被挤成竖列"]
@@ -673,8 +673,8 @@
       },
       "baseUiApis": [],
       "replaceBeforeUse": ["局部 cn", "内容与语言", "链接策略和图片来源", "复制权限与错误反馈"],
-      "knownGaps": ["来源和许可待确认", "PCM 基础模板缺少解析和高亮包，明确实现或调试任务可按项目方式补齐", "宿主需接入 next-themes ThemeProvider", "不提供编辑、传输或资源代理", "复制依赖浏览器支持和权限，失败会明确反馈"],
-      "license": {"spdx": null, "file": null, "notes": ["用户导入，原项目和许可未知；不继承 collection 的 shadcn MIT License。"]}
+      "knownGaps": ["PCM 基础模板缺少解析和高亮包，明确实现或调试任务可按项目方式补齐", "宿主需接入 next-themes ThemeProvider", "不提供编辑、传输或资源代理", "复制依赖浏览器支持和权限，失败会明确反馈"],
+      "license": {"spdx": null, "file": null, "notes": ["用户自研并授权使用。"]}
     }
   ]
 }

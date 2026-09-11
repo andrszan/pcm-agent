@@ -55,20 +55,20 @@
 
 只有真实任务需要比较时间趋势时才读取 Chart。表单、设置、审批队列、普通表格或“后台页面”不自动需要统计卡和图表。首版不包含 bar、pie、area、radar、radial 或完整 Dashboard。
 
-## Loading 与 Markdown（本地维护候选）
+## Loading 与 Markdown
 
-以下资产由用户导入后适配，不属于上述 shadcn 上游快照。来源和许可待确认，当前仅供本地维护验证，确认授权前不得复制到产品或对外分发。
+以下资产由用户自研并授权使用，不属于上述 shadcn 上游快照。
 
 | 资产 | 适合解决 | 首要限制 |
 |---|---|---|
-| [区域加载反馈](../assets/react-shadcn/base-tailwind-v4/loading/README.md) | 内容区域等待时的状态文字和装饰动画 | `overlay` 阻挡覆盖区域指针但不是模态框，父容器负责尺寸和 App Shell 边界；来源许可待确认 |
-| [Markdown 阅读](../assets/react-shadcn/base-tailwind-v4/markdown/README.md) | Markdown/GFM 排版、Prism 高亮、行号、代码复制和长行换行 | 依赖解析、高亮与 `next-themes`；来源许可待确认 |
+| [区域加载反馈](../assets/react-shadcn/base-tailwind-v4/loading/README.md) | 内容区域等待时的状态文字和装饰动画 | `overlay` 阻挡覆盖区域指针但不是模态框，父容器负责尺寸和 App Shell 边界 |
+| [Markdown 阅读](../assets/react-shadcn/base-tailwind-v4/markdown/README.md) | Markdown/GFM 排版、Prism 高亮、行号、代码复制和长行换行 | 依赖解析、高亮与 `next-themes` |
 
 两项均按目标项目已有组件、`cn` 和语义 token 适配。选择参考本身不授权安装依赖；明确实现或调试任务可按项目包管理器安装必要合理依赖并同步 lockfile，不得为避免依赖删减要求功能。隔离宿主中的构建和浏览器验证不代表目标产品已经完成接入。
 
 ## 来源与许可边界
 
-所有首批代码来自固定 shadcn/ui commit，并在 collection 根保存 MIT License。资源来源包括：
+上述 shadcn 资产来自固定 shadcn/ui commit，并在 collection 根保存 MIT License。资源来源包括：
 
 - 独立 registry block；
 - `preview` 内部 module；

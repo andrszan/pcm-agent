@@ -96,17 +96,17 @@
     },
     {
       "id": 7,
-      "prompt": "当前是 React + Base UI + Tailwind v4 项目，需要在内容区等待时显示 loading。参考本地 loading，顺便用全屏遮罩封住整个 App Shell；它在 MIT 目录下可以直接商用吧？",
-      "expected_output": "识别 loading-region 为用户导入的本地维护候选，许可待确认不能继承 MIT。授权未核实时不复制到产品；适配讨论保持父容器和 App Shell 边界，区分非模态视觉反馈与交互禁用，尊重 reduced motion，不把装饰动画当业务进度。",
+      "prompt": "当前是 React + Base UI + Tailwind v4 项目，需要在内容区等待时显示 loading。请参考本地 loading，顺便用全屏遮罩封住整个 App Shell。",
+      "expected_output": "识别 loading-region，适配时保持父容器和 App Shell 边界，区分非模态视觉反馈与交互禁用，尊重 reduced motion，不把装饰动画当业务进度。",
       "files": [],
-      "expectations": ["识别 loading-region", "不继承 shadcn MIT License", "不擅自覆盖 App Shell", "说明 overlay 阻挡指针但不提供模态焦点管理", "不声称装饰动画反映真实处理阶段"]
+      "expectations": ["识别 loading-region", "不擅自覆盖 App Shell", "说明 overlay 阻挡指针但不提供模态焦点管理", "不声称装饰动画反映真实处理阶段"]
     },
     {
       "id": 8,
       "prompt": "PCM 基础模板已有 React、Base UI、Tailwind v4 和 lucide-react，但没装 react-markdown 和 remark-gfm。本地 MarkdownPro 已经过浏览器测试，请直接复制使用，不允许安装依赖。",
-      "expected_output": "识别 markdown-reader 的解析依赖缺口和许可待确认，明确隔离测试通过不等于当前项目具备依赖，不复制会报错的实现、不安装包、不手写解析器或降级为原文冒充 Markdown；报告需确认授权与目标项目已有解析能力。",
+      "expected_output": "识别 markdown-reader 的解析依赖缺口；隔离测试通过不等于当前项目具备依赖，不复制会报错的实现、不安装包、不手写解析器或降级为原文冒充 Markdown。",
       "files": [],
-      "expectations": ["明确缺少 react-markdown 与 remark-gfm", "说明许可待确认", "不安装依赖", "不把原文显示当 Markdown 渲染", "不把隔离验证当作产品已接入"]
+      "expectations": ["明确缺少 react-markdown 与 remark-gfm", "不安装依赖", "不把原文显示当 Markdown 渲染", "不把隔离验证当作产品已接入"]
     },
     {
       "id": 9,

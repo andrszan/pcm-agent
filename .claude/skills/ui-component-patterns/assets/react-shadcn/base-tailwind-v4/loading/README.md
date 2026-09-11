@@ -14,8 +14,8 @@ React + Tailwind CSS v4 的通用加载状态参考，提供 `inline`、`overlay
 
 组件使用 `role="status"` 和礼貌播报，装饰动画设为隐藏，不冒充真实业务阶段。系统启用 reduced motion 时停止旋转、轨道和流光动画。
 
-## 来源与许可
+## 来源
 
-此文件由用户从原项目导入，本地仅完成标准 React/CSS 兼容转换、reduced motion 和业务通用化。原项目、作者和许可证尚未确认，不能推断或继承本 collection 的 MIT License；用于产品前必须确认来源与许可。
+该组件由用户自研并授权使用。
 
 本地文件：[`source/LoadingPage.tsx`](./source/LoadingPage.tsx)。

@@ -130,7 +130,6 @@ allowed-tools: Read, Glob, Grep, Bash, Write, Edit, TodoWrite
 - Loading 表达实际等待，不把装饰动画解释为业务阶段；加载区域由调用方控制，不能覆盖或重新定义 App Shell，尊重 reduced motion。
 - Markdown 保留任务要求的解析、Prism 高亮、行号和 `next-themes` 明暗/system 主题能力；核对 SSR/hydration、未知语言 fallback、代码块状态隔离、复制成功与失败、长行与表格局部滚动。已明确要求实现或调试时可安装必要合理依赖，不得以避免依赖为由降级功能。
 - 保留 Markdown 默认安全解析边界，不默认启用 raw HTML；图片来源、链接策略和流式内容按真实项目处理。
-- 用户导入的 `loading`、`markdown` 目前来源与许可待确认，只供本地维护验证；不得推断 collection 的 shadcn MIT License 覆盖它们。生产复用前必须核实授权。
 
 ## 边界
 
