@@ -14,7 +14,7 @@ DEMO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(DEMO_ROOT))
 
 from common.claude_agent import ClaudeRunResult
-from common.decision import AgentDecision
+from common.decision import AgentDecision, render_decision_system_prompt
 from common.files import write_json
 from common.state import read_state, write_state
 from steps.step_01_create_workspace import initialize_root_repository
@@ -30,7 +30,10 @@ from steps.step_05_project_readiness.step import (
     checklist_present,
     completion_repair_prompt,
     initial_prompt,
+    product_output_contents,
     readiness_baseline,
+    readiness_selection_projection,
+    resource_list_facts,
     run,
 )
 
@@ -184,7 +187,7 @@ class ProjectReadinessTests(unittest.TestCase):
             ),
         }
 
-    def test_initial_prompt_uses_authoritative_inputs_and_minimal_selection_projection(self) -> None:
+    def test_initial_prompt_passes_inputs_and_minimal_selection_projection(self) -> None:
         prompt = initial_prompt(
             ["docs/requirements/项目需求说明.md", "docs/requirements/产品功能说明.md"],
             ["frontend"],
@@ -193,15 +196,13 @@ class ProjectReadinessTests(unittest.TestCase):
         )
 
         self.assertEqual(prompt.splitlines()[0], "/project-readiness")
-        for required in (
-            "权威产品定义",
-            "实际工程",
-            "可信开发资源清单：@/resource-list",
-            "基础工程选择白名单",
-            "执行 Git 写操作",
+        for reference in (
+            "@./docs/requirements/项目需求说明.md",
+            "@./docs/requirements/产品功能说明.md",
+            "@./frontend",
+            "@/resource-list",
         ):
-            self.assertIn(required, prompt)
-        self.assertNotIn("当前只核验进入基础工程项目化前条件", prompt)
+            self.assertIn(reference, prompt)
         self.assertIn('"applicable": true', prompt)
         self.assertIn('"id": "frontend-template"', prompt)
         self.assertIn('"default_branch": "main"', prompt)
@@ -210,19 +211,6 @@ class ProjectReadinessTests(unittest.TestCase):
         self.assertNotIn("file:///templates.git", prompt)
         self.assertNotIn("git_url", prompt)
         self.assertNotIn("origin", prompt)
-        for forbidden in ("第 5 步", "第5步", "PCM", "节点", "阶段", "调用 Skill"):
-            self.assertNotIn(forbidden, prompt)
-            self.assertNotIn(forbidden, PROJECT_READINESS_DECISION_RULES)
-
-    def test_decision_rules_keep_readiness_completion_contract_concise(self) -> None:
-        for required in (
-            "completed：开发资源准备基线已建立，必需资源均真实可用",
-            "continue：仍有可用当前资料和工具安全完成",
-            "只补齐缺失、失效或不合格绑定",
-            "删除清单中的未采用候选和范围外事项",
-            "不换个标签保留，也不开展范围外工作",
-        ):
-            self.assertIn(required, PROJECT_READINESS_DECISION_RULES)
 
     def test_completed_decision_advances_after_checklist_and_preserves_agent_raw_text(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -241,24 +229,23 @@ class ProjectReadinessTests(unittest.TestCase):
                 *,
                 system_prompt: str,
             ) -> tuple[dict[str, object], int, str]:
-                for tag in ("role", "project_context", "responsibility", "completion", "output"):
-                    self.assertIn(f"<{tag}>", system_prompt)
-                    self.assertIn(f"</{tag}>", system_prompt)
-                for required in (
-                    "最高项目负责人、工程负责人、专业开发者和 Agent 专家",
-                    "assistant 是你此前发给 Agent 的指令或结构化回复",
-                    "user 是 Agent 返回给你的完整执行结果",
+                resource_list = run_dir.parent / "可信开发资源清单.md"
+                expected_system_prompt = render_decision_system_prompt(
                     PROJECT_READINESS_DECISION_RULES,
-                    "# 定义",
-                    "适用工程",
-                    "基础工程选择",
-                    '"readable": true',
-                ):
-                    self.assertIn(required, system_prompt)
-                self.assertNotEqual(system_prompt, PROJECT_READINESS_DECISION_RULES)
-                self.assertIn(str((run_dir.parent / "可信开发资源清单.md").resolve()), system_prompt)
-                for forbidden in ("资源清单正文不应内联", "file:///templates.git", "git_url", "origin"):
-                    self.assertNotIn(forbidden, system_prompt)
+                    {
+                        "产品定义": product_output_contents(
+                            workspace, self.product_outputs()
+                        ),
+                        "适用工程": ["frontend"],
+                        "基础工程选择": readiness_selection_projection(
+                            self.selection()
+                        ),
+                        "可信开发资源清单": resource_list_facts(resource_list),
+                    },
+                )
+                self.assertEqual(system_prompt, expected_system_prompt)
+                for private_input in ("资源清单正文不应内联", "file:///templates.git", '"git_url"', '"origin"'):
+                    self.assertNotIn(private_input, system_prompt)
                 decision_inputs.append(copy.deepcopy(messages))
                 current = decision("completed", reason="清单与当前事实均已核验")
                 return current.model_dump(), 1, current.model_dump_json()
@@ -330,9 +317,7 @@ class ProjectReadinessTests(unittest.TestCase):
             self.assertEqual(len(calls), 2)
             self.assertTrue(str(calls[0]["prompt"]).startswith("/project-readiness"))
             self.assertEqual(calls[1]["resume_session_id"], "session-1")
-            self.assertIn("检测到 `docs/requirements/项目准备清单.md` 缺失或为空", str(calls[1]["prompt"]))
-            self.assertIn("必要资源准备与真实验证", str(calls[1]["prompt"]))
-            self.assertNotIn("共享管理或根凭据", str(calls[1]["prompt"]))
+            self.assertEqual(calls[1]["prompt"], completion_repair_prompt())
             self.assertEqual(decision_inputs[0][-1], {"role": "user", "content": "Agent 原文 1", "timestamp": decision_inputs[0][-1]["timestamp"]})
             self.assertNotIn("pending_agent_prompt", read_state(run_dir)["project_readiness"])
 

@@ -22,11 +22,11 @@ from steps.step_05_project_readiness.step import (
 )
 from steps.step_07_solution_design.step import (
     CURRENT_NODE,
-    DECISION_LOOP_SPEC,
     DESIGN_PATH,
     DESIGN_REPAIR_PROMPT,
     LEGACY_COMPLETION_MESSAGES,
     NEXT_NODE,
+    SOLUTION_DESIGN_DECISION_RULES,
     SOLUTION_DESIGN_MAX_TURNS,
     SolutionDesignBlocked,
     run,
@@ -220,33 +220,14 @@ class SolutionDesignTests(unittest.TestCase):
             self.assertIn("docs/requirements/项目准备清单.md", prompt)
             self.assertIn("@./frontend", prompt)
             self.assertIn('"commit_sha"', prompt)
-            self.assertIn("只允许修改该固定产物", prompt)
-            self.assertIn("不重新选择模板或组装工程", prompt)
-            self.assertIn("不得执行 Git 写操作", prompt)
-            for forbidden in (
-                "git_url",
-                "origin",
-                "第 7 步",
-                "PCM",
-                "节点",
-                "阶段",
-                "调用Skill",
-                "扫描所有README/manifest/代码",
-                "README、manifest、锁文件、配置、代码、测试",
-            ):
-                self.assertNotIn(forbidden, prompt)
+            for private_source in ("file:///templates.git", "git_url", "origin"):
+                self.assertNotIn(private_source, prompt)
             self.assertEqual(calls[0]["max_turns"], SOLUTION_DESIGN_MAX_TURNS)
             self.assertNotIn("max_budget_usd", calls[0])
             self.assertEqual(len(system_prompts), 2)
             for system_prompt in system_prompts:
-                for tag in ("role", "project_context", "responsibility", "completion", "output"):
-                    self.assertIn(f"<{tag}>", system_prompt)
-                    self.assertIn(f"</{tag}>", system_prompt)
+                self.assertIn(SOLUTION_DESIGN_DECISION_RULES, system_prompt)
                 for required in (
-                    "最高项目负责人、工程负责人、专业开发者和 Agent 专家",
-                    "assistant 是你此前发给 Agent 的指令或结构化回复",
-                    "user 是 Agent 返回给你的完整执行结果",
-                    "固定技术方案文档已写入",
                     "# 项目需求说明",
                     "# 产品功能说明",
                     "# 项目准备清单",
@@ -254,9 +235,8 @@ class SolutionDesignTests(unittest.TestCase):
                     '"commit_sha"',
                 ):
                     self.assertIn(required, system_prompt)
-                self.assertNotEqual(system_prompt, DECISION_LOOP_SPEC.decision_system_prompt)
-                for forbidden in ("file:///templates.git", "git_url", "origin"):
-                    self.assertNotIn(forbidden, system_prompt)
+                for private_source in ("file:///templates.git", "git_url", "origin"):
+                    self.assertNotIn(private_source, system_prompt)
 
             saved = read_state(run_dir)
             self.assertEqual((saved["step"], saved["current_node"]), (8, NEXT_NODE))

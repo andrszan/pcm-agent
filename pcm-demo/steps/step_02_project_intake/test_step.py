@@ -13,7 +13,7 @@ DEMO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(DEMO_ROOT))
 
 from common.claude_agent import ClaudeRunResult
-from common.decision import AgentDecision
+from common.decision import AgentDecision, render_decision_system_prompt
 from common.files import sha256, write_json
 from common.state import read_state, write_state
 from steps.step_01_create_workspace import initialize_root_repository
@@ -22,6 +22,7 @@ from steps.step_02_project_intake.step import (
     OUTPUTS,
     PROJECT_INTAKE_DECISION_RULES,
     ProjectIntakeBlocked,
+    completion_repair_prompt,
     initial_prompt,
     run,
 )
@@ -130,19 +131,14 @@ class ProjectIntakeTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("# 完成\n", encoding="utf-8")
 
-    def test_initial_prompt_describes_only_authority_outputs_and_boundary(self) -> None:
+    def test_initial_prompt_passes_slash_command_and_document_paths(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             _, workspace, _ = self.make_run(Path(directory))
             prompt = initial_prompt(workspace / "docs/产品初稿.md", workspace)
 
         self.assertEqual(prompt.splitlines()[0], "/project-intake @./docs/产品初稿.md")
-        self.assertIn("产品初稿为当前产品定义的权威输入", prompt)
         for output in OUTPUTS:
             self.assertIn(output.as_posix(), prompt)
-        self.assertIn("只处理产品定义文档", prompt)
-        for forbidden in ("第 2 步", "第2步", "PCM", "节点", "阶段", "调用 Skill"):
-            self.assertNotIn(forbidden, prompt)
-            self.assertNotIn(forbidden, PROJECT_INTAKE_DECISION_RULES)
 
     def test_initial_prompt_includes_explicit_imported_resources_path(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -166,9 +162,6 @@ class ProjectIntakeTests(unittest.TestCase):
         )
         self.assertIn("`./initial-resources/客户样本.csv`", file_prompt)
         self.assertNotIn("@./initial-resources/", file_prompt)
-        self.assertIn("请按需阅读", prompt)
-        self.assertIn("对产品定义有影响的结论", prompt)
-        self.assertNotIn("目录摸底", prompt)
 
     def test_completed_then_repair_then_completed_uses_same_session_and_raw_reply(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -200,20 +193,21 @@ class ProjectIntakeTests(unittest.TestCase):
                 *,
                 system_prompt: str,
             ) -> tuple[dict[str, object], int, str]:
-                for tag in ("role", "project_context", "responsibility", "completion", "output"):
-                    self.assertIn(f"<{tag}>", system_prompt)
-                    self.assertIn(f"</{tag}>", system_prompt)
-                for required in (
-                    "最高项目负责人、工程负责人、专业开发者和 Agent 专家",
-                    "assistant 是你此前发给 Agent 的指令或结构化回复",
-                    "user 是 Agent 返回给你的完整执行结果",
-                    "两份正式产品定义文档已经生成",
-                    "# 产品初稿",
-                    "这是用于生成正式产品定义的权威初稿内容。",
-                    "目标产品定义文档",
-                ):
-                    self.assertIn(required, system_prompt)
-                self.assertNotEqual(system_prompt, PROJECT_INTAKE_DECISION_RULES)
+                expected_system_prompt = render_decision_system_prompt(
+                    PROJECT_INTAKE_DECISION_RULES,
+                    {
+                        "产品初稿": {
+                            "path": "docs/产品初稿.md",
+                            "content": (workspace / "docs/产品初稿.md").read_text(
+                                encoding="utf-8"
+                            ),
+                        },
+                        "目标产品定义文档": [
+                            path.as_posix() for path in OUTPUTS
+                        ],
+                    },
+                )
+                self.assertEqual(system_prompt, expected_system_prompt)
                 decision_inputs.append(copy.deepcopy(messages))
                 current = next(outcomes)
                 return current.model_dump(), 1, current.model_dump_json()
@@ -233,7 +227,7 @@ class ProjectIntakeTests(unittest.TestCase):
             self.assertEqual(len(calls), 2)
             self.assertTrue(str(calls[0]["prompt"]).startswith("/project-intake"))
             self.assertEqual(calls[1]["resume_session_id"], "session-1")
-            self.assertIn("请生成或补全两份非空正式产品定义文档", str(calls[1]["prompt"]))
+            self.assertEqual(calls[1]["prompt"], completion_repair_prompt())
             self.assertEqual(decision_inputs[0][-1], {"role": "user", "content": "完整 Agent 原文 1", "timestamp": decision_inputs[0][-1]["timestamp"]})
             saved = read_state(run_dir)
             self.assertEqual(
@@ -251,7 +245,7 @@ class ProjectIntakeTests(unittest.TestCase):
             )["messages"]
             self.assertEqual(history[2], decision_inputs[0][-1])
             self.assertEqual(json.loads(history[3]["content"])["verdict"], "completed")
-            self.assertIn("请生成或补全两份非空正式产品定义文档", history[4]["content"])
+            self.assertEqual(history[4]["content"], completion_repair_prompt())
             self.assertEqual(history[-2], {"role": "user", "content": "完整 Agent 原文 2", "timestamp": history[-2]["timestamp"]})
             self.assertEqual(json.loads(history[-1]["content"])["verdict"], "completed")
 

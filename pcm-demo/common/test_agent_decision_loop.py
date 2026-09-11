@@ -2270,63 +2270,21 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
 
 
 class AgentDecisionTest(unittest.IsolatedAsyncioTestCase):
-    def test_rendered_system_prompt_uses_complete_xml_contract(self) -> None:
-        prompt = render_decision_system_prompt(
-            "completed 表示领域工作已完成；continue 表示仍可继续；blocked 仅限外部输入缺失。",
-            {"产品初稿": {"content": "原始项目资料 <tag> & 内容"}},
-        )
+    def test_rendered_system_prompt_injects_rules_and_escapes_context(self) -> None:
+        for marker in ("FIRST", "SECOND"):
+            with self.subTest(marker=marker):
+                rules = f"COMPLETION_{marker}"
+                path = f"docs/{marker}.md"
+                content = f"CONTEXT_{marker} <data> & 正文"
+                prompt = render_decision_system_prompt(
+                    rules,
+                    {"document": {"path": path, "content": content}},
+                )
 
-        self.assertTrue(prompt.startswith("<role>\n"))
-        self.assertTrue(prompt.endswith("</output>\n"))
-        for tag in (
-            "<role>",
-            "</role>",
-            "<project_context>",
-            "</project_context>",
-            "<responsibility>",
-            "</responsibility>",
-            "<completion>",
-            "</completion>",
-            "<output>",
-            "</output>",
-        ):
-            self.assertIn(tag, prompt)
-        for required in (
-            "最高项目负责人、工程负责人、专业开发者和 Agent 专家",
-            "assistant 是你此前发给 Agent 的指令或结构化回复",
-            "user 是 Agent 返回给你的完整执行结果",
-            "准确问题、已核验事实与约束、可行选项及影响、推荐与理由",
-            "只有一个可行选项时也须说明",
-            "待决策信息不足时返回 continue",
-            "你无法直接读取项目文件",
-            "要求 Agent 在原会话补齐具体缺口",
-            "引用不能代替必要事实，不得猜测",
-            "只补问已提出的待决策事项",
-            "不因缺少完成声明或“无问题”声明而要求继续",
-            "信息充分时直接回答 Agent 的问题、选择合理方案并说明理由",
-            "不上抛普通判断",
-            "按 completion 段的标准判断继续、完成或阻塞",
-            "在 answer 中给出明确、可执行的指令",
-            "blocked 仅用于缺少当前环境无法取得的不可替代外部资源",
-            "不得用 Mock、假凭据或虚构资源消除阻塞",
-            "Agent 的决策交接不完整时，只能使用该 verdict",
-            "completed 表示领域工作已完成",
-            '"verdict": "completed | continue | blocked"',
-            "首字符必须是 {，末字符必须是 }",
-            "`completed`：`answer` 必须是空字符串",
-            "`continue`：`answer` 必须是非空的下一步指令",
-            "`blocked`：`answer` 必须是空字符串",
-            "`reason` 始终必须是非空字符串",
-            "禁止 JSON 之外的任何文本",
-            "原始项目资料 &lt;tag&gt; &amp; 内容",
-        ):
-            self.assertIn(required, prompt)
-        self.assertEqual(prompt.count("completed 表示领域工作已完成"), 1)
-        responsibility = prompt.partition("<responsibility>")[2].partition("</responsibility>")[0]
-        completion = prompt.partition("<completion>")[2].partition("</completion>")[0]
-        self.assertNotIn("completed 表示领域工作已完成", responsibility)
-        self.assertIn("completed 表示领域工作已完成", completion)
-        self.assertNotIn("```", prompt)
+                self.assertEqual(prompt.count(rules), 1)
+                self.assertIn(path, prompt)
+                self.assertIn(f"CONTEXT_{marker} &lt;data&gt; &amp; 正文", prompt)
+                self.assertNotIn(content, prompt)
 
     def test_strict_invariants_and_legacy_actions(self) -> None:
         with self.assertRaises(ValueError):

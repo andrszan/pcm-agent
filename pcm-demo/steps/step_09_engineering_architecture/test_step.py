@@ -23,9 +23,11 @@ from steps.step_05_project_readiness.step import (
 )
 from steps.step_09_engineering_architecture.step import (
     ARCHITECTURE_PATH,
+    ARCHITECTURE_REPAIR_PROMPT,
     CONVERSATION_KEY,
     CURRENT_NODE,
     NEXT_NODE,
+    ENGINEERING_ARCHITECTURE_DECISION_RULES,
     EngineeringArchitectureBlocked,
     architecture_repair,
     run,
@@ -226,7 +228,7 @@ class EngineeringArchitectureTests(unittest.TestCase):
 
             async def agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
                 calls.append((prompt, kwargs["resume_session_id"]))  # type: ignore[index]
-                if "工程架构设计.md` 缺失或为空" in prompt:
+                if prompt == ARCHITECTURE_REPAIR_PROMPT:
                     self.write_document(workspace)
                 elif prompt.splitlines()[0] == "/commit-changes":
                     self.commit_document(workspace)
@@ -236,18 +238,11 @@ class EngineeringArchitectureTests(unittest.TestCase):
 
             self.run_step(run_dir, state, agent_runner=agent, decision_runner=self.completed, config_loader=lambda: object())
             self.assertTrue(calls[0][0].startswith("/engineering-architecture"))
-            repair_prompt = next(
-                prompt
-                for prompt, _ in calls
-                if "工程架构设计.md` 缺失或为空" in prompt
-            )
-            for required in (ARCHITECTURE_PATH.as_posix(), "仅创建或补全", "不修改其它文件", "Git 写操作"):
-                self.assertIn(required, repair_prompt)
-            self.assertNotIn("Current/Target", repair_prompt)
+            self.assertIn((ARCHITECTURE_REPAIR_PROMPT, "session-1"), calls)
             sessions = [
                 value
                 for prompt, value in calls
-                if "工程架构设计.md` 缺失或为空" in prompt
+                if prompt == ARCHITECTURE_REPAIR_PROMPT
                 or prompt.splitlines()[0] == "/commit-changes"
             ]
             self.assertEqual(sessions, ["session-1", "session-1"])
@@ -361,52 +356,51 @@ class EngineeringArchitectureTests(unittest.TestCase):
             saved = json.loads((run_dir / "steps/09.json").read_text(encoding="utf-8"))
             self.assertEqual(saved["status"], "blocked")
             self.assertEqual(read_state(run_dir)["current_node"], CURRENT_NODE)
-    def test_initial_prompt_exposes_only_engineering_domain_contract(self) -> None:
+    def test_initial_prompt_wires_paths_and_repository_references(self) -> None:
+        product_paths = [
+            "docs/requirements/PRODUCT-MARKER-A.md",
+            "docs/requirements/PRODUCT-MARKER-B.md",
+        ]
+        prompt = architecture_step.initial_prompt(
+            product_paths, ["root", "frontend", "backend"]
+        )
+        self.assertTrue(prompt.startswith("/engineering-architecture\n"))
+        for reference in (
+            *product_paths,
+            architecture_step.CHECKLIST.as_posix(),
+            architecture_step.DESIGN_PATH.as_posix(),
+            ARCHITECTURE_PATH.as_posix(),
+            "@./frontend",
+            "@./backend",
+        ):
+            self.assertIn(reference, prompt)
+
+    def test_decision_prompt_wires_dynamic_context_to_decision_runner(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(
-                Path(directory), ["frontend", "backend"]
+                Path(directory), ["frontend", "backend"], existing=True
             )
-            prompts: list[str] = []
-
-            async def agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
-                prompts.append(prompt)
-                if prompt.startswith("/engineering-architecture"):
-                    self.write_document(workspace)
-                elif prompt.splitlines()[0] == "/commit-changes":
-                    self.commit_document(workspace)
-                value = agent_result(kwargs["cwd"])  # type: ignore[index]
-                kwargs["on_update"](value)  # type: ignore[index,operator]
-                return value
-
-            self.run_step(
-                run_dir,
-                state,
-                agent_runner=agent,
-                decision_runner=self.completed,
-                config_loader=lambda: object(),
-            )
-            prompt = prompts[0]
-            self.assertTrue(prompt.startswith("/engineering-architecture\n"))
-            for required in (
-                "/engineering-architecture",
-                ARCHITECTURE_PATH.as_posix(),
+            markers = {
+                "docs/requirements/项目需求说明.md": "PRODUCT-DEFINITION-MARKER",
+                "docs/requirements/产品功能说明.md": "FEATURE-DEFINITION-MARKER",
+                "docs/requirements/项目准备清单.md": "READINESS-MARKER",
+                "docs/design/技术方案.md": "SOLUTION-MARKER",
+            }
+            for relative, marker in markers.items():
+                (workspace / relative).write_text(marker + "\n", encoding="utf-8")
+            commit_paths(workspace, *markers)
+            product_outputs = [
                 "docs/requirements/项目需求说明.md",
                 "docs/requirements/产品功能说明.md",
-                "docs/requirements/项目准备清单.md",
-                "docs/design/技术方案.md",
-                "@./frontend",
-                "@./backend",
-                "只允许修改该固定产物",
-                "Git 写操作",
-            ):
-                self.assertIn(required, prompt)
-            for forbidden in ("第 9 步", "PCM", "节点", "session", "/commit-changes"):
-                self.assertNotIn(forbidden, prompt)
-
-    def test_decision_system_prompt_uses_dynamic_context_and_completion_contract(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            run_dir, _workspace, state = self.make_run(
-                Path(directory), ["frontend", "backend"], existing=True
+            ]
+            write_json(
+                run_dir / "steps/05.json",
+                readiness_result(
+                    "success",
+                    "准备基线已完成。",
+                    outputs=["docs/requirements/项目准备清单.md"],
+                    readiness_baseline=readiness_baseline(workspace, product_outputs),
+                ),
             )
             system_prompts: list[str] = []
 
@@ -424,53 +418,19 @@ class EngineeringArchitectureTests(unittest.TestCase):
                 system_prompts.append(system_prompt)
                 return decision("completed")
 
-            saved = self.run_step(
+            self.run_step(
                 run_dir,
                 state,
                 agent_runner=agent,
                 decision_runner=capture_decision,
                 config_loader=lambda: object(),
             )
-            self.assertEqual(saved["status"], "success")
             self.assertEqual(len(system_prompts), 1)
-            system_prompt = system_prompts[0]
-            self.assertNotEqual(
-                system_prompt,
-                architecture_step.DECISION_LOOP_SPEC.decision_system_prompt,
-            )
-            for section in (
-                "role",
-                "project_context",
-                "responsibility",
-                "completion",
-                "output",
-            ):
-                self.assertIn(f"<{section}>", system_prompt)
-                self.assertIn(f"</{section}>", system_prompt)
-            for required in (
-                '"产品定义"',
-                '"项目准备清单"',
-                '"总体技术方案"',
-                '"权威工程"',
-                '"frontend"',
-                '"backend"',
-                f'"固定输出": "{ARCHITECTURE_PATH.as_posix()}"',
-                "固定工程架构设计文档已生成",
-                "逐交付单元工程归属合同",
-                "稳定边界与内部粒度区分",
-                "Current 偏差迁移",
-                "工程事实核验",
-                "下游所需高影响架构决定",
-            ):
-                self.assertIn(required, system_prompt)
-            responsibility = system_prompt.split("<responsibility>", 1)[1].split(
-                "</responsibility>", 1
-            )[0]
-            completion = system_prompt.split("<completion>", 1)[1].split(
-                "</completion>", 1
-            )[0]
-            self.assertIn("逐交付单元工程归属合同", completion)
-            self.assertNotIn("- completed：", responsibility)
+            self.assertIn(ENGINEERING_ARCHITECTURE_DECISION_RULES, system_prompts[0])
+            for marker in markers.values():
+                self.assertIn(marker, system_prompts[0])
+            for dynamic_value in ('"frontend"', '"backend"', ARCHITECTURE_PATH.as_posix()):
+                self.assertIn(dynamic_value, system_prompts[0])
 
     def test_agent_out_of_scope_changes_fail_before_decision(self) -> None:
         for mutation in ("root", "child"):

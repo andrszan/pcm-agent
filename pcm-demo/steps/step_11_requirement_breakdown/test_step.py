@@ -24,9 +24,11 @@ from steps.step_05_project_readiness.step import (
 from steps.step_11_requirement_breakdown.step import (
     ARCHITECTURE_OUTPUT_PATH,
     BACKLOG_PATH,
+    BACKLOG_REPAIR_PROMPT,
     CONVERSATION_KEY,
     CURRENT_NODE,
     NEXT_NODE,
+    REQUIREMENT_BREAKDOWN_DECISION_RULES,
     RequirementBreakdownBlocked,
     UI_UX_FRAMEWORK_PATH,
     backlog_repair,
@@ -82,10 +84,8 @@ class RequirementBreakdownTests(unittest.TestCase):
         if ui_ux_applicable:
             (workspace / UI_UX_FRAMEWORK_PATH).parent.mkdir(parents=True)
             (workspace / UI_UX_FRAMEWORK_PATH).write_text(
-                "# UI/UX\n\n## 已确认 Target\n- 运营工作台是既有产品表面，后续需求从此入口演进。\n\n"
-                "## 默认 Target\n- 窄屏将上下文导航收纳为抽屉，同时保留当前对象与返回关系。\n"
-                "  - 依据：现有任务需要保持对象上下文。\n"
-                "  - 重新评估条件：新增跨角色工作台或主要入口。\n",
+                "# UI/UX\n\nUIUX-CONFIRMED-MARKER\nUIUX-DEFAULT-MARKER\n"
+                "UIUX-RATIONALE-MARKER\nUIUX-REVIEW-CONDITION-MARKER\n",
                 encoding="utf-8",
             )
         if existing:
@@ -207,7 +207,7 @@ class RequirementBreakdownTests(unittest.TestCase):
             calls: list[tuple[str, str | None]] = []
             async def agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
                 calls.append((prompt, kwargs["resume_session_id"]))  # type: ignore[index]
-                if prompt.startswith("固定 Backlog 文档缺失"):
+                if prompt == BACKLOG_REPAIR_PROMPT:
                     self.write_document(workspace)
                 elif prompt.splitlines()[0] == "/commit-changes":
                     self.commit_document(workspace)
@@ -215,7 +215,8 @@ class RequirementBreakdownTests(unittest.TestCase):
                 kwargs["on_update"](value)  # type: ignore[index,operator]
                 return value
             self.run_step(run_dir, state, agent_runner=agent, decision_runner=self.completed, config_loader=lambda: object())
-            self.assertEqual([session for prompt, session in calls if prompt.startswith("固定 Backlog 文档缺失") or prompt.splitlines()[0] == "/commit-changes"], ["session-1", "session-1"])
+            self.assertEqual([session for prompt, session in calls if prompt == BACKLOG_REPAIR_PROMPT or prompt.splitlines()[0] == "/commit-changes"], ["session-1", "session-1"])
+            self.assertIn((BACKLOG_REPAIR_PROMPT, "session-1"), calls)
 
     def test_boundary_symlink_and_clean_untracked_document_cannot_succeed(self) -> None:
         for mutation in ("root", "child", "symlink"):
@@ -358,45 +359,58 @@ class RequirementBreakdownTests(unittest.TestCase):
                     decision_prompts.append(system_prompt)
                     return decision("completed")
 
-                self.run_step(
-                    run_dir,
-                    state,
-                    agent_runner=agent,
-                    decision_runner=decide,
-                    config_loader=lambda: object(),
-                )
+                with (
+                    patch.object(breakdown_step, "initial_prompt", wraps=breakdown_step.initial_prompt) as build_initial,
+                    patch.object(
+                        breakdown_step, "render_decision_system_prompt",
+                        wraps=breakdown_step.render_decision_system_prompt,
+                    ) as build_decision,
+                ):
+                    self.run_step(
+                        run_dir,
+                        state,
+                        agent_runner=agent,
+                        decision_runner=decide,
+                        config_loader=lambda: object(),
+                    )
+                self.assertIs(build_initial.call_args.args[2], applicable)
                 prompt = prompts[0]
+                self.assertEqual(prompt, breakdown_step.initial_prompt(*build_initial.call_args.args))
+                self.assertTrue(decision_prompts)
+                self.assertEqual(
+                    decision_prompts[0],
+                    breakdown_step.render_decision_system_prompt(*build_decision.call_args.args),
+                )
+                experience_context = build_decision.call_args.args[1]["产品级体验框架"]
+                if not applicable:
+                    self.assertIsInstance(experience_context, str)
+                    self.assertTrue(experience_context.strip())
                 self.assertTrue(prompt.startswith("/requirement-breakdown\n"))
                 for required in (
-                    ARCHITECTURE_OUTPUT_PATH.as_posix(), BACKLOG_PATH.as_posix(),
-                    "权威实际工程", "不得写入需求开发状态", "不得执行 Git 写操作",
+                    "docs/requirements/项目需求说明.md",
+                    "docs/requirements/产品功能说明.md",
+                    "docs/requirements/项目准备清单.md",
+                    "docs/design/技术方案.md",
+                    ARCHITECTURE_OUTPUT_PATH.as_posix(),
+                    BACKLOG_PATH.as_posix(),
+                    "@./frontend",
                 ):
                     self.assertIn(required, prompt)
-                if applicable:
-                    self.assertIn(UI_UX_FRAMEWORK_PATH.as_posix(), prompt)
-                else:
-                    self.assertIn("当前产品不适用。", prompt)
-                for forbidden in ("第 11 步", "PCM", "节点", "session", "Skill", "/commit-changes"):
-                    self.assertNotIn(forbidden, prompt)
-
                 self.assertTrue(decision_prompts)
                 for system_prompt in decision_prompts:
-                    for required in (
-                        "固定 Backlog 文档已生成",
-                        "Backlog、工程事实核验或需求拆分仍可在当前项目中补全",
-                        '"产品级体验框架"',
+                    self.assertIn(REQUIREMENT_BREAKDOWN_DECISION_RULES, system_prompt)
+                if applicable:
+                    self.assertIn(UI_UX_FRAMEWORK_PATH.as_posix(), prompt)
+                    for marker in (
+                        "UIUX-CONFIRMED-MARKER",
+                        "UIUX-DEFAULT-MARKER",
+                        "UIUX-RATIONALE-MARKER",
+                        "UIUX-REVIEW-CONDITION-MARKER",
                     ):
-                        self.assertIn(required, system_prompt)
-                    self.assertNotIn("Skill", system_prompt)
-                    if applicable:
-                        self.assertIn("运营工作台是既有产品表面", system_prompt)
-                        self.assertIn("窄屏将上下文导航收纳为抽屉", system_prompt)
-                        self.assertIn("现有任务需要保持对象上下文", system_prompt)
-                        self.assertIn("新增跨角色工作台或主要入口", system_prompt)
-                    else:
-                        self.assertIn("当前产品没有适用的产品级体验框架文档", system_prompt)
-                        self.assertNotIn("运营工作台是既有产品表面", system_prompt)
-                        self.assertNotIn("窄屏将上下文导航收纳为抽屉", system_prompt)
+                        self.assertIn(marker, decision_prompts[0])
+                else:
+                    self.assertNotIn(UI_UX_FRAMEWORK_PATH.as_posix(), prompt)
+                    self.assertNotIn("UIUX-CONFIRMED-MARKER", decision_prompts[0])
 
         for invalid_step in ("02", "05", "07", "09", "10"):
             with self.subTest(invalid_step=invalid_step), tempfile.TemporaryDirectory() as directory:

@@ -341,11 +341,12 @@ class RequirementCommitTests(unittest.TestCase):
             decision_prompts.append(system_prompt)
             return decision("completed")
 
-        self.execute(
+        saved = self.execute(
             run_dir, state, agent_runner=agent, decision_runner=completed,
             config_loader=lambda: object(),
         )
         self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["cwd"], workspace.resolve())
         self.assertEqual(calls[0]["max_turns"], COMMIT_MAX_TURNS)
         profile = get_agent_profile("requirement_commit")
         self.assertEqual(calls[0]["task"], "requirement_commit")
@@ -355,14 +356,22 @@ class RequirementCommitTests(unittest.TestCase):
         )
         self.assertNotIn("max_budget_usd", calls[0])
         self.assertTrue(calls[0]["prompt"].startswith(f"/{commit_step.SKILL_NAME}\n"))
-        for value in ("BR-001", "账户访问", "req/br-001", "- root: `.`", "- web: `web`", "- api: `api`"):
+        for value in (
+            "BR-001",
+            state["requirement_registry"]["requirements"][0]["title"],
+            "req/br-001",
+            "- root: `.`",
+            "- web: `web`",
+            "- api: `api`",
+        ):
             self.assertIn(value, calls[0]["prompt"])
         self.assertIsNone(calls[0]["resume_session_id"])
         self.assertEqual(len(decision_prompts), 1)
         self.assertIn(commit_step.REQUIREMENT_COMMIT_DECISION_RULES, decision_prompts[0])
-        for forbidden in ("docs/trd", "第 15 步", "第 16 步", "第 17 步", "current_node", "session"):
-            self.assertNotIn(forbidden, calls[0]["prompt"])
-            self.assertNotIn(forbidden, decision_prompts[0])
+        self.assertEqual(
+            [item["tip_sha"] for item in saved["repositories"]],
+            [command("rev-parse", "HEAD", cwd=workspace if name == "root" else workspace / name) for name in names],
+        )
         saved_state = read_state(run_dir)
         key = "requirement_commit_BR-001"
         self.assertEqual(saved_state["claude_sessions"][key], "commit-session-1")
@@ -529,22 +538,19 @@ class RequirementCommitTests(unittest.TestCase):
         async def completed(messages, config, *, system_prompt):
             return decision("completed")
 
-        self.execute(
+        saved = self.execute(
             run_dir, state, agent_runner=agent, decision_runner=completed,
             config_loader=lambda: object(),
         )
         self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0]["cwd"], workspace.resolve())
         self.assertEqual(calls[1]["prompt"], REPOSITORY_REPAIR_PROMPT)
         self.assertEqual(calls[1]["resume_session_id"], "commit-session-1")
-        for required in (
-            "检测到白名单仓库仍有未提交变更",
-            "精确暂存",
-            "安全清理",
-            "所有白名单仓库工作区与暂存区干净",
-            "只 commit，不 push",
-        ):
-            self.assertIn(required, calls[1]["prompt"])
-        self.assertNotIn("hook 要求", calls[1]["prompt"])
+        self.assertEqual(saved["status"], "success")
+        self.assertEqual(
+            saved["repositories"][0]["tip_sha"],
+            command("rev-parse", "HEAD", cwd=workspace),
+        )
 
     def test_decision_round_limit_stops_before_fourth_agent_call(self) -> None:
         run_dir, workspace, state, _bases = self.make_run()

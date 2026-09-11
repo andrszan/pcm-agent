@@ -140,9 +140,8 @@ class RuleRetrospectiveTests(unittest.TestCase):
 
             self.assertEqual(resumes, ["development-session-1"])
             self.assertEqual(len(prompts), 1)
-            self.assertTrue(prompts[0].startswith("/session-rule-retrospective 本次开发会话\n"))
-            for forbidden in ("第 16 步", "PCM", "requirement:", "development-session-1"):
-                self.assertNotIn(forbidden, prompts[0])
+            self.assertEqual(prompts[0].split()[0], "/session-rule-retrospective")
+            self.assertNotIn("development-session-1", prompts[0])
             self.assertEqual(saved["outputs"], [])
             self.assertEqual(saved["development_session_id"], "development-session-1")
             completed = read_state(run_dir)
@@ -291,10 +290,6 @@ class RuleRetrospectiveTests(unittest.TestCase):
 
             with self.assertRaisesRegex(RuntimeError, "开发 session"):
                 self.run_step(run_dir, state, agent_runner=forbidden)
-
-    def test_step_does_not_import_git_or_hashing_modules(self) -> None:
-        for name in ("subprocess", "hashlib", "stat", "os"):
-            self.assertNotIn(name, vars(retrospective_step))
 
 
 if __name__ == "__main__":

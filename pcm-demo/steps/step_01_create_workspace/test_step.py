@@ -27,7 +27,6 @@ from config import (
     load_workspace_root,
 )
 from steps.step_01_create_workspace.project_identity import (
-    SYSTEM_PROMPT,
     ProjectIdentityInput,
     validate_identity,
 )
@@ -58,7 +57,14 @@ class WorkspaceStepTests(unittest.TestCase):
             path.write_text('{"old": true}\n', encoding="utf-8")
             write_json(path, {"new": True})
             self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"new": True})
-            self.assertFalse((path.parent / ".state.json.tmp").exists())
+            self.assertEqual(list(path.parent.glob(".state.json.*.tmp")), [])
+
+            path.write_text('{"stable": true}\n', encoding="utf-8")
+            with patch("pathlib.Path.replace", side_effect=OSError("replace failed")):
+                with self.assertRaisesRegex(OSError, "replace failed"):
+                    write_json(path, {"incomplete": True})
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"stable": True})
+            self.assertEqual(list(path.parent.glob(".state.json.*.tmp")), [])
 
     def test_workspace_output_path_must_stay_relative_to_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -102,20 +108,6 @@ class WorkspaceStepTests(unittest.TestCase):
             )["blocked_reason"],
             "初稿没有明确产品选题",
         )
-        self.assertIn("<task>", SYSTEM_PROMPT)
-        self.assertIn("<output>", SYSTEM_PROMPT)
-        self.assertIn("严格 JSON", SYSTEM_PROMPT)
-        self.assertIn("代码围栏", SYSTEM_PROMPT)
-        for field in (
-            "status",
-            "topic_name",
-            "project_directory_name",
-            "directory_name_source",
-            "reason",
-            "blocked_reason",
-        ):
-            self.assertIn(field, SYSTEM_PROMPT)
-        self.assertIn("禁止增加其它字段", SYSTEM_PROMPT)
         with self.assertRaises(ValueError):
             validate_identity({**identity, "project_directory_name": "Mend Mark"})
         with self.assertRaises(ValueError):

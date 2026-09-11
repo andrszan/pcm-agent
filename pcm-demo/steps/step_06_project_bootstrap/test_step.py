@@ -7,34 +7,39 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 DEMO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(DEMO_ROOT))
 
 from common.agent_decision_loop import AgentExecutionFailure, ResumeMessage
 from common.claude_agent import ClaudeRunResult
+from common.decision import render_decision_system_prompt
 from common.files import write_json
 from common.state import read_state, write_state
 from steps.step_01_create_workspace import initialize_root_repository
 from steps.step_03_foundation_selection.step import TemplateSelection
 from steps.step_05_project_readiness.step import (
+    product_output_contents,
     readiness_baseline,
     result as readiness_result,
 )
 from steps.step_06_project_bootstrap.step import (
-    BRAND_ASSETS_DECISION_LOOP_SPEC,
+    BOOTSTRAP_DECISION_RULES,
+    BRAND_ASSETS_DECISION_RULES,
     BRAND_ASSETS_MAX_TURNS,
     COVERAGE_ARTIFACT_REPAIR_PROMPT,
     CURRENT_NODE,
-    DECISION_LOOP_SPEC,
     LEGACY_COMPLETION_MESSAGES,
     NEXT_NODE,
     PROJECT_BOOTSTRAP_MAX_TURNS,
     README_REPAIR_PROMPT,
-    TAILWIND_THEME_DECISION_LOOP_SPEC,
+    TAILWIND_THEME_DECISION_RULES,
     TAILWIND_THEME_MAX_TURNS,
     ProjectBootstrapBlocked,
     brand_assets_initial_prompt,
+    initial_prompt,
+    prompt_assembly,
     result,
     run,
     tailwind_theme_initial_prompt,
@@ -243,13 +248,17 @@ class ProjectBootstrapTests(unittest.TestCase):
                 system_prompts.append(system_prompt)
                 return decision("completed")
 
-            outcome = self.run_step(
-                run_dir,
-                state,
-                agent_runner=fake_agent,
-                decision_runner=completed,
-                config_loader=lambda: object(),
-            )
+            with patch(
+                "steps.step_06_project_bootstrap.step.render_decision_system_prompt",
+                wraps=render_decision_system_prompt,
+            ) as render_prompt:
+                outcome = self.run_step(
+                    run_dir,
+                    state,
+                    agent_runner=fake_agent,
+                    decision_runner=completed,
+                    config_loader=lambda: object(),
+                )
             self.assertEqual(outcome["outputs"], ["frontend"])
             self.assertIs(outcome["tailwind_theme"], True)
             self.assertIn("基础品牌资产已完成适用接入", outcome["summary"])
@@ -265,110 +274,96 @@ class ProjectBootstrapTests(unittest.TestCase):
             self.assertEqual(BRAND_ASSETS_MAX_TURNS, 9999)
             self.assertEqual(calls[3]["max_turns"], BRAND_ASSETS_MAX_TURNS)
 
+            product_outputs = [
+                "docs/requirements/项目需求说明.md",
+                "docs/requirements/产品功能说明.md",
+            ]
             bootstrap_prompt = calls[0]["prompt"]
-            self.assertTrue(bootstrap_prompt.startswith("/project-bootstrap\n"))
-            self.assertIn("docs/requirements/项目需求说明.md", bootstrap_prompt)
-            self.assertIn("@./frontend", bootstrap_prompt)
-            for required in (
+            self.assertEqual(
+                bootstrap_prompt,
+                initial_prompt(
+                    product_outputs,
+                    json.loads(
+                        (run_dir / "steps/04.json").read_text(encoding="utf-8")
+                    ),
+                    "docs/requirements/项目准备清单.md",
+                    ".pcm/runtime.json",
+                ),
+            )
+            self.assertEqual(bootstrap_prompt.splitlines()[0], "/project-bootstrap")
+            for reference in (
+                "@./docs/requirements/项目需求说明.md",
+                "@./docs/requirements/产品功能说明.md",
+                "@./docs/requirements/项目准备清单.md",
+                "@./frontend",
                 "@./.pcm/runtime.json",
-                "组装白名单",
-                "复用既有资源绑定",
-                "不重新选择、创建、派生、轮换或替换凭据",
-                "不选择项目专属主题",
             ):
-                self.assertIn(required, bootstrap_prompt)
-            for forbidden in ("git_url", "origin", "第 6 步", "PCM", "节点", "阶段", "调用Skill"):
-                self.assertNotIn(forbidden, bootstrap_prompt)
+                self.assertIn(reference, bootstrap_prompt)
+            for hidden in ("file:///templates.git", "git_url", "origin"):
+                self.assertNotIn(hidden, bootstrap_prompt)
             self.assertEqual(calls[0]["max_turns"], PROJECT_BOOTSTRAP_MAX_TURNS)
             self.assertNotIn("max_budget_usd", calls[0])
 
             theme_prompt = calls[2]["prompt"]
-            self.assertEqual(theme_prompt, tailwind_theme_initial_prompt([
-                "docs/requirements/项目需求说明.md",
-                "docs/requirements/产品功能说明.md",
-            ]))
             self.assertEqual(
                 theme_prompt,
-                "/tailwind-theme\n"
-                "请依据以下权威产品定义和实际前端，完成项目风格定制：\n"
-                "- @./docs/requirements/项目需求说明.md\n"
-                "- @./docs/requirements/产品功能说明.md\n"
-                "- @./frontend",
+                tailwind_theme_initial_prompt(product_outputs),
             )
-            for forbidden in ("git_url", "origin", "第 6 步", "PCM", "节点", "阶段", "session"):
-                self.assertNotIn(forbidden, theme_prompt)
+            self.assertEqual(theme_prompt.splitlines()[0], "/tailwind-theme")
+            for reference in (
+                "@./docs/requirements/项目需求说明.md",
+                "@./docs/requirements/产品功能说明.md",
+                "@./frontend",
+            ):
+                self.assertIn(reference, theme_prompt)
 
             brand_prompt = calls[3]["prompt"]
             self.assertEqual(
                 brand_prompt,
-                brand_assets_initial_prompt(
-                    [
-                        "docs/requirements/项目需求说明.md",
-                        "docs/requirements/产品功能说明.md",
-                    ],
-                    ".pcm/runtime.json",
-                ),
+                brand_assets_initial_prompt(product_outputs, ".pcm/runtime.json"),
             )
-            for required in (
-                "/media-assets",
-                "页面品牌标识和浏览器 favicon",
-                "共享最多 8 次生成调用",
-                "首次生成包含在内",
-                "恢复时沿用已有候选和已用次数",
-                "不重新分配额度",
-                "生成服务不可用或额度耗尽仍无合适结果",
-                "简洁 SVG 或文字标识兜底",
-                "实际查看、质量检查",
+            self.assertEqual(brand_prompt.splitlines()[0], "/media-assets")
+            for reference in (
+                "@./docs/requirements/项目需求说明.md",
+                "@./docs/requirements/产品功能说明.md",
+                "@./frontend",
                 "@./.pcm/runtime.json",
             ):
-                self.assertIn(required, brand_prompt)
-            for forbidden in ("第 6 步", "PCM", "节点", "阶段", "程序计数", "预算状态"):
-                self.assertNotIn(forbidden, brand_prompt)
+                self.assertIn(reference, brand_prompt)
 
-            self.assertEqual(len(system_prompts), 4)
+            assembly = json.loads(
+                (run_dir / "steps/04.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(len(render_prompt.call_args_list), 3)
+            bootstrap_rules, bootstrap_context = render_prompt.call_args_list[0].args
+            theme_rules, theme_context = render_prompt.call_args_list[1].args
+            brand_rules, brand_context = render_prompt.call_args_list[2].args
+            self.assertEqual(bootstrap_rules, BOOTSTRAP_DECISION_RULES)
+            self.assertEqual(theme_rules, TAILWIND_THEME_DECISION_RULES)
+            self.assertEqual(brand_rules, BRAND_ASSETS_DECISION_RULES)
+            self.assertEqual(
+                bootstrap_context["产品定义"],
+                product_output_contents(workspace, product_outputs),
+            )
+            self.assertEqual(
+                bootstrap_context["组装白名单事实"], prompt_assembly(assembly)
+            )
+            self.assertEqual(theme_context["实际前端"], ["frontend"])
+            self.assertEqual(brand_context["实际前端"], ["frontend"])
+            self.assertEqual(
+                brand_context["产品本机运行配置"], {"path": ".pcm/runtime.json"}
+            )
+            rendered_prompts = [
+                render_decision_system_prompt(*call.args)
+                for call in render_prompt.call_args_list
+            ]
+            self.assertEqual(
+                system_prompts,
+                [rendered_prompts[0], rendered_prompts[0], *rendered_prompts[1:]],
+            )
             for system_prompt in system_prompts:
-                for tag in ("role", "project_context", "responsibility", "completion", "output"):
-                    self.assertIn(f"<{tag}>", system_prompt)
-                    self.assertIn(f"</{tag}>", system_prompt)
-                self.assertNotIn("file:///templates.git", system_prompt)
-                self.assertNotIn("git_url", system_prompt)
-                self.assertNotIn("origin", system_prompt)
-            for bootstrap_system_prompt in system_prompts[:2]:
-                for required in (
-                    "产品根 README 和各适用工程的项目身份",
-                    "已完成的项目准备基线",
-                    "配置迁移与既有资源边界",
-                    "项目化或上述验证尚未完成",
-                ):
-                    self.assertIn(required, bootstrap_system_prompt)
-                self.assertNotEqual(
-                    bootstrap_system_prompt, DECISION_LOOP_SPEC.decision_system_prompt
-                )
-            theme_system_prompt = system_prompts[2]
-            for required in (
-                "项目风格定制已完成",
-                '"frontend"',
-            ):
-                self.assertIn(required, theme_system_prompt)
-            for forbidden in ("主题合同", "授权范围", "preset", "tracking", "完整基础视觉主题 token"):
-                self.assertNotIn(forbidden, theme_system_prompt)
-            self.assertNotEqual(
-                theme_system_prompt,
-                TAILWIND_THEME_DECISION_LOOP_SPEC.decision_system_prompt,
-            )
-            brand_system_prompt = system_prompts[3]
-            for required in (
-                "基础品牌资产已交付并完成适用接入",
-                "仍有明确未完成事项",
-                '"frontend"',
-            ):
-                self.assertIn(required, brand_system_prompt)
-            for forbidden in ("读取文件", "查看图片", "逐项证明", "8 次", "生成次数"):
-                self.assertNotIn(forbidden, brand_system_prompt)
-            self.assertNotEqual(
-                brand_system_prompt,
-                BRAND_ASSETS_DECISION_LOOP_SPEC.decision_system_prompt,
-            )
+                for hidden in ("file:///templates.git", "git_url", "origin"):
+                    self.assertNotIn(hidden, system_prompt)
 
             saved = read_state(run_dir)
             self.assertEqual((saved["step"], saved["current_node"]), (7, NEXT_NODE))
@@ -844,8 +839,12 @@ class ProjectBootstrapTests(unittest.TestCase):
                 kwargs["on_update"](current)  # type: ignore[index, operator]
                 return current
 
+            decision_calls = 0
+
             async def first_decision(messages, config, *, system_prompt):
-                if "项目风格定制已完成" in system_prompt:
+                nonlocal decision_calls
+                decision_calls += 1
+                if decision_calls == 2:
                     return decision(
                         "blocked",
                         reason="缺少不可替代的授权品牌资料",
@@ -862,6 +861,7 @@ class ProjectBootstrapTests(unittest.TestCase):
                     config_loader=lambda: object(),
                 )
             self.assertEqual(len(calls), 2)
+            self.assertEqual(decision_calls, 2)
             self.assertTrue(calls[0]["prompt"].startswith("/project-bootstrap\n"))
             self.assertTrue(calls[1]["prompt"].startswith("/tailwind-theme\n"))
 
@@ -1025,8 +1025,12 @@ class ProjectBootstrapTests(unittest.TestCase):
                 kwargs["on_update"](current)  # type: ignore[index, operator]
                 return current
 
+            decision_calls = 0
+
             async def block_brand(messages, config, *, system_prompt):
-                if "基础品牌资产已交付" in system_prompt:
+                nonlocal decision_calls
+                decision_calls += 1
+                if decision_calls == 3:
                     return decision(
                         "blocked",
                         reason="缺少不可替代的品牌决定",
@@ -1046,6 +1050,7 @@ class ProjectBootstrapTests(unittest.TestCase):
                 [call["prompt"].splitlines()[0] for call in calls],
                 ["/project-bootstrap", "/tailwind-theme", "/media-assets"],
             )
+            self.assertEqual(decision_calls, 3)
 
             resumed_state = read_state(run_dir)
             resumed_state.update(

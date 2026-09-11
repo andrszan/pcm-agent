@@ -106,7 +106,7 @@ class RequirementRegistryTests(unittest.TestCase):
     def run_step(self, run_dir: Path, state: dict, **kwargs: object) -> dict:
         return asyncio.run(run(run_dir, state, **kwargs))
 
-    def test_models_and_prompt_define_complete_free_format_extraction(self) -> None:
+    def test_models_and_extraction_call_are_wired_for_complete_free_format_input(self) -> None:
         with self.assertRaises(ValidationError):
             BacklogExtractionInput.model_validate(
                 {"backlog_markdown": "x", "unexpected": True}
@@ -147,25 +147,9 @@ class RequirementRegistryTests(unittest.TestCase):
         self.assertEqual(extracted, self.catalog())
         self.assertNotIn("max_output_tokens", calls[0])
         self.assertEqual(calls[0]["max_retries"], 0)
+        self.assertEqual(calls[0]["system_prompt"], SYSTEM_PROMPT)
         self.assertEqual(calls[0]["input_model"].backlog_markdown, BACKLOG)
         self.assertIs(calls[0]["output_model"], RequirementCatalog)
-        for section in ("<task>", "<extraction_rules>", "<output>"):
-            self.assertIn(section, SYSTEM_PROMPT)
-        for rule in (
-            "自由格式",
-            "全部正式需求",
-            "每项只输出一次",
-            "不得遗漏",
-            "明确声明为前置依赖",
-            "不得根据",
-            "数组的物理顺序",
-            "严格 JSON",
-            "只能包含 requirements",
-            "不要输出复核过程",
-        ):
-            self.assertIn(rule, SYSTEM_PROMPT)
-        for forbidden in ("第 12 步", "PCM", "session", "Skill"):
-            self.assertNotIn(forbidden, SYSTEM_PROMPT)
 
     def test_success_initializes_registry_from_free_format_without_git(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

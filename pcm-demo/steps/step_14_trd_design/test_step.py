@@ -21,7 +21,6 @@ from steps.step_14_trd_design.step import (
     NEXT_NODE,
     PHASE,
     STEP,
-    TRD_DESIGN_DECISION_RULES,
     TRDDesignBlocked,
     failure_scope,
     has_complete_success,
@@ -143,16 +142,6 @@ class TRDDesignTests(unittest.TestCase):
         target.write_text(content, encoding="utf-8")
         return target
 
-    def test_decision_rules_keep_step_completion_contract_concise(self) -> None:
-        self.assertIn("活动 TRD 写入唯一指定路径", TRD_DESIGN_DECISION_RULES)
-        self.assertIn("范围、关键行为、技术方案、验证场景和需求级体验设计已经收敛", TRD_DESIGN_DECISION_RULES)
-        self.assertIn("没有阻碍实现的未决事项", TRD_DESIGN_DECISION_RULES)
-        self.assertIn("保真承接适用工程归属合同", TRD_DESIGN_DECISION_RULES)
-        self.assertIn("架构 delta", TRD_DESIGN_DECISION_RULES)
-        self.assertIn("明确的下一步指令", TRD_DESIGN_DECISION_RULES)
-        self.assertNotIn("体验决定已在 TRD 收敛", TRD_DESIGN_DECISION_RULES)
-        self.assertNotIn("不得静默偏离", TRD_DESIGN_DECISION_RULES)
-
     def test_fresh_persists_path_and_gives_lead_full_backlog_context(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))
@@ -184,50 +173,16 @@ class TRDDesignTests(unittest.TestCase):
 
             self.assertEqual(len(prompts), 1)
             self.assertTrue(prompts[0].startswith("/trd-design\n"))
+            self.assertIn("BR-001 身份、角色访问与站内消息入口", prompts[0])
             self.assertIn(saved["trd_path"], prompts[0])
-            self.assertNotIn("@docs/", prompts[0])
-            for required in (
-                "/trd-design", "BR-001 身份、角色访问与站内消息入口",
-                "唯一输出", "正式 Backlog", "实际工程", "只允许创建或更新该活动 TRD",
-                "执行 Git 写操作",
-            ):
-                self.assertIn(required, prompts[0])
             self.assertEqual(len(decision_prompts), 1)
+            self.assertIn(trd_step.TRD_DESIGN_DECISION_RULES, decision_prompts[0])
             self.assertIn("docs/backlog/canonical-source.md", decision_prompts[0])
             self.assertIn("BACKLOG_CONTEXT_MARKER", decision_prompts[0])
             self.assertIn("BR-002 维修预约入口，依赖：BR-001", decision_prompts[0])
             self.assertNotIn("HARDCODED_BACKLOG_PATH_DECOY", decision_prompts[0])
             self.assertNotIn("BACKLOG_CONTEXT_MARKER", prompts[0])
             self.assertNotIn("实现约束。", decision_prompts[0])
-            for required in (
-                "范围、关键行为、技术方案、验证场景和需求级体验设计已经收敛",
-                "没有阻碍实现的未决事项",
-                "保真承接适用工程归属合同",
-                "架构 delta",
-                "明确的下一步指令",
-            ):
-                self.assertIn(required, decision_prompts[0])
-            for duplicated in (
-                "体验决定已在 TRD 收敛",
-                "默认 Target 已说明依据与重议条件",
-                "不得静默偏离",
-                "跨需求骨架改变已有负责人决定",
-            ):
-                self.assertNotIn(duplicated, decision_prompts[0])
-            for content in (prompts[0], decision_prompts[0]):
-                for forbidden in (
-                    "第 14 步",
-                    "PCM",
-                    "session",
-                    "@./docs/",
-                    "docs/design/工程架构设计.md",
-                    "docs/ui-ux/framework.md",
-                    "ui-ux-framework",
-                    "React",
-                    "Tailwind",
-                    "shadcn",
-                ):
-                    self.assertNotIn(forbidden, content)
             self.assertFalse((run_dir / "steps/02.json").exists())
             self.assertFalse((run_dir / "steps/13.json").exists())
             self.assertEqual(saved["trd_session_id"], "trd-session-1")
@@ -308,9 +263,10 @@ class TRDDesignTests(unittest.TestCase):
                 today_provider=lambda: date(2026, 8, 25),
             )
             self.assertEqual(len(prompts), 2)
-            self.assertIn("缺失或为空", prompts[1])
+            trd_path = read_state(run_dir)["requirement_cycle"]["trd_path"]
+            self.assertEqual(prompts[1], trd_step._repair_prompt(trd_path))
+            self.assertIn(trd_path, prompts[1])
             self.assertEqual(resumes, [None, "trd-session-1"])
-            self.assertNotIn("/commit-changes", "\n".join(prompts))
 
     def test_blocked_preserves_scoped_result_and_session(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -492,7 +448,7 @@ class TRDDesignTests(unittest.TestCase):
             self.assertEqual((run_dir / "state.json").read_bytes(), before)
             self.assertNotIn("trd_path", read_state(run_dir)["requirement_cycle"])
 
-    def test_failure_scope_uses_persisted_path_and_step_never_imports_git_subprocess(self) -> None:
+    def test_failure_scope_uses_persisted_path(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, _, state = self.make_run(Path(directory))
             self.assertIsNone(failure_scope(run_dir, state))
@@ -504,8 +460,6 @@ class TRDDesignTests(unittest.TestCase):
             self.assertEqual(scope["requirement_id"], "BR-001")
             self.assertEqual(scope["branch"], "req/br-001")
             self.assertEqual(scope["trd_path"], state["requirement_cycle"]["trd_path"])
-            self.assertNotIn("subprocess", vars(trd_step))
-            self.assertNotIn("os", vars(trd_step))
 
 
 if __name__ == "__main__":

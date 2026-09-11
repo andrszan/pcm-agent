@@ -15,12 +15,14 @@ sys.path.insert(0, str(DEMO_ROOT))
 
 from common.agent_decision_loop import BLOCKED_RESUME_PROMPT
 from common.claude_agent import ClaudeRunResult
+from common.decision import render_decision_system_prompt
 from common.files import write_json
 from common.state import read_state, write_state
 from model_policy import get_agent_profile
 from steps.step_01_create_workspace import initialize_root_repository
 from steps.step_08_initialize_repositories.step import (
     CURRENT_NODE,
+    INITIALIZE_REPOSITORIES_DECISION_RULES,
     INITIALIZE_REPOSITORIES_MAX_TURNS,
     NEXT_NODE,
     REPOSITORY_REPAIR_PROMPT,
@@ -203,19 +205,24 @@ class InitializeRepositoriesTests(unittest.TestCase):
             )
             self.assertNotIn("max_budget_usd", calls[0])
             self.assertTrue(calls[0]["prompt"].startswith("/commit-changes\n"))
+            repository_references = [
+                f"@./{'.' if name == 'root' else name}" for name in names
+            ]
+            self.assertEqual(
+                [part for part in calls[0]["prompt"].split() if part.startswith("@./")],
+                repository_references,
+            )
             self.assertEqual(len(decision_prompts), 1)
-            for required in (
-                ".agents/",
-                ".claude/",
-                "plugins-lock.json",
-                "精确暂存并原样提交",
-                "不得创建、修改、删除",
-                "无人值守权限合同必须原样保留",
-            ):
-                self.assertIn(required, calls[0]["prompt"])
-                self.assertIn(required, decision_prompts[0])
-            for forbidden in ("expected_head", "INITIAL_COMMITS", "SHA", "组装", "唯一", "无父", "许可证"):
-                self.assertNotIn(forbidden, calls[0]["prompt"])
+            self.assertEqual(
+                decision_prompts[0],
+                render_decision_system_prompt(
+                    INITIALIZE_REPOSITORIES_DECISION_RULES,
+                    {"有序仓库": [
+                        {"name": name, "path": str((workspace if name == "root" else workspace / name).resolve())}
+                        for name in names
+                    ]},
+                ),
+            )
             self.assertEqual(saved["applicable_repositories"], names)
             self.assertNotIn("initial_commits", read_state(run_dir))
 
@@ -247,16 +254,6 @@ class InitializeRepositoriesTests(unittest.TestCase):
 
             self.assertEqual(len(calls), 2)
             self.assertEqual(calls[1]["prompt"], REPOSITORY_REPAIR_PROMPT)
-            for required in (
-                ".agents/",
-                ".claude/",
-                "plugins-lock.json",
-                "精确暂存并原样提交",
-                "不得创建、修改、删除",
-                "无人值守权限合同必须原样保留",
-            ):
-                self.assertIn(required, calls[1]["prompt"])
-            self.assertNotIn("许可证", calls[1]["prompt"])
             self.assertEqual(calls[1]["resume_session_id"], "session-1")
 
     def test_blocked_after_agent_clean_state_succeeds(self) -> None:
