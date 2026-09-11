@@ -546,7 +546,7 @@ AI-compatible 模型可以决定所有能够基于当前输入、项目事实、
 
 发送给 AI-compatible 负责人的历史由完整 XML system snapshot 与既有对话组成。新 conversation 创建前，`common/decision.py` 将负责人角色、项目上下文、统一职责、步骤完成条件和 Pydantic 输出合同分别渲染为 `<role>`、`<project_context>`、`<responsibility>`、`<completion>`、`<output>` 并首次保存为 system。统一职责先检查 Agent 的决策交接是否自包含；不完整时通过 `continue` 要求同一 Agent session 重新读取并补齐。恢复严格使用历史 `messages[0]`，不重渲染、覆盖或迁移；因此新职责只作用于新建 decision conversation，既有 conversation 不补造为新合同证据。完整 Agent 原文用于连续裁决，不能重新包装为步骤元数据或伪 `user` 消息。
 
-项目上下文范围固定为：第 2 步初稿原文和目标路径；第 5 步产品定义原文、适用工程、选型白名单投影以及资源清单的绝对路径/可读性；第 6 步 `project_bootstrap` 使用产品定义原文、已完成准备清单原文、配置迁移与既有资源边界、适用工程和组装白名单投影，`tailwind_theme` 使用产品定义原文、实际 frontend 和主题颜色边界；第 7 步产品定义原文、准备清单原文、适用工程和组装白名单投影；第 8 步有序权威仓库相对路径和干净基线说明；第 9 步两份产品定义原文、准备清单原文、总体技术方案原文、有序权威工程和固定输出路径；第 10 步适用时还包括固定工程架构文档与实际 `frontend`；第 11 步包括第 2/5/7 步文档、第 8 步权威工程、第 9 步工程架构和严格第 10 步交接，仅在第 10 步 true 时读取 UI/UX 框架。资源清单正文和 `.env` 因输入来源边界不读取或内联到项目上下文；第 6、7、9、10、11 步在消费准备清单前均严格核对当前清单和两份产品定义与 `readiness_baseline` 一致；第 8～11 步其它只读 Git 核验和 verifier 仍由步骤私有实现。
+项目上下文范围固定为：第 2 步初稿原文和目标路径；第 5 步产品定义原文、适用工程、选型白名单投影以及资源清单的绝对路径/可读性；第 6 步 `project_bootstrap` 使用产品定义原文、已完成准备清单原文、配置迁移与既有资源边界、适用工程和组装白名单投影，`tailwind_theme` 只使用产品定义原文和实际 frontend；第 7 步产品定义原文、准备清单原文、适用工程和组装白名单投影；第 8 步有序权威仓库相对路径和干净基线说明；第 9 步两份产品定义原文、准备清单原文、总体技术方案原文、有序权威工程和固定输出路径；第 10 步适用时还包括固定工程架构文档与实际 `frontend`；第 11 步包括第 2/5/7 步文档、第 8 步权威工程、第 9 步工程架构和严格第 10 步交接，仅在第 10 步 true 时读取 UI/UX 框架。资源清单正文和 `.env` 因输入来源边界不读取或内联到项目上下文；第 6、7、9、10、11 步在消费准备清单前均严格核对当前清单和两份产品定义与 `readiness_baseline` 一致；第 8～11 步其它只读 Git 核验和 verifier 仍由步骤私有实现。
 
 选型和组装投影不含 `git_url`、`origin`、`remote`。渲染器仅对项目上下文做标准 XML 转义。`request_decision` 显式接收 XML prompt，原样传给一次 `responses.parse`，并以 Pydantic `AgentDecision` 取得结构化输出；没有公共默认、隐藏追加 prompt 或格式重试。
 
@@ -741,26 +741,26 @@ PCM 在请求前读取该领域完整编排历史。首次保存动态 `system` 
 
 **当时自动化事实。** 公共循环 24 项、第 5 步 10 项以及当时全量 194 项测试已经通过；公共循环已在第 7、9、10、11 步取得真实集成证据。上述第 5 步历史仍是旧协议事实，本文不把它改写为第 5 步独立新 session 运行。
 
-### 第 6 步：项目化基础工程与主题配色
+### 第 6 步：项目化基础工程与项目风格定制
 
 执行方式：在产品项目根顺序运行两个独立的公共 Agent 决策循环。`project_bootstrap` session/conversation 先显式调用 `project-bootstrap` 完成项目化修改与真实工程验证；有 frontend 时，通过步骤私有 Tailwind v4 CSS-first gate 后再由独立的 `tailwind_theme` session/conversation 显式调用 `tailwind-theme`。AI-compatible 模型分别以各自 `AgentDecision` 判断下一动作，Python 负责前序交接、两个循环的顺序、目录/Git 边界、Tailwind gate、结果与状态；公共循环、步骤编号和节点不改变。
 
 实现合同：
 
 - 状态必须位于 `project:06_bootstrap_foundation`；重新核验根 Git 和每个适用子仓自身 top-level、`main`、unborn HEAD、空 index、第 2 步两份产品定义、第 3/4 步选型与实际组装一致性，以及第 5 步严格成功结果；当前准备清单和两份产品定义必须与 `readiness_baseline` 指纹一致。适用工程目录只从 `steps/04.json.outputs` 读取，内部 README、manifest、锁文件、配置、代码和测试由各领域 Agent 按现场发现。状态不增加 `6.1` 或活动 capability；两个 spec 分别使用 `project_bootstrap`、`tailwind_theme` key/state_key 保存独立 session、conversation 和私有恢复状态。
-- bootstrap 初始 prompt 显式调用 `/project-bootstrap`，引用两份产品定义、已完成准备基线、配置迁移与既有资源边界、实际适用工程和白名单化组装来源。只传递 `target`、模板 ID、分支、相对路径和 commit SHA，不传递可能带凭据的 `git_url` 或 `origin`；正文只描述项目化领域任务，不包含步骤编号、PCM 节点、session 或其它编排背景，并明确只保持可替换主题基础设施、不形成项目专属配色。theme 初始 prompt 独立以 `/tailwind-theme` 开始，只引用两份产品定义和 `@./frontend`，同样不包含外层编排信息或组装远程来源；
-- `project-bootstrap` Agent 已获授权直接完成有限项目化：落实产品根 README、各适用工程项目身份、基础配置、模板首页和测试迁移、按引用处理误导残留，并执行适用安装、静态/类型检查、测试、构建、启动、健康检查、真实浏览器和基础联调；保持或建立可替换的 Tailwind 语义颜色结构，但不选择或生成项目专属主题。可以按工程实际加载合同维护被 Git 忽略的实际 `.env` 或等价配置，允许环境变量改名和配置结构迁移并同步无秘密公开示例；迁移必须复用同一既有资源绑定和真实值，保留资源身份、endpoint 与权限范围，不重新选择、创建、派生、轮换或替换外部资源或凭据。完成前必须删除所属仓未忽略的 `.coverage` 或将其加入所属仓 `.gitignore`；不得实现业务功能、总体技术方案或工程架构，不得改变独立 Git 边界或执行 Git 写操作；
+- bootstrap 初始 prompt 显式调用 `/project-bootstrap`，引用两份产品定义、已完成准备基线、配置迁移与既有资源边界、实际适用工程和白名单化组装来源。只传递 `target`、模板 ID、分支、相对路径和 commit SHA，不传递可能带凭据的 `git_url` 或 `origin`；正文只描述项目化领域任务，不包含步骤编号、PCM 节点、session 或其它编排背景，并明确只保持可替换主题基础设施、不形成项目专属基础视觉主题。theme 初始 prompt 独立以 `/tailwind-theme` 开始，只引用两份产品定义和 `@./frontend`，请求依据产品和前端完成风格定制，不包含外层编排信息、固定属性范围或组装远程来源；
+- `project-bootstrap` Agent 已获授权直接完成有限项目化：落实产品根 README、各适用工程项目身份、基础配置、模板首页和测试迁移、按引用处理误导残留，并执行适用安装、静态/类型检查、测试、构建、启动、健康检查、真实浏览器和基础联调；保持或建立可替换的 Tailwind 基础主题接线，但不选择或生成项目专属主题。可以按工程实际加载合同维护被 Git 忽略的实际 `.env` 或等价配置，允许环境变量改名和配置结构迁移并同步无秘密公开示例；迁移必须复用同一既有资源绑定和真实值，保留资源身份、endpoint 与权限范围，不重新选择、创建、派生、轮换或替换外部资源或凭据。完成前必须删除所属仓未忽略的 `.coverage` 或将其加入所属仓 `.gitignore`；不得实现业务功能、总体技术方案或工程架构，不得改变独立 Git 边界或执行 Git 写操作；
 - bootstrap completed 后，若 outputs 含 frontend，Python 必须在创建或恢复主题 conversation 前确认 `frontend/package.json` 直接声明唯一且可明确判断为 major 4 的 `tailwindcss`，并从 frontend 自身 Git 可见且未忽略的 CSS 中找到 `@import "tailwindcss"` CSS-first 证据。版本不明确、非 v4 或缺少 CSS-first 证据抛普通本地错误并由 CLI 写为 `failed`，不创建主题 session，不属于 `blocked`；Python 不实现完整 semver、CSS import graph、token parser 或 fingerprint；
-- `tailwind-theme` Agent 根据产品定义和当前 frontend 选择经校验的 tweakcn preset 或生成 custom；tweakcn 网络不可用时必须 custom fallback。完整 light/dark 语义颜色必须同时落实；只允许修改颜色值和必要颜色映射，不改变字体、圆角、阴影、间距、tracking、布局、组件、页面、主题切换交互或业务功能，不安装、升级或迁移 Tailwind，不执行 Git 写操作。完成前运行适用前端检查、测试和构建，并在真实浏览器中切换 light/dark、读取代表性渲染和 computed color，检查控制台和失败网络请求；
-- 两个领域的每轮完整真实 Agent 回复分别保存到 `conversations/project_bootstrap.json` 与 `conversations/tailwind_theme.json`，并交给各自由公共渲染器生成的 XML system snapshot 与 `AgentDecision` 裁决。bootstrap 工程配置读取、迁移、接线、安装、验证问题属于其 `continue`；theme 方向、light/dark、允许范围修改、构建或真实渲染证据不完整属于 theme `continue`。`blocked` 只允许当前环境无法取得的不可替代外部条件；本地版本、主题入口、dark selector、文件、工作树或状态冲突不得 blocked。两个 `completed` 都必须在自己的 completion verifier 后成立，主题未完成时不得写第 6 步 success；
+- `tailwind-theme` Agent 依据产品定义和当前 frontend 完成项目风格定制，可自主选择保留默认、采用全部或部分 preset、适配或 custom，并按实际改动执行相称验证、诚实报告结果。具体选择、修改与验证规则以 [`tailwind-theme` Skill](../../.claude/skills/tailwind-theme/SKILL.md) 为唯一真源，步骤合同不重复固定属性范围、选择顺序或全套完成检查；
+- 两个领域的每轮完整真实 Agent 回复分别保存到 `conversations/project_bootstrap.json` 与 `conversations/tailwind_theme.json`，并交给各自由公共渲染器生成的 XML system snapshot 与 `AgentDecision` 裁决。bootstrap 工程配置读取、迁移、接线、安装、验证问题属于其 `continue`；theme `completed` 表示项目风格定制已完成，`continue` 表示本次任务未完可继续。通用 `completed/continue/blocked` 三态和恢复规则不变，`blocked` 只允许当前环境无法取得的不可替代外部条件；两个 `completed` 都必须在自己的 completion verifier 后成立，主题任务未完成时不得写第 6 步 success；
 - 两个 spec 的 AI-compatible 结构化输出都要求 `request_decision` 显式接收各自完整 XML system prompt，原样调用一次 `responses.parse` 并以 Pydantic `AgentDecision` 解析；没有公共默认、隐藏追加 prompt 或格式重试。步骤分别维护 bootstrap 与 theme `DECISION_RULES`，公共循环代码和 schema 不变。持续结构或完成状态失败为 `failed`，新协议不写 Python 固定完成声明；
 - bootstrap 与 theme 的单次 Agent turn、各自 conversation 的负责人决策轮数沿用步骤代码的有限配置，且不设置 `max_budget_usd`。各自对话尾部为 `user` 时先裁决，为 `continue` 时恢复本领域原 `answer`，为 `blocked` 时终止，为 `completed` 时先核验。bootstrap completed/theme 未开始或 theme 中断时，重跑先零 Agent 复验 bootstrap，再新建或恢复 theme；theme blocked/failed 不重新执行 bootstrap Agent。turn 上限有 session 和非空回复时可裁决，但必须恢复正常 `success` 才能最终完成；API 400/429/500、连接、CLI/进程、无 Result 或其它 SDK 错误均先形成 `failed`。公共循环自身不做 HTTP 重试；属于 Claude Agent SDK 通道故障的失败仍由外层 `run_step.py` 有界重放，取消和本地合同错误不重放；
 - Python 在两个 Agent 前后复用根仓和适用子仓的自身 top-level、`main`、unborn HEAD、空 index 核验，并确认适用目录仍与第 4 步一致且 `.coverage` 已删除或实际被所属仓忽略。bootstrap completion 另核验根 README；theme completion 重验 Tailwind v4 CSS-first gate。Python 不解析实际 `.env`、资源身份、准备清单语义、主题 token 或浏览器语义，不保存秘密映射，不重复执行 Agent 已完成的工程命令；
-- 成功先写 `steps/06.json`，再推进到 `project:07_solution_design`。顶层 `applicable` 和 `outputs` 保持原语义，新增真实布尔 `tailwind_theme`，严格满足 `tailwind_theme == ("frontend" in outputs)`；blocked/failed 默认 false，字段缺失、类型错误或不一致的旧 success 不可复用。没有任何适用工程时两个 Agent 都不调用并以 `applicable:false`、空 outputs、false marker 跳过；backend-only 运行 bootstrap、跳过 theme。有 frontend 时只有两个领域都完成才 success。result 已写而状态推进中断时按严格 marker、前序交接、Tailwind gate 和 Git 事实补状态；完整 success 幂等不调用两个 Agent。`failed` / `blocked` 结果不作成功锚点，也不阻止各自原 session 恢复。
+- 成功先写 `steps/06.json`，再推进到 `project:07_solution_design`。顶层 `applicable` 和 `outputs` 保持原语义，新增真实布尔 `tailwind_theme`，严格满足 `tailwind_theme == ("frontend" in outputs)`；有 frontend 时 success 摘要的风格定制部分只写“已完成项目风格定制”。blocked/failed 默认 false，字段缺失、类型错误或不一致的旧 success 不可复用。没有任何适用工程时两个 Agent 都不调用并以 `applicable:false`、空 outputs、false marker 跳过；backend-only 运行 bootstrap、跳过 theme。有 frontend 时只有两个领域都完成才 success。result 已写而状态推进中断时按严格 marker、前序交接、Tailwind gate 和 Git 事实补状态；完整 success 幂等不调用两个 Agent。`failed` / `blocked` 结果不作成功锚点，也不阻止各自原 session 恢复。
 
 输出：
 
-- 已完成项目化和条件性主题配色的 `steps/04.json.outputs` 实际工程目录；
+- 已完成项目化和条件性项目风格定制的 `steps/04.json.outputs` 实际工程目录；
 - `state.json` 中的 `claude_sessions.project_bootstrap`，以及 frontend 适用时的 `claude_sessions.tailwind_theme`；
 - `runs/<run-id>/conversations/project_bootstrap.json`，以及 frontend 适用时的 `runs/<run-id>/conversations/tailwind_theme.json`；
 - 带严格 `tailwind_theme` marker 的 `steps/06.json`。
@@ -769,7 +769,9 @@ PCM 在请求前读取该领域完整编排历史。首次保存动态 `system` 
 
 **本次重构当时自动化事实。** 第 6 步 9 项与当时全量 194 项测试已经通过；公共循环已在第 7、9、10、11 步取得真实集成证据。第 6 步的真实项目化记录仍属于旧协议，本文不把它改写为第 6 步独立新 session 运行。
 
-**当前双 Skill 合同自动化。** 第 6 步现行 14 项、第 7 步现行 9 项均通过；第 6/7/8/10 步相关回归 58 项、公共循环与 `run_step`/`run_all` 入口回归 64 项通过。全量 351 项 `unittest` 通过（61.878 秒），`compileall common steps run_step.py run_all.py test_run_step_retry.py test_run_all.py` 通过。覆盖 bootstrap/theme 两个独立 spec/session/conversation、各自 repair/blocked 恢复、backend-only 与无工程跳过、Tailwind v4/CSS-first failed gate、严格 `tailwind_theme` marker、旧 success 拒绝、第 7 步消费及第 8/10 步无业务回归。隔离 run `step06-tailwind-theme-20260831` 已确认 bootstrap Skill/slash command、产品 cwd 和原 session 加载；内置 Explore 未识别模型后，run-local 同 session 恢复实际执行 43 turns 并修改工程，但 SDK 以 `result_subtype=success`、`is_error=true`、`terminal_reason=api_error` 结束，没有产生完整 Agent 回复；后续恢复严格拒绝不合法 `pending_agent_text`，因此未进入独立 `tailwind_theme` session。该现场保留为真实通道与恢复失败证据，不能由自动化、工作树改动或旧项目化历史替代 `/tailwind-theme` 和浏览器 light/dark 集成成功。
+**基础视觉主题合同验证（2026-09-09）。** 本次将颜色专属范围扩展为本地官方完整预设优先、必要适配、自定义兜底的基础视觉主题，未修改双会话、三态、Tailwind gate、成功 marker 或恢复机制。PCM Demo 全量 518 项 `unittest` 通过；最终提示接线修正后，第 6/7/8/10 步相关 65 项回归通过，第 6 步 Python 编译及 `git diff --check` 通过。本地资源离线校验入口见 `.claude/skills/tailwind-theme/assets/tweakcn/README.md`。Skill evals 是场景定义，不是已执行的 Agent 验收；本次未启动真实产品、调用 fresh 主题 Agent 或执行产品浏览器验收，不把旧 run 的成功或旧配色结果当作新版完整主题证据。已发布产品工作区的 Skill/资源需显式同步；旧 snapshot/session/success 不自动升级或补跑。
+
+**此前双 Skill 合同自动化。** 第 6 步现行 14 项、第 7 步现行 9 项均通过；第 6/7/8/10 步相关回归 58 项、公共循环与 `run_step`/`run_all` 入口回归 64 项通过。全量 351 项 `unittest` 通过（61.878 秒），`compileall common steps run_step.py run_all.py test_run_step_retry.py test_run_all.py` 通过。覆盖 bootstrap/theme 两个独立 spec/session/conversation、各自 repair/blocked 恢复、backend-only 与无工程跳过、Tailwind v4/CSS-first failed gate、严格 `tailwind_theme` marker、旧 success 拒绝、第 7 步消费及第 8/10 步无业务回归。隔离 run `step06-tailwind-theme-20260831` 已确认 bootstrap Skill/slash command、产品 cwd 和原 session 加载；内置 Explore 未识别模型后，run-local 同 session 恢复实际执行 43 turns 并修改工程，但 SDK 以 `result_subtype=success`、`is_error=true`、`terminal_reason=api_error` 结束，没有产生完整 Agent 回复；后续恢复严格拒绝不合法 `pending_agent_text`，因此未进入独立 `tailwind_theme` session。该现场保留为真实通道与恢复失败证据，不能由自动化、工作树改动或旧项目化历史替代 `/tailwind-theme` 和浏览器 light/dark 集成成功。
 
 ### 第 7 步：总体技术方案
 
@@ -1399,7 +1401,7 @@ PCM_DEV_RESOURCE_LIST=
 配置职责：
 
 - `LLM_*` 用于 OpenAI-compatible Responses API，包括 AI-compatible 决策调用和第 12 步 Backlog 静态字段结构化提取；
-- `PCM_AGENT_BASE_URL`、`PCM_AGENT_AUTH_TOKEN` 用于 Claude Agent SDK 的 Anthropic Messages 网关和受保护 Bearer 认证；Base URL 不包含 `/v1`；旧 `PCM_AGENT_API_KEY` 的有效值需迁移到新键，不保留旧键读取兼容；
+- `PCM_AGENT_BASE_URL`、`PCM_AGENT_AUTH_TOKEN` 用于 Claude Agent SDK 的 Anthropic Messages 网关和受保护 Bearer 认证；Base URL 不包含 `/v1`；
 - `PCM_AGENT_MODEL_LOW`、`PCM_AGENT_MODEL_MEDIUM`、`PCM_AGENT_MODEL_HIGH` 将代码中的低、中、高档位映射为网关真实模型名；
 - `PCM_WORKSPACE_ROOT` 是独立产品项目父目录；
 - `PCM_MAX_CONCURRENT_PROJECTS` 是当前 Demo checkout 同时执行的产品项目上限，正整数，默认 `2`；
@@ -1434,7 +1436,7 @@ PCM_DEV_RESOURCE_LIST=
 以下事项在进入对应步骤前解决，暂不臆定答案：
 
 1. Agent SDK、捆绑 Claude Code 或模型版本变化时，需重新记录并复核相关探针；
-2. `/project-intake`、`/project-readiness`、`/project-bootstrap` 和 `/solution-design` 已有真实调用证据；第 6 步新增的独立 `/tailwind-theme` session、init 发现、真实 light/dark 修改和浏览器验证仍需在隔离 fresh run 中验证；其它目标 Skill 的实际调用名、参数、plugin namespace 和 init 发现结果继续逐步验证；
+2. `/project-intake`、`/project-readiness`、`/project-bootstrap` 和 `/solution-design` 已有真实调用证据；第 6 步新增的独立 `/tailwind-theme` session、init 发现、实际风格定制及与改动相称的验证仍需在隔离 fresh run 中验证；其它目标 Skill 的实际调用名、参数、plugin namespace 和 init 发现结果继续逐步验证；
 3. 单机多产品并发实现尚需用两个独立产品真实验证 Claude Agent、配对端口、前后端启动和浏览器 session 隔离；
 4. 阶段二具名节点如何增量接入已实现的 `run_all.py` 阶段一入口；
 5. 第二个真实需求复用第 13～18 步时是否暴露新的最小恢复边界；

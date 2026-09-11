@@ -1,15 +1,15 @@
 # 场景组件参考目录
 
-本目录是 `ui-component-patterns` 的选择索引。机器可读来源、依赖和许可事实以 [`manifest.json`](../assets/react-shadcn/base-tailwind-v4/manifest.json) 为准；选定资产后的具体适配风险以该资产 README 为准。
+本目录是 `ui-component-patterns` 的选择索引。机器可读技术基线、依赖和本地路径以 [`manifest.json`](../assets/react-shadcn/base-tailwind-v4/manifest.json) 为准；选定资产后的具体适配风险以该资产 README 为准。
 
 ## 当前技术基线
 
-首批资源的上游验证基线是 React 19.2.3、shadcn/ui 4.19.0、Base UI 1.6.0 与 Tailwind CSS 4.3.0。目标项目需要满足：
+首批资源的已验证技术基线是 React 19.2.3、shadcn/ui 4.19.0、Base UI 1.6.0 与 Tailwind CSS 4.3.0。目标项目需要满足：
 
 - 使用 React/TSX，并核对当前 React 版本与所选源码 API 的兼容性；
 - shadcn/ui Base UI；
 - Tailwind CSS v4；
-- 已经具备资产依赖的 primitives 和 packages。
+- 核对资产依赖的 primitives 和 packages；明确实现或调试任务内可按项目方式补齐必要合理依赖。
 
 不能仅凭 `components.json` 或“使用 shadcn”推断兼容。至少结合 `package.json`、实际 `@base-ui/react` imports 和现有组件组合 API 判断。Radix、React Aria、Vue、其它 CSS 框架或证据冲突时不读取源码并无副作用跳过。
 
@@ -17,7 +17,7 @@
 
 1. 先从真实用户任务、数据、状态和目标视口定义当前问题；
 2. 默认只选择一个资产；只有两个候选代表实质不同的结构边界时最多比较两个；
-3. 先读选中资产 README，确认适用、依赖、缺失和许可，再读 `source/`；
+3. 先读选中资产 README，确认适用、依赖和缺失，再读 `source/`；
 4. 不浏览完整资源库后选择最容易复制的一项；
 5. 参考只证明一种组合如何工作，不能证明当前项目应该采用它；
 6. 使用前按 [`adaptation-checklist.md`](./adaptation-checklist.md) 完成项目化转译。
@@ -55,18 +55,11 @@
 
 只有真实任务需要比较时间趋势时才读取 Chart。表单、设置、审批队列、普通表格或“后台页面”不自动需要统计卡和图表。首版不包含 bar、pie、area、radar、radial 或完整 Dashboard。
 
-## 来源与许可边界
+## Loading 与 Markdown
 
-所有首批代码来自固定 shadcn/ui commit，并在 collection 根保存 MIT License。资源来源包括：
+| 资产 | 适合解决 | 首要限制 |
+|---|---|---|
+| [区域加载反馈](../assets/react-shadcn/base-tailwind-v4/loading/README.md) | 内容区域等待时的状态文字和装饰动画 | `overlay` 阻挡覆盖区域指针但不是模态框，父容器负责尺寸和 App Shell 边界 |
+| [Markdown 阅读](../assets/react-shadcn/base-tailwind-v4/markdown/README.md) | Markdown/GFM 排版、Prism 高亮、行号、代码复制和长行换行 | 依赖解析、高亮与 `next-themes` |
 
-- 独立 registry block；
-- `preview` 内部 module；
-- `registry:example` 内部函数的派生摘录。
-
-派生摘录不是官方原样快照。MIT 代码许可不自动覆盖：
-
-- GitHub 等名称、Logo 和商标；
-- Unsplash 等远程媒体；
-- `Acme Inc.`、`Ledger` 等演示品牌；
-- SOC 2、SEC registered、加密、供应商、价格或试用等产品声明；
-- OAuth、支付、税务、上传、下载等未实现业务能力。
+两项均按目标项目已有组件、`cn` 和语义 token 适配。选择参考本身不授权安装依赖；明确实现或调试任务可按项目包管理器安装必要合理依赖并同步 lockfile，不得为避免依赖删减要求功能。隔离宿主中的构建和浏览器验证不代表目标产品已经完成接入。

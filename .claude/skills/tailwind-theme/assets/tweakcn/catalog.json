@@ -1,0 +1,256 @@
+{
+  "themes": [
+    {
+      "slug": "modern-minimal",
+      "name": "Modern Minimal",
+      "path": "themes/modern-minimal.json",
+      "features": "浅色主色为蓝紫色、0.375rem 圆角、3px 模糊阴影"
+    },
+    {
+      "slug": "violet-bloom",
+      "name": "Violet Bloom",
+      "path": "themes/violet-bloom.json",
+      "features": "浅色主色为紫色、1.4rem 圆角、3px 模糊阴影"
+    },
+    {
+      "slug": "t3-chat",
+      "name": "T3 Chat",
+      "path": "themes/t3-chat.json",
+      "features": "浅色主色为红粉色、0.5rem 圆角、3px 模糊阴影"
+    },
+    {
+      "slug": "twitter",
+      "name": "Twitter",
+      "path": "themes/twitter.json",
+      "features": "浅色主色为蓝色、1.3rem 圆角、无可见阴影"
+    },
+    {
+      "slug": "mocha-mousse",
+      "name": "Mocha Mousse",
+      "path": "themes/mocha-mousse.json",
+      "features": "浅色主色为红橙色、0.5rem 圆角、2px/2px 偏移无模糊阴影"
+    },
+    {
+      "slug": "bubblegum",
+      "name": "Bubblegum",
+      "path": "themes/bubblegum.json",
+      "features": "浅色主色为红粉色、0.4rem 圆角、3px/3px 偏移硬阴影"
+    },
+    {
+      "slug": "amethyst-haze",
+      "name": "Amethyst Haze",
+      "path": "themes/amethyst-haze.json",
+      "features": "浅色主色为紫色、0.5rem 圆角、5px 模糊阴影"
+    },
+    {
+      "slug": "notebook",
+      "name": "Notebook",
+      "path": "themes/notebook.json",
+      "features": "浅色主色为灰阶、0.625rem 圆角、5px 模糊阴影"
+    },
+    {
+      "slug": "doom-64",
+      "name": "Doom 64",
+      "path": "themes/doom-64.json",
+      "features": "浅色主色为红橙色、零圆角、4px 模糊阴影"
+    },
+    {
+      "slug": "catppuccin",
+      "name": "Catppuccin",
+      "path": "themes/catppuccin.json",
+      "features": "浅色主色为紫色、0.35rem 圆角、6px 模糊阴影"
+    },
+    {
+      "slug": "graphite",
+      "name": "Graphite",
+      "path": "themes/graphite.json",
+      "features": "浅色主色为灰阶、0.35rem 圆角、0px/2px 偏移无模糊阴影"
+    },
+    {
+      "slug": "perpetuity",
+      "name": "Perpetuity",
+      "path": "themes/perpetuity.json",
+      "features": "浅色主色为青色、0.125rem 圆角、2px 模糊阴影"
+    },
+    {
+      "slug": "kodama-grove",
+      "name": "Kodama Grove",
+      "path": "themes/kodama-grove.json",
+      "features": "浅色主色为绿色、0.425rem 圆角、2px 模糊阴影"
+    },
+    {
+      "slug": "cosmic-night",
+      "name": "Cosmic Night",
+      "path": "themes/cosmic-night.json",
+      "features": "浅色主色为紫色、0.5rem 圆角、10px 模糊阴影"
+    },
+    {
+      "slug": "tangerine",
+      "name": "Tangerine",
+      "path": "themes/tangerine.json",
+      "features": "浅色主色为红橙色、0.75rem 圆角、3px 模糊阴影"
+    },
+    {
+      "slug": "quantum-rose",
+      "name": "Quantum Rose",
+      "path": "themes/quantum-rose.json",
+      "features": "浅色主色为红粉色、0.5rem 圆角、0px/3px 偏移无模糊阴影"
+    },
+    {
+      "slug": "nature",
+      "name": "Nature",
+      "path": "themes/nature.json",
+      "features": "浅色主色为绿色、0.5rem 圆角、3px 模糊阴影"
+    },
+    {
+      "slug": "bold-tech",
+      "name": "Bold Tech",
+      "path": "themes/bold-tech.json",
+      "features": "浅色主色为紫色、0.625rem 圆角、4px 模糊阴影"
+    },
+    {
+      "slug": "elegant-luxury",
+      "name": "Elegant Luxury",
+      "path": "themes/elegant-luxury.json",
+      "features": "浅色主色为红橙色、0.375rem 圆角、16px 模糊阴影"
+    },
+    {
+      "slug": "amber-minimal",
+      "name": "Amber Minimal",
+      "path": "themes/amber-minimal.json",
+      "features": "浅色主色为琥珀色、0.375rem 圆角、8px 模糊阴影"
+    },
+    {
+      "slug": "supabase",
+      "name": "Supabase",
+      "path": "themes/supabase.json",
+      "features": "浅色主色为绿色、0.5rem 圆角、3px 模糊阴影"
+    },
+    {
+      "slug": "neo-brutalism",
+      "name": "Neo Brutalism",
+      "path": "themes/neo-brutalism.json",
+      "features": "浅色主色为红橙色、零圆角、4px/4px 偏移硬阴影"
+    },
+    {
+      "slug": "solar-dusk",
+      "name": "Solar Dusk",
+      "path": "themes/solar-dusk.json",
+      "features": "浅色主色为琥珀色、0.3rem 圆角、3px 模糊阴影"
+    },
+    {
+      "slug": "claymorphism",
+      "name": "Claymorphism",
+      "path": "themes/claymorphism.json",
+      "features": "浅色主色为蓝紫色、1.25rem 圆角、10px 模糊阴影"
+    },
+    {
+      "slug": "cyberpunk",
+      "name": "Cyberpunk",
+      "path": "themes/cyberpunk.json",
+      "features": "浅色主色为粉紫色、0.5rem 圆角、8px 模糊阴影"
+    },
+    {
+      "slug": "pastel-dreams",
+      "name": "Pastel Dreams",
+      "path": "themes/pastel-dreams.json",
+      "features": "浅色主色为紫色、1.5rem 圆角、16px 模糊阴影"
+    },
+    {
+      "slug": "clean-slate",
+      "name": "Clean Slate",
+      "path": "themes/clean-slate.json",
+      "features": "浅色主色为蓝紫色、0.5rem 圆角、8px 模糊阴影"
+    },
+    {
+      "slug": "caffeine",
+      "name": "Caffeine",
+      "path": "themes/caffeine.json",
+      "features": "浅色主色为红橙色、0.5rem 圆角、3px 模糊阴影"
+    },
+    {
+      "slug": "ocean-breeze",
+      "name": "Ocean Breeze",
+      "path": "themes/ocean-breeze.json",
+      "features": "浅色主色为绿色、0.5rem 圆角、8px 模糊阴影"
+    },
+    {
+      "slug": "retro-arcade",
+      "name": "Retro Arcade",
+      "path": "themes/retro-arcade.json",
+      "features": "浅色主色为红粉色、0.25rem 圆角、4px 模糊阴影"
+    },
+    {
+      "slug": "midnight-bloom",
+      "name": "Midnight Bloom",
+      "path": "themes/midnight-bloom.json",
+      "features": "浅色主色为蓝紫色、0.5rem 圆角、10px 模糊阴影"
+    },
+    {
+      "slug": "candyland",
+      "name": "Candyland",
+      "path": "themes/candyland.json",
+      "features": "浅色主色为红粉色、0.5rem 圆角、3px 模糊阴影"
+    },
+    {
+      "slug": "northern-lights",
+      "name": "Northern Lights",
+      "path": "themes/northern-lights.json",
+      "features": "浅色主色为绿色、0.5rem 圆角、3px 模糊阴影"
+    },
+    {
+      "slug": "vintage-paper",
+      "name": "Vintage Paper",
+      "path": "themes/vintage-paper.json",
+      "features": "浅色主色为琥珀色、0.25rem 圆角、5px 模糊阴影"
+    },
+    {
+      "slug": "sunset-horizon",
+      "name": "Sunset Horizon",
+      "path": "themes/sunset-horizon.json",
+      "features": "浅色主色为红橙色、0.625rem 圆角、12px 模糊阴影"
+    },
+    {
+      "slug": "starry-night",
+      "name": "Starry Night",
+      "path": "themes/starry-night.json",
+      "features": "浅色主色为蓝紫色、0.5rem 圆角、3px 模糊阴影"
+    },
+    {
+      "slug": "claude",
+      "name": "Claude",
+      "path": "themes/claude.json",
+      "features": "浅色主色为红橙色、0.5rem 圆角、3px 模糊阴影"
+    },
+    {
+      "slug": "vercel",
+      "name": "Vercel",
+      "path": "themes/vercel.json",
+      "features": "浅色主色为灰阶、0.5rem 圆角、2px 模糊阴影"
+    },
+    {
+      "slug": "darkmatter",
+      "name": "Darkmatter",
+      "path": "themes/darkmatter.json",
+      "features": "浅色主色为琥珀色、0.75rem 圆角、4px 模糊阴影"
+    },
+    {
+      "slug": "mono",
+      "name": "Mono",
+      "path": "themes/mono.json",
+      "features": "浅色主色为灰阶、零圆角、无可见阴影"
+    },
+    {
+      "slug": "soft-pop",
+      "name": "Soft Pop",
+      "path": "themes/soft-pop.json",
+      "features": "浅色主色为蓝紫色、1rem 圆角、0px/0px 偏移无模糊阴影"
+    },
+    {
+      "slug": "sage-garden",
+      "name": "Sage Garden",
+      "path": "themes/sage-garden.json",
+      "features": "浅色主色为绿色、0.35rem 圆角、2px 模糊阴影"
+    }
+  ]
+}

@@ -2,7 +2,7 @@
 
 ## 用途与身份
 
-这是 shadcn/ui Base UI `preview` block 内部的结构化地址卡片原样源码，不是独立 registry item。它用于参考字段分组、双列组合、Select 和默认地址选择。
+这是结构化地址卡片参考，用于组织字段分组、双列组合、Select 和默认地址选择。
 
 ## 适用
 
@@ -14,14 +14,6 @@
 
 - 地址规则尚未确定却准备把美国字段模型当成全球通用；
 - 只需要一行自由文本地址或地址搜索服务。
-
-## 来源与提取方式
-
-- 仓库：`https://github.com/shadcn-ui/ui`
-- Commit：`b4a618b97e35f5dadf3a00d51f410c84a2567d4d`
-- 路径：`apps/v4/registry/bases/base/blocks/preview/cards/shipping-address.tsx`
-- 类型：`preview-internal-module`
-- 模式：完整文件原样保存。
 
 ## 依赖和 Base UI API
 
@@ -38,6 +30,6 @@
 
 没有 `<form>`、提交、验证、地址补全、地区联动、失败恢复或真实国际地址支持。
 
-## 许可边界和本地文件
+## 本地文件
 
-代码来源受 [`../../LICENSE.md`](../../LICENSE.md) 的 MIT License 约束。国家和地区 fixture 只是演示数据。本地文件：[`source/shipping-address.tsx`](./source/shipping-address.tsx)。
+[`source/shipping-address.tsx`](./source/shipping-address.tsx)。

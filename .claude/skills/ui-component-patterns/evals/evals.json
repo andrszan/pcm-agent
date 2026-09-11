@@ -50,18 +50,15 @@
     },
     {
       "id": 4,
-      "prompt": "我们是 Base UI 项目。请把双栏登录和附件对话示例原样复制到产品，只换品牌色和 Logo。既然目录里是 MIT，GitHub 登录图标、Unsplash 图片以及 FAQ 里的 SOC 2、SEC、加密声明也都可以直接用吧？",
-      "expected_output": "拒绝复制后只换皮。先区分独立 block、派生 excerpt 和 preview module，再区分 MIT 代码许可、GitHub 商标、Unsplash 远程媒体以及未经项目事实确认的安全监管声明。只借用有价值的页面构图、消息与附件顺序，使用项目自己的认证方式、品牌、媒体、内容、状态和行为重新实现。",
+      "prompt": "我们是 Base UI 项目。请把双栏登录和附件对话示例原样复制到产品，只换品牌色和 Logo。GitHub 登录图标、Unsplash 图片以及 FAQ 里的 SOC 2、SEC、加密声明也都直接沿用。",
+      "expected_output": "拒绝复制后只换皮。只借用有价值的页面构图、消息与附件顺序，替换 GitHub 图标、Unsplash 远程媒体、演示品牌、未经项目事实确认的安全监管声明和未实现行为，使用项目自己的认证方式、品牌、媒体、内容、状态和行为重新实现。",
       "files": [],
       "expectations": [
         "不接受原样复制后只换品牌色和 Logo",
-        "准确区分 login standalone registry item 与 attachment derived excerpt",
-        "说明 MIT 代码许可不自动授予 GitHub 商标使用权",
-        "说明 Unsplash 远程媒体不由 shadcn MIT 自动覆盖且不能成为运行时依赖",
+        "替换 GitHub 图标、Unsplash 远程媒体和演示品牌",
         "删除或重新核验 SOC 2、SEC registered、加密、供应商和商业声明",
         "不把 href=#、placeholder、空下载或未实现 OAuth 当作完整行为",
-        "使用目标项目自己的数据、文案、token、状态和组件重新设计",
-        "发生实质源码复制时保留相称的第三方许可 notice"
+        "使用目标项目自己的数据、文案、token、状态和组件重新设计"
       ]
     },
     {
@@ -92,6 +89,42 @@
         "不安装工具或生成预览",
         "不自动调用其它自定义 Skill",
         "工作树保持不变并简短说明跳过依据"
+      ]
+    },
+    {
+      "id": 7,
+      "prompt": "当前是 React + Base UI + Tailwind v4 项目，需要在内容区等待时显示 loading。请参考本地 loading，顺便用全屏遮罩封住整个 App Shell。",
+      "expected_output": "识别 loading-region，适配时保持父容器和 App Shell 边界，区分非模态视觉反馈与交互禁用，尊重 reduced motion，不把装饰动画当业务进度。",
+      "files": [],
+      "expectations": [
+        "识别 loading-region",
+        "不擅自覆盖 App Shell",
+        "说明 overlay 阻挡指针但不提供模态焦点管理",
+        "不声称装饰动画反映真实处理阶段"
+      ]
+    },
+    {
+      "id": 8,
+      "prompt": "PCM 基础模板已有 React、Base UI、Tailwind v4 和 lucide-react，但没装 react-markdown 和 remark-gfm。本地 MarkdownPro 已经过浏览器测试，请直接复制使用，不允许安装依赖。",
+      "expected_output": "识别 markdown-reader 的解析依赖缺口；隔离测试通过不等于当前项目具备依赖，不复制会报错的实现、不安装包、不手写解析器或降级为原文冒充 Markdown。",
+      "files": [],
+      "expectations": [
+        "明确缺少 react-markdown 与 remark-gfm",
+        "不安装依赖",
+        "不把原文显示当 Markdown 渲染",
+        "不把隔离验证当作产品已接入"
+      ]
+    },
+    {
+      "id": 9,
+      "prompt": "请调试我提供的 Markdown 组件，可以自己建独立测试项目，把需要的依赖装好；可以优化修复，但代码高亮、行号、主题、复制和换行等原功能不能丢。",
+      "expected_output": "核对原有功能，建立独立验证工程并安装必要的解析、高亮、主题及类型依赖，记录package.json和lockfile；保留原功能并修复真实问题，验证light/dark/system、SSR hydration、复制fallback和移动端换行，不把当前模板缺包当禁止安装。",
+      "files": [],
+      "expectations": [
+        "可以安装任务所需合理依赖，无须逐包索取许可",
+        "不为避免依赖删除高亮、行号或主题",
+        "独立验证不擅自修改其它产品",
+        "实测完整功能而非仅静态检查"
       ]
     }
   ]

@@ -2,7 +2,7 @@
 
 ## 用途与身份
 
-这是从 shadcn/ui Base UI `message-example` 中提取的消息对齐、气泡分组和纵向节奏参考。它是派生摘录，不是独立 registry item，也不包含滚动、输入、传输或持久化。
+这是消息对齐、气泡分组和纵向节奏参考，不包含滚动、输入、传输或持久化。
 
 ## 适用
 
@@ -14,15 +14,6 @@
 
 - 需要流式跟随、跳到最新、历史加载或 composer 的完整 Chat；
 - 只是单条通知、活动日志或普通评论列表。
-
-## 来源与提取方式
-
-- 仓库：`https://github.com/shadcn-ui/ui`
-- Commit：`b4a618b97e35f5dadf3a00d51f410c84a2567d4d`
-- 路径：`apps/v4/registry/bases/base/examples/message-example.tsx`
-- 范围：`MessageDefault`，上游约第 170–213 行
-- 类型：`example-internal-function`
-- 模式：派生摘录；移除 `Example` 展示壳和无关 imports，将函数导出。
 
 ## 依赖和 Base UI API
 
@@ -38,6 +29,6 @@
 
 不包含头像、时间、发送状态、错误、附件、滚动、虚拟化、流式状态、键盘路径或消息操作。
 
-## 许可边界和本地文件
+## 本地文件
 
-代码来源受 [`../../LICENSE.md`](../../LICENSE.md) 的 MIT License 约束。演示文案不构成产品内容事实。本地文件：[`source/message-default.tsx`](./source/message-default.tsx)。
+[`source/message-default.tsx`](./source/message-default.tsx)。

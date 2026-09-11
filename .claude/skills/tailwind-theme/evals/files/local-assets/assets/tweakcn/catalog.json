@@ -1,0 +1,8 @@
+{
+  "snapshot": "fixture-2026-09-09",
+  "entries": [
+    {"slug": "quiet-workbench", "path": "themes/quiet-workbench.json", "featuresZh": ["冷静", "高密度"]},
+    {"slug": "mono-editor", "path": "themes/mono-editor.json", "featuresZh": ["黑白", "编辑器"]},
+    {"slug": "local-unsafe", "path": "themes/local-unsafe.json", "featuresZh": ["不安全测试"]}
+  ]
+}

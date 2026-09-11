@@ -8,7 +8,7 @@
 - shadcn primitives 实际基于 `@base-ui/react`；
 - 现有组合使用 Base UI `render`，不是 Radix `asChild`；
 - 目标项目已经具备所选资产需要的 registry components 和 packages；
-- 缺失依赖时报告精确缺口，不执行 `shadcn add`、registry 搜索、包安装或技术栈迁移。
+- 缺失依赖时说明精确缺口；明确实现或调试任务可按项目包管理器安装必要合理依赖并同步 lockfile，不必逐包询问，不得为了避免依赖删除所需功能。仅选择参考不授权安装，也不授权无关的 registry 搜索、preset 更新或技术栈迁移。
 
 ## 2. 任务与借用原理
 
@@ -66,14 +66,10 @@
 - tooltip、legend、轴标签和辅助文本能被用户理解；
 - 没有真实趋势任务时不添加 Chart 或 Recharts 依赖。
 
-## 8. 许可、媒体与声明
+## 8. 媒体与声明
 
-- 先读资产 README 和 collection MIT License；
-- 不把同目录 MIT License 推断为覆盖来源未知文件；
-- GitHub 等商标、远程媒体和第三方品牌单独判断；
 - 临时或第三方远程 URL 不进入产品运行时；
-- SOC 2、SEC registered、加密、供应商、价格和试用等声明必须由项目事实支持；
-- 发生实质源码复制时按项目第三方许可约定保留必要 notice。
+- SOC 2、SEC registered、加密、供应商、价格和试用等声明必须由项目事实支持。
 
 ## 9. 验证移交
 

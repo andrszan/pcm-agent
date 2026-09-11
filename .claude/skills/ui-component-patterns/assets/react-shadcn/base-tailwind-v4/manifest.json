@@ -15,13 +15,6 @@
     "referenceOnly": true,
     "independentlyRunnable": false
   },
-  "provider": {
-    "id": "shadcn-ui",
-    "repository": "https://github.com/shadcn-ui/ui",
-    "commit": "b4a618b97e35f5dadf3a00d51f410c84a2567d4d",
-    "license": "MIT",
-    "licenseFile": "LICENSE.md"
-  },
   "assets": [
     {
       "id": "chat-transcript-foundation",
@@ -32,26 +25,6 @@
       ],
       "notApplicableWhen": [
         "需要滚动、composer、流式状态或附件的完整 Chat"
-      ],
-      "sources": [
-        {
-          "repository": "https://github.com/shadcn-ui/ui",
-          "commit": "b4a618b97e35f5dadf3a00d51f410c84a2567d4d",
-          "path": "apps/v4/registry/bases/base/examples/message-example.tsx",
-          "sourceKind": "example-internal-function",
-          "scope": [
-            "MessageDefault, upstream lines 170-213"
-          ],
-          "contentMode": "derived",
-          "localFiles": [
-            "source/message-default.tsx"
-          ],
-          "transformations": [
-            "removed the Example wrapper",
-            "pruned unrelated imports and sibling examples",
-            "exported MessageDefault"
-          ]
-        }
       ],
       "dependencies": {
         "packages": [],
@@ -71,11 +44,9 @@
       "knownGaps": [
         "没有滚动、输入、传输、状态、附件或持久化"
       ],
-      "license": {
-        "spdx": "MIT",
-        "file": "LICENSE.md",
-        "notes": []
-      }
+      "localFiles": [
+        "source/message-default.tsx"
+      ]
     },
     {
       "id": "chat-streaming-chat-card",
@@ -86,27 +57,6 @@
       ],
       "notApplicableWhen": [
         "普通评论或目标项目没有现有流式协议且不允许引入依赖"
-      ],
-      "sources": [
-        {
-          "repository": "https://github.com/shadcn-ui/ui",
-          "commit": "b4a618b97e35f5dadf3a00d51f410c84a2567d4d",
-          "path": "apps/v4/registry/bases/base/examples/message-scroller-example.tsx",
-          "sourceKind": "example-internal-function",
-          "scope": [
-            "scripted fixture, upstream lines 51-121",
-            "MessageScrollerDemo, upstream lines 123-252"
-          ],
-          "contentMode": "derived",
-          "localFiles": [
-            "source/message-scroller-demo.tsx"
-          ],
-          "transformations": [
-            "removed the gallery wrapper",
-            "pruned unrelated imports",
-            "exported MessageScrollerDemo"
-          ]
-        }
       ],
       "dependencies": {
         "packages": [
@@ -139,11 +89,9 @@
         "没有生产 transport、附件、错误重试、停止后反馈或多部件渲染",
         "示例未显式启用 autoScroll"
       ],
-      "license": {
-        "spdx": "MIT",
-        "file": "LICENSE.md",
-        "notes": []
-      }
+      "localFiles": [
+        "source/message-scroller-demo.tsx"
+      ]
     },
     {
       "id": "chat-attachment-conversation",
@@ -154,26 +102,6 @@
       ],
       "notApplicableWhen": [
         "只需要普通文件上传控件，或尚未设计文件生命周期"
-      ],
-      "sources": [
-        {
-          "repository": "https://github.com/shadcn-ui/ui",
-          "commit": "b4a618b97e35f5dadf3a00d51f410c84a2567d4d",
-          "path": "apps/v4/registry/bases/base/examples/message-example.tsx",
-          "sourceKind": "example-internal-function",
-          "scope": [
-            "MessageAttachment, upstream lines 595-669"
-          ],
-          "contentMode": "derived",
-          "localFiles": [
-            "source/message-attachment.tsx"
-          ],
-          "transformations": [
-            "removed the Example wrapper",
-            "pruned unrelated imports and sibling examples",
-            "exported MessageAttachment"
-          ]
-        }
       ],
       "dependencies": {
         "packages": [],
@@ -197,13 +125,9 @@
       "knownGaps": [
         "没有文件选择、上传、进度、取消、删除、失败重试或下载授权"
       ],
-      "license": {
-        "spdx": "MIT",
-        "file": "LICENSE.md",
-        "notes": [
-          "Referenced Unsplash media is not covered by the shadcn/ui MIT License."
-        ]
-      }
+      "localFiles": [
+        "source/message-attachment.tsx"
+      ]
     },
     {
       "id": "business-login-two-column",
@@ -214,24 +138,6 @@
       ],
       "notApplicableWhen": [
         "登录应位于 Dialog/Sheet，或不需要辅助品牌表面"
-      ],
-      "sources": [
-        {
-          "repository": "https://github.com/shadcn-ui/ui",
-          "commit": "b4a618b97e35f5dadf3a00d51f410c84a2567d4d",
-          "path": "apps/v4/registry/bases/base/blocks/login-02",
-          "sourceKind": "standalone-registry-item",
-          "scope": [
-            "page.tsx",
-            "components/login-form.tsx"
-          ],
-          "contentMode": "verbatim",
-          "localFiles": [
-            "source/page.tsx",
-            "source/components/login-form.tsx"
-          ],
-          "transformations": []
-        }
       ],
       "dependencies": {
         "packages": [],
@@ -263,13 +169,10 @@
       "knownGaps": [
         "没有认证提交、会话、错误恢复、MFA、OAuth 或真实路由"
       ],
-      "license": {
-        "spdx": "MIT",
-        "file": "LICENSE.md",
-        "notes": [
-          "MIT does not grant GitHub trademark rights."
-        ]
-      }
+      "localFiles": [
+        "source/page.tsx",
+        "source/components/login-form.tsx"
+      ]
     },
     {
       "id": "business-invoice",
@@ -280,22 +183,6 @@
       ],
       "notApplicableWhen": [
         "只展示单个金额，或金融规则尚未确定"
-      ],
-      "sources": [
-        {
-          "repository": "https://github.com/shadcn-ui/ui",
-          "commit": "b4a618b97e35f5dadf3a00d51f410c84a2567d4d",
-          "path": "apps/v4/registry/bases/base/blocks/preview/cards/invoice.tsx",
-          "sourceKind": "preview-internal-module",
-          "scope": [
-            "complete file"
-          ],
-          "contentMode": "verbatim",
-          "localFiles": [
-            "source/invoice.tsx"
-          ],
-          "transformations": []
-        }
       ],
       "dependencies": {
         "packages": [],
@@ -318,11 +205,9 @@
       "knownGaps": [
         "没有真实账单、税务、支付、PDF、权限或财务精度合同"
       ],
-      "license": {
-        "spdx": "MIT",
-        "file": "LICENSE.md",
-        "notes": []
-      }
+      "localFiles": [
+        "source/invoice.tsx"
+      ]
     },
     {
       "id": "business-shipping-address",
@@ -333,22 +218,6 @@
       ],
       "notApplicableWhen": [
         "只需要自由文本地址，或准备把美国模型当成全球通用"
-      ],
-      "sources": [
-        {
-          "repository": "https://github.com/shadcn-ui/ui",
-          "commit": "b4a618b97e35f5dadf3a00d51f410c84a2567d4d",
-          "path": "apps/v4/registry/bases/base/blocks/preview/cards/shipping-address.tsx",
-          "sourceKind": "preview-internal-module",
-          "scope": [
-            "complete file"
-          ],
-          "contentMode": "verbatim",
-          "localFiles": [
-            "source/shipping-address.tsx"
-          ],
-          "transformations": []
-        }
       ],
       "dependencies": {
         "packages": [],
@@ -378,11 +247,9 @@
       "knownGaps": [
         "没有 form submit、地址补全、地区联动、错误或真实国际地址支持"
       ],
-      "license": {
-        "spdx": "MIT",
-        "file": "LICENSE.md",
-        "notes": []
-      }
+      "localFiles": [
+        "source/shipping-address.tsx"
+      ]
     },
     {
       "id": "business-invite-team",
@@ -393,22 +260,6 @@
       ],
       "notApplicableWhen": [
         "权限模型尚未定义，或只有单个简单邮箱输入"
-      ],
-      "sources": [
-        {
-          "repository": "https://github.com/shadcn-ui/ui",
-          "commit": "b4a618b97e35f5dadf3a00d51f410c84a2567d4d",
-          "path": "apps/v4/registry/bases/base/blocks/preview/cards/invite-team.tsx",
-          "sourceKind": "preview-internal-module",
-          "scope": [
-            "complete file"
-          ],
-          "contentMode": "verbatim",
-          "localFiles": [
-            "source/invite-team.tsx"
-          ],
-          "transformations": []
-        }
       ],
       "dependencies": {
         "packages": [],
@@ -441,11 +292,9 @@
       "knownGaps": [
         "没有动态行、剪贴板、邀请 API、loading、成功或恢复状态"
       ],
-      "license": {
-        "spdx": "MIT",
-        "file": "LICENSE.md",
-        "notes": []
-      }
+      "localFiles": [
+        "source/invite-team.tsx"
+      ]
     },
     {
       "id": "business-notification-settings",
@@ -456,22 +305,6 @@
       ],
       "notApplicableWhen": [
         "只有一个布尔开关，或强制通知规则尚未设计"
-      ],
-      "sources": [
-        {
-          "repository": "https://github.com/shadcn-ui/ui",
-          "commit": "b4a618b97e35f5dadf3a00d51f410c84a2567d4d",
-          "path": "apps/v4/registry/bases/base/blocks/preview-02/cards/notification-settings.tsx",
-          "sourceKind": "preview-internal-module",
-          "scope": [
-            "complete file"
-          ],
-          "contentMode": "verbatim",
-          "localFiles": [
-            "source/notification-settings.tsx"
-          ],
-          "transformations": []
-        }
       ],
       "dependencies": {
         "packages": [],
@@ -498,11 +331,9 @@
       "knownGaps": [
         "没有持久化、异步状态、冲突恢复或服务端同步"
       ],
-      "license": {
-        "spdx": "MIT",
-        "file": "LICENSE.md",
-        "notes": []
-      }
+      "localFiles": [
+        "source/notification-settings.tsx"
+      ]
     },
     {
       "id": "business-faq",
@@ -513,22 +344,6 @@
       ],
       "notApplicableWhen": [
         "问题很少，或规模需要搜索、深链和独立知识库"
-      ],
-      "sources": [
-        {
-          "repository": "https://github.com/shadcn-ui/ui",
-          "commit": "b4a618b97e35f5dadf3a00d51f410c84a2567d4d",
-          "path": "apps/v4/registry/bases/base/blocks/preview-02/cards/faq.tsx",
-          "sourceKind": "preview-internal-module",
-          "scope": [
-            "complete file"
-          ],
-          "contentMode": "verbatim",
-          "localFiles": [
-            "source/faq.tsx"
-          ],
-          "transformations": []
-        }
       ],
       "dependencies": {
         "packages": [],
@@ -554,13 +369,9 @@
       "knownGaps": [
         "没有搜索、深链、内容管理、分析或真实支持入口"
       ],
-      "license": {
-        "spdx": "MIT",
-        "file": "LICENSE.md",
-        "notes": [
-          "MIT does not validate security, regulatory, vendor, or commercial claims in demo copy."
-        ]
-      }
+      "localFiles": [
+        "source/faq.tsx"
+      ]
     },
     {
       "id": "chart-line-trend",
@@ -571,26 +382,6 @@
       ],
       "notApplicableWhen": [
         "表单、设置、审批队列或普通表格没有趋势判断需求"
-      ],
-      "sources": [
-        {
-          "repository": "https://github.com/shadcn-ui/ui",
-          "commit": "b4a618b97e35f5dadf3a00d51f410c84a2567d4d",
-          "path": "apps/v4/registry/bases/base/examples/chart-example.tsx",
-          "sourceKind": "example-internal-function",
-          "scope": [
-            "line data/config and ChartLineExample, upstream lines 210-297"
-          ],
-          "contentMode": "derived",
-          "localFiles": [
-            "source/chart-line-example.tsx"
-          ],
-          "transformations": [
-            "removed the combined chart gallery and Example wrapper",
-            "pruned non-line chart imports",
-            "exported ChartLineExample"
-          ]
-        }
       ],
       "dependencies": {
         "packages": [
@@ -616,11 +407,90 @@
       "knownGaps": [
         "没有数据加载、空态、失败、时区、筛选、降采样或实时更新"
       ],
-      "license": {
-        "spdx": "MIT",
-        "file": "LICENSE.md",
-        "notes": []
-      }
+      "localFiles": [
+        "source/chart-line-example.tsx"
+      ]
+    },
+    {
+      "id": "loading-region",
+      "category": "loading",
+      "relativePath": "loading",
+      "applicableWhen": [
+        "内容区域等待，需要文字状态和装饰动画"
+      ],
+      "notApplicableWhen": [
+        "按钮级加载",
+        "需要模态阻止操作"
+      ],
+      "dependencies": {
+        "packages": [
+          "react",
+          "clsx",
+          "tailwind-merge"
+        ],
+        "registryComponents": [],
+        "projectLocal": [
+          "Tailwind CSS v4 入口与 shadcn 语义颜色 token"
+        ]
+      },
+      "baseUiApis": [],
+      "replaceBeforeUse": [
+        "局部 cn",
+        "等待文案",
+        "父容器尺寸、定位和层级"
+      ],
+      "knownGaps": [
+        "overlay 仅阻挡指针，不锁定键盘焦点或充当模态框",
+        "不负责超时、错误或重试"
+      ],
+      "localFiles": [
+        "source/LoadingPage.tsx"
+      ]
+    },
+    {
+      "id": "markdown-reader",
+      "category": "markdown",
+      "relativePath": "markdown",
+      "applicableWhen": [
+        "Markdown/GFM 内容阅读，需要代码复制和换行"
+      ],
+      "notApplicableWhen": [
+        "目标项目缺少依赖且调用方明确禁止安装",
+        "需要 Markdown 编辑器"
+      ],
+      "dependencies": {
+        "packages": [
+          "react",
+          "react-markdown@10.1.0",
+          "remark-gfm@4.0.1",
+          "react-syntax-highlighter@16.1.1",
+          "@types/react-syntax-highlighter@15.5.13",
+          "next-themes@0.4.6",
+          "lucide-react",
+          "clsx",
+          "tailwind-merge"
+        ],
+        "registryComponents": [],
+        "projectLocal": [
+          "Tailwind CSS v4 入口与 shadcn 语义颜色 token"
+        ]
+      },
+      "baseUiApis": [],
+      "replaceBeforeUse": [
+        "局部 cn",
+        "内容与语言",
+        "链接策略和图片来源",
+        "复制权限与错误反馈"
+      ],
+      "knownGaps": [
+        "PCM 基础模板缺少解析和高亮包，明确实现或调试任务可按项目方式补齐",
+        "宿主需接入 next-themes ThemeProvider",
+        "不提供编辑、传输或资源代理",
+        "复制依赖浏览器支持和权限，失败会明确反馈"
+      ],
+      "localFiles": [
+        "source/MarkdownPro.tsx"
+      ]
     }
   ]
 }

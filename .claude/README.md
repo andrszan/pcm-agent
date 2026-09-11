@@ -44,9 +44,7 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 
 ### 开发账号与凭据边界
 
-- PCM 或 Agent 为目标产品创建或调整、最终保留在交付开发数据中且交付后仍可登录的所有开发账号及密码，都是受版本控制的产品交付信息，包括普通用户、业务角色、产品管理员和产品超级管理员。真实开发账号应项目专用、不冒用真实个人身份、在开发数据中真实存在且可登录；真实开发数据不等于真实个人或生产数据。不得将这些账号称为演示账号、体验账号或假账号，也不得附加演示租户、隔离业务数据、生产禁用 Seed 等部署阶段限制。
-- 项目约定的受跟踪 README 或独立账号文档必须记录适用开发环境、登录入口、角色、账号、密码、Seed/reset 方式及必要已有开发数据说明。账号创建、修改或删除时同步文档；开发完成前逐个核验账号真实存在、密码可登录、角色一致和已有开发数据可见。Seed/reset 保持幂等、不重复且不覆盖其管理范围外的已有账号或数据。临时测试后删除或事务回滚、未保留在最终交付开发状态中的短期账号无需逐个记录。
-- 凭据是否公开按认证目标判断：用于登录目标产品的交付开发账号公开；PCM 或目标产品用于访问其它系统或资源的数据库、对象存储、SMTP、OAuth client secret、API key、私钥、令牌、Git、云、服务器、基础设施账号、PCM 工具和媒体 Provider 凭据及真实个人认证信息仍属秘密。`docs/ignore/` 可继续保存真正私密的开发资源资料，但不承担目标产品账号交接。
+凭据分类遵循根目录 [Agent 工作规范](../AGENTS.md)。账号交付由需求规划、技术设计和开发能力按各自职责落实；创建、文档交接、真实登录验证及初始化／重置的完整执行要求见 [开发规范](skills/dev-workflow/SKILL.md#真实环境与数据闸门)。
 
 开始文档设计或开发前，根据当前任务至少检查：
 
@@ -94,14 +92,14 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 
 | Skill | 职责 |
 |---|---|
-| `project-intake` | 通过对话收敛最终产品范围、核心任务、用户语言、复杂度取舍和需要尽早验证的高风险假设 |
+| `project-intake` | 通过对话收敛最终产品范围、核心任务、用户语言、复杂度取舍和需要尽早验证的高风险假设；对调用方资料按需摸底，将用途结论、来源与重要未知写入产品定义，不默认全量读取或将附件全部纳入范围 |
 | `solution-design` | 基于已组装的工程事实确定项目级技术方向、系统边界和跨模块技术方案 |
 | `project-readiness` | 建立当前自动化开发周期唯一的开发资源准备基线，实际准备外部服务、运行凭据和受保护配置，并维护脱敏清单 |
 | `project-bootstrap` | 将已有基础工程项目化，按既有资源绑定迁移配置接线，并完成适用安装、构建、启动和基础验证 |
 | `product-experience-audit` | 对当前完整集成产品执行跨需求、跨模块、跨页面的全项目级体验审计，输出经核验候选、重复项和覆盖缺口，不修改正式 Backlog |
 | `product-feedback-triage` | 核验、拆解、去重和分级人工产品反馈，并按项目约定形成候选变更项 |
 | `engineering-architecture` | 在单份项目架构文档中，按每个适用业务代码交付单元设计可核验的 Current/Target、职责/边界/依赖和代表性文件归属；默认不修改 `AGENTS.md` |
-| `ui-ux-framework` | 建立、校正或演进跨需求稳定的产品表面、App Shell Contract、内容语言、视觉和交互框架；按需读取技术中立布局资源或明确记录来源、许可与未知边界的框架源码快照，后者不代表项目技术选型；不负责单需求设计或开发后验收 |
+| `ui-ux-framework` | 建立、校正或演进跨需求稳定的产品表面、App Shell Contract、内容语言、视觉和交互框架；可主动调用，也支持设计或开发时只查阅布局预览与兼容源码，不重做既定框架；不接管单需求设计、实现或开发后验收 |
 | `requirement-breakdown` | 完整覆盖最终产品范围，拆成有明确结果、依赖和验收方向的 Backlog，并建议首条验证切片 |
 | `trd-design` | 为一个内聚需求设计产品行为、体验复杂度、关键内容意图和技术实现，形成或更新活动 TRD |
 | `dev-workflow` | 实现功能、Bug 或重构，以自动化、真实运行、浏览器、实际渲染和独立审查证明功能与体验结果 |
@@ -112,12 +110,12 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 
 | Skill | 依赖与边界 |
 |---|---|
-| `tailwind-theme` | 适用于 Tailwind CSS v4 CSS-first 前端；根据项目事实和明确主题要求选择经校验的 tweakcn 内置主题或生成自定义配色，只落实完整 light/dark 语义颜色并验证真实渲染，不修改字体、圆角、阴影、布局、组件或业务页面，也不自动安装 Tailwind 或组件库 |
-| `ui-component-patterns` | 适用于 React + shadcn/ui Base UI + Tailwind CSS v4 的具体 Chat、认证、业务卡片、结构化表单和真实趋势场景；从本地受控参考中选择少量候选并按真实业务、品牌、数据和状态二次设计，不安装或复制 registry，不决定 Shell、信息架构或主题；Radix 及其它不兼容栈无副作用跳过 |
+| `tailwind-theme` | 适用于 Tailwind CSS v4 CSS-first 前端；依据产品资料和实际前端完成风格定制，可自主选择保留默认、采用全部或部分 preset、适配或 custom，并按实际改动验证和诚实报告；具体规则以 [Skill 正文](skills/tailwind-theme/SKILL.md) 为唯一真源 |
+| `ui-component-patterns` | 适用于 React + shadcn/ui Base UI + Tailwind CSS v4 的具体 Chat、认证、业务卡片、结构化表单、真实趋势、区域加载反馈和 Markdown 内容阅读场景；从本地受控参考中选择少量候选并按真实业务、品牌、数据和状态二次设计，不安装或复制 registry，不决定 Shell、信息架构或主题；Radix 及其它不兼容栈无副作用跳过 |
 | `playwright-cli` | 依赖当前环境已具备的对应浏览器运行工具；用于真实浏览器操作与验证，核心 Skills 不得把它作为隐藏必需 Skill |
-| `media-assets` | 工作区固有、按需调用的开发期媒体工具；通过受控 Provider catalog 选择适配来源，获取少量资源并固化到目标项目，但不构成产品运行时依赖 |
+| `media-assets` | 工作区固有、按需调用的开发期媒体工具；统一负责已有资产复用、图库检索、单张定制生成、传入与生成结果检查、资产固化及测试 fixture，不构成产品运行时依赖 |
 
-可选技术或工具能力不适用、不可用时，应无副作用跳过或记录真实验证缺口；本仓库不为此自动安装新的 CLI、插件或项目依赖。
+可选技术或工具能力不适用、不可用时，应无副作用跳过或记录真实验证缺口；本仓库不自动安装任意新的 CLI、插件或项目依赖。已准入受控工具随附的声明式依赖可以按其使用合同由隔离运行时准备，不等同于允许任意安装新工具或把工具依赖加入目标产品。
 
 ### 第三方 Skills
 
@@ -129,7 +127,17 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 
 ### 流程外辅助能力
 
-`pcm-product-factory` 是面向特定产品选题场景的专用能力，可输出产品初稿并更新其产品目录。它不是核心开发流程的必经 Skill；若使用，其结果仍由 `project-intake` 收敛为当前项目权威产品定义。
+`project-data-baseline` 是项目主要业务已经开发并集成完成后的独立数据收尾能力。它直接完成必要设计、实现、真实初始化／重置、角色使用、文件恢复和交接验证，不限于产出 TRD，也不依赖 `dev-workflow` 或其它设计／开发 Skill。它不接入或修改原有编号步骤，不自动创建需求、提交或推送；已有数据基线则复用并收口，已经满足时实际核验后可以无代码变更结束。
+
+在目标项目准备交接时显式调用，例如：
+
+```text
+/project-data-baseline 对当前已完成项目做数据交付收尾，建立自然、完整、可操作的 init/reset 基线，按实际业务恢复所需文件并完成真实验证。
+```
+
+调用本能力不等于授权清空任意现有环境。实际删除仍须说明精确目标、当前数据和影响并取得对应确认；完成标准是接手者真正能初始化、登录或使用、明确重置并恢复，而不是只留下方案或脚本。详见 [项目数据基线收口](skills/project-data-baseline/SKILL.md)。
+
+`pcm-product-factory` 是开放构思 Web 应用并形成产品初稿的可选能力，同时维护产品目录索引。它不预设市场、功能或文档模板，也不是核心开发流程的必经 Skill；一句话想法或已有资料即可进入产品定义，由 `project-intake` 通过沟通形成当前项目权威产品文档。
 
 ## 6. Subagents
 
@@ -146,6 +154,8 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 .claude/
 ├── README.md
 ├── AI Agent开发流程设计.md
+├── rules/
+│   └── model-prompts.md     # 仅匹配 PCM Demo 的 Python 文件
 ├── agents/
 │   ├── dev.md
 │   └── reviewer.md
@@ -159,10 +169,12 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 │   │   └── evals/evals.json
 │   ├── media-assets/
 │   │   ├── SKILL.md
+│   │   ├── scripts/generate_image.py
+│   │   ├── scripts/pixabay.py
 │   │   ├── providers/
 │   │   │   ├── README.md
-│   │   │   ├── pixabay/README.md
-│   │   │   └── openai-compatible-image/README.md
+│   │   │   ├── openai-compatible-image/README.md
+│   │   │   └── pixabay/README.md
 │   │   ├── assets/fixtures/
 │   │   │   ├── README.md
 │   │   │   └── manifest.template.json
@@ -178,7 +190,9 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 │   │   ├── SKILL.md
 │   │   └── evals/evals.json
 │   ├── project-bootstrap/SKILL.md
-│   ├── project-intake/SKILL.md
+│   ├── project-intake/
+│   │   ├── SKILL.md
+│   │   └── evals/evals.json
 │   ├── project-readiness/
 │   │   ├── SKILL.md
 │   │   └── evals/evals.json
@@ -190,6 +204,11 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 │   ├── tailwind-theme/
 │   │   ├── SKILL.md
 │   │   ├── references/theme-selection.md
+│   │   ├── assets/tweakcn/
+│   │   │   ├── README.md
+│   │   │   ├── LICENSE
+│   │   │   ├── catalog.json
+│   │   │   └── themes/
 │   │   └── evals/
 │   │       ├── evals.json
 │   │       └── files/
@@ -212,6 +231,8 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 │   │   │   │   ├── login-two-column/
 │   │   │   │   ├── notification-settings/
 │   │   │   │   └── shipping-address/
+│   │   │   ├── loading/         # 区域加载反馈，本地改造候选
+│   │   │   ├── markdown/        # Markdown 阅读，本地改造候选
 │   │   │   └── chart/line-trend/
 │   │   └── evals/evals.json
 │   ├── trd-design/
@@ -223,10 +244,6 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 │   │   │   ├── app-shell-contract.md
 │   │   │   ├── layout-resource-library.md
 │   │   │   └── layout-selection-guide.md
-│   │   ├── assets/layout-patterns/
-│   │   │   ├── list-detail-workspace/
-│   │   │   ├── sidebar-workspace/
-│   │   │   └── top-navigation/
 │   │   ├── assets/layout-source-snapshots/shadcn-ui/
 │   │   │   ├── summary-to-record-workbench/
 │   │   │   ├── context-switching-navigation-shell/
@@ -239,15 +256,20 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 └── settings.local.json
 ```
 
-项目执行时可以另有 `.claude/rules/` 保存项目级稳定规则。普通运行不创建专属过程目录、Manifest、Run ID 或阶段报告；需要长期保留的事实进入产品文档、活动 TRD、代码、测试、Git 或项目已有记录位置。
+普通运行不创建专属过程目录、Manifest、Run ID 或阶段报告；需要长期保留的事实进入产品文档、活动 TRD、代码、测试、Git 或项目已有记录位置。
 
-`media-assets` 的 `providers/` 维护显式准入的 Provider catalog 和适配说明，不扫描目录或自动安装来源；`assets/fixtures/` 是受跟踪测试输入的维护入口，不承载目标产品资产、对象存储数据或工作区私有凭据。
+媒体价值判断遵循根目录工作规范；获取、检查、固化和测试 fixture 的执行约定统一见 [media-assets](skills/media-assets/SKILL.md)。工具内部入口：
 
-`tailwind-theme` 只面向实际采用 Tailwind CSS v4 CSS-first 语义颜色变量的前端。它按需读取 tweakcn 当前动态 registry，但只消费经过校验的 light/dark 颜色白名单并把最终值固化进目标项目；网络不可用或没有合适 preset 时依据项目事实生成自定义配色，不把动态 URL、完整远程 CSS、字体、圆角、阴影或其它非颜色 token 变成产品依赖。
+- [Provider catalog](skills/media-assets/providers/README.md)：已准入来源及适配说明。
+- [Pixabay](skills/media-assets/providers/pixabay/README.md)：图库检索、下载命令、配置与缓存。
+- [定制生成](skills/media-assets/providers/openai-compatible-image/README.md)：固定生成命令、参数及配置。
+- [测试 fixture](skills/media-assets/assets/fixtures/README.md)：测试输入及复制、维护边界。
 
-`ui-component-patterns` 只面向实际采用 React、shadcn/ui Base UI 与 Tailwind CSS v4 的具体 UI 实现场景。其 `assets/react-shadcn/base-tailwind-v4/` 保存固定上游 commit 的独立 registry block、preview 内部模块和明确标记为派生的 example 函数摘录；不复制基础 primitives、完整 gallery、可运行 demo 或正式预览。Agent 每次只读取最相关的少量候选，并使用目标项目自己的业务、品牌、数据、状态、组件和 token 二次设计；MIT 代码许可不自动覆盖商标、远程媒体或演示中的安全、监管和商业声明。
+`tailwind-theme` 面向实际采用 Tailwind CSS v4 CSS-first 的前端，依据产品资料和现有工程完成基础风格定制。Agent 可自主选择保留默认、采用全部或部分 preset、适配或 custom，并按实际改动执行相称验证、诚实报告结果；本地资源的选择、安全、修改和验证规则统一以 [Skill 正文](skills/tailwind-theme/SKILL.md) 为唯一真源。
 
-`ui-ux-framework` 的布局资源分为两层：`assets/layout-patterns/` 是技术中立、原生、自包含且可运行的固定六文件模式；`assets/layout-source-snapshots/` 是记录上游来源、许可与未知边界、带有外部依赖且不可独立运行的部分框架源码快照，只用于分析结构、交互和实现假设，不代表项目技术栈或组件选型。两类资源都按需只读最相关单套，Agent 必须依据目标项目的真实用户、任务、层级、设备、技术栈和品牌事实二次设计，不能复制后只换皮。具体索引与维护合同以 `ui-ux-framework/references/layout-resource-library.md` 为准。
+`ui-component-patterns` 只面向实际采用 React、shadcn/ui Base UI 与 Tailwind CSS v4 的具体 UI 实现场景。其 `assets/react-shadcn/base-tailwind-v4/` 保存固定上游 commit 的独立 registry block、preview 内部模块和明确标记为派生的 example 函数摘录；不复制基础 primitives、完整 gallery、可运行 demo 或正式预览。Agent 每次只读取最相关的少量候选，并使用目标项目自己的业务、品牌、数据、状态、组件和 token 二次设计；MIT 代码许可不自动覆盖商标、远程媒体或演示中的安全、监管和商业声明。另有用户导入后通用化的 `loading`、`markdown` 候选，原始来源与许可待确认，仅供本地维护验证，不继承 shadcn MIT 许可；生产复用前先核实授权和目标项目依赖。
+
+`ui-ux-framework` 的 `assets/layout-source-snapshots/` 保存带实际预览、上游依赖与许可边界的部分框架源码快照，不保证独立运行。先依据任务和实际技术栈筛选少量候选、查看预览比较，再深入选中源码；React + shadcn/ui 项目优先考察兼容的本地 shadcn/ui 资源，不将现有资源当作设计上限。允许复用许可明确、技术兼容且适用的布局与响应式代码，接入真实业务、权限、路由、组件和 token，不照搬品牌、fixture 或演示逻辑。开发时仅查阅资源不要求重做框架或写文档。当前尚未收录独立纯图片资源；源码与纯图片的具体选择、使用和维护规则以 `ui-ux-framework/references/layout-resource-library.md` 为准。
 
 ## 8. 使用边界摘要
 
@@ -257,7 +279,7 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 - 不因为示例流程存在就机械运行所有能力；不适用时允许无副作用跳过。
 - 活动需求和活动 TRD 可随当前事实调整；归档历史保持不可变。
 - 开发 `.env` 可以在项目范围内安全使用；用于登录目标产品的交付开发账号及密码应进入受跟踪账号文档，PCM 或目标产品用于访问其它系统或资源的凭据及其它秘密必须保持 Git 忽略并在输出中脱敏。
-- 工作区媒体 Provider 的私有配置仅服务 `media-assets`，按需调用；它们不属于目标项目配置、开发资源清单或产品运行时依赖。
+- 工作区媒体工具的私有配置供相应的已有素材检索或定制生成/编辑能力使用；它们是 AI Agent 工作区工具配置，不属于目标项目配置、开发资源清单或产品运行时依赖。
 - 不为当前任务擅自引入新基础设施、CLI、插件或第三方 Skill。
 - 验证以真实行为和风险为中心，局部 Mock、代码阅读或工具缺位不能冒充完成。
 
@@ -281,7 +303,7 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 
 ### 空白项目怎么开始？
 
-先使用 `project-intake` 收敛目标用户、产品范围、核心流程和外部约束；需要模板选型时，基于当前可读参考资料完成选型并组装适用基础工程。随后使用 `project-readiness` 建立当前自动化开发周期唯一的开发资源准备基线，实际准备并核验后续编码和开发联调所需的外部资源、权限和开发配置；生产发布条件不属于该基线。基线完成后执行 `project-bootstrap` 项目化工程；当前存在 Tailwind CSS v4 CSS-first 前端且尚无项目专属主题配色时，在项目化完成后、初始提交前条件性调用 `tailwind-theme`，同时落实并验证 light/dark 语义颜色，不新增固定编号步骤。然后基于真实工程事实调用 `solution-design` 形成总体技术方案。默认完整顺序见人工流程文档，但每个 Skill 仍可独立调用。
+先使用 `project-intake` 收敛目标用户、产品范围、核心流程和外部约束；需要模板选型时，基于当前可读参考资料完成选型并组装适用基础工程。随后使用 `project-readiness` 建立当前自动化开发周期唯一的开发资源准备基线，实际准备并核验后续编码和开发联调所需的外部资源、权限和开发配置；生产发布条件不属于该基线。基线完成后执行 `project-bootstrap` 项目化工程；当前存在 Tailwind CSS v4 CSS-first 前端时，在项目化完成后、初始提交前条件性调用 `tailwind-theme`，只提供产品资料和实际前端并请求完成风格定制，不新增固定编号步骤。然后基于真实工程事实调用 `solution-design` 形成总体技术方案。默认完整顺序见人工流程文档，但每个 Skill 仍可独立调用。
 
 ### 小改动或 Bug 修复也要走完整流程吗？
 

@@ -1,8 +1,8 @@
 # ui-ux-framework
 
-`ui-ux-framework` 是产品级 UI/UX 框架设计 Skill，用于建立或演进跨需求稳定的产品表面、信息架构、App Shell Contract、导航、页面模式、滚动与 sticky 规则、共享视觉语义、响应式和可访问性基线。
+`ui-ux-framework` 用于建立或演进跨需求稳定的产品表面、信息架构、App Shell Contract、导航、页面模式、滚动与 sticky 规则、共享视觉语义、响应式和可访问性基线；也支持设计或开发时只查阅布局参考。
 
-它负责形成后续需求可以引用的设计合同，不负责单需求页面设计、前端实现、开发后验收或套用通用导航模板。完整职责与执行规则见 [`SKILL.md`](./SKILL.md)。
+它不接管单需求设计、前端实现或开发后验收。完整职责与执行规则见 [`SKILL.md`](./SKILL.md)。
 
 ## 目录
 
@@ -14,10 +14,6 @@ ui-ux-framework/
 │   ├── layout-selection-guide.md
 │   ├── app-shell-contract.md
 │   └── layout-resource-library.md
-├── assets/layout-patterns/
-│   ├── list-detail-workspace/
-│   ├── sidebar-workspace/
-│   └── top-navigation/
 ├── assets/layout-source-snapshots/shadcn-ui/
 │   ├── summary-to-record-workbench/
 │   ├── context-switching-navigation-shell/
@@ -26,34 +22,23 @@ ui-ux-framework/
 └── evals/evals.json
 ```
 
-- [`references/layout-selection-guide.md`](./references/layout-selection-guide.md)：区分产品 Shell、页面模式与滚动模型，按项目事实选择布局方向。
-- [`references/app-shell-contract.md`](./references/app-shell-contract.md)：定义区域图、滚动所有者、sticky 基准、响应式转换和 Current/Target 合同。
-- [`references/layout-resource-library.md`](./references/layout-resource-library.md)：两层布局资源的索引，以及新增、验证和维护资源的唯一权威规则。
-- `assets/layout-patterns/`：技术中立、原生、自包含且可运行的 HTML/CSS/JavaScript 结构与交互参考，不是项目品牌成品或生产代码。
-- `assets/layout-source-snapshots/`：部分、不可独立运行的第三方框架源码快照，保留上游依赖与许可，只用于分析结构、交互和实现假设，不代表项目技术栈或组件选型。
-- `evals/evals.json`：验证 Skill 的职责边界和关键行为。
+- [`references/layout-selection-guide.md`](./references/layout-selection-guide.md)：区分 Shell、页面模式与滚动模型，按项目事实比较布局方向。
+- [`references/app-shell-contract.md`](./references/app-shell-contract.md)：七种可组合的区域示例，以及导航、滚动、sticky 和窄屏变化的按需记录要点；新项目直接写目标，既有项目调整时再说明现状与迁移。
+- [`references/layout-resource-library.md`](./references/layout-resource-library.md)：现有资源索引、代码复用边界与维护规则。
+- `assets/layout-source-snapshots/`：带实际预览的部分框架源码快照，保留上游依赖与许可，不保证独立运行；符合许可与技术兼容条件的适用代码可以复用。
+- `evals/evals.json`：职责边界、参考选择和资源查阅行为的验证用例。
 
 ## 使用方式
 
-显式调用 `/ui-ux-framework`，并提供当前项目范围、产品资料、现有设计或需要演进的框架问题。Agent 会先读取真实项目事实，再按当前问题读取必要的 reference；只有需要结构参考时才选择最相关的资源层和单套资源，源码快照先读 README，再按需读取 source。
+可以显式调用 `/ui-ux-framework`，也可以由 Agent 根据任务主动调用：
 
-两类资源都只能帮助理解一种结构如何工作，不能直接决定项目布局。项目必须根据真实用户、任务、信息层级、设备、技术栈和品牌事实二次设计，而不是复制后只替换 Logo、颜色或文案。
+- **建立或演进框架**：提供项目范围、产品资料、现有设计或框架问题；依据真实事实形成适用设计合同，只有真正高影响的取舍才需要确认。
+- **仅查阅资源**：提供当前设计或开发问题、已有框架决定和技术事实；比较少量候选预览，再深入选中源码，说明可借鉴部分和局限后结束。不要求创建或更新框架文档，不重做已确定的 Shell，不接管代码实现。
+
+按实际技术栈优先选择兼容参考；React + shadcn/ui 项目优先考察本地 shadcn/ui 资源，但仍需核对组件 API、版本和依赖。允许合理复用布局与响应式代码，不为原创强制重写，也不将已有模板作为设计上限。真实业务、路由、权限、状态、品牌和 token 必须按项目接入，后续实现仍需验证。
 
 ## 长期维护资产
 
-### `layout-patterns`
+源码快照的 provider 保留 README 与许可；每个语义目录保留 README、`source/` 和实际存在的预览。记录来源、依赖、局限和许可，未知信息不推断，不承诺部分快照独立运行。
 
-以下规则只适用于技术中立可运行资源：
-
-1. 只有现有资源无法覆盖新的 Shell、页面模式或滚动决策边界时才新增；行业、颜色、圆角或组件库不同不构成新资产。
-2. 每个资源保持原生 HTML/CSS/JavaScript、自包含、无构建步骤、无 CDN 和远程素材，避免绑定 React、Vue 或特定组件库。
-3. 每个资源固定且只包含 `README.md`、`index.html`、`styles.css`、`script.js`、`desktop-preview.png` 和 `mobile-preview.png` 六个文件。
-4. README 说明适用与不适用条件、区域图、滚动所有者、sticky 基准、宽窄屏转换、交互和非目标。
-5. 使用真实浏览器验证桌面与窄屏布局、键盘交互、Drawer、焦点返回、滚动、sticky 和控制台错误；临时截图放入工作区根 `.test-screenshots/`，正式预览图保存在资源目录。
-6. 新增或调整资源后更新 [`layout-resource-library.md`](./references/layout-resource-library.md) 的索引；只有 Skill 行为边界发生变化时才修改 `SKILL.md` 或增加 eval。
-
-### `layout-source-snapshots`
-
-每个 provider 保留 README 与许可；每个语义目录保留 README、`source/` 和实际存在的预览。快照应保持已知来源与相对结构，记录依赖、局限和许可，未知信息不推断；不承诺独立运行、编译成功或移动端预览，也不伪造未随上游材料提供的内容。
-
-具体准入条件、两类目录合同、操作步骤和维护检查以 [`references/layout-resource-library.md`](./references/layout-resource-library.md) 为唯一权威说明，避免在多个文件中重复维护同一套长规则。
+本能力引导 Agent 按项目选择、组合和完善主框架，不提供逐页实现规格或固定审批表单。现有 assets 以代码组织和交互写法为主，附带预览提供构图与审美参考，不要求另建图库；示例未闭合的路由、当前项、折叠、sticky 和响应式行为仍需在实际项目补齐。具体页面美化与实现由实际设计和开发完成。
