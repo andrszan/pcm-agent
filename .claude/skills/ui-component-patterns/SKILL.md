@@ -47,10 +47,10 @@ allowed-tools: Read, Glob, Grep, Bash, Write, Edit, TodoWrite
 
 | 需要 | 读取 |
 |---|---|
-| 核验 collection 技术基线、来源、依赖和本地路径 | [`assets/react-shadcn/base-tailwind-v4/manifest.json`](./assets/react-shadcn/base-tailwind-v4/manifest.json) |
+| 核验 collection 技术基线、依赖和本地路径 | [`assets/react-shadcn/base-tailwind-v4/manifest.json`](./assets/react-shadcn/base-tailwind-v4/manifest.json) |
 | 根据具体任务选择候选 | [`references/catalog.md`](./references/catalog.md) |
 | 已选定资产，需要完成项目化检查 | [`references/adaptation-checklist.md`](./references/adaptation-checklist.md) |
-| 确认单项适用、依赖、缺失和许可 | 只读选中资产的 `README.md` |
+| 确认单项适用、依赖和缺失 | 只读选中资产的 `README.md` |
 | 需要分析具体组合方式 | 最后再读选中资产的 `source/` |
 
 默认只选一个资产。只有两个候选代表实质不同的任务结构，且当前事实不足以直接排除其一时，最多比较两个。不要浏览全部源码后选择最容易复制的一项。
@@ -60,7 +60,7 @@ allowed-tools: Read, Glob, Grep, Bash, Write, Edit, TodoWrite
 1. 明确用户、对象、完成结果、主要行动、数据规模、关键状态和目标视口；
 2. 核验技术栈和目标项目已经存在的 primitives、packages、aliases、图标与 token；
 3. 从 manifest 和 catalog 过滤候选；
-4. 读取候选 README，确认适用、不适用、依赖、known gaps 和许可；
+4. 读取候选 README，确认适用、不适用、依赖和 known gaps；
 5. 说明借用的是信息分组、消息顺序、字段组合、状态表达、操作层级还是趋势表达；
 6. 只有确定适用后才读取 source；
 7. 按目标项目事实重新实现，并完成与当前改动相称的测试和验证移交。
@@ -83,7 +83,7 @@ allowed-tools: Read, Glob, Grep, Bash, Write, Edit, TodoWrite
 - `Acme Inc.`、`Ledger` 等演示品牌；
 - `href="#"`、`IconPlaceholder`、上游 aliases 和宿主资源；
 - 固定宽高、断点、Card 数量、图表 series 和 demo logic；
-- GitHub 等商标、远程媒体和第三方品牌；
+- GitHub 等第三方品牌与远程媒体；
 - SOC 2、SEC registered、加密、供应商、价格或试用等未经项目事实确认的声明；
 - 没有实现的 OAuth、支付、税务、上传、下载、复制、保存和重试行为。
 
@@ -114,7 +114,7 @@ allowed-tools: Read, Glob, Grep, Bash, Write, Edit, TodoWrite
 - transport、AI SDK 状态、重试和附件生命周期留在场景适配层，不进入 Bubble/Message primitives；
 - 已使用 `MessageScroller` 时，不再手写另一套 `scrollTop`、`ResizeObserver` 或 `useStickToBottom` 逻辑。
 
-上游 streaming 示例使用 scripted transport 和 canary AI SDK，只能作为状态与布局参考，不能变成目标项目隐藏依赖。
+流式示例使用 scripted transport 和 canary AI SDK，只能作为状态与布局参考，不能变成目标项目隐藏依赖。
 
 ## Chart 约束
 

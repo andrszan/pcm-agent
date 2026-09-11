@@ -39,7 +39,3 @@ import MarkdownPro from "@/components/MarkdownPro";
 - 复制优先使用 Clipboard API；不可用或拒绝时保留 `textarea` + `execCommand` 兼容 fallback，并清理临时节点、恢复焦点与选择。两种方式均失败才显示失败提示；浏览器可能限制已废弃的兼容接口。
 - 外链统一在新标签页打开；图片使用原生 `img`。接入目标项目时仍需按链接信任边界、图片域名和内容安全策略调整。
 - 保持 `react-markdown` 默认安全边界，不启用 raw HTML。本组件不负责内容清洗、远程资源代理、编辑、流式传输或持久化。
-
-## 来源
-
-该组件由用户自研并授权使用。

@@ -66,14 +66,10 @@
 - tooltip、legend、轴标签和辅助文本能被用户理解；
 - 没有真实趋势任务时不添加 Chart 或 Recharts 依赖。
 
-## 8. 许可、媒体与声明
+## 8. 媒体与声明
 
-- 先读资产 README 和 collection MIT License；
-- 不把同目录 MIT License 推断为覆盖来源未知文件；
-- GitHub 等商标、远程媒体和第三方品牌单独判断；
 - 临时或第三方远程 URL 不进入产品运行时；
-- SOC 2、SEC registered、加密、供应商、价格和试用等声明必须由项目事实支持；
-- 发生实质源码复制时按项目第三方许可约定保留必要 notice。
+- SOC 2、SEC registered、加密、供应商、价格和试用等声明必须由项目事实支持。
 
 ## 9. 验证移交
 
