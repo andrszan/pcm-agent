@@ -6,9 +6,8 @@
 - Block ID：`sidebar-09`
 - 类型：Block-derived installed-output
 - 运行状态：缺少宿主项目与基础依赖，不可独立运行
-- Provenance：unknown provenance；CLI 版本、upstream commit、精确安装命令、导入前修改和截图精确 provenance 均未随素材提供，不推断
+- 技术版本信息：CLI 版本、upstream commit、精确安装命令、导入前修改和截图捕获信息均未随素材提供，不推断
 - 预览：desktop only，`3840 × 1984`；未提供 mobile preview
-- 许可边界：shadcn/ui 派生部分见 [`../LICENSE.md`](../LICENSE.md)；`source/components/theme-provider.tsx` 的精确来源与许可未随素材提供
 
 ## 决策问题
 
@@ -31,7 +30,7 @@
 ## 项目化差异要求
 
 - 建立真实、稳定的“模式 → 集合查询 → 当前项 → 内容”状态模型，路由或可恢复状态应表达当前选择；不得复制随机子集作为模式切换反馈。
-- 不照搬 fixture、Acme 品牌、邮件内容和 demo logic，使用项目已有 token；布局代码可按许可与兼容条件复用，`350px` 等宽度及断点是否保留由目标信息密度和视口验证决定。
+- 不照搬 fixture、Acme 品牌、邮件内容和 demo logic，使用项目已有 token；技术兼容时可复用布局代码，`350px` 等宽度及断点是否保留由目标信息密度和视口验证决定。
 - Search、Unreads 和 mode 切换必须接入真实查询与状态，并提供加载、空态、失败和权限反馈。
 - 窄屏必须补齐“进入集合 → 选择内容 → 返回集合/模式”的流程，恢复当前项、焦点和滚动位置；不得直接隐藏 collection 后宣称已响应式适配。
 - 只有目标任务确实需要三层并存时才保留 mode rail；更简单的两层关系应使用更简单的导航或 list-detail。
@@ -56,13 +55,11 @@
 - `source/app/dashboard/page.tsx`：外层 Shell、固定演示宽度和占位主内容。
 - `source/components/`：mode rail / collection Sidebar、用户菜单和捕获宿主 ThemeProvider，共 3 个文件。
 
-## 上游参考与许可
+## 上游技术参考
 
-以下是当前官方参考，不是本地 provenance：
+以下是当前官方技术参考，不用于标定本地快照的固定 upstream commit：
 
 - Blocks：<https://ui.shadcn.com/blocks>
 - Preview：<https://ui.shadcn.com/view/new-york-v4/sidebar-09>
 - Registry JSON：<https://ui.shadcn.com/r/styles/new-york-v4/sidebar-09.json>
 - GitHub source：<https://github.com/shadcn-ui/ui/tree/main/apps/v4/registry/new-york-v4/blocks/sidebar-09>
-- 官方 License：<https://github.com/shadcn-ui/ui/blob/main/LICENSE.md>
-- shadcn/ui 派生部分的本地许可：[`../LICENSE.md`](../LICENSE.md)

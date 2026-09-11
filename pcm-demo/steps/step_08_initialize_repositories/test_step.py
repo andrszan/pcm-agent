@@ -214,7 +214,7 @@ class InitializeRepositoriesTests(unittest.TestCase):
             ):
                 self.assertIn(required, calls[0]["prompt"])
                 self.assertIn(required, decision_prompts[0])
-            for forbidden in ("expected_head", "INITIAL_COMMITS", "SHA", "组装", "唯一", "无父"):
+            for forbidden in ("expected_head", "INITIAL_COMMITS", "SHA", "组装", "唯一", "无父", "许可证"):
                 self.assertNotIn(forbidden, calls[0]["prompt"])
             self.assertEqual(saved["applicable_repositories"], names)
             self.assertNotIn("initial_commits", read_state(run_dir))
@@ -256,6 +256,7 @@ class InitializeRepositoriesTests(unittest.TestCase):
                 "无人值守权限合同必须原样保留",
             ):
                 self.assertIn(required, calls[1]["prompt"])
+            self.assertNotIn("许可证", calls[1]["prompt"])
             self.assertEqual(calls[1]["resume_session_id"], "session-1")
 
     def test_blocked_after_agent_clean_state_succeeds(self) -> None:

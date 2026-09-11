@@ -19,10 +19,6 @@
 
 `themes/<slug>.json` 是发布 registry 的 `items` 中对应 `registry:style` object 的逐项拆分：保留原有字段、嵌套结构和值，只将 JSON 空白统一为两空格缩进并补末尾换行；未补写 `$schema`，也未删除 `title`、`description`、`css` 或任何 token。`catalog.json` 仅是本地轻量发现索引，其中中文风格特征是本仓库为筛选候选补充的概括，不属于上游主题数据。
 
-## 许可
-
-上游官方仓库根 `LICENSE` 为 **Apache License 2.0**。本目录的 [`LICENSE`](./LICENSE) 是核验时官方仓库 `main` HEAD 中该文件的原文副本；该提交未包含 `NOTICE` 文件。许可文件只说明上游作品的适用许可，不代表主题名称涉及的第三方商标获得额外授权。
-
 ## 离线校验
 
 在仓库根目录运行：
@@ -58,4 +54,4 @@ python3 .claude/skills/tailwind-theme/assets/tweakcn/validate.py
 - 本目录是核验日官方发布 themes registry 的完整 42 项快照，不包含数据库中的社区/用户主题。
 - 发布 endpoint 是可变资源；本目录通过抓取时间、HTTP 元数据和内容哈希标识这次快照，而不是声称它永久代表最新版。
 - 逐主题文件由发布聚合 JSON 拆分，结构和值可逐项验证，但格式空白不是上游逐主题响应的逐字节副本。
-- catalog 的中文特征用于初筛，不应被当作稳定 schema、完整 token、许可结论或采用依据；使用主题时必须直接读取并独立校验对应完整 JSON。
+- catalog 的中文特征用于初筛，不应被当作稳定 schema、完整 token 或采用依据；使用主题时必须直接读取并独立校验对应完整 JSON。

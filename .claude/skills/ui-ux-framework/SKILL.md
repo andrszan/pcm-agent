@@ -55,9 +55,9 @@ allowed-tools: Read, Glob, Grep, Bash, Write, Edit, TodoWrite
 | 正式确定或演进 Shell、导航、sticky、滚动与响应式合同 | [`references/app-shell-contract.md`](./references/app-shell-contract.md) |
 | 需要结构、构图或交互参考，或维护布局资源 | [`references/layout-resource-library.md`](./references/layout-resource-library.md)、少量候选预览及选中资源的源码 |
 
-`assets/layout-source-snapshots/` 保存部分第三方框架源码快照，带有上游依赖和许可，不保证独立运行。按实际技术栈优先选择兼容参考；React + shadcn/ui 项目优先考察本地 shadcn/ui 资源，但仍核对组件版本、Base UI／Radix、路由和依赖，不因资源存在而决定技术栈或布局。先依据用户任务筛选少量候选，读取 README 并查看预览比较构图、层级和密度，再深入选中源码；不全量加载，也不把现有资源作为设计上限。
+`assets/layout-source-snapshots/` 保存部分第三方框架源码快照，带有上游依赖，不保证独立运行。按实际技术栈优先选择兼容参考；React + shadcn/ui 项目优先考察本地 shadcn/ui 资源，但仍核对组件版本、Base UI／Radix、路由和依赖，不因资源存在而决定技术栈或布局。先依据用户任务筛选少量候选，读取 README 并查看预览比较构图、层级和密度，再深入选中源码；不全量加载，也不把现有资源作为设计上限。
 
-现有 assets 主要提供代码组织与交互写法，附带预览辅助理解构图和审美，不要求为项目补建图库。允许复用许可明确、技术兼容且适用的布局、组件组合和响应式代码，接入项目自己的业务、路由、权限、组件与 token，不为原创强制重写。示例未闭合的路由跳转、当前项高亮、侧栏折叠、sticky 和窄屏行为，由实现方按项目补齐并验证；具体资源说明见 [`references/layout-resource-library.md`](./references/layout-resource-library.md)。
+现有 assets 主要提供代码组织与交互写法，附带预览辅助理解构图和审美，不要求为项目补建图库。允许复用技术兼容且适用的布局、组件组合和响应式代码，接入项目自己的业务、路由、权限、组件与 token，不为原创强制重写。示例未闭合的路由跳转、当前项高亮、侧栏折叠、sticky 和窄屏行为，由实现方按项目补齐并验证；具体资源说明见 [`references/layout-resource-library.md`](./references/layout-resource-library.md)。
 
 开始前读取足以支撑判断的真实上下文，通常包括：
 

@@ -267,9 +267,9 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 
 `tailwind-theme` 面向实际采用 Tailwind CSS v4 CSS-first 的前端，依据产品资料和现有工程完成基础风格定制。Agent 可自主选择保留默认、采用全部或部分 preset、适配或 custom，并按实际改动执行相称验证、诚实报告结果；本地资源的选择、安全、修改和验证规则统一以 [Skill 正文](skills/tailwind-theme/SKILL.md) 为唯一真源。
 
-`ui-component-patterns` 只面向实际采用 React、shadcn/ui Base UI 与 Tailwind CSS v4 的具体 UI 实现场景。其 `assets/react-shadcn/base-tailwind-v4/` 保存固定上游 commit 的独立 registry block、preview 内部模块和明确标记为派生的 example 函数摘录；不复制基础 primitives、完整 gallery、可运行 demo 或正式预览。Agent 每次只读取最相关的少量候选，并使用目标项目自己的业务、品牌、数据、状态、组件和 token 二次设计；MIT 代码许可不自动覆盖商标、远程媒体或演示中的安全、监管和商业声明。另有用户导入后通用化的 `loading`、`markdown` 候选，原始来源与许可待确认，仅供本地维护验证，不继承 shadcn MIT 许可；生产复用前先核实授权和目标项目依赖。
+`ui-component-patterns` 只面向实际采用 React、shadcn/ui Base UI 与 Tailwind CSS v4 的具体 UI 实现场景。其 `assets/react-shadcn/base-tailwind-v4/` 保存固定上游 commit 的独立 registry block、preview 内部模块和明确标记为派生的 example 函数摘录；不复制基础 primitives、完整 gallery、可运行 demo 或正式预览。Agent 每次只读取最相关的少量候选，并使用目标项目自己的业务、品牌、数据、状态、组件和 token 二次设计。另有 `loading`、`markdown` 候选，接入前核对目标项目依赖。
 
-`ui-ux-framework` 的 `assets/layout-source-snapshots/` 保存带实际预览、上游依赖与许可边界的部分框架源码快照，不保证独立运行。先依据任务和实际技术栈筛选少量候选、查看预览比较，再深入选中源码；React + shadcn/ui 项目优先考察兼容的本地 shadcn/ui 资源，不将现有资源当作设计上限。允许复用许可明确、技术兼容且适用的布局与响应式代码，接入真实业务、权限、路由、组件和 token，不照搬品牌、fixture 或演示逻辑。开发时仅查阅资源不要求重做框架或写文档。当前尚未收录独立纯图片资源；源码与纯图片的具体选择、使用和维护规则以 `ui-ux-framework/references/layout-resource-library.md` 为准。
+`ui-ux-framework` 的 `assets/layout-source-snapshots/` 保存带实际预览与上游依赖的部分框架源码快照，不保证独立运行。先依据任务和实际技术栈筛选少量候选、查看预览比较，再深入选中源码；React + shadcn/ui 项目优先考察兼容的本地 shadcn/ui 资源，不将现有资源当作设计上限。允许复用技术兼容且适用的布局与响应式代码，接入真实业务、权限、路由、组件和 token，不照搬品牌、fixture 或演示逻辑。开发时仅查阅资源不要求重做框架或写文档。当前尚未收录独立纯图片资源；源码与纯图片的具体选择、使用和维护规则以 `ui-ux-framework/references/layout-resource-library.md` 为准。
 
 ## 8. 使用边界摘要
 
