@@ -24,10 +24,30 @@ class RunStepRetryTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         for patcher in (
             patch.object(run_step, "DEMO_ROOT", Path(temporary.name)),
-            patch.object(run_step, "parse_args", return_value=Mock(step=0, run_id="test-run")),
+            patch.object(run_step, "parse_args", return_value=Mock(step=1, run_id="test-run")),
         ):
             patcher.start()
             self.addCleanup(patcher.stop)
+
+    def test_invalid_step_numbers_are_rejected_before_execution(self) -> None:
+        for step in (-1, 0, 19):
+            with (
+                self.subTest(step=step),
+                patch.object(sys, "argv", ["run_step.py", "--step", str(step)]),
+                contextlib.redirect_stderr(io.StringIO()),
+                self.assertRaises(SystemExit) as raised,
+            ):
+                _REAL_PARSE_ARGS()
+            self.assertEqual(raised.exception.code, 2)
+        self.assertFalse((run_step.DEMO_ROOT / "runs").exists())
+
+    def test_run_directory_identity_is_protected(self) -> None:
+        runs = run_step.DEMO_ROOT / "runs"
+        run_step.create_run_dir(runs, "same-run")
+        with self.assertRaises(FileExistsError):
+            run_step.create_run_dir(runs, "same-run")
+        with self.assertRaises(ValueError):
+            run_step.create_run_dir(runs, "../outside")
 
     def test_initial_resources_rejected_outside_creation_steps(self) -> None:
         with (
@@ -133,12 +153,12 @@ class RunStepRetryTests(unittest.TestCase):
                 with (
                     tempfile.TemporaryDirectory() as directory,
                     patch.object(run_step, "DEMO_ROOT", Path(directory)),
-                    patch.object(run_step, "parse_args", return_value=Mock(step=0)),
-                    patch.object(run_step, "run_step_zero", side_effect=error),
+                    patch.object(run_step, "parse_args", return_value=Mock(step=4)),
+                    patch.object(run_step, "run_step_four", side_effect=error),
                     contextlib.redirect_stderr(stderr),
                 ):
                     self.assertEqual(run_step.main(), expected)
-                self.assertIn("第 0 步执行失败", stderr.getvalue())
+                self.assertIn("第 4 步执行失败", stderr.getvalue())
 
     def test_sdk_retry_reuses_one_prepared_resume_message(self) -> None:
         root = run_step.DEMO_ROOT
@@ -329,47 +349,6 @@ raise SystemExit(run_step.retrying_main())
             self.assertEqual(completed.returncode, 0, completed.stderr)
             self.assertEqual((root / "captured.bin").read_bytes(), raw)
 
-    def test_step_zero_failure_resumes_same_run_and_advances(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            demo_root = Path(directory)
-            draft = demo_root / "draft.md"
-            draft.write_text(" \n\t", encoding="utf-8")
-            args = Mock(run_id="test-run", product_draft=draft)
-            with patch.object(run_step, "DEMO_ROOT", demo_root):
-                run_dir, failed = run_step.run_step_zero(args)
-                failed_state = json.loads(
-                    (run_dir / "state.json").read_text(encoding="utf-8")
-                )
-                self.assertEqual(failed["status"], "failed")
-                self.assertEqual(
-                    (
-                        failed_state["step"],
-                        failed_state["current_step"],
-                        failed_state["current_node"],
-                    ),
-                    (0, 0, "project:00_product_draft"),
-                )
-
-                draft.write_text(
-                    "做一个供档案修复人员使用的手稿拼合 Web 工具。",
-                    encoding="utf-8",
-                )
-                resumed_dir, completed = run_step.run_step_zero(args)
-                completed_state = json.loads(
-                    (run_dir / "state.json").read_text(encoding="utf-8")
-                )
-
-            self.assertEqual(resumed_dir, run_dir)
-            self.assertEqual(completed["status"], "success")
-            self.assertEqual(
-                (
-                    completed_state["step"],
-                    completed_state["current_step"],
-                    completed_state["current_node"],
-                ),
-                (1, 1, "project:01_create_workspace"),
-            )
-
     def test_step_one_fresh_run_binds_draft_and_initial_resources(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             demo_root = Path(directory)
@@ -397,14 +376,19 @@ raise SystemExit(run_step.retrying_main())
                     "published_path": None,
                 },
             )
-            self.assertFalse((run_dir / "steps/00.json").exists())
 
     def test_step_one_rejects_invalid_draft_before_run_or_ai(self) -> None:
-        for label, raw in (("blank", b" \n\t"), ("invalid-utf8", b"\xff")):
+        for label, raw in (
+            ("missing", None),
+            ("empty", b""),
+            ("blank", b" \n\t"),
+            ("invalid-utf8", b"\xff"),
+        ):
             with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
                 demo_root = Path(directory)
                 draft = demo_root / "draft.md"
-                draft.write_bytes(raw)
+                if raw is not None:
+                    draft.write_bytes(raw)
                 args = Mock(
                     step=1,
                     run_id=f"fresh-{label}",
@@ -422,59 +406,6 @@ raise SystemExit(run_step.retrying_main())
                 ai.assert_not_called()
                 self.assertFalse((demo_root / "runs" / f"fresh-{label}").exists())
 
-    def test_step_zero_records_resolved_initial_resources_path(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            demo_root = Path(directory)
-            draft = demo_root / "draft.md"
-            draft.write_text(
-                "## A. 产品身份与文档边界\n产品。\n"
-                "## C. 用户与使用场景\n用户。\n"
-                "## D. 核心价值与业务闭环\n闭环。\n"
-                "## E. 产品范围\n范围。\n"
-                "## P. 产品验收\n验收。\n",
-                encoding="utf-8",
-            )
-            resources = demo_root / "资料"
-            resources.mkdir()
-            args = Mock(
-                run_id="test-run",
-                product_draft=draft,
-                initial_resources=resources,
-            )
-            with patch.object(run_step, "DEMO_ROOT", demo_root):
-                run_dir, completed = run_step.run_step_zero(args)
-            state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
-            self.assertEqual(completed["status"], "success")
-            self.assertEqual(
-                state["initial_resources"],
-                {
-                    "source_path": str(resources.resolve()),
-                    "basename": "资料",
-                    "published_path": None,
-                },
-            )
-
-    def test_step_zero_advanced_state_is_not_downgraded(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            demo_root = Path(directory)
-            draft = demo_root / "draft.md"
-            draft.write_text(
-                "## A. 产品身份与文档边界\n产品。\n"
-                "## C. 用户与使用场景\n用户。\n"
-                "## D. 核心价值与业务闭环\n闭环。\n"
-                "## E. 产品范围\n范围。\n"
-                "## P. 产品验收\n验收。\n",
-                encoding="utf-8",
-            )
-            args = Mock(run_id="test-run", product_draft=draft)
-            with patch.object(run_step, "DEMO_ROOT", demo_root):
-                run_dir, _ = run_step.run_step_zero(args)
-                before = (run_dir / "state.json").read_bytes()
-                with self.assertRaisesRegex(RuntimeError, "第 0 步恢复锚点"):
-                    run_step.run_step_zero(args)
-
-            self.assertEqual((run_dir / "state.json").read_bytes(), before)
-
     def test_existing_runs_reject_adding_initial_resources_without_writes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             demo_root = Path(directory).resolve()
@@ -482,48 +413,39 @@ raise SystemExit(run_step.retrying_main())
             draft.write_text("产品初稿", encoding="utf-8")
             resources = demo_root / "资料.txt"
             resources.write_text("客户资料", encoding="utf-8")
-            for step in (0, 1):
-                for legacy in (False, True):
-                    with self.subTest(step=step, legacy=legacy):
-                        run_id = f"old-{step}-{legacy}"
-                        run_dir = demo_root / "runs" / run_id
-                        (run_dir / "steps").mkdir(parents=True)
-                        state = {
-                            "run_id": run_id,
-                            "status": "failed",
-                            "current_step": step,
-                            "input": {"source_path": str(draft)},
-                        }
-                        if not legacy:
-                            state.update({
-                                "phase": "project_initialization",
-                                "step": step,
-                                "current_node": (
-                                    run_step.PRODUCT_DRAFT_NODE if step == 0
-                                    else run_step.CREATE_WORKSPACE_NODE
-                                ),
-                            })
-                        state_path = run_dir / "state.json"
-                        state_path.write_text(json.dumps(state), encoding="utf-8")
-                        result_path = run_dir / "steps" / f"{step:02d}.json"
-                        result_path.write_text('{"status": "failed"}', encoding="utf-8")
-                        before = (state_path.read_bytes(), result_path.read_bytes())
-                        args = Mock(
-                            run_id=run_id, product_draft=None, initial_resources=resources
-                        )
-                        with (
-                            patch.object(run_step, "DEMO_ROOT", demo_root),
-                            patch.object(run_step, "run_product_draft") as draft_runner,
-                            self.assertRaisesRegex(RuntimeError, "已有运行不能追加"),
-                        ):
-                            if step == 0:
-                                run_step.run_step_zero(args)
-                            else:
-                                run_step.load_or_create_step_one_run(args)
-                        draft_runner.assert_not_called()
-                        self.assertEqual(
-                            (state_path.read_bytes(), result_path.read_bytes()), before
-                        )
+            for legacy in (False, True):
+                with self.subTest(legacy=legacy):
+                    run_id = f"existing-{legacy}"
+                    run_dir = demo_root / "runs" / run_id
+                    (run_dir / "steps").mkdir(parents=True)
+                    state = {
+                        "run_id": run_id,
+                        "status": "failed",
+                        "current_step": 1,
+                        "input": {"source_path": str(draft)},
+                    }
+                    if not legacy:
+                        state.update({
+                            "phase": "project_initialization",
+                            "step": 1,
+                            "current_node": run_step.CREATE_WORKSPACE_NODE,
+                        })
+                    state_path = run_dir / "state.json"
+                    state_path.write_text(json.dumps(state), encoding="utf-8")
+                    result_path = run_dir / "steps/01.json"
+                    result_path.write_text('{"status": "failed"}', encoding="utf-8")
+                    before = (state_path.read_bytes(), result_path.read_bytes())
+                    args = Mock(
+                        run_id=run_id, product_draft=None, initial_resources=resources
+                    )
+                    with (
+                        patch.object(run_step, "DEMO_ROOT", demo_root),
+                        self.assertRaisesRegex(RuntimeError, "已有运行不能追加"),
+                    ):
+                        run_step.load_or_create_step_one_run(args)
+                    self.assertEqual(
+                        (state_path.read_bytes(), result_path.read_bytes()), before
+                    )
 
     def test_step_one_success_writes_result_before_advancing_state(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

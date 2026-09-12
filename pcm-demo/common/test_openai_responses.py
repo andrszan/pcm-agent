@@ -127,7 +127,7 @@ class OpenAIResponsesTests(unittest.TestCase):
         run_dir = Path(directory.name)
         client = Client(responses)
         clock = timing.StepTiming()
-        clock.begin_attempt(0)
+        clock.begin_attempt(1)
         clock.bind_run(run_dir)
         result = None
         error = None
@@ -251,7 +251,7 @@ class OpenAIResponsesTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         run_dir = Path(directory.name)
         clock = timing.StepTiming()
-        clock.begin_attempt(0)
+        clock.begin_attempt(1)
         clock.bind_run(run_dir)
         responses = Responses('{"value":"ok"}')
         client = Client(responses)

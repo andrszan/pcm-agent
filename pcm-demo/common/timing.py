@@ -16,13 +16,26 @@ from common.files import write_json
 from common.state import is_valid_requirement_id, read_state, requirement_step_result_path
 
 
-STEP_NAMES = (
-    "形成产品初稿", "建立项目工作区", "项目需求与产品定义", "基础工程选型",
-    "组装基础工程", "核验项目准备状态", "项目化基础工程与主题配色", "总体技术方案",
-    "首次提交适用仓库", "工程架构设计", "产品级 UI/UX 框架", "拆分 Backlog",
-    "解析 Backlog 并初始化需求注册表", "选择需求并建立统一需求分支", "形成活动 TRD",
-    "实现与验证", "规则复盘", "统一提交需求变更", "程序化合并并完成需求",
-)
+STEP_NAMES = {
+    1: "建立项目工作区",
+    2: "项目需求与产品定义",
+    3: "基础工程选型",
+    4: "组装基础工程",
+    5: "核验项目准备状态",
+    6: "项目化基础工程与主题配色",
+    7: "总体技术方案",
+    8: "首次提交适用仓库",
+    9: "工程架构设计",
+    10: "产品级 UI/UX 框架",
+    11: "拆分 Backlog",
+    12: "解析 Backlog 并初始化需求注册表",
+    13: "选择需求并建立统一需求分支",
+    14: "形成活动 TRD",
+    15: "实现与验证",
+    16: "规则复盘",
+    17: "统一提交需求变更",
+    18: "程序化合并并完成需求",
+}
 STATUSES = {"success", "blocked", "failed"}
 BEIJING = timezone(timedelta(hours=8))
 MISSING_AGENT_NOTE = "历史 Claude Code 执行区间未记录；Agent 累计仅含已记录区间。"
@@ -131,7 +144,7 @@ def _read_timings(run_dir: Path) -> dict[str, Any]:
         raise ValueError("计时文件版本或步骤列表无效")
     for record in data["steps"]:
         if (
-            type(record["step"]) is not int or record["step"] not in range(len(STEP_NAMES))
+            type(record["step"]) is not int or record["step"] not in STEP_NAMES
             or not isinstance(record["name"], str)
             or record["status"] not in STATUSES | {None}
             or (record["requirement_id"] is not None and not is_valid_requirement_id(record["requirement_id"]))
@@ -557,7 +570,7 @@ def print_timing_summary(run_dir: Path) -> None:
                 result = json.loads(path.read_bytes())
                 step = result["step"]
                 requirement_id = result.get("requirement_id") if step >= 13 else None
-                if type(step) is not int or step not in range(len(STEP_NAMES)) or (step, requirement_id) in known:
+                if type(step) is not int or step not in STEP_NAMES or (step, requirement_id) in known:
                     continue
                 record = _new_step(step, requirement_id, None)
                 record.update(status=result["status"], agent_elapsed_seconds=None, note="该步骤未记录计时。")

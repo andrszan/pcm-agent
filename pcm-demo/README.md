@@ -2,7 +2,7 @@
 
 PCM Demo 是正式 PCM 开发前的本地流程验证工具。它用 Python 串联确定性操作、AI-compatible 负责人决策和 Claude Agent SDK，在仓库外的独立产品工作区中执行真实产品开发流程。
 
-当前已实现第 0～18 步和阶段一需求循环：输入可以是一句话产品想法或完整初稿，流程能够建立工作区、形成产品定义、准备工程与资源、完成设计和 Backlog，再逐需求执行 TRD、开发验证、规则复盘、提交和 ff-only 合并。第 6 步还会在适用时完成项目风格定制和基础品牌资产准备。阶段二全项目体验审计与迭代尚未实现。
+当前已实现第 1～18 步和阶段一需求循环：输入可以是一句话产品想法或完整初稿，流程能够建立工作区、形成产品定义、准备工程与资源、完成设计和 Backlog，再逐需求执行 TRD、开发验证、规则复盘、提交和 ff-only 合并。第 6 步还会在适用时完成项目风格定制和基础品牌资产准备。阶段二全项目体验审计与迭代尚未实现。
 
 Demo 只验证流程可行性，不建设正式 PCM 的 Web 管理界面、数据库、分布式调度、部署或生产运维能力。当前支持同一 Demo checkout 在容量限制内并发执行不同产品；同一产品始终互斥。
 
@@ -46,7 +46,7 @@ AI-compatible 与 Claude Agent SDK 使用独立配置，不相互回退。`PCM_A
 
 ### 新建阶段一运行
 
-新运行直接从第 1 步建立工作区，不执行或生成第 0 步结果。入口会把产品初稿和可选初始资料交给第 1 步；产品初稿必须在创建 `runs/<run-id>/` 和调用 AI 前通过可读、UTF-8、非空白检查。
+流程从第 1 步建立工作区开始。入口会把产品初稿和可选初始资料交给第 1 步；产品初稿必须在创建 `runs/<run-id>/` 和调用 AI 前通过可读、UTF-8、非空白检查。
 
 ```bash
 uv run python run_all.py \
@@ -73,10 +73,10 @@ uv run python run_all.py --resume <run-id>
 ### 单独运行当前步骤
 
 ```bash
-uv run python run_step.py --step <0-18> --run-id <run-id>
+uv run python run_step.py --step <1-18> --run-id <run-id>
 ```
 
-第 1 步可以直接创建新运行，此时需提供 `--product-draft`，并可同时提供 `--initial-resources`。第 0 步仅保留给显式 `--step 0` 调用和停在第 0 步的历史运行恢复；完整流程的新运行优先使用 `run_all.py`，不会生成 `steps/00.json`。单步入口用于定向开发、诊断和恢复，并遵循相同锁、状态和重试合同。
+第 1 步创建新运行时需提供 `--product-draft`，并可同时提供 `--initial-resources`。完整流程使用 `run_all.py`；单步入口用于定向开发、诊断和恢复，并遵循相同锁、状态和重试合同。
 
 只有 Claude Agent SDK 执行通道明确请求重试时，单步入口才按 10 秒、30 秒有界重跑当前步骤。业务 `blocked`、普通 `failed`、负责人裁决失败、本地合同错误和主动取消不会自动重试。
 
@@ -119,7 +119,7 @@ uv run python run_all.py --release-product /absolute/path/to/product
 runs/<run-id>/
 ├── state.json                         # 当前节点、需求注册表、session 引用和恢复状态
 ├── timings.json                       # 步骤与 Agent/AI 调用计时和用量
-├── steps/                             # 第 0～12 步及按需求隔离的第 13～18 步结果
+├── steps/                             # 第 1～12 步及按需求隔离的第 13～18 步结果
 ├── conversations/<domain-key>.json   # Agent 回复、负责人决定和人工恢复指令
 └── logs/*.json                        # 最近一次结构化故障诊断快照
 ```

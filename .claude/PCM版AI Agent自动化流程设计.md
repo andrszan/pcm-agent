@@ -334,9 +334,7 @@ Demo 和默认 PCM 流程只进行本地文件修改、测试、构建、服务�
 
 产品想法或已有资料可以只有一句话，不要求完整 PRD 或固定章节。需要先构思时，可在流程外使用 `pcm-product-factory`，但它不是入口前提。
 
-Demo 新运行直接从第 1 步开始，通过 `--product-draft` 接收 UTF-8 文本文件路径，不限制扩展名。第 1 步在创建 run 和调用 AI 前核验输入可读且非空白，不判断方案完整度；随后建立工作区并原样发布初稿，第 2 步通过沟通形成正式产品文档。
-
-第 0 步只保留旧 `--step 0` 调用和历史运行恢复兼容，不属于新运行的正式步骤。停在第 0 步的旧 run 仍从其当前节点恢复，已推进的运行不回退或补写第 0 步结果。
+Demo 从第 1 步开始，通过 `--product-draft` 接收 UTF-8 文本文件路径，不限制扩展名。第 1 步在创建 run 和调用 AI 前核验输入可读且非空白，不判断方案完整度；随后建立工作区并原样发布初稿，第 2 步通过沟通形成正式产品文档。
 
 ### 第 1 步：建立项目工作区
 
@@ -497,7 +495,7 @@ Demo 新运行直接从第 1 步开始，通过 `--product-draft` 接收 UTF-8 �
 
 ### 第 13 步：选择需求并建立统一需求分支
 
-- **已实现范围**：纯 Python 确定性节点，零 AI、Claude Agent、Skill、产品文件改动、提交、合并和 push；`run_step.py` 已支持第 0～18 步；第 18 步已实现并真实验证。
+- **已实现范围**：纯 Python 确定性节点，零 AI、Claude Agent、Skill、产品文件改动、提交、合并和 push；`run_step.py` 支持第 1～18 步；第 18 步已实现并真实验证。
 - **输入与选择**：消费第 8 步有序 `applicable_repositories`、state 中精确对应 workspace 的仓库 descriptor，以及当前 `state.requirement_registry`。注册表是阶段一需求生命周期真源；第 13 步不读取或按现行 schema 复验历史 `steps/12.json` 与 `source`。只从 `pending` 中选择依赖均为 `completed` 且 `order` 最小的一项；没有 pending 时当前无副作用失败，阶段二转场延期；有 pending 而无候选是注册表状态错误。
 - **fresh 与 intent**：在任何 state/Git 写入前，全局核验全部适用仓为自身非符号链接 top-level、clean local `main`、HEAD/local `main` 相等、目标分支不存在且没有进行中的 merge、rebase、cherry-pick 或 revert。通过后先写 `active_requirement`（仅 ID）及 cycle：`branch: req/<lowercase-id>`、按仓名映射的 `base_sha`、`return_node_after_completion`，再以 `git switch -c <branch> <base>` 建立全部统一分支。第 13 步后续只校验自己拥有的活动需求、统一分支、仓库集合和每仓 `base_sha`；第 14、15、17 步可追加自身字段，但不得改变这些选择与基线证据。
 - **结果、恢复与 CLI**：success 仅写 `steps/requirements/<ID>/13.json`，仓库 path 为 `.` 或仓库名，随后推进 `requirement:14_trd_design`。partial 现场按记录 base 恢复；scoped success 已写但 state 未推进时先只读核验 target/base/clean 后补 state；已推进后续节点时不读 Git。CLI 只以当前 active/cycle 的第 13 步核心投影和完整 scoped success 保护当前需求，历史需求 result 不保护当前需求；只有 state 仍位于第 13 步自身锚点时，失败才可持久化，误调历史步骤不得覆盖已推进节点。
@@ -676,7 +674,7 @@ python run_all.py --run-id <run-id> --from-node phase_2:audit
 
 ### 步骤耗时观测
 
-Demo 将步骤生命周期与 Claude Code 调用计时分开：`agent_elapsed_seconds` 累计各次主调用的已知执行区间，不包含调用外的负责人决策、Python 核验、10/30 秒退避和停机等待；`wall_elapsed_seconds` 持久化步骤首次开始到首次成功结束的自然时间跨度，包含这些等待。第 0～12 步按项目、第 13～18 步按需求 ID 和步骤编号区分；每次真实调用、continue、修复和恢复均保留独立区间，成功复用不新增虚假区间或重置首次完成数据。
+Demo 将步骤生命周期与 Claude Code 调用计时分开：`agent_elapsed_seconds` 累计各次主调用的已知执行区间，不包含调用外的负责人决策、Python 核验、10/30 秒退避和停机等待；`wall_elapsed_seconds` 持久化步骤首次开始到首次成功结束的自然时间跨度，包含这些等待。第 1～12 步按项目、第 13～18 步按需求 ID 和步骤编号区分；每次真实调用、continue、修复和恢复均保留独立区间，成功复用不新增虚假区间或重置首次完成数据。
 
 计时独立保存在 `runs/<run-id>/timings.json`，程序只读取和写入 `schema_version: 2`，时间戳统一北京时间 `+08:00`。新增 Agent 执行记录保存 `task/model/effort` 与原始 `usage/model_usage/total_cost_usd`；实时结果回调和最终返回更新同一记录，不重复计数。AI-compatible 的主请求与 JSON 修复请求分别写入同一步骤的 `ai_executions`，不计入 Agent 执行时间。当前单输入 `query()` 每次独立计量，`model_usage` 包含子代理、`usage` 只覆盖主循环，不重复相加；Responses 的缓存和推理 token 属于明细，不再加到总数上。缺失或中断未取得的用量保持未知，不根据当前配置补造历史。费用是 SDK 估算，不作为订阅扣费事实。可观测中断记录时刻，不可捕获退出保持未知；缺口仅以步骤级提示说明，不重复业务适用性与复用布尔。程序不转换旧计时文件，不自动迁移、归档或删除旧数据；不在当前 run 计时读写路径上的旧数据原样保留。若旧格式 `timings.json` 实际阻碍所需新版记录，先确认没有旧进程正在写入该 run，再只移除这一份冲突文件，不批量清理，也不动 `state.json`、步骤 result 或 `conversations/`。计时不可用只警告，不改变业务三态、prompt、负责人裁决、恢复和退出码。字段定义与存储策略见 [计时记录与字段说明](../pcm-demo/docs/timing.md)，不新增业务节点或外部监控服务。
 

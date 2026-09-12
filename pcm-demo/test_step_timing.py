@@ -355,12 +355,12 @@ class AgentTimingIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(timing_module, "beijing_now", side_effect=lambda: fake_now(clock)),
                 contextlib.redirect_stderr(io.StringIO()),
             ):
-                timing.begin_attempt(0)
+                timing.begin_attempt(4)
                 timing.bind_run(run_dir)
                 await timing_module.run_timed_agent(agent)
                 with timing.activate():
                     await timing_module.run_timed_agent(agent)
-                timing.observe_result(run_dir, make_result(0, "success"))
+                timing.observe_result(run_dir, make_result(4, "success"))
                 timing.finish(returned=True)
 
             record = json.loads((run_dir / "timings.json").read_text(encoding="utf-8"))["steps"][0]
@@ -635,7 +635,7 @@ class StepTimingIntegrationTests(unittest.TestCase):
             self.assertEqual(record["step"], 18)
             self.assertEqual(record["requirement_id"], "BR-018")
 
-    def test_real_step_zero_subprocess_preserves_stdout_and_writes_compact_v2(self) -> None:
+    def test_subprocess_preserves_stdout_and_writes_compact_v2(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             draft = root / "draft.md"
@@ -653,6 +653,16 @@ class StepTimingIntegrationTests(unittest.TestCase):
                 "import run_step\n"
                 "root, cli = Path(sys.argv[1]), sys.argv[2:]\n"
                 "run_step.DEMO_ROOT = root\n"
+                "from common.state import write_state, write_step_result\n"
+                "from test_step_timing import make_result\n"
+                "def complete_step(args):\n"
+                "    run_dir = (root / 'runs' / args.run_id).resolve()\n"
+                "    (run_dir / 'steps').mkdir(parents=True, exist_ok=True)\n"
+                "    result = make_result(4, 'success')\n"
+                "    write_step_result(run_dir, 4, result)\n"
+                "    write_state(run_dir, {'current_step': 5, 'status': 'success'})\n"
+                "    return run_dir, result\n"
+                "run_step.run_step_four = complete_step\n"
                 "sys.argv = ['run_step.py', *cli]\n"
                 "raise SystemExit(run_step.retrying_main())\n"
             )
@@ -663,7 +673,7 @@ class StepTimingIntegrationTests(unittest.TestCase):
                     child_code,
                     str(root),
                     "--step",
-                    "0",
+                    "4",
                     "--product-draft",
                     str(draft),
                     "--run-id",
@@ -678,10 +688,10 @@ class StepTimingIntegrationTests(unittest.TestCase):
 
             self.assertEqual(completed.returncode, 0, completed.stderr)
             run_dir = root / "runs" / "subprocess-run"
-            result_path = run_dir / "steps" / "00.json"
+            result_path = run_dir / "steps" / "04.json"
             self.assertEqual(completed.stdout.strip(), str(result_path.resolve()))
-            self.assertIn("开始  第 0 步 形成产品初稿", completed.stderr)
-            self.assertIn("结束  项目 · 第 0 步", completed.stderr)
+            self.assertIn("开始  第 4 步 组装基础工程", completed.stderr)
+            self.assertIn("结束  项目 · 第 4 步", completed.stderr)
             self.assertIn("Claude Code 累计执行", completed.stderr)
 
             timings = json.loads((run_dir / "timings.json").read_text(encoding="utf-8"))
@@ -690,7 +700,7 @@ class StepTimingIntegrationTests(unittest.TestCase):
             self.assertEqual(len(timings["steps"]), 1)
             record = timings["steps"][0]
             self.assertEqual(set(record), STEP_FIELDS)
-            self.assertEqual(record["step"], 0)
+            self.assertEqual(record["step"], 4)
             self.assertEqual(record["status"], "success")
             self.assertEqual(record["agent_elapsed_seconds"], 0.0)
             self.assertEqual(record["agent_executions"], [])
@@ -712,7 +722,7 @@ class StepTimingIntegrationTests(unittest.TestCase):
             "run_dir = Path(sys.argv[1])\n"
             "run_dir.mkdir()\n"
             "timing = StepTiming()\n"
-            "timing.begin_attempt(0)\n"
+            "timing.begin_attempt(4)\n"
             "timing.bind_run(run_dir)\n"
             "returned = False\n"
             "async def wait_for_signal():\n"
@@ -792,10 +802,20 @@ class StepTimingIntegrationTests(unittest.TestCase):
                 "import run_step\n"
                 "root = Path(sys.argv[1])\n"
                 "run_step.DEMO_ROOT = root\n"
-                "sys.argv = ['run_step.py', '--step', '0', '--run-id', 'success-signal', '--product-draft', str(root / 'draft.md')]\n"
+                "from common.state import write_state, write_step_result\n"
+                "from test_step_timing import make_result\n"
+                "def complete_step(args):\n"
+                "    run_dir = (root / 'runs' / args.run_id).resolve()\n"
+                "    (run_dir / 'steps').mkdir(parents=True, exist_ok=True)\n"
+                "    result = make_result(4, 'success')\n"
+                "    write_step_result(run_dir, 4, result)\n"
+                "    write_state(run_dir, {'current_step': 5, 'status': 'success'})\n"
+                "    return run_dir, result\n"
+                "run_step.run_step_four = complete_step\n"
+                "sys.argv = ['run_step.py', '--step', '4', '--run-id', 'success-signal', '--product-draft', str(root / 'draft.md')]\n"
                 "original_print = builtins.print\n"
                 "def checkpoint(*args, **kwargs):\n"
-                "    if args and isinstance(args[0], Path) and args[0].name == '00.json':\n"
+                "    if args and isinstance(args[0], Path) and args[0].name == '04.json':\n"
                 "        original_print('READY', flush=True)\n"
                 "        signal.pause()\n"
                 "    else:\n"
@@ -847,7 +867,7 @@ class StepTimingIntegrationTests(unittest.TestCase):
 
             resumed = timing_module.StepTiming()
             with contextlib.redirect_stderr(io.StringIO()):
-                resumed.begin_attempt(0)
+                resumed.begin_attempt(4)
                 resumed.bind_run(run_dir)
 
             recovered = json.loads(path.read_text(encoding="utf-8"))["steps"][0]
@@ -869,8 +889,8 @@ class StepTimingIntegrationTests(unittest.TestCase):
             stderr = io.StringIO()
             with (
                 patch.object(run_step, "DEMO_ROOT", root),
-                patch.object(run_step, "parse_args", return_value=Namespace(step=0, run_id="old-format")),
-                patch.object(run_step, "run_step_zero", return_value=(run_dir, make_result(0, "success"))),
+                patch.object(run_step, "parse_args", return_value=Namespace(step=4, run_id="old-format")),
+                patch.object(run_step, "run_step_four", return_value=(run_dir, make_result(4, "success"))),
                 contextlib.redirect_stdout(io.StringIO()),
                 contextlib.redirect_stderr(stderr),
             ):
@@ -891,12 +911,12 @@ class StepTimingIntegrationTests(unittest.TestCase):
                 patch.object(
                     run_step,
                     "parse_args",
-                    return_value=Namespace(step=0, run_id="damaged-run"),
+                    return_value=Namespace(step=4, run_id="damaged-run"),
                 ),
                 patch.object(
                     run_step,
-                    "run_step_zero",
-                    return_value=(run_dir, make_result(0, "success")),
+                    "run_step_four",
+                    return_value=(run_dir, make_result(4, "success")),
                 ),
                 contextlib.redirect_stdout(io.StringIO()),
                 contextlib.redirect_stderr(stderr),
@@ -915,12 +935,12 @@ class StepTimingIntegrationTests(unittest.TestCase):
                 patch.object(
                     run_step,
                     "parse_args",
-                    return_value=Namespace(step=0, run_id=None),
+                    return_value=Namespace(step=4, run_id=None),
                 ),
                 patch.object(
                     run_step,
-                    "run_step_zero",
-                    return_value=(run_dir, make_result(0, "failed")),
+                    "run_step_four",
+                    return_value=(run_dir, make_result(4, "failed")),
                 ),
                 patch.object(timing_module, "write_json", side_effect=OSError("只读文件系统")),
                 contextlib.redirect_stdout(io.StringIO()),
@@ -1001,7 +1021,7 @@ class StepTimingIntegrationTests(unittest.TestCase):
                     path,
                     {
                         "schema_version": 2,
-                        "steps": [make_step_record(0, "success", agent_executions=[])],
+                        "steps": [make_step_record(4, "success", agent_executions=[])],
                     },
                 )
                 before = path.read_bytes()
@@ -1028,7 +1048,7 @@ class StepTimingIntegrationTests(unittest.TestCase):
                 path,
                 {
                     "schema_version": 2,
-                    "steps": [make_step_record(0, "success", agent_executions=[])],
+                    "steps": [make_step_record(4, "success", agent_executions=[])],
                 },
             )
             before = path.read_bytes()

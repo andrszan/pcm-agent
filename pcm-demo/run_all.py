@@ -44,7 +44,6 @@ RUN_STEP_PATH = DEMO_ROOT / "run_step.py"
 COORDINATION_ROOT = coordination_root(DEMO_ROOT)
 
 NODE_TO_STEP = {
-    "project:00_product_draft": 0,
     "project:01_create_workspace": 1,
     "project:02_intake": 2,
     "project:03_foundation_selection": 3,
@@ -227,7 +226,7 @@ def _release_product(path: Path) -> int:
 def _legacy_step(run_dir: Path, state: dict[str, Any]) -> int:
     current_step = state.get("current_step")
     status = state.get("status")
-    if type(current_step) is not int or current_step not in {0, 1, 2, 3}:
+    if type(current_step) is not int or current_step not in {1, 2, 3}:
         raise RuntimeError("旧运行状态缺少可恢复的早期步骤位置")
     if status in {"running", "failed", "blocked"}:
         return current_step
@@ -289,27 +288,6 @@ def build_step_command(
         "--run-id",
         run_id,
     ]
-    if step == 0:
-        draft = args.product_draft
-        if draft is None and state is not None:
-            source_path = state.get("input", {}).get("source_path")
-            if isinstance(source_path, str) and source_path:
-                draft = Path(source_path)
-        if draft is None:
-            raise RuntimeError("第 0 步恢复状态缺少产品初稿路径")
-        command.extend(["--product-draft", str(draft.resolve())])
-        resources = args.initial_resources
-        if resources is None and state is not None:
-            resource_record = state.get("initial_resources")
-            source_path = (
-                resource_record.get("source_path")
-                if isinstance(resource_record, dict)
-                else None
-            )
-            if isinstance(source_path, str) and source_path:
-                resources = Path(source_path)
-        if resources is not None:
-            command.extend(["--initial-resources", str(resources.absolute())])
     if step == 1:
         if args.product_draft is not None:
             command.extend(["--product-draft", str(args.product_draft.resolve())])

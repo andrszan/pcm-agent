@@ -124,6 +124,18 @@ class RunAllTests(unittest.TestCase):
                 state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
                 self.assertEqual(run_all.step_for_state(run_dir, state), expected)
 
+    def test_unsupported_positions_are_rejected(self) -> None:
+        for step in (-1, 0, 19):
+            for node in (None, "project:unknown"):
+                with self.subTest(step=step, node=node):
+                    run_dir = self.make_run(
+                        {"status": "failed", "current_step": step, "current_node": node},
+                        f"unsupported-{step}-{node is not None}",
+                    )
+                    state = json.loads((run_dir / "state.json").read_text())
+                    with self.assertRaises(RuntimeError):
+                        run_all.step_for_state(run_dir, state)
+
     def test_canonical_position_mismatch_is_rejected(self) -> None:
         run_dir = self.make_run(
             {
@@ -139,10 +151,8 @@ class RunAllTests(unittest.TestCase):
 
     def test_legacy_success_and_failure_positions_are_supported(self) -> None:
         for current_step, status, expected in (
-            (0, "success", 1),
             (1, "success", 2),
             (2, "success", 3),
-            (0, "failed", 0),
             (1, "blocked", 1),
             (2, "running", 2),
             (3, "failed", 3),
@@ -247,12 +257,8 @@ class RunAllTests(unittest.TestCase):
             workspace_root=workspace_root,
             catalog_path=catalog_path,
         )
-        step_zero = run_all.build_step_command(0, "test-run", args, None)
         step_one = run_all.build_step_command(1, "test-run", args, {})
         step_three = run_all.build_step_command(3, "test-run", args, {})
-        self.assertIn("--product-draft", step_zero)
-        self.assertIn("--initial-resources", step_zero)
-        self.assertNotIn("--workspace-root", step_zero)
         self.assertIn("--product-draft", step_one)
         self.assertEqual(
             step_one[step_one.index("--product-draft") + 1], str(draft.resolve())
@@ -270,12 +276,11 @@ class RunAllTests(unittest.TestCase):
         args = self.args(
             resume=None, product_draft=self.root / "draft.md", initial_resources=source
         )
-        for step in (0, 1):
-            command = run_all.build_step_command(step, "test-run", args, None)
-            forwarded = Path(command[command.index("--initial-resources") + 1])
-            self.assertEqual(forwarded, source.absolute())
-            with self.assertRaisesRegex(ValueError, "非符号链接"):
-                validate_initial_resources(forwarded)
+        command = run_all.build_step_command(1, "test-run", args, None)
+        forwarded = Path(command[command.index("--initial-resources") + 1])
+        self.assertEqual(forwarded, source.absolute())
+        with self.assertRaisesRegex(ValueError, "非符号链接"):
+            validate_initial_resources(forwarded)
         self.assertIn(str(source.absolute()), run_all.fresh_command("test-run", args))
 
     def test_full_fresh_sequence_stops_after_first_completed_requirement(self) -> None:
@@ -410,7 +415,6 @@ class RunAllTests(unittest.TestCase):
             commands[0][commands[0].index("--initial-resources") + 1],
             str(resources.absolute()),
         )
-        self.assertFalse((run_dir / "steps/00.json").exists())
 
     def test_resume_message_file_is_absolute_and_only_forwarded_to_first_step(self) -> None:
         run_dir = self.make_blocked_agent_run()

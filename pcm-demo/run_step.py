@@ -50,7 +50,6 @@ from config import (
     read_agent_workspace_env_file,
 )
 from model_policy import load_model_policy
-from steps.step_00_product_draft import run as run_product_draft
 from steps.step_01_create_workspace import (
     WorkspaceBlocked,
     clone_and_verify,
@@ -165,7 +164,6 @@ from steps.step_18_merge.step import (
 )
 
 DEMO_ROOT = Path(__file__).resolve().parent
-PRODUCT_DRAFT_NODE = "project:00_product_draft"
 CREATE_WORKSPACE_NODE = "project:01_create_workspace"
 STEP_RETRY_DELAYS = (10, 30)
 _RETRY_REQUESTED_EXIT_CODE = 3
@@ -185,7 +183,7 @@ def _at_early_failure_anchor(step: int, state: dict[str, Any]) -> bool:
         and state.get("step") is None
         and state.get("current_node") is None
         and (
-            (current_step == step - 1 and status == "success")
+            (step == 2 and current_step == 1 and status == "success")
             or (current_step == step and status in {"running", "failed", "blocked"})
         )
     )
@@ -194,7 +192,7 @@ def _at_early_failure_anchor(step: int, state: dict[str, Any]) -> bool:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="运行已实现的 PCM Demo 步骤")
-    parser.add_argument("--step", type=int, required=True)
+    parser.add_argument("--step", type=int, choices=range(1, 19), required=True)
     parser.add_argument("--product-draft", "--prd", dest="product_draft", type=Path)
     parser.add_argument("--initial-resources", type=Path)
     parser.add_argument("--workspace-root", type=Path)
@@ -207,8 +205,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--coordination-locks", help=argparse.SUPPRESS)
     args = parser.parse_args()
-    if args.initial_resources is not None and args.step not in {0, 1}:
-        parser.error("--initial-resources 只能在第 0 或 1 步创建新运行时提供")
+    if args.initial_resources is not None and args.step != 1:
+        parser.error("--initial-resources 只能在第 1 步创建新运行时提供")
     if args.resume_message_file is not None and not args.run_id:
         parser.error("--resume-message-file 需要 --run-id")
     return args
@@ -448,18 +446,11 @@ def load_or_create_step_one_run(args: argparse.Namespace) -> tuple[Path, dict[st
             state.get("phase") is None
             and state.get("step") is None
             and state.get("current_node") is None
-            and (
-                (state.get("current_step") == 0 and state.get("status") == "success")
-                or (
-                    state.get("current_step") == 1
-                    and state.get("status") in {"running", "failed", "blocked"}
-                )
-            )
+            and state.get("current_step") == 1
+            and state.get("status") in {"running", "failed", "blocked"}
         )
         if not canonical and not legacy:
             raise RuntimeError("已有运行状态不属于第 1 步恢复锚点")
-        if state.get("current_step") == 0 and state.get("status") != "success":
-            raise RuntimeError("第 0 步尚未成功，不能建立项目工作区")
         draft_path = Path(state["input"]["source_path"])
         if args.product_draft and args.product_draft.resolve() != draft_path:
             raise RuntimeError("--product-draft 与已有运行记录不一致")
@@ -1067,79 +1058,12 @@ def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def run_step_zero(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
-    run_dir: Path | None = None
-    state: dict[str, Any] | None = None
-    requested_resources = requested_initial_resources(args)
-    if args.run_id:
-        candidate = run_dir_for(args.run_id)
-        if candidate.is_dir():
-            state = read_state(candidate)
-            canonical = (
-                state.get("phase") == PROJECT_INITIALIZATION_PHASE
-                and (state.get("step"), state.get("current_step"), state.get("current_node"))
-                == (0, 0, PRODUCT_DRAFT_NODE)
-            )
-            legacy_failed = (
-                state.get("phase") is None
-                and state.get("step") is None
-                and state.get("current_node") is None
-                and state.get("current_step") == 0
-                and state.get("status") != "success"
-            )
-            if not canonical and not legacy_failed:
-                raise RuntimeError("已有运行状态不属于第 0 步恢复锚点")
-            recorded_path = Path(state["input"]["source_path"]).resolve()
-            if args.product_draft and args.product_draft.resolve() != recorded_path:
-                raise RuntimeError("--product-draft 与已有运行记录不一致")
-            draft_path = recorded_path
-            run_dir = candidate
-        else:
-            draft_path = require_draft(args.product_draft)
-    else:
-        draft_path = require_draft(args.product_draft)
-
-    run_id = args.run_id or new_run_id()
-    next_state = state if state is not None else {"run_id": run_id}
-    bind_initial_resources(next_state, requested_resources, new_run=state is None)
-    before_hash = sha256(draft_path)
-    result = run_product_draft(draft_path)
-    after_hash = sha256(draft_path)
-    if before_hash != after_hash:
-        raise RuntimeError("第 0 步意外修改了产品初稿")
-    if run_dir is None:
-        run_dir = create_run_dir(DEMO_ROOT / "runs", run_id)
-    write_step_result(run_dir, 0, result)
-    next_step = 1 if result["status"] == "success" else 0
-    next_node = CREATE_WORKSPACE_NODE if result["status"] == "success" else PRODUCT_DRAFT_NODE
-    next_state.update(
-        {
-            "status": result["status"],
-            "phase": PROJECT_INITIALIZATION_PHASE,
-            "step": next_step,
-            "current_step": next_step,
-            "current_node": next_node,
-            "input": {
-                "type": "product_draft",
-                "source_path": str(draft_path),
-                "source_sha256": before_hash,
-                "content": draft_path.read_text(encoding="utf-8"),
-                "published_path": None,
-            },
-            "blocked": result["blocked"],
-            "error": result["error"],
-        }
-    )
-    write_state(run_dir, next_state)
-    return run_dir, result
-
-
 def _execute(
     args: argparse.Namespace,
     execution_locks: ExecutionLocks,
     timing: StepTiming | None = None,
 ) -> int:
-    if args.step not in {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18}:
+    if args.step not in {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18}:
         print(f"步骤尚未实现：{args.step}", file=sys.stderr)
         return 2
 
@@ -1158,9 +1082,7 @@ def _execute(
     caught_error: Exception | None = None
     retry_requested = False
     try:
-        if args.step == 0:
-            run_dir, result = run_step_zero(args)
-        elif args.step == 1:
+        if args.step == 1:
             run_dir, state, draft_path = load_or_create_step_one_run(args)
             if timing is not None:
                 timing.bind_run(run_dir)

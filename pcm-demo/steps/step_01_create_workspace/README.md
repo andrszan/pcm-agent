@@ -69,21 +69,6 @@ uv run python run_step.py \
   --run-id step01-mendmark
 ```
 
-## 直接新建与第 0→1 步历史串联
-
-上面的 `--step 1 --product-draft ...` 命令可直接建立新 run，也是 `run_all.py` 新运行采用的入口，不要求先生成 `steps/00.json`。停在第 0 步的历史 run 仍可按原状态进入本步骤：
-```bash
-uv run python run_step.py \
-  --step 0 \
-  --product-draft ../docs/prd/修迹-产品需求文档-v1.md \
-  --run-id step01-mendmark
-
-uv run python run_step.py \
-  --step 1 \
-  --workspace-root /absolute/path/to/products \
-  --run-id step01-mendmark
-```
-
 第 2 步使用默认 Claude Code 用户配置、认证、插件、Skill 和 session；第 1 步只负责为产品路径建立项目 Git 边界，不创建独立 Claude 配置目录。
 
 最终项目路径为：

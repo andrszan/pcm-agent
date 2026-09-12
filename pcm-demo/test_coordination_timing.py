@@ -211,24 +211,23 @@ class CoordinationTimingTests(unittest.TestCase):
         summary.assert_not_called()
 
     def test_real_child_records_timing_under_inherited_locks(self) -> None:
-        self.args.step = 0
-        draft = self.root / "draft.md"
-        draft.write_text(
-            "## A. 产品身份与文档边界\n产品。\n"
-            "## C. 用户与使用场景\n用户。\n"
-            "## D. 核心价值与业务闭环\n闭环。\n"
-            "## E. 产品范围\n范围。\n"
-            "## P. 产品验收\n验收。\n",
-            encoding="utf-8",
-        )
         code = '''
 import sys
 from pathlib import Path
 import run_step
 from common import timing
+from common.state import write_state, write_step_result
 from common.coordination import coordination_root, lock_status, run_lock_path
 run_step.DEMO_ROOT = Path(sys.argv[1])
 sys.argv = ['run_step.py', *sys.argv[2:]]
+def complete_step(args):
+    run_dir = (run_step.DEMO_ROOT / 'runs' / args.run_id).resolve()
+    (run_dir / 'steps').mkdir(parents=True, exist_ok=True)
+    result = run_step.assembly_result('success', '组装基础工程完成。')
+    write_step_result(run_dir, 4, result)
+    write_state(run_dir, {'current_step': 5, 'status': 'success'})
+    return run_dir, result
+run_step.run_step_four = complete_step
 original = timing.write_json
 checks = []
 def save(path, data):
@@ -241,8 +240,8 @@ raise SystemExit(result)
 '''
         with acquire_execution_locks(self.coordination, "run", 2) as locks:
             completed = subprocess.run(
-                [sys.executable, "-c", code, str(self.root), "--step", "0",
-                 "--run-id", "run", "--product-draft", str(draft),
+                [sys.executable, "-c", code, str(self.root), "--step", "4",
+                 "--run-id", "run",
                  "--coordination-locks", inherited_lock_argument(locks)],
                 cwd=Path(run_step.__file__).parent,
                 pass_fds=locks.file_descriptors(), capture_output=True, text=True, timeout=30,
