@@ -16,7 +16,7 @@
 | [`docs/pcm/`](docs/pcm/README.md) | PCM 项目治理、规划与历史商业资料 |
 | [`docs/prd/`](docs/prd/) | 产品初稿和 PRD |
 | [`catalog.json`](catalog.json) | 业务无关的前端、后端基础工程候选目录 |
-| [`pcm-product-catalog.json`](pcm-product-catalog.json) | 产品初稿目录数据，不等同于成品目录 |
+| [`docs/prd/pcm-product-catalog.json`](docs/prd/pcm-product-catalog.json) | 产品初稿目录数据，不等同于成品目录 |
 | `frontend/`、`backend/` | 根工作区约定的独立前后端代码仓位置；当前不代表正式 PCM 或商业平台已实现 |
 
 ## 技术入口

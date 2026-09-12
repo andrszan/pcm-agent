@@ -137,7 +137,7 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 
 调用本能力不等于授权清空任意现有环境。实际删除仍须说明精确目标、当前数据和影响并取得对应确认；完成标准是接手者真正能初始化、登录或使用、明确重置并恢复，而不是只留下方案或脚本。详见 [项目数据基线收口](skills/project-data-baseline/SKILL.md)。
 
-`pcm-product-factory` 是开放构思 Web 应用并形成产品初稿的可选能力，同时维护产品目录索引。它不预设市场、功能或文档模板，也不是核心开发流程的必经 Skill；一句话想法或已有资料即可进入产品定义，由 `project-intake` 通过沟通形成当前项目权威产品文档。
+`pcm-product-factory` 是流程外的可选产品构思能力，默认通过讨论选定方向和命名后形成初稿，只有用户明确要求时才直接生成。它同时维护产品目录索引，本工作区入口为 [`docs/prd/pcm-product-catalog.json`](../docs/prd/pcm-product-catalog.json)，格式以 [Skill 正文](skills/pcm-product-factory/SKILL.md#5-产品目录格式) 为准。它不预设市场、功能或初稿章节，也不是核心开发流程的必经 Skill；一句话想法或已有资料即可进入产品定义，由 `project-intake` 通过沟通形成当前项目权威产品文档。
 
 ## 6. Subagents
 
