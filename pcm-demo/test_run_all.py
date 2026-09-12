@@ -253,6 +253,10 @@ class RunAllTests(unittest.TestCase):
         self.assertIn("--product-draft", step_zero)
         self.assertIn("--initial-resources", step_zero)
         self.assertNotIn("--workspace-root", step_zero)
+        self.assertIn("--product-draft", step_one)
+        self.assertEqual(
+            step_one[step_one.index("--product-draft") + 1], str(draft.resolve())
+        )
         self.assertIn("--initial-resources", step_one)
         self.assertIn("--workspace-root", step_one)
         self.assertNotIn("--catalog-path", step_one)
@@ -277,13 +281,17 @@ class RunAllTests(unittest.TestCase):
     def test_full_fresh_sequence_stops_after_first_completed_requirement(self) -> None:
         draft = self.root / "draft.md"
         draft.write_text("产品初稿", encoding="utf-8")
+        resources = self.root / "资料"
+        resources.mkdir()
         args = self.args(
             resume=None,
             product_draft=draft,
+            initial_resources=resources,
             run_id="fresh-run",
         )
         run_dir = self.runs / "fresh-run"
         calls: list[int] = []
+        commands: list[list[str]] = []
         nodes = {step: node for node, step in run_all.NODE_TO_STEP.items()}
 
         def fake_run_child(
@@ -292,6 +300,7 @@ class RunAllTests(unittest.TestCase):
             _env: dict[str, str] | None = None,
         ) -> int:
             step = int(command[command.index("--step") + 1])
+            commands.append(command)
             calls.append(step)
             (run_dir / "steps").mkdir(parents=True, exist_ok=True)
             if step < 12:
@@ -391,7 +400,17 @@ class RunAllTests(unittest.TestCase):
         with patch.object(run_all, "run_child", side_effect=fake_run_child):
             self.assertEqual(run_all.orchestrate(args), 0)
 
-        self.assertEqual(calls, list(range(19)))
+        self.assertEqual(calls, list(range(1, 19)))
+        self.assertIn("--product-draft", commands[0])
+        self.assertEqual(
+            commands[0][commands[0].index("--product-draft") + 1],
+            str(draft.resolve()),
+        )
+        self.assertEqual(
+            commands[0][commands[0].index("--initial-resources") + 1],
+            str(resources.absolute()),
+        )
+        self.assertFalse((run_dir / "steps/00.json").exists())
 
     def test_resume_message_file_is_absolute_and_only_forwarded_to_first_step(self) -> None:
         run_dir = self.make_blocked_agent_run()

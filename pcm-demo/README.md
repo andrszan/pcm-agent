@@ -46,6 +46,8 @@ AI-compatible 与 Claude Agent SDK 使用独立配置，不相互回退。`PCM_A
 
 ### 新建阶段一运行
 
+新运行直接从第 1 步建立工作区，不执行或生成第 0 步结果。入口会把产品初稿和可选初始资料交给第 1 步；产品初稿必须在创建 `runs/<run-id>/` 和调用 AI 前通过可读、UTF-8、非空白检查。
+
 ```bash
 uv run python run_all.py \
   --product-draft "../docs/prd/修迹-产品需求文档-v1.md" \
@@ -74,7 +76,7 @@ uv run python run_all.py --resume <run-id>
 uv run python run_step.py --step <0-18> --run-id <run-id>
 ```
 
-第 0 步首次运行还需提供 `--product-draft`，可同时提供 `--initial-resources`。完整流程优先使用 `run_all.py`；单步入口用于定向开发、诊断和恢复，并遵循相同锁、状态和重试合同。
+第 1 步可以直接创建新运行，此时需提供 `--product-draft`，并可同时提供 `--initial-resources`。第 0 步仅保留给显式 `--step 0` 调用和停在第 0 步的历史运行恢复；完整流程的新运行优先使用 `run_all.py`，不会生成 `steps/00.json`。单步入口用于定向开发、诊断和恢复，并遵循相同锁、状态和重试合同。
 
 只有 Claude Agent SDK 执行通道明确请求重试时，单步入口才按 10 秒、30 秒有界重跑当前步骤。业务 `blocked`、普通 `failed`、负责人裁决失败、本地合同错误和主动取消不会自动重试。
 

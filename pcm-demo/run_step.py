@@ -467,10 +467,12 @@ def load_or_create_step_one_run(args: argparse.Namespace) -> tuple[Path, dict[st
         return run_dir, state, draft_path
 
     draft_path = require_draft(args.product_draft)
-    run_id = args.run_id or new_run_id()
-    run_dir = create_run_dir(DEMO_ROOT / "runs", run_id)
     draft_bytes = draft_path.read_bytes()
     draft_content = draft_bytes.decode("utf-8")
+    if not draft_content.strip():
+        raise ValueError("产品初稿不能为空白")
+    run_id = args.run_id or new_run_id()
+    run_dir = create_run_dir(DEMO_ROOT / "runs", run_id)
     state = {
         "run_id": run_id,
         "status": "running",

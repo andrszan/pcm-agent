@@ -370,6 +370,58 @@ raise SystemExit(run_step.retrying_main())
                 (1, 1, "project:01_create_workspace"),
             )
 
+    def test_step_one_fresh_run_binds_draft_and_initial_resources(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            demo_root = Path(directory)
+            draft = demo_root / "draft.md"
+            draft.write_text("产品初稿", encoding="utf-8")
+            resources = demo_root / "资料"
+            resources.mkdir()
+            args = Mock(
+                run_id="fresh-run",
+                product_draft=draft,
+                initial_resources=resources,
+            )
+
+            with patch.object(run_step, "DEMO_ROOT", demo_root):
+                run_dir, state, draft_path = run_step.load_or_create_step_one_run(args)
+
+            self.assertEqual(draft_path, draft.resolve())
+            self.assertEqual(state["input"]["content"], "产品初稿")
+            self.assertEqual(state["input"]["source_sha256"], run_step.sha256(draft))
+            self.assertEqual(
+                state["initial_resources"],
+                {
+                    "source_path": str(resources.resolve()),
+                    "basename": "资料",
+                    "published_path": None,
+                },
+            )
+            self.assertFalse((run_dir / "steps/00.json").exists())
+
+    def test_step_one_rejects_invalid_draft_before_run_or_ai(self) -> None:
+        for label, raw in (("blank", b" \n\t"), ("invalid-utf8", b"\xff")):
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
+                demo_root = Path(directory)
+                draft = demo_root / "draft.md"
+                draft.write_bytes(raw)
+                args = Mock(
+                    step=1,
+                    run_id=f"fresh-{label}",
+                    product_draft=draft,
+                    initial_resources=None,
+                    workspace_root=None,
+                )
+                with (
+                    patch.object(run_step, "DEMO_ROOT", demo_root),
+                    patch.object(run_step, "extract_project_identity") as ai,
+                    contextlib.redirect_stderr(io.StringIO()),
+                ):
+                    self.assertEqual(run_step._execute(args, None), 1)
+
+                ai.assert_not_called()
+                self.assertFalse((demo_root / "runs" / f"fresh-{label}").exists())
+
     def test_step_zero_records_resolved_initial_resources_path(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             demo_root = Path(directory)

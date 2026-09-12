@@ -311,6 +311,8 @@ def build_step_command(
         if resources is not None:
             command.extend(["--initial-resources", str(resources.absolute())])
     if step == 1:
+        if args.product_draft is not None:
+            command.extend(["--product-draft", str(args.product_draft.resolve())])
         if args.initial_resources is not None:
             command.extend(
                 ["--initial-resources", str(args.initial_resources.absolute())]
@@ -462,7 +464,7 @@ def _run_steps(
             return 0
         try:
             _attach_product_lock(locks, state, run_dir, run_id)
-            step = 0 if state is None else step_for_state(run_dir, state)
+            step = 1 if state is None else step_for_state(run_dir, state)
             command = build_step_command(step, run_id, args, state, locks)
         except Exception as error:  # noqa: BLE001 - 编排器必须给出稳定停止摘要。
             print(f"无法确定下一执行步骤：{error}", file=sys.stderr)

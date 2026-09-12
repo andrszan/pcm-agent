@@ -39,7 +39,7 @@ PCM_AGENT_WORKSPACE_ENV_FILE=
 
 ## 输入与身份提取
 
-Demo 必需输入为本地产品初稿路径；还可通过 `--initial-resources` 提供一个普通文件或目录。新运行保存解析后的源路径，第 1 步把资料复制到产品根 `initial-resources/<源 basename>`，不改名、不移动源、不软链接、不自动解压，目录内部结构保持不变。源及目录递归项中的符号链接和特殊文件会被拒绝；会递归包含目标项目或 staging 的目录也会被拒绝。空文件和空目录允许导入。
+Demo 必需输入为本地产品初稿路径。新运行直接从本步骤开始，并在创建 `runs/<run-id>/` 或调用身份提取 AI 前确认初稿可读、可按 UTF-8 解码且不是纯空白。还可通过 `--initial-resources` 提供一个普通文件或目录。新运行保存解析后的源路径，第 1 步把资料复制到产品根 `initial-resources/<源 basename>`，不改名、不移动源、不软链接、不自动解压，目录内部结构保持不变。源及目录递归项中的符号链接和特殊文件会被拒绝；会递归包含目标项目或 staging 的目录也会被拒绝。空文件和空目录允许导入。
 
 正式 PCM 将来可把初稿字符串直接保存到数据库。本步骤从初稿提取：
 
@@ -69,9 +69,9 @@ uv run python run_step.py \
   --run-id step01-mendmark
 ```
 
-## 第 0→1 串联
+## 直接新建与第 0→1 步历史串联
 
-第 2 步使用默认 Claude Code 用户配置、认证、插件、Skill 和 session；第 1 步只负责为产品路径建立项目 Git 边界，不创建独立 Claude 配置目录。
+上面的 `--step 1 --product-draft ...` 命令可直接建立新 run，也是 `run_all.py` 新运行采用的入口，不要求先生成 `steps/00.json`。停在第 0 步的历史 run 仍可按原状态进入本步骤：
 ```bash
 uv run python run_step.py \
   --step 0 \
@@ -83,6 +83,8 @@ uv run python run_step.py \
   --workspace-root /absolute/path/to/products \
   --run-id step01-mendmark
 ```
+
+第 2 步使用默认 Claude Code 用户配置、认证、插件、Skill 和 session；第 1 步只负责为产品路径建立项目 Git 边界，不创建独立 Claude 配置目录。
 
 最终项目路径为：
 
