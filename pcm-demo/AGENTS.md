@@ -6,4 +6,4 @@
 - **把 Agent 与负责人当作多轮沟通者。** Agent 请求决定时讲清问题、必要事实、可行选项、影响和推荐，文件引用不能代替正文。已有待决策事项交代不清时，通过原会话的 `continue` 补齐，不盲猜、不当作外部阻塞。
 - **补问问题，不索取完成声明。** Agent 会报告未完成事项，但不一定复述已完成内容；不得要求它逐项声明“一切无问题”，也不因缺少结束状态声明而要求继续。
 - **优先用工作流解决问题，保持薄编排。** 能用提示和多轮协作解决，就不增加复杂解析、快照或状态机制。语义判断交给模型，确定性操作交给程序；信任前序交接，只核验当前步骤必要事实，不重复审计上游。
-- **长时完整编排由独立进程主管托管。** Claude 代为执行 `run_all` 等预计可能持续数小时的关键任务时，不使用 Claude Code 的 `Bash(run_in_background=true)` 作为进程主管；macOS 默认通过 `launchd` 独立启动，Claude Code 只读取状态与日志并监控。启动前核对现有进程和协调锁，按产品与 run 使用唯一 label，日志写入对应 run 目录；停止时只处理归属已确认的任务。用户在普通终端以前台方式直接运行不受此限制。`CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP=1` 可作为用户级额外保护，但不是 `launchd` 执行的前置条件。
+- **长时完整编排由独立进程主管托管。** Claude 代为执行 `run_all` 等预计可能持续数小时的关键任务时，不使用 Claude Code 的 `Bash(run_in_background=true)` 作为进程主管；macOS 默认通过 `launchd` 独立启动，Claude Code 只读取状态与日志并监控。`launchd` 任务使用 `ProcessType=Interactive`，这里的 `Interactive` 表示正常前台服务调度优先级，不要求显示界面；不得使用会显著限制 Git、网络和磁盘 I/O 吞吐的 `ProcessType=Background`。启动前核对现有进程和协调锁，补齐 `HOME`、用户身份、`PATH`、`SSH_AUTH_SOCK` 等运行所需环境，按产品与 run 使用唯一 label，日志写入对应 run 目录之外的独立路径，避免预建运行目录；停止时只处理归属已确认的任务。用户在普通终端以前台方式直接运行不受此限制。`CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP=1` 可作为用户级额外保护，但不是 `launchd` 执行的前置条件。
