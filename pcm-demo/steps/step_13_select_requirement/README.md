@@ -1,6 +1,8 @@
 # 第 13 步：选择需求并建立统一需求分支
 
-本步骤是纯 Python 的确定性节点：不调用 AI、Claude Agent 或 Skill，不修改产品文件，不提交、合并或 push。它消费第 8 步的有序 `applicable_repositories` 和当前 `state.requirement_registry`；注册表是需求生命周期真源，第 13 步不读取或按现行 schema 复验历史 `steps/12.json` 与 `source`。需求 ID 必须符合 `[A-Za-z0-9][A-Za-z0-9_-]*`，且忽略大小写后唯一。
+本步骤是纯 Python 的确定性节点：不调用 AI、Claude Agent 或 Skill，不修改产品文件，不提交、合并或 push。它直接消费 state 中的有序 `applicable_repositories`、仓库名称与路径，以及当前 `requirement_registry`，不回读历史 `steps/08.json`、`steps/12.json` 或复验 `source`。
+
+注册表是需求生命周期真源。第 12 步负责静态目录的完整校验；本步骤只检查选择与恢复所需的字段、合法且忽略大小写后唯一的需求 ID、可比较的顺序、依赖引用和动态状态，不重跑连续顺序或依赖图校验。仓库描述允许附加字段，历史 `branch`、`worktree_clean` 不作为现场依据；路径边界和真实 Git 预检仍按下文执行。
 
 ## 运行
 
@@ -14,10 +16,9 @@ uv run python run_step.py --step 13 --run-id <run-id>
 
 ```bash
 uv run python -m unittest \
-  steps.step_12_initialize_requirement_registry.test_step \
-  steps.step_12_initialize_requirement_registry.test_cli \
   steps.step_13_select_requirement.test_step \
-  steps.step_13_select_requirement.test_cli -v
+  steps.step_13_select_requirement.test_cli \
+  test_run_all test_run_step_retry -v
 ```
 
 ## 选择、分支与状态

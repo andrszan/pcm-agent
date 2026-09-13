@@ -195,6 +195,113 @@ class SelectRequirementTests(unittest.TestCase):
                 self.assertEqual(git("branch", "--show-current", cwd=path).stdout.strip(), "req/req-002")
                 self.assertEqual(git("status", "--porcelain=v1", cwd=path).stdout, "")
 
+    def test_uses_state_repository_handoff_without_rereading_step_eight_result(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, _repositories, state = self.make_run(Path(directory))
+            (run_dir / "steps/08.json").unlink()
+
+            saved = run(run_dir, state)
+
+            self.assertEqual(saved["requirement_id"], "REQ-001")
+            completed = read_state(run_dir)
+            with patch.object(selection_step, "_git", side_effect=AssertionError("不得调用 Git")):
+                self.assertTrue(has_complete_success(run_dir, completed))
+                self.assertEqual(run(run_dir, completed), saved)
+
+    def test_state_repository_descriptor_accepts_unowned_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, _repositories, state = self.make_run(Path(directory))
+            state["repositories"][0]["runtime_metadata"] = {"owner": "later-step"}
+            write_state(run_dir, state)
+
+            saved = run(run_dir, state)
+
+            self.assertEqual(saved["requirement_id"], "REQ-001")
+
+    def test_repository_preflight_uses_git_instead_of_historical_status_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, repositories, state = self.make_run(Path(directory))
+            for repository in state["repositories"]:
+                del repository["branch"]
+                del repository["worktree_clean"]
+            write_state(run_dir, state)
+            dirty = Path(repositories[1]["path"]) / "dirty.txt"
+            dirty.write_text("dirty\n", encoding="utf-8")
+            before = (run_dir / "state.json").read_bytes()
+
+            with self.assertRaisesRegex(RuntimeError, "fresh"):
+                run(run_dir, state)
+            self.assertEqual((run_dir / "state.json").read_bytes(), before)
+            for repository in repositories:
+                self.assertEqual(
+                    git("branch", "--show-current", cwd=Path(repository["path"])).stdout.strip(),
+                    "main",
+                )
+
+            dirty.unlink()
+            self.assertEqual(run(run_dir, state)["requirement_id"], "REQ-001")
+
+    def test_registry_handoff_preserves_catalog_and_dynamic_state_without_source(self) -> None:
+        requirements = [
+            {**item, "status": "pending", "completion": None, "metadata": "preserved"}
+            for item in self.catalog()
+        ]
+        requirements[0].update(status="completed", completion={"step": 18})
+        state = {"requirement_registry": {"schema_version": 1, "requirements": requirements}}
+        before = json.dumps(state, sort_keys=True)
+
+        catalog, handed_off = selection_step.registry_handoff(state)
+
+        self.assertEqual(catalog, self.catalog())
+        self.assertIs(handed_off, requirements)
+        self.assertEqual(json.dumps(state, sort_keys=True), before)
+        self.assertEqual(_select(handed_off)["id"], "REQ-002")
+
+    def test_registry_handoff_rejects_invalid_local_selection_fields(self) -> None:
+        invalid_values = [
+            ("id", []),
+            ("id", "req-002"),
+            ("title", ""),
+            ("order", True),
+            ("order", 0),
+            ("depends_on", "REQ-002"),
+            ("depends_on", ["MISSING"]),
+            ("status", "unknown"),
+            ("completion", {"step": 18}),
+        ]
+        for key, value in invalid_values:
+            with self.subTest(key=key, value=value):
+                requirements = [
+                    {**item, "status": "pending", "completion": None}
+                    for item in self.catalog()
+                ]
+                requirements[0][key] = value
+                state = {"requirement_registry": {"schema_version": 1, "requirements": requirements}}
+                with self.assertRaises(RuntimeError):
+                    selection_step.registry_handoff(state)
+
+        with self.assertRaises(RuntimeError):
+            selection_step.registry_handoff(
+                {"requirement_registry": {"schema_version": 1, "requirements": []}}
+            )
+
+    def test_local_handoff_rejects_missing_repository_path_and_duplicate_requirement_id(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, _repositories, state = self.make_run(Path(directory))
+            del state["repositories"][0]["path"]
+            write_state(run_dir, state)
+            with patch.object(selection_step.subprocess, "run", side_effect=AssertionError("不得调用 Git")):
+                with self.assertRaisesRegex(RuntimeError, "仓库描述"):
+                    run(run_dir, state)
+
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, _repositories, state = self.make_run(Path(directory))
+            state["requirement_registry"]["requirements"][1]["id"] = "REQ-001"
+            write_state(run_dir, state)
+            with patch.object(selection_step.subprocess, "run", side_effect=AssertionError("不得调用 Git")):
+                with self.assertRaisesRegex(RuntimeError, "静态字段"):
+                    run(run_dir, state)
+
     def test_legacy_registry_source_does_not_block_the_next_requirement(self) -> None:
         requirements = [
             {**self.catalog()[0], "status": "completed", "completion": {"step": 18}},

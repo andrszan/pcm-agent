@@ -8,11 +8,11 @@ from pathlib import Path
 from typing import Any
 
 from common.state import (
+    is_valid_requirement_id,
     requirement_step_result_path,
     write_requirement_step_result,
     write_state,
 )
-from steps.step_12_initialize_requirement_registry.step import validate_catalog
 
 STEP = 13
 NAME = "选择需求并建立统一需求分支"
@@ -87,41 +87,13 @@ def _workspace_from_state(state: dict[str, Any]) -> Path:
     return workspace
 
 
-def _repository_handoff(run_dir: Path, state: dict[str, Any]) -> list[dict[str, Any]]:
+def _repository_handoff(state: dict[str, Any]) -> list[dict[str, Any]]:
     workspace = _workspace_from_state(state)
-    saved = _read_json(run_dir / "steps" / "08.json", "第 8 步成功结果不可读取")
-    expected_keys = {
-        "step",
-        "name",
-        "status",
-        "summary",
-        "applicable",
-        "outputs",
-        "blocked",
-        "error",
-        "applicable_repositories",
-        "repositories",
-    }
+    names = state.get("applicable_repositories")
+    state_repositories = state.get("repositories")
     if (
-        not isinstance(saved, dict)
-        or set(saved) != expected_keys
-        or type(saved.get("step")) is not int
-        or saved.get("step") != 8
-        or saved.get("name") != "首次提交适用仓库"
-        or saved.get("status") != "success"
-        or not isinstance(saved.get("summary"), str)
-        or not saved["summary"].strip()
-        or saved.get("applicable") is not True
-        or saved.get("outputs") != []
-        or saved.get("blocked") is not None
-        or saved.get("error") is not None
-        or not isinstance(saved.get("applicable_repositories"), list)
-        or not isinstance(saved.get("repositories"), list)
-    ):
-        raise RuntimeError("第 8 步成功结果不符合约定")
-    names = saved["applicable_repositories"]
-    if (
-        not names
+        not isinstance(names, list)
+        or not names
         or names[0] != "root"
         or any(
             not isinstance(name, str)
@@ -132,32 +104,18 @@ def _repository_handoff(run_dir: Path, state: dict[str, Any]) -> list[dict[str, 
             for name in names
         )
         or len(set(names)) != len(names)
-        or len(saved["repositories"]) != len(names)
+        or not isinstance(state_repositories, list)
+        or len(state_repositories) != len(names)
     ):
-        raise RuntimeError("第 8 步适用仓库清单不符合约定")
-    for name, repository in zip(names, saved["repositories"], strict=True):
-        if repository != {
-            "name": name,
-            "path": "." if name == "root" else name,
-            "branch": "main",
-            "worktree_clean": True,
-        }:
-            raise RuntimeError("第 8 步仓库描述不符合约定")
+        raise RuntimeError("运行状态中的适用仓库不符合约定")
 
-    state_names = state.get("applicable_repositories")
-    state_repositories = state.get("repositories")
-    if state_names != names or not isinstance(state_repositories, list) or len(state_repositories) != len(names):
-        raise RuntimeError("运行状态中的适用仓库与第 8 步不一致")
     repositories: list[dict[str, Any]] = []
     for name, repository in zip(names, state_repositories, strict=True):
         expected_path = workspace if name == "root" else workspace / name
         if (
             not isinstance(repository, dict)
-            or set(repository) != {"name", "path", "branch", "worktree_clean"}
             or repository.get("name") != name
             or repository.get("path") != str(expected_path)
-            or repository.get("branch") != "main"
-            or repository.get("worktree_clean") is not True
         ):
             raise RuntimeError("运行状态中的仓库描述不符合约定")
         repositories.append({"name": name, "path": Path(repository["path"])})
@@ -168,13 +126,12 @@ def registry_handoff(
     state: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     registry = state.get("requirement_registry")
-    registry_keys = {"schema_version", "source", "requirements"}
     if (
         not isinstance(registry, dict)
-        or not registry_keys.issubset(registry)
         or type(registry.get("schema_version")) is not int
         or registry.get("schema_version") != 1
         or not isinstance(registry.get("requirements"), list)
+        or not registry["requirements"]
     ):
         raise RuntimeError("需求注册表不符合约定")
 
@@ -186,17 +143,38 @@ def registry_handoff(
         for requirement in requirements
     ):
         raise RuntimeError("需求注册表动态字段不符合约定")
-    static_requirements = [
+
+    if any(
+        not is_valid_requirement_id(requirement["id"])
+        or not isinstance(requirement["title"], str)
+        or not requirement["title"].strip()
+        or type(requirement["order"]) is not int
+        or requirement["order"] <= 0
+        or not isinstance(requirement["depends_on"], list)
+        or any(
+            not is_valid_requirement_id(dependency)
+            for dependency in requirement["depends_on"]
+        )
+        for requirement in requirements
+    ):
+        raise RuntimeError("需求注册表静态字段不符合约定")
+
+    identifiers = [requirement["id"] for requirement in requirements]
+    known_identifiers = set(identifiers)
+    if (
+        len({identifier.casefold() for identifier in identifiers}) != len(identifiers)
+        or any(
+            dependency not in known_identifiers
+            for requirement in requirements
+            for dependency in requirement["depends_on"]
+        )
+    ):
+        raise RuntimeError("需求注册表静态字段不符合约定")
+
+    catalog = [
         {key: requirement[key] for key in ("id", "title", "order", "depends_on")}
         for requirement in requirements
     ]
-    try:
-        catalog = validate_catalog(static_requirements)
-    except (ValueError, TypeError) as error:
-        raise RuntimeError("需求注册表静态字段不符合约定") from error
-    if catalog != static_requirements:
-        raise RuntimeError("需求注册表静态字段不符合约定")
-
     for requirement in requirements:
         if (
             requirement.get("status") not in {"pending", "active", "completed"}
@@ -252,7 +230,7 @@ def _cycle(
 
 
 def _context(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
-    repositories = _repository_handoff(run_dir, state)
+    repositories = _repository_handoff(state)
     catalog, requirements = registry_handoff(state)
     active = state.get("active_requirement")
     cycle = state.get("requirement_cycle")
