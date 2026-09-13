@@ -377,7 +377,7 @@ Demo 从第 1 步开始，通过 `--product-draft` 接收 UTF-8 文本文件路�
 
 ### 第 3 步：基础工程选型
 
-- 执行方式：Python 将产品定义和 catalog 候选构造成 Pydantic 输入模型，使用代码内的 system prompt 调用 OpenAI Python SDK `responses.parse(..., text_format=FoundationSelectionResult)`，取得 Pydantic 输出后直接保存。
+- 执行方式：Python 将产品定义和 catalog 候选构造成 Pydantic 输入模型，通过公共 Responses API 调用封装和代码内的 system prompt 获取 `FoundationSelectionDecision`；模型只返回各交付面的 `candidate_id` 与 `reason`，明确不需要的交付面返回 `null`。程序校验候选 ID，并从 catalog 回填仓库地址、默认分支和模板路径，形成完整选型结果。
 - 输入：第 2 步结果中记录的项目需求说明、产品功能说明，以及本次 `catalog.json` 中的前端和后端候选。system prompt 只描述选型功能、输入、输出和约束，不包含步骤编号、PCM、Skill 或其它外层编排背景，并要求严格 JSON、禁止 Markdown、代码围栏、YAML 或 JSON 之外的文本。
 - 输出：Pydantic `FoundationSelectionResult`，其中 `frontend`、`backend` 分别为完整模板选择或 `null`；每个选择直接包含 `id`、`git_url`、`default_branch`、`path` 和 `reason`。程序使用 `model_dump()` 将该结果写入 `steps/03.json.template_selection`。
 - 完成条件：SDK 成功返回 `output_parsed`，步骤结果已经写入，状态推进到 `project:04_assemble_foundation`。本步骤不获取、复制或组装模板，不初始化前后端仓库。
