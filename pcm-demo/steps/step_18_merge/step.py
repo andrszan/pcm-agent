@@ -253,12 +253,8 @@ def _commit_success(run_dir: Path, context: dict[str, Any]) -> None:
     )
     _require(
         saved.get("step") == 17
-        and saved.get("name") == "统一提交需求变更"
         and saved.get("status") == "success"
-        and isinstance(saved.get("summary"), str)
-        and bool(saved["summary"].strip())
         and saved.get("applicable") is True
-        and saved.get("outputs") == []
         and saved.get("blocked") is None
         and saved.get("error") is None
         and saved.get("requirement_id") == context["requirement_id"]

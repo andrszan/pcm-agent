@@ -514,10 +514,13 @@ class RequirementMergeTests(unittest.TestCase):
                 run(run_dir, state)
                 self.assert_final(repositories, tips)
 
-    def test_upstream_incremental_fields_do_not_block_merge(self) -> None:
+    def test_conflicting_commit_result_is_rejected_before_git_writes(self) -> None:
         for field, value in (
+            ("step", 16),
+            ("status", "failed"),
+            ("requirement_id", "BR-002"),
+            ("branch", "req/br-002"),
             ("applicable", False),
-            ("outputs", ["unexpected"]),
             ("blocked", {"reason": "blocked"}),
             ("error", {"type": "RuntimeError", "message": "failed"}),
         ):
@@ -527,10 +530,67 @@ class RequirementMergeTests(unittest.TestCase):
                 commit_result = json.loads(commit_path.read_text(encoding="utf-8"))
                 commit_result[field] = value
                 write_requirement_step_result(run_dir, "BR-001", 17, commit_result)
-                with self.assertRaisesRegex(RuntimeError, "第 17 步"):
-                    run(run_dir, state)
+                with patch.object(merge_step, "_git_write") as writes:
+                    with self.assertRaisesRegex(RuntimeError, "第 17 步"):
+                        run(run_dir, state)
+                writes.assert_not_called()
+                self.assertEqual(read_state(run_dir), state)
                 self.assertFalse((run_dir / "steps/requirements/BR-001/18.json").exists())
 
+    def test_mismatched_commit_repositories_are_rejected_before_git_writes(self) -> None:
+        for field, value in (
+            ("name", "other"),
+            ("path", "other"),
+            ("base_sha", "0" * 40),
+            ("tip_sha", "0" * 40),
+            ("missing", None),
+            ("extra", None),
+            ("order", None),
+        ):
+            with self.subTest(conflicting_field=field):
+                run_dir, _workspace, state, _repositories, _bases, _tips = self.make_run(["web"])
+                commit_path = run_dir / "steps/requirements/BR-001/17.json"
+                commit_result = json.loads(commit_path.read_text(encoding="utf-8"))
+                repositories = commit_result["repositories"]
+                if field == "missing":
+                    repositories.pop()
+                elif field == "extra":
+                    repositories.append(dict(repositories[0]))
+                elif field == "order":
+                    repositories.reverse()
+                else:
+                    repositories[0][field] = value
+                write_requirement_step_result(run_dir, "BR-001", 17, commit_result)
+                with patch.object(merge_step, "_git_write") as writes:
+                    with self.assertRaisesRegex(RuntimeError, "第 17 步"):
+                        run(run_dir, state)
+                writes.assert_not_called()
+                self.assertEqual(read_state(run_dir), state)
+                self.assertFalse((run_dir / "steps/requirements/BR-001/18.json").exists())
+
+    def test_commit_display_fields_do_not_block_merge(self) -> None:
+        for metadata in (
+            {"name": "提交结果", "summary": "", "outputs": ["commit-report.json"]},
+            {},
+        ):
+            with self.subTest(metadata=metadata):
+                run_dir, _workspace, state, repositories, _bases, tips = self.make_run(["web"])
+                commit_path = run_dir / "steps/requirements/BR-001/17.json"
+                commit_result = json.loads(commit_path.read_text(encoding="utf-8"))
+                for field in ("name", "summary", "outputs"):
+                    commit_result.pop(field)
+                commit_result.update(metadata)
+                write_requirement_step_result(run_dir, "BR-001", 17, commit_result)
+
+                run(run_dir, state)
+
+                self.assert_final(repositories, tips)
+                final = read_state(run_dir)
+                self.assertEqual(final["requirement_registry"]["requirements"][0]["status"], "completed")
+                self.assertIsNone(final["active_requirement"])
+                self.assertIsNone(final["requirement_cycle"])
+
+    def test_upstream_incremental_fields_do_not_block_merge(self) -> None:
         run_dir, _workspace, state, repositories, _bases, tips = self.make_run(["web"])
         state["requirement_cycle"]["repositories"]["root"]["note"] = "upstream metadata"
         commit_path = run_dir / "steps/requirements/BR-001/17.json"

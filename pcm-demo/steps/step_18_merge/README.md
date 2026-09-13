@@ -4,7 +4,7 @@
 
 本步骤只执行本地 Python 与 Git 同步，不调用 Agent、Skill、LLM、session 或 conversation。
 
-它读取当前活动需求的第 17 步 scoped success、需求 cycle、适用仓库白名单与工作区仓库描述，对全部权威仓库按“非 root 原顺序、最后 root”的顺序执行安全的 fast-forward 合并和需求分支清理。前序交接允许增加与本步骤无关的字段；本步骤只读取 requirement、branch、仓库路径和 base/tip 等执行所需事实。
+它读取当前活动需求的第 17 步 scoped success、需求 cycle、适用仓库白名单与工作区仓库描述，对全部权威仓库按“非 root 原顺序、最后 root”的顺序执行安全的 fast-forward 合并和需求分支清理。前序结果须属于第 17 步和当前需求，状态为适用且成功、无 blocked 或 error，统一分支和逐仓名称、路径、base/tip 与 cycle 一致；不要求固定 `name`、非空 `summary` 或空 `outputs`，也不因增加其它元数据阻断合并。
 
 ## Git 边界
 
@@ -54,8 +54,10 @@ uv run python run_step.py --step 18 --run-id <run-id>
 
 ## 验证
 
-`test_step.py` 使用临时真实 Git 仓覆盖动态多仓顺序、base/tip no-op、部分 merge、partial cleanup、result→state 恢复、旧失败 result 重跑、上游增量字段、dirty/操作中/detached/non-fast-forward 拒绝，以及 `GIT_*` 过滤和 Git 写命令白名单。`test_cli.py` 覆盖同步调度、真实临时仓 CLI、scoped 结果路径、失败脱敏、完成状态防降级和完整 success 保护。
+`test_step.py` 使用临时真实 Git 仓覆盖动态多仓顺序、base/tip no-op、中间 main 快进到保存 tip、部分 merge、partial cleanup、result→state 恢复、旧失败 result 重跑、上游展示字段变化与增量元数据兼容、成功状态和逐仓合并事实不一致时拒绝写入、dirty/操作中/detached/non-fast-forward 拒绝，以及 `GIT_*` 过滤和 Git 写命令白名单。`test_cli.py` 覆盖同步调度、真实临时仓 CLI、scoped 结果路径、失败脱敏、完成状态防降级和完整 success 保护。
 
-第 18 步本体 10 项、CLI 5 项，共 15 项；PCM Demo 全量 294 项 `unittest`、`compileall common steps run_step.py` 和 `git diff --check` 通过。独立只读审查最终无高、中置信发现。
+在 `pcm-demo/` 运行：
 
-真实 `step01-mendmark` 已将 frontend、backend、root 的 local main 分别 ff-only 到 `65764dee0b2655f1c674ec36fee527861ea5043c`、`0e0bf9bb37e2abcf8c923c0fa4611c671da87640`、`62ac0aea0a69ea95d6382adfc276adce808be964`。三仓当前均在 main、clean、`req/br-001` 已删除、无 merge commit且未 push；BR-001 已写为 completed，state 返回 step 13。
+```bash
+uv run python -m unittest steps.step_18_merge.test_step steps.step_18_merge.test_cli -v
+```

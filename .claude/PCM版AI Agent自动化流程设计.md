@@ -163,7 +163,7 @@ Demo 和默认 PCM 流程只进行本地文件修改、测试、构建、服务�
 
 ## 四、运行上下文与恢复
 
-第 17 步现行实现本体 9 项与 CLI 4 项，共 13 项；第 18 步本体 10 项与 CLI 5 项，共 15 项。本轮 Agent 模型分级完成后，PCM Demo 当前工作树全量 367 项 `unittest`、`compileall` 与 `git diff --check` 通过（全量耗时 49.802 秒），中模型 + `high` effort 的公共 runner 首轮与同 session resume 真实成功；其余第 17、18 步既有事实保持不变。当前工作树还包含其它公共循环/CLI 的未提交修改，故该全量结果不能全部归因于第 9 步。`run_step.py` 只对 Claude Agent SDK 执行通道故障产生的瞬时请求有界重跑两次；任意 API 状态均可请求重试，业务 `blocked`、普通失败、AI-compatible 裁决失败、本地合同错误和取消不重试，且请求不写入 state/result/diagnostic/conversation。公共错误诊断保留经精确凭据遮盖的 Claude Agent SDK `errors`、异常链和 traceback 位置，以及 AI-compatible provider 的 code/type/message/request ID/HTTP status；完整有界快照写入 Git 忽略的 `logs/`，state/result/stderr 保存具体安全原因和引用。第 13 步直接消费当前需求注册表；第 17 步通过公共 Agent 决策循环运行 `commit-changes`；第 18 步只使用确定性 Python/Git。真实 `step01-mendmark` 已连续完成 BR-001 与 BR-002 两个需求循环。BR-002 在旧 direct-run 第 17 步期间只保存了 Claude session，没有 decision conversation；该历史不能补造，现行合同保证后续需求保存完整 conversation。root/frontend/backend 的 local main tips 分别为 `2f39fbe7e26d6e4905142925ae149ba83d9e70fe`、`f290ff85ed779a1f100eeded7eedfcfb0376b826`、`204a7a6b48c43a80f573dc9e70acedddb59bbe4f`，三仓 clean、`req/br-002` 已删除且未 push。
+第 17、18 步的当前合同与验证入口见各步骤说明。本轮 Agent 模型分级完成后，PCM Demo 当前工作树全量 367 项 `unittest`、`compileall` 与 `git diff --check` 通过（全量耗时 49.802 秒），中模型 + `high` effort 的公共 runner 首轮与同 session resume 真实成功；其余第 17、18 步既有事实保持不变。当前工作树还包含其它公共循环/CLI 的未提交修改，故该全量结果不能全部归因于第 9 步。`run_step.py` 只对 Claude Agent SDK 执行通道故障产生的瞬时请求有界重跑两次；任意 API 状态均可请求重试，业务 `blocked`、普通失败、AI-compatible 裁决失败、本地合同错误和取消不重试，且请求不写入 state/result/diagnostic/conversation。公共错误诊断保留经精确凭据遮盖的 Claude Agent SDK `errors`、异常链和 traceback 位置，以及 AI-compatible provider 的 code/type/message/request ID/HTTP status；完整有界快照写入 Git 忽略的 `logs/`，state/result/stderr 保存具体安全原因和引用。第 13 步直接消费当前需求注册表；第 17 步通过公共 Agent 决策循环运行 `commit-changes`；第 18 步只使用确定性 Python/Git。真实 `step01-mendmark` 已连续完成 BR-001 与 BR-002 两个需求循环。BR-002 在旧 direct-run 第 17 步期间只保存了 Claude session，没有 decision conversation；该历史不能补造，现行合同保证后续需求保存完整 conversation。root/frontend/backend 的 local main tips 分别为 `2f39fbe7e26d6e4905142925ae149ba83d9e70fe`、`f290ff85ed779a1f100eeded7eedfcfb0376b826`、`204a7a6b48c43a80f573dc9e70acedddb59bbe4f`，三仓 clean、`req/br-002` 已删除且未 push。
 
 本轮第 9、14、15 步工程架构约束传递修正已完成：第 9 步区分稳定 owner、目录/包/模块边界与边界内部文件粒度，并对前端巨型路由/页面或通用收纳、后端同名平铺文件及跨所有者穿透给出一致合同；第 14 步按每个受影响交付单元把适用工程归属和架构 delta 写入活动 TRD；第 15 步负责人补齐架构约束/模块归属到改动、依赖、diff/导入/调用证据和实际结果的完成映射。第 9/14/15 步本体 35 项、公共循环与三步 CLI 相关回归 91 项、当前工作树全量 367 项 `unittest`（49.013 秒）通过；完整 `compileall`、修改 Python 文件 IDE diagnostics、两个 eval JSON 解析和 `git diff --check` 通过。第 14/15 步负责人上下文仍分别只增加完整 Backlog 与活动 TRD，没有新增工程架构全文注入、Markdown 解析、JSON 架构 DSL、Git verifier、公共循环或状态字段；第 14/15 步真实集成留给 BR-003 自然验证，第 9 步等待下一 fresh 项目。
 
@@ -320,7 +320,7 @@ Demo 和默认 PCM 流程只进行本地文件修改、测试、构建、服务�
 1. 每个节点开始前保存 `phase`、`current_node` 和已核验输入；节点成功后原子保存输出、事实证据和下一节点；阻塞或失败时保存原因并退出。
 2. 使用 `--resume <run-id>` 加载原工作区和状态；恢复时只重跑当前节点，并按该节点合同重新核验它自己拥有的 intent、session、输出和外部条件，不跨节点重复核验前序步骤已经完成的文件、Git 或其它交接事实，也不依据历史文字直接跳过当前节点。
 3. 已有 Claude Agent SDK session 时优先恢复：第 14 步恢复 TRD session，第 15、16 步恢复同一 `development_session_id`。第 16 步只负责原 session 复盘和结果推进，不比较工作树增量；实际变更由第 17 步统一读取并提交。
-4. 第 12 步以合法需求注册表和 Backlog 指纹为幂等锚点；第 13 步以活动需求、统一分支计划和各仓 `main` 基线为恢复锚点；第 17 步以每个 dirty 仓的最终分支 tip SHA 为提交锚点。第 18 步按非 root 代码仓先、root 最后的固定顺序执行 `git merge --ff-only`：若某仓 `main` 已等于记录的 tip，可确认该仓已合并；若仍等于记录的 base，则继续合并；其它 SHA、非 fast-forward、dirty 或历史操作冲突均返回 `failed`。全部仓库核验和分支清理成功后才写入 `completed`。
+4. 第 12 步以合法需求注册表和 Backlog 指纹为幂等锚点；第 13 步以活动需求、统一分支计划和各仓 `main` 基线为恢复锚点；第 17 步以各仓最终分支 tip SHA 为提交锚点。第 18 步按非 root 代码仓先、root 最后的固定顺序合并到保存的 tip；在祖先关系、工作树和引用等 Git 安全边界成立时，依据实际 main 确认已合并或继续 fast-forward，不要求 main 仍等于原始 base。全部仓库核验和分支清理成功后才写入 `completed`。
 5. 阶段二每轮审计先记录 `applicable_repositories` 中各仓库 `main` 的版本指纹和独立 SDK session。相同且工作树清楚的指纹恢复原审计或读取已持久化结果，不重复制造候选；修复合并后版本指纹变化，才建立新的全项目复审轮次。
 6. 候选分流和入池均保存证据引用。恢复时按候选的稳定事实、已有归属和正式 ID 检查，已入池的候选不得再次分配 ID；入池分支、提交或合并证据冲突时返回 `failed`，不猜测补写 Backlog。
 7. Claude Agent SDK 的多轮上下文由其 session 保存；第 9～11 步的公共循环按领域键保存、读取和解释完整 conversation，`state.json` 只记录恢复所需的 session/reference/private state。领域步骤不解析 conversation 的 schema、角色顺序、尾部 decision、session/reference 组合或完整 commit prompt，也不把它当长期成功证据。
@@ -539,10 +539,10 @@ Demo 从第 1 步开始，通过 `--product-draft` 接收 UTF-8 文本文件路�
 ### 第 18 步：程序化合并并完成需求
 
 - **执行方式**：已实现为确定性 Python/Git 步骤，不调用 Claude Agent SDK、AI 决策模型、Skill、session 或 conversation。
-- **输入**：读取当前 active requirement、cycle、`applicable_repositories`、工作区仓库路径和 scoped `17.json` success；只使用 requirement、统一分支及各仓 `base_sha/tip_sha/merged` 等当前操作所需字段，允许前序交接增加其它字段。
-- **合并与恢复**：全部非 root 仓按权威顺序先处理、root 最后。`main == tip` 表示已合并并可补写 `merged:true`；`main == base` 且未合并时才执行必要的 `git switch main` 和 `git merge --ff-only <requirement-branch>`；`base == tip` 为零 merge 的合法 no-op。其它 SHA、dirty、进行中 Git 操作、分支证据冲突或非 fast-forward 均保留现场并 `failed`。
-- **清理与完成**：每仓合并后原子保存 `merged:true`；只有全部仓 `main == tip` 后才按同一顺序安全 `git branch -d`，支持部分清理恢复。最终先写 scoped `18.json`，再把注册表项更新为 `completed`、`completion:{"step":18}`，清空 active requirement/cycle，并按 `return_node_after_completion` 返回既有节点。
-- **验证事实**：第 18 步本体 10 项、CLI 5 项，共 15 项；全量 282 项、`compileall`、`git diff --check` 通过，独立只读审查无高、中置信发现。真实 `step01-mendmark` 已将 frontend/backend/root 的 local main 分别 ff-only 到 `65764dee0b2655f1c674ec36fee527861ea5043c`、`0e0bf9bb37e2abcf8c923c0fa4611c671da87640`、`62ac0aea0a69ea95d6382adfc276adce808be964`；三仓均在 main、clean、需求分支已删除、无 merge commit且未 push，BR-001 已完成。
+- **输入**：读取当前 active requirement、cycle、`applicable_repositories`、工作区仓库路径和 scoped `17.json`。保留前序步骤、需求、适用成功状态及无 blocked/error 的检查，统一分支和逐仓名称、路径、base/tip 须与当前 cycle 一致；不校验展示用的 `name/summary/outputs`，允许增加无关元数据。
+- **合并与恢复**：全部非 root 仓按权威顺序先处理、root 最后。合并与 no-op 均要求 `base_sha ≤ main ≤ tip_sha`（祖先或相等），原始 base 不改写；`main == tip_sha` 时只补记已合并，否则在未标记 merged 且 Git 边界成立时执行必要的 `git switch main` 和 `git merge --ff-only <tip_sha>`。合并目标使用已保存的 SHA，需求分支须仍指向该提交；分叉、main 超过 tip、引用变化或工作树与进行中操作不满足安全边界时，保留现场并失败。
+- **清理与完成**：每仓合并后原子保存 `merged:true`；全部仓均到达保存 tip 且通过核验后，才按同一顺序安全执行 `git branch -d`，支持部分清理恢复。最终各仓须在 main、clean 且需求分支已删除，先写 scoped `18.json`，再把注册表项更新为 `completed`、`completion:{"step":18}`，清空 active requirement/cycle，返回 `phase_1:select_requirement` / step 13。result 已写而 state 未推进时，只读核验最终 Git 事实并补状态。
+- **使用与验证入口**：Git 边界、恢复合同和定向测试命令见 [第 18 步说明](../pcm-demo/steps/step_18_merge/README.md)。
 
 ## 七、阶段二：全项目级集成产品体验审计与迭代
 
