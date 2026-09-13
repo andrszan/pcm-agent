@@ -201,7 +201,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--resume-message-file",
         type=Path,
-        help="仅用于当前 blocked：读取 UTF-8 文件作为人工负责人恢复指令",
+        help="用于当前 blocked、running 中断或 AgentExecutionFailure：读取 UTF-8 文件作为人工负责人恢复指令",
     )
     parser.add_argument("--coordination-locks", help=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -1445,7 +1445,7 @@ def _execute(
 
     resume_message = _resume_message(args)
     if resume_message is not None and not resume_message.consumed:
-        raise RuntimeError("负责人消息未被当前 blocked 对话消费")
+        raise RuntimeError("负责人消息未被目标原对话消费")
 
     if result["status"] != "success" and not error_message:
         detail = result.get("blocked") or result.get("error") or {}

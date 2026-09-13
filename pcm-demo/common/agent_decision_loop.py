@@ -30,6 +30,9 @@ BLOCKED_RESUME_PROMPT = (
     "如仍缺少不可替代输入，请明确说明。"
 )
 RECOVERABLE_RESULT_PROMPT = "请继续完成工作，并在正常结束后报告结果。"
+PROJECT_BOOTSTRAP_LEGACY_COMPLETION_MESSAGES = (
+    "已完成 project-bootstrap：基础工程已完成项目化并通过完成条件与工程边界核验。",
+)
 _SAFE_EXCEPTION_TYPE = re.compile(r"[A-Za-z_][A-Za-z0-9_.]{0,127}\Z")
 _RECOVERABLE_SUBTYPES = {"error_max_turns", "error_max_budget_usd"}
 _NORMAL_TERMINAL_REASONS = {None, "completed"}
@@ -175,6 +178,9 @@ _RESUME_REQUIREMENT_PREFIXES = {
     16: "rule_retrospective",
     17: "requirement_commit",
 }
+_RESUME_LEGACY_COMPLETION_MESSAGES = {
+    "project_bootstrap": PROJECT_BOOTSTRAP_LEGACY_COMPLETION_MESSAGES,
+}
 
 
 def _decision_at(
@@ -209,6 +215,68 @@ def _resume_anchor(messages: list[dict[str, str]]) -> bool:
     )
 
 
+def _matches_legacy_completion(
+    messages: list[dict[str, str]], completion_messages: tuple[str, ...]
+) -> bool:
+    tail = messages[-1]
+    return (
+        len(messages) >= 2
+        and tail["role"] == "assistant"
+        and messages[-2]["role"] == "user"
+        and tail["content"] in completion_messages
+    )
+
+
+def _agent_result_finished_normally(result: Any) -> bool:
+    return (
+        isinstance(result, dict)
+        and result.get("subtype") == "success"
+        and result.get("is_error") is False
+        and result.get("has_errors") is False
+        and result.get("api_error_status") is None
+        and result.get("exception_type") is None
+        and result.get("terminal_reason") in _NORMAL_TERMINAL_REASONS
+    )
+
+
+def _resume_incomplete_loop(
+    state: dict[str, Any], key: str, messages: list[dict[str, str]]
+) -> bool:
+    section = state.get(key)
+    if section is not None and not isinstance(section, dict):
+        return False
+    pending = section.get("pending_agent_text") if isinstance(section, dict) else None
+    if pending is not None and not isinstance(pending, str):
+        return False
+    if isinstance(pending, str) and pending.strip():
+        pending_already_decided = (
+            _decision_at(messages, -1) is not None
+            and len(messages) >= 2
+            and messages[-2]["role"] == "user"
+            and messages[-2]["content"] == pending
+        )
+        if not pending_already_decided:
+            return True
+
+    if _matches_legacy_completion(
+        messages, _RESUME_LEGACY_COMPLETION_MESSAGES.get(key, ())
+    ):
+        return False
+
+    tail = messages[-1]
+    if tail["role"] == "user":
+        return True
+    if tail["role"] != "assistant":
+        return False
+    decision = _decision_at(messages, -1)
+    if decision is None:
+        return True
+    if decision.verdict != "completed":
+        return True
+    result = section.get("last_agent_result") if isinstance(section, dict) else None
+    return isinstance(result, dict) and not _agent_result_finished_normally(result)
+
+
 def _resume_keys(step: int, state: dict[str, Any]) -> tuple[str, ...]:
     static = _RESUME_STATIC_KEYS.get(step)
     if static is not None:
@@ -225,22 +293,31 @@ def validate_resume_target(
     state: dict[str, Any],
     step: int,
 ) -> str:
-    """在步骤锁内选择当前 blocked 节点唯一可恢复的原对话。"""
+    """在步骤锁内选择当前可人工恢复的唯一原对话。"""
 
     expected_node = _RESUME_STEP_NODES.get(step)
     if expected_node is None:
         raise ValueError(f"第 {step} 步不支持负责人消息恢复")
+    status = state.get("status")
+    failed_agent = (
+        status == "failed"
+        and isinstance(state.get("error"), dict)
+        and state["error"].get("type") == "AgentExecutionFailure"
+    )
     if (
-        state.get("status") != "blocked"
-        or (state.get("step"), state.get("current_step"), state.get("current_node"))
-        != (step, step, expected_node)
-    ):
-        raise ValueError("负责人消息只能用于当前 blocked 节点")
+        status not in {"blocked", "running"}
+        and not failed_agent
+    ) or (
+        state.get("step"), state.get("current_step"), state.get("current_node")
+    ) != (step, step, expected_node):
+        raise ValueError(
+            "负责人消息只能用于当前 blocked、running 或 AgentExecutionFailure 节点"
+        )
 
     sessions = state.get("claude_sessions")
     references = state.get("decision_conversations")
     if not isinstance(sessions, dict) or not isinstance(references, dict):
-        raise ValueError("当前 blocked 节点没有可恢复的原 Agent 对话")
+        raise ValueError("当前节点没有可恢复的原 Agent 对话")
 
     matches: list[str] = []
     for key in _resume_keys(step, state):
@@ -266,11 +343,16 @@ def validate_resume_target(
             messages = _validate_messages(data["messages"])
         except RuntimeError:
             continue
-        if _resume_anchor(messages):
+        eligible = (
+            _resume_anchor(messages)
+            if status == "blocked"
+            else _resume_incomplete_loop(state, key, messages)
+        )
+        if eligible:
             matches.append(key)
 
     if len(matches) != 1:
-        raise ValueError("当前 blocked 节点没有唯一可恢复的原 Agent 对话")
+        raise ValueError("当前节点没有唯一可恢复的原 Agent 对话")
     return matches[0]
 
 
@@ -623,15 +705,8 @@ def persist_agent_failure(
 
 
 def _last_agent_finished_normally(state: dict[str, Any], spec: AgentDecisionLoopSpec) -> bool:
-    result = _state_section(state, spec).get("last_agent_result")
-    return (
-        isinstance(result, dict)
-        and result.get("subtype") == "success"
-        and result.get("is_error") is False
-        and result.get("has_errors") is False
-        and result.get("api_error_status") is None
-        and result.get("exception_type") is None
-        and result.get("terminal_reason") in _NORMAL_TERMINAL_REASONS
+    return _agent_result_finished_normally(
+        _state_section(state, spec).get("last_agent_result")
     )
 
 
@@ -779,13 +854,7 @@ def _tail_decision(messages: list[dict[str, str]]) -> AgentDecision | None:
 
 
 def _legacy_completion(messages: list[dict[str, str]], spec: AgentDecisionLoopSpec) -> bool:
-    tail = messages[-1]
-    return (
-        len(messages) >= 2
-        and tail["role"] == "assistant"
-        and messages[-2]["role"] == "user"
-        and tail["content"] in spec.legacy_completion_messages
-    )
+    return _matches_legacy_completion(messages, spec.legacy_completion_messages)
 
 
 def _validate_agent_result(
@@ -1020,8 +1089,10 @@ async def run_agent_decision_loop(
             and not resume_message.consumed
             and resume_message.target_key == spec.key
         )
-        if targeted_resume and (
-            _resume_anchor(messages) or _tail_decision(messages) is not None
+        if (
+            targeted_resume
+            and messages[-1]["role"] == "assistant"
+            and not _legacy_completion(messages, spec)
         ):
             _require_decision_capacity(messages, spec)
             messages.append(conversation_message("assistant", resume_message.content))
@@ -1042,7 +1113,7 @@ async def run_agent_decision_loop(
             repair = await _verify_completed(completion_verifier)
             if repair is None:
                 if targeted_resume:
-                    raise RuntimeError("负责人消息未能投递到原 blocked 对话")
+                    raise RuntimeError("负责人消息未能投递到目标原对话")
                 return AgentDecision(
                     verdict="completed",
                     answer="",
@@ -1080,7 +1151,7 @@ async def run_agent_decision_loop(
                 repair = await _verify_completed(completion_verifier)
                 if repair is None:
                     if targeted_resume:
-                        raise RuntimeError("负责人消息未能投递到原 blocked 对话")
+                        raise RuntimeError("负责人消息未能投递到目标原对话")
                     return decision
                 messages.append(conversation_message("assistant", repair))
                 _save_conversation(run_dir, state, spec, messages)

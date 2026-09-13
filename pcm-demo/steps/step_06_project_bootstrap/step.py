@@ -6,7 +6,12 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from common.agent_decision_loop import AgentDecisionLoopSpec, ResumeMessage, run_agent_decision_loop
+from common.agent_decision_loop import (
+    PROJECT_BOOTSTRAP_LEGACY_COMPLETION_MESSAGES,
+    AgentDecisionLoopSpec,
+    ResumeMessage,
+    run_agent_decision_loop,
+)
 from common.claude_agent import run_claude
 from common.decision import render_decision_system_prompt, request_decision
 from common.state import step_result_status, write_state, write_step_result
@@ -41,9 +46,7 @@ MAX_DECISION_ROUNDS = 32
 PROJECT_BOOTSTRAP_MAX_TURNS = 9999
 TAILWIND_THEME_MAX_TURNS = 9999
 BRAND_ASSETS_MAX_TURNS = 9999
-LEGACY_COMPLETION_MESSAGES = (
-    "已完成 project-bootstrap：基础工程已完成项目化并通过完成条件与工程边界核验。",
-)
+LEGACY_COMPLETION_MESSAGES = PROJECT_BOOTSTRAP_LEGACY_COMPLETION_MESSAGES
 
 BOOTSTRAP_DECISION_RULES = """- completed：产品根 README 和各适用工程的项目身份、配置、文档及模板残留已完成项目化。
 - continue：项目化或上述验证尚未完成，可用既有工程、配置和工具继续修复。"""

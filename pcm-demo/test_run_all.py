@@ -69,28 +69,38 @@ class RunAllTests(unittest.TestCase):
         write_json(run_dir / "state.json", state)
         return run_dir
 
-    def make_blocked_agent_run(self, *, key: str = "project_intake") -> Path:
+    def make_agent_run(
+        self,
+        *,
+        key: str = "project_intake",
+        status: str = "blocked",
+        error: dict[str, object] | None = None,
+        run_id: str = "test-run",
+    ) -> Path:
         run_dir = self.make_run(
             {
-                "run_id": "test-run",
-                "status": "blocked",
+                "run_id": run_id,
+                "status": status,
                 "phase": "project_initialization",
                 "step": 2,
                 "current_step": 2,
                 "current_node": "project:02_intake",
+                "error": error,
                 "claude_sessions": {key: "session-1"},
                 "decision_conversations": {
                     key: {"path": f"conversations/{key}.json"}
                 },
-            }
+            },
+            run_id,
         )
         (run_dir / "conversations").mkdir()
-        write_json(
-            run_dir / "conversations" / f"{key}.json",
-            {
-                "messages": [
-                    {"role": "system", "content": "system"},
-                    {"role": "assistant", "content": "初始提示"},
+        messages = [
+            {"role": "system", "content": "system"},
+            {"role": "assistant", "content": "初始提示"},
+        ]
+        if status == "blocked":
+            messages.extend(
+                [
                     {"role": "user", "content": "Agent 回复"},
                     {
                         "role": "assistant",
@@ -105,9 +115,15 @@ class RunAllTests(unittest.TestCase):
                         ),
                     },
                 ]
-            },
+            )
+        write_json(
+            run_dir / "conversations" / f"{key}.json",
+            {"messages": messages},
         )
         return run_dir
+
+    def make_blocked_agent_run(self, *, key: str = "project_intake") -> Path:
+        return self.make_agent_run(key=key)
 
     def test_canonical_nodes_route_to_exact_steps(self) -> None:
         for node, expected in run_all.NODE_TO_STEP.items():
@@ -454,6 +470,58 @@ class RunAllTests(unittest.TestCase):
         )
         self.assertNotIn("--resume-message-file", calls[1])
 
+    def test_running_and_agent_failure_forward_message_only_to_current_step(self) -> None:
+        message = self.root / "负责人决定"
+        message.write_text("请继续", encoding="utf-8")
+        for status, error in (
+            ("running", None),
+            ("failed", {"type": "AgentExecutionFailure", "message": "SDK 失败"}),
+        ):
+            with self.subTest(status=status):
+                run_id = f"test-{status}"
+                self.make_agent_run(
+                    status=status,
+                    error=error,
+                    run_id=run_id,
+                )
+                calls: list[list[str]] = []
+
+                def stop_after_current(command, *_args, **_kwargs):
+                    calls.append(command)
+                    return 1
+
+                with patch.object(run_all, "run_child", side_effect=stop_after_current):
+                    self.assertEqual(
+                        run_all.orchestrate(
+                            self.args(resume=run_id, resume_message_file=message)
+                        ),
+                        1,
+                    )
+
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(
+                    calls[0][calls[0].index("--resume-message-file") + 1],
+                    str(message.resolve()),
+                )
+
+    def test_other_failed_resume_message_does_not_start_child(self) -> None:
+        run_dir = self.make_agent_run(
+            status="failed",
+            error={"type": "AIDecisionFailure", "message": "裁决失败"},
+        )
+        message = self.root / "负责人决定"
+        message.write_text("请继续", encoding="utf-8")
+        before = (run_dir / "state.json").read_bytes()
+
+        with patch.object(run_all, "run_child") as child:
+            self.assertEqual(
+                run_all.orchestrate(self.args(resume_message_file=message)), 2
+            )
+
+        child.assert_not_called()
+        self.assertEqual((run_dir / "state.json").read_bytes(), before)
+        self.assertEqual(list((run_dir / "steps").iterdir()), [])
+
     def test_parent_does_not_read_invalid_resume_file_or_change_business_state(self) -> None:
         run_dir = self.make_blocked_agent_run()
         message = self.root / "missing-message"
@@ -597,15 +665,14 @@ class RunAllTests(unittest.TestCase):
         with patch.object(run_all.subprocess, "Popen", return_value=child):
             self.assertEqual(run_all.run_child(["python", "step.py"]), 143)
 
-    def test_resume_message_help_explains_blocked_utf8_contract(self) -> None:
+    def test_resume_message_help_explains_supported_states_and_utf8_contract(self) -> None:
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout), self.assertRaises(SystemExit) as raised:
             run_all.parse_args(["--help"])
         self.assertEqual(raised.exception.code, 0)
-        self.assertIn(
-            "仅用于当前 blocked：读取 UTF-8 文件作为人工负责人恢复指令",
-            stdout.getvalue(),
-        )
+        help_text = stdout.getvalue()
+        self.assertIn("blocked、running 中断或 AgentExecutionFailure", help_text)
+        self.assertIn("UTF-8 文件作为人工负责人恢复指令", help_text)
 
     def test_cli_requires_exactly_one_fresh_or_resume_entry(self) -> None:
         with self.assertRaises(SystemExit):

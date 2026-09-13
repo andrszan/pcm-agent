@@ -61,7 +61,7 @@ class RunStepRetryTests(unittest.TestCase):
             _REAL_PARSE_ARGS()
         self.assertEqual(raised.exception.code, 2)
 
-    def test_resume_message_help_explains_blocked_utf8_contract(self) -> None:
+    def test_resume_message_help_explains_supported_states_and_utf8_contract(self) -> None:
         stdout = io.StringIO()
         with (
             patch.object(sys, "argv", ["run_step.py", "--help"]),
@@ -70,10 +70,9 @@ class RunStepRetryTests(unittest.TestCase):
         ):
             _REAL_PARSE_ARGS()
         self.assertEqual(raised.exception.code, 0)
-        self.assertIn(
-            "仅用于当前 blocked：读取 UTF-8 文件作为人工负责人恢复指令",
-            stdout.getvalue(),
-        )
+        help_text = stdout.getvalue()
+        self.assertIn("blocked、running 中断或 AgentExecutionFailure", help_text)
+        self.assertIn("UTF-8 文件作为人工负责人恢复指令", help_text)
 
     def test_success_does_not_retry(self) -> None:
         runner = Mock(return_value=0)
@@ -200,6 +199,66 @@ class RunStepRetryTests(unittest.TestCase):
 
         prepare.assert_called_once()
         self.assertEqual(seen, [message, message])
+
+    def test_running_and_agent_failure_prepare_message_before_business_execution(self) -> None:
+        root = run_step.DEMO_ROOT
+        message_path = root / "message"
+        message_path.write_text("负责人指令", encoding="utf-8")
+        for status, error in (
+            ("running", None),
+            ("failed", {"type": "AgentExecutionFailure", "message": "SDK 失败"}),
+        ):
+            with self.subTest(status=status):
+                run_id = f"test-{status}"
+                run_dir = root / "runs" / run_id
+                (run_dir / "steps").mkdir(parents=True)
+                (run_dir / "conversations").mkdir()
+                state = {
+                    "run_id": run_id,
+                    "status": status,
+                    "step": 2,
+                    "current_step": 2,
+                    "current_node": "project:02_intake",
+                    "error": error,
+                    "claude_sessions": {"project_intake": "session-1"},
+                    "decision_conversations": {
+                        "project_intake": {"path": "conversations/project_intake.json"}
+                    },
+                }
+                (run_dir / "state.json").write_text(json.dumps(state), encoding="utf-8")
+                (run_dir / "conversations/project_intake.json").write_text(
+                    json.dumps(
+                        {
+                            "messages": [
+                                {"role": "system", "content": "system"},
+                                {"role": "assistant", "content": "待发送指令"},
+                            ]
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                args = Mock(
+                    step=2,
+                    run_id=run_id,
+                    resume_message_file=message_path,
+                    coordination_locks=None,
+                )
+                seen: list[ResumeMessage] = []
+
+                def execute(current_args, *_args):
+                    seen.append(current_args.resume_message)
+                    current_args.resume_message.consumed = True
+                    return 0
+
+                with (
+                    patch.object(run_step, "parse_args", return_value=args),
+                    patch.object(run_step, "_execute", side_effect=execute),
+                ):
+                    self.assertEqual(run_step.main(), 0)
+
+                self.assertEqual(len(seen), 1)
+                self.assertEqual(seen[0].target_key, "project_intake")
+                self.assertEqual(seen[0].content, "负责人指令")
 
     def test_invalid_resume_file_stops_before_business_execution(self) -> None:
         root = run_step.DEMO_ROOT

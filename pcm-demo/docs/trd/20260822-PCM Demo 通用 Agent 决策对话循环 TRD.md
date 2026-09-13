@@ -311,15 +311,17 @@ stateDiagram-v2
 
 ### 6.1 人工负责人恢复指令
 
-`run_all.py --resume <run-id> --resume-message-file <path>` 与 `run_step.py --step <step> --run-id <run-id> --resume-message-file <path>` 提供人工负责人接管当前 blocked 决定的入口。它不是自由跳转或强制 completed：仅已有 run、当前 blocked 节点、对应的原 Agent 对话/session 可使用；没有 Agent 对话的确定性阻塞明确拒绝，不能静默丢弃意见或新建 session。
+`run_all.py --resume <run-id> --resume-message-file <path>` 与 `run_step.py --step <step> --run-id <run-id> --resume-message-file <path>` 提供人工负责人接管当前 Agent 对话的入口。它不是自由跳转或强制 completed，只允许以下现场：当前 `blocked` 且 conversation 保留合法 blocked 裁决锚点；进程中断后仍为 `running`；或当前 `failed` 且顶层 `error.type == AgentExecutionFailure`。三者都必须保留当前 step/node、对应 conversation 引用和原 session。负责人裁决失败、其它 failed、success、确定性阻塞、无原 session 或无法唯一定位的现场明确拒绝。
 
 - 文件可以在任意目录，支持绝对路径和按调用者工作目录解析的相对路径；推荐 txt/md，但不限制扩展名。不要求结构化字段或 frontmatter。
-- CLI 在执行锁内、业务状态变更及计时落盘之前校验当前阻塞位置与文件；只读取一次 UTF-8 正文。缺失、非普通文件、不可读、无效编码或全空白均报输入错误，不覆盖原 blocked 业务结果。检验非空不改变正文，保留首尾换行等原始文本。
-- 目标对话尾部为 blocked 决定，或该阻塞后的恢复指令尚未获得 Agent 回复时，保留旧历史并追加普通 `assistant` 人工正文。尤其允许已有泛化 `BLOCKED_RESUME_PROMPT` 后再追加人工指令。
-- 必须先持久化人工正文，再发送同一正文给原 Claude session；文件路径本身不是发给 Agent 的指令。发送前不调用负责人决策模型预审，也不再补发泛化恢复提示。
-- Agent 返回后仍追加真实 `user` 回复并进入既有决策流程。决策模型可以看到人工指令及其执行结果；真实缺口仍应如实报告，不因人工要求继续而伪造资源、批准或验证。
-- 同一 CLI 执行中的自动重试共享仅内存的消费状态；本次消息不能在后续再次 blocked 时重复注入。人工恢复不重置或扩大既有裁决轮数上限，额度不足时在追加正文前明确拒绝。`run_all` 只向当前子步骤传递该参数；同一步有多个 loop 时只向真正的阻塞对话发送，不能投递给已完成或新开启的相邻对话。
-- 新输入无法确定合法投递目标时明确拒绝，不允许步骤先成功后才发现输入未被消费。已有 `pending_agent_text` 继续按原持久化协议处理，不丢弃既有回复或将其冒充为人工指令执行结果。
+- CLI 在执行锁内、业务状态变更及计时落盘之前校验当前位置与目标对话；只读取一次 UTF-8 正文。缺失、非普通文件、不可读、无效编码或全空白均报输入错误，不覆盖原业务结果。检验非空不改变正文，保留首尾换行等原始文本。
+- 多 loop 步骤根据 `pending_agent_text` 和 conversation 尾部唯一选择尚未完成的原对话，排除已由正常 Agent 结果形成稳定 `completed` 的历史 loop；不按键顺序猜测，也不新增状态、计时或持久化体系。
+- 已有 `pending_agent_text` 或 conversation 的 `user` 尾部时，先恢复真实 Agent 回复并完成负责人裁决，不丢弃回复，也不把它冒充为人工指令执行结果。裁决完成后，本次显式人工消息仍须投递，包括旧回复被裁决为 `completed` 的情况。
+- 即将再次调用 Agent 时，保留旧历史并追加普通 `assistant` 人工正文，以此替代待发送的普通指令、`continue` answer、可恢复结果提示或泛化 blocked 恢复提示；不会改写原消息，也不会先把被替代提示发给 Agent。
+- 必须先持久化人工正文，再设置本次内存 `consumed`，最后把同一正文发送给原 Claude session；文件路径本身不是指令。发送前不调用负责人决策模型预审。Agent 返回后仍追加真实 `user` 回复并进入既有决策流程；真实缺口仍应如实报告。
+- 人工恢复不重置或扩大既有裁决轮数上限。循环复用 `_require_decision_capacity()` 在追加正文前检查容量；额度不足时不追加正文、不标记消费，也不向 CLI 复制动态轮数配置。
+- 同一 CLI 执行中的 SDK 自动重试共享仅内存的消费状态，不重复追加人工正文，本次消息也不能在后续再次 blocked 时重复注入。正文落盘后若进程再次中断，普通恢复从 conversation 尾部复用正文，不再读取源文件；只有用户显式提交新意见时才再次提供 `--resume-message-file`。该顺序仍是 at-least-once，不承诺 Agent 或业务副作用恰好执行一次。
+- `run_all` 只向当前子步骤传递该参数，当前步骤成功后清除转发；新输入无法确定合法投递目标时在启动子进程前拒绝，不允许步骤先成功后才发现输入未被消费。
 
 人工正文不增加 conversation schema 字段。识别结构化模型决定及旧完成标记时，要求该 `assistant` 紧随 Agent 的 `user` 回复；在旧 blocked/generic `assistant` 后追加的人工正文即使恰好是合法 `AgentDecision` JSON 或旧完成标记，也只能作为普通指令投递，不触发完成、不计入模型裁决轮数。
 
@@ -432,7 +434,7 @@ Prompt 投递采用 at-least-once 语义。自动恢复指令使用幂等的“�
 - Git、文件或完成验证冲突；
 - 无法形成合法结构化决定。
 
-`blocked` 和 `failed` 都结束当前单次步骤执行，`continue` 只存在于公共循环内部，不成为第四种步骤结果。CLI 只在当前异常显式携带 Claude Agent SDK 通道重试请求时有界重放两次；普通 `blocked`、确定性 `failed`、AI-compatible 裁决失败、本地合同错误和取消均在首次执行后退出。第三次仍请求重试时对外归一为步骤失败码 `1`。
+`blocked` 和 `failed` 都结束当前单次步骤执行，`continue` 只存在于公共循环内部，不成为第四种步骤结果。CLI 只在当前异常显式携带 Claude Agent SDK 通道重试请求时有界重放两次；普通 `blocked`、确定性 `failed`、AI-compatible 裁决失败、本地合同错误和取消均在首次执行后退出。第三次仍请求重试时对外归一为步骤失败码 `1`。自动重试之外，负责人可按 §6.1 对合法 blocked、running 中断或顶层 `AgentExecutionFailure` 现场显式提供人工恢复指令；这不把其它 failed 变成可恢复状态，也不改变自动重试分类。
 
 ## 10. Prompt 合同
 

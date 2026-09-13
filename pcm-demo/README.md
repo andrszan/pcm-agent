@@ -80,9 +80,15 @@ uv run python run_step.py --step <1-18> --run-id <run-id>
 
 只有 Claude Agent SDK 执行通道明确请求重试时，单步入口才按 10 秒、30 秒有界重跑当前步骤。业务 `blocked`、普通 `failed`、负责人裁决失败、本地合同错误和主动取消不会自动重试。
 
-## 用负责人指令恢复 blocked 步骤
+## 用负责人指令恢复 Agent 对话
 
-仅当当前节点为 `blocked`，且已有对应 Agent conversation 和原 session 时，可以追加真正负责人的恢复指令：
+`--resume-message-file` 可用于当前节点的以下 Agent 对话现场：
+
+- `blocked`，并且 conversation 保留合法 blocked 裁决锚点；
+- 进程中断后仍为 `running`；
+- `failed`，且 `state.json` 顶层 `error.type` 为 `AgentExecutionFailure`。
+
+三种情况都必须已有对应 conversation 和原 session。正常完成的 loop、负责人裁决失败、其它程序失败、确定性阻塞和无法唯一定位原对话的现场会被拒绝。
 
 ```bash
 uv run python run_all.py --resume <run-id> \
@@ -96,7 +102,9 @@ uv run python run_step.py --step <当前步骤> --run-id <run-id> \
   --resume-message-file /absolute/path/to/resume-message.md
 ```
 
-该文件必须是可读、非空白的 UTF-8 普通文本。正文会先完整写入当前 conversation，再原样发送给原 Claude session；它不是自由跳转、强制完成或绕过裁决轮数的入口。消息落盘后若进程中断，后续使用不带文件参数的普通 `--resume` 即可；只有确需追加新指令时才再次提供文件。
+CLI 取得执行锁后校验目标，并只读取一次可读、非空白的 UTF-8 普通文本。多 loop 步骤会排除已正常 `completed` 的历史 loop，只允许唯一尚未完成的原对话。若已有待裁决的 Agent 回复，循环会先恢复并裁决该回复；即将再次调用 Agent 时，人工正文替代待发送的普通、`continue` 或泛化恢复指令，旧历史不改写。即使先前回复被裁决为 `completed`，本次显式人工消息仍会投递。
+
+正文会先完整写入当前 conversation，随后标记本次内存消息已消费，再原样发送给原 Claude session；它不是自由跳转、强制完成或绕过裁决轮数的入口。容量不足时不会追加或消费消息。消息落盘后若进程中断，后续使用不带文件参数的普通 `--resume`，循环会从已落盘正文继续；同一命令的 SDK 自动重试复用消费状态，不重复追加正文，但整体仍是 at-least-once，不承诺 Agent 业务操作恰好执行一次。只有确需追加新指令时才再次提供文件。
 
 **凭据边界：文件参数只避免正文出现在 shell 命令行，不提供脱敏或秘密隔离。正文会进入 PCM 对话历史、Agent session 和模型请求。API key、令牌、密码等秘密必须先写入已有受保护配置，指令只引用配置路径、配置键和资源说明，不得直接包含秘密。** 不要手改 `state.json`、步骤结果、conversation 或 Claude session，也不要使用 stdin 管道代替该入口。
 

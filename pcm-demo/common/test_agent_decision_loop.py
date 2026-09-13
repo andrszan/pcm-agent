@@ -47,6 +47,9 @@ from common.openai_responses import ResponsesFailure  # noqa: E402
 from common.files import write_json  # noqa: E402
 from config import AgentConfig  # noqa: E402
 from model_policy import get_agent_profile  # noqa: E402
+from steps.step_06_project_bootstrap.step import (  # noqa: E402
+    LEGACY_COMPLETION_MESSAGES as PROJECT_BOOTSTRAP_LEGACY_COMPLETION_MESSAGES,
+)
 
 
 CONTEXT_WINDOW_API_ERROR = (
@@ -266,6 +269,287 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(message.target_key, "brand_assets")
         self.assertEqual(message.content.encode("utf-8"), raw)
         self.assertFalse(message.consumed)
+
+    def test_prepare_resume_message_selects_running_ordinary_assistant(self) -> None:
+        self.state.update(
+            {
+                "status": "running",
+                "step": 2,
+                "current_step": 2,
+                "current_node": "project:02_intake",
+                "claude_sessions": {"project_intake": "session-1"},
+                "decision_conversations": {
+                    "project_intake": {"path": "conversations/project_intake.json"}
+                },
+            }
+        )
+        conversations = self.run_dir / "conversations"
+        conversations.mkdir()
+        write_json(
+            conversations / "project_intake.json",
+            {
+                "messages": [
+                    {"role": "system", "content": "system"},
+                    {"role": "assistant", "content": "尚未发送完成的普通指令"},
+                ]
+            },
+        )
+        message_path = self.run_dir.parent / "message"
+        message_path.write_text("人工替换指令", encoding="utf-8")
+
+        message = prepare_resume_message(message_path, self.run_dir, self.state, 2)
+
+        self.assertEqual(message.target_key, "project_intake")
+        self.assertEqual(message.content, "人工替换指令")
+
+    def test_prepare_resume_message_selects_failed_agent_execution_failure(self) -> None:
+        self.state.update(
+            {
+                "status": "failed",
+                "step": 2,
+                "current_step": 2,
+                "current_node": "project:02_intake",
+                "error": {"type": "AgentExecutionFailure", "message": "SDK 失败"},
+                "claude_sessions": {"project_intake": "session-1"},
+                "decision_conversations": {
+                    "project_intake": {"path": "conversations/project_intake.json"}
+                },
+                self.spec.state_key: {"pending_agent_text": "失败前已返回的完整回复"},
+            }
+        )
+        conversations = self.run_dir / "conversations"
+        conversations.mkdir()
+        write_json(
+            conversations / "project_intake.json",
+            {
+                "messages": [
+                    {"role": "system", "content": "system"},
+                    {"role": "assistant", "content": "初始提示"},
+                ]
+            },
+        )
+        message_path = self.run_dir.parent / "message"
+        message_path.write_text("人工恢复指令", encoding="utf-8")
+
+        message = prepare_resume_message(message_path, self.run_dir, self.state, 2)
+
+        self.assertEqual(message.target_key, "project_intake")
+
+    def test_prepare_resume_message_excludes_step6_legacy_completed_bootstrap(self) -> None:
+        legacy_completion = PROJECT_BOOTSTRAP_LEGACY_COMPLETION_MESSAGES[0]
+        self.state.update(
+            {
+                "status": "running",
+                "step": 6,
+                "current_step": 6,
+                "current_node": "project:06_bootstrap_foundation",
+                "claude_sessions": {
+                    "project_bootstrap": "session-bootstrap",
+                    "tailwind_theme": "session-theme",
+                },
+                "decision_conversations": {
+                    "project_bootstrap": {"path": "conversations/project_bootstrap.json"},
+                    "tailwind_theme": {"path": "conversations/tailwind_theme.json"},
+                },
+            }
+        )
+        conversations = self.run_dir / "conversations"
+        conversations.mkdir()
+        write_json(
+            conversations / "project_bootstrap.json",
+            {
+                "messages": [
+                    {"role": "system", "content": "system"},
+                    {"role": "user", "content": "旧 Agent 回复"},
+                    {"role": "assistant", "content": legacy_completion},
+                ]
+            },
+        )
+        write_json(
+            conversations / "tailwind_theme.json",
+            {
+                "messages": [
+                    {"role": "system", "content": "system"},
+                    {"role": "assistant", "content": "等待发送的风格指令"},
+                ]
+            },
+        )
+        message_path = self.run_dir.parent / "message"
+        message_path.write_text("人工恢复风格任务", encoding="utf-8")
+
+        message = prepare_resume_message(message_path, self.run_dir, self.state, 6)
+
+        self.assertEqual(message.target_key, "tailwind_theme")
+
+    def test_prepare_resume_message_pending_reply_overrides_legacy_completion_tail(self) -> None:
+        self.state.update(
+            {
+                "status": "running",
+                "step": 6,
+                "current_step": 6,
+                "current_node": "project:06_bootstrap_foundation",
+                "claude_sessions": {"project_bootstrap": "session-bootstrap"},
+                "decision_conversations": {
+                    "project_bootstrap": {"path": "conversations/project_bootstrap.json"}
+                },
+                "project_bootstrap": {"pending_agent_text": "旧完成后的新 Agent 回复"},
+            }
+        )
+        conversations = self.run_dir / "conversations"
+        conversations.mkdir()
+        write_json(
+            conversations / "project_bootstrap.json",
+            {
+                "messages": [
+                    {"role": "system", "content": "system"},
+                    {"role": "user", "content": "旧 Agent 回复"},
+                    {
+                        "role": "assistant",
+                        "content": PROJECT_BOOTSTRAP_LEGACY_COMPLETION_MESSAGES[0],
+                    },
+                ]
+            },
+        )
+        message_path = self.run_dir.parent / "message"
+        message_path.write_text("人工恢复指令", encoding="utf-8")
+
+        message = prepare_resume_message(message_path, self.run_dir, self.state, 6)
+
+        self.assertEqual(message.target_key, "project_bootstrap")
+
+    def test_prepare_resume_message_rejects_failed_agent_without_session(self) -> None:
+        self.state.update(
+            {
+                "status": "failed",
+                "step": 2,
+                "current_step": 2,
+                "current_node": "project:02_intake",
+                "error": {"type": "AgentExecutionFailure"},
+                "decision_conversations": {
+                    "project_intake": {"path": "conversations/project_intake.json"}
+                },
+            }
+        )
+        conversations = self.run_dir / "conversations"
+        conversations.mkdir()
+        write_json(
+            conversations / "project_intake.json",
+            {
+                "messages": [
+                    {"role": "system", "content": "system"},
+                    {"role": "assistant", "content": "待发送指令"},
+                ]
+            },
+        )
+        message_path = self.run_dir.parent / "message"
+        message_path.write_text("人工恢复指令", encoding="utf-8")
+
+        with self.assertRaisesRegex(ValueError, "原 Agent 对话"):
+            prepare_resume_message(message_path, self.run_dir, self.state, 2)
+
+    def test_prepare_resume_message_rejects_other_failed_and_completed_loop(self) -> None:
+        message_path = self.run_dir.parent / "message"
+        message_path.write_text("人工恢复指令", encoding="utf-8")
+        conversations = self.run_dir / "conversations"
+        conversations.mkdir()
+        write_json(
+            conversations / "project_intake.json",
+            {
+                "messages": [
+                    {"role": "system", "content": "system"},
+                    {"role": "assistant", "content": "初始提示"},
+                    {"role": "user", "content": "Agent 回复"},
+                    {"role": "assistant", "content": decision("completed").model_dump_json()},
+                ]
+            },
+        )
+        base = {
+            "step": 2,
+            "current_step": 2,
+            "current_node": "project:02_intake",
+            "claude_sessions": {"project_intake": "session-1"},
+            "decision_conversations": {
+                "project_intake": {"path": "conversations/project_intake.json"}
+            },
+            "project_intake": {
+                "pending_agent_text": "Agent 回复",
+                "last_agent_result": {
+                    "subtype": "success",
+                    "is_error": False,
+                    "has_errors": False,
+                    "api_error_status": None,
+                    "exception_type": None,
+                    "terminal_reason": "completed",
+                }
+            },
+        }
+        for status, error in (
+            ("failed", {"type": "AIDecisionFailure"}),
+            ("failed", {"type": "RuntimeError"}),
+            ("success", None),
+            ("running", None),
+        ):
+            with self.subTest(status=status, error=error):
+                self.state.clear()
+                self.state.update({**copy.deepcopy(base), "status": status, "error": error})
+                with self.assertRaises(ValueError):
+                    prepare_resume_message(message_path, self.run_dir, self.state, 2)
+
+    def test_prepare_resume_message_selects_only_unfinished_loop(self) -> None:
+        self.state.update(
+            {
+                "status": "running",
+                "step": 6,
+                "current_step": 6,
+                "current_node": "project:06_bootstrap_foundation",
+                "claude_sessions": {
+                    "project_bootstrap": "session-bootstrap",
+                    "tailwind_theme": "session-theme",
+                },
+                "decision_conversations": {
+                    "project_bootstrap": {"path": "conversations/project_bootstrap.json"},
+                    "tailwind_theme": {"path": "conversations/tailwind_theme.json"},
+                },
+                "project_bootstrap": {
+                    "last_agent_result": {
+                        "subtype": "success",
+                        "is_error": False,
+                        "has_errors": False,
+                        "api_error_status": None,
+                        "exception_type": None,
+                        "terminal_reason": "completed",
+                    }
+                },
+            }
+        )
+        conversations = self.run_dir / "conversations"
+        conversations.mkdir()
+        write_json(
+            conversations / "project_bootstrap.json",
+            {
+                "messages": [
+                    {"role": "system", "content": "system"},
+                    {"role": "assistant", "content": "初始提示"},
+                    {"role": "user", "content": "已完成回复"},
+                    {"role": "assistant", "content": decision("completed").model_dump_json()},
+                ]
+            },
+        )
+        write_json(
+            conversations / "tailwind_theme.json",
+            {
+                "messages": [
+                    {"role": "system", "content": "system"},
+                    {"role": "assistant", "content": "等待发送的风格指令"},
+                ]
+            },
+        )
+        message_path = self.run_dir.parent / "message"
+        message_path.write_text("人工恢复指令", encoding="utf-8")
+
+        message = prepare_resume_message(message_path, self.run_dir, self.state, 6)
+
+        self.assertEqual(message.target_key, "tailwind_theme")
 
     def test_prepare_resume_message_rejects_missing_session_without_reading_body(self) -> None:
         self.state.update(
@@ -781,6 +1065,32 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertEqual(outcome.verdict, "completed")
                 self.assertEqual(agent.calls[0][0], original)
+
+    async def test_manual_resume_replaces_running_ordinary_assistant_tail(self) -> None:
+        self.state.update(
+            {
+                "status": "running",
+                "claude_sessions": {self.spec.key: "session-1"},
+            }
+        )
+        self.save_conversation(
+            [
+                {"role": "system", "content": self.spec.decision_system_prompt},
+                {"role": "assistant", "content": "中断前待发送的普通指令"},
+            ]
+        )
+        message = ResumeMessage(self.spec.key, "人工替换指令")
+        agent = FakeAgentRunner([self.result("执行人工指令后的回复")])
+
+        outcome = await self.run_loop(
+            agent,
+            FakeDecisionRunner([decision("completed")]),
+            resume_message=message,
+        )
+
+        self.assertEqual(outcome.verdict, "completed")
+        self.assertEqual([call[0] for call in agent.calls], ["人工替换指令"])
+        self.assertTrue(message.consumed)
 
     async def test_manual_resume_after_generic_tail_overrides_generic_prompt(self) -> None:
         blocked = decision("blocked", required_inputs=["提供决定"])

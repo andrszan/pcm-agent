@@ -79,7 +79,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--resume-message-file",
         type=Path,
-        help="仅用于当前 blocked：读取 UTF-8 文件作为人工负责人恢复指令",
+        help="用于当前 blocked、running 中断或 AgentExecutionFailure：读取 UTF-8 文件作为人工负责人恢复指令",
     )
     args = parser.parse_args(argv)
     if args.initial_resources is not None and args.product_draft is None:
