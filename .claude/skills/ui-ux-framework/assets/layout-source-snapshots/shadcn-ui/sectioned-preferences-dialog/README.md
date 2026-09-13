@@ -6,9 +6,8 @@
 - Block ID：`sidebar-13`
 - 类型：Block-derived installed-output
 - 运行状态：缺少宿主项目与基础依赖，不可独立运行
-- Provenance：unknown provenance；CLI 版本、upstream commit、精确安装命令、导入前修改和截图精确 provenance 均未随素材提供，不推断
+- 技术版本信息：CLI 版本、upstream commit、精确安装命令、导入前修改和截图捕获信息均未随素材提供，不推断
 - 预览：desktop only，`3840 × 1984`；未提供 mobile preview
-- 许可边界：shadcn/ui 派生部分见 [`../LICENSE.md`](../LICENSE.md)；`source/components/theme-provider.tsx` 的精确来源与许可未随素材提供
 
 ## 决策问题
 
@@ -30,7 +29,7 @@
 
 ## 项目化差异要求
 
-- 使用目标项目真实设置分类、表单、保存模型、权限和未保存变更保护，不照搬分类文案或占位块；接入已有 token，布局代码可按许可与兼容条件复用，尺寸和断点按真实内容与视口核验。
+- 使用目标项目真实设置分类、表单、保存模型、权限和未保存变更保护，不照搬分类文案或占位块；接入已有 token，技术兼容时可复用布局代码，尺寸和断点按真实内容与视口核验。
 - 让 active 分类、breadcrumb、标题和右侧内容同步，并决定是否需要 URL / 可恢复状态。
 - 窄屏提供等价的分类进入与返回流程，不得直接隐藏分类导航。
 - 使用目标项目现有 Dialog 实现并真实验证 focus trap、初始焦点、Escape、遮罩关闭策略、背景 scroll lock、关闭后的 focus return 和长内容边界。
@@ -57,13 +56,11 @@
 - `source/components/settings-dialog.tsx`：分区导航、固定 header 与独立滚动内容。
 - `source/components/theme-provider.tsx`：未被随附 Block 源码引用的捕获宿主 ThemeProvider。
 
-## 上游参考与许可
+## 上游技术参考
 
-以下是当前官方参考，不是本地 provenance：
+以下是当前官方技术参考，不用于标定本地快照的固定 upstream commit：
 
 - Blocks：<https://ui.shadcn.com/blocks>
 - Preview：<https://ui.shadcn.com/view/new-york-v4/sidebar-13>
 - Registry JSON：<https://ui.shadcn.com/r/styles/new-york-v4/sidebar-13.json>
 - GitHub source：<https://github.com/shadcn-ui/ui/tree/main/apps/v4/registry/new-york-v4/blocks/sidebar-13>
-- 官方 License：<https://github.com/shadcn-ui/ui/blob/main/LICENSE.md>
-- shadcn/ui 派生部分的本地许可：[`../LICENSE.md`](../LICENSE.md)

@@ -26,7 +26,6 @@
         "evals/files/local-assets/assets/tweakcn/catalog.json",
         "evals/files/local-assets/assets/tweakcn/themes/quiet-workbench.json",
         "evals/files/local-assets/assets/tweakcn/README.md",
-        "evals/files/local-assets/assets/tweakcn/LICENSE",
         "evals/files/full-preset/package.json",
         "evals/files/full-preset/src/main.tsx",
         "evals/files/full-preset/src/styles/globals.css"
@@ -48,7 +47,6 @@
         "evals/files/local-assets/assets/tweakcn/catalog.json",
         "evals/files/local-assets/assets/tweakcn/themes/quiet-workbench.json",
         "evals/files/local-assets/assets/tweakcn/README.md",
-        "evals/files/local-assets/assets/tweakcn/LICENSE",
         "evals/files/adaptation/package.json",
         "evals/files/adaptation/src/main.tsx",
         "evals/files/adaptation/src/theme.css"
@@ -71,7 +69,6 @@
         "evals/files/local-assets/assets/tweakcn/themes/quiet-workbench.json",
         "evals/files/local-assets/assets/tweakcn/themes/mono-editor.json",
         "evals/files/local-assets/assets/tweakcn/README.md",
-        "evals/files/local-assets/assets/tweakcn/LICENSE",
         "evals/files/custom-project/package.json",
         "evals/files/custom-project/src/main.ts",
         "evals/files/custom-project/src/theme.css"
@@ -114,7 +111,6 @@
         "evals/files/local-assets/assets/tweakcn/themes/local-unsafe.json",
         "evals/files/local-assets/assets/tweakcn/themes/quiet-workbench.json",
         "evals/files/local-assets/assets/tweakcn/README.md",
-        "evals/files/local-assets/assets/tweakcn/LICENSE",
         "evals/files/unsafe-target/package.json",
         "evals/files/unsafe-target/src/main.ts",
         "evals/files/unsafe-target/src/theme.css"

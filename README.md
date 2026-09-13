@@ -13,10 +13,10 @@
 |---|---|
 | [`.claude/`](.claude/README.md) | Skills、Subagents、Plugins、项目规则和开发流程能力 |
 | [`pcm-demo/`](pcm-demo/README.md) | 正式 PCM 前的本地程序化流程验证工具 |
-| [`docs/pcm/`](docs/pcm/README.md) | PCM 项目治理、历史商业资料和 Demo 上位设计 |
+| [`docs/pcm/`](docs/pcm/README.md) | PCM 项目治理、规划与历史商业资料 |
 | [`docs/prd/`](docs/prd/) | 产品初稿和 PRD |
 | [`catalog.json`](catalog.json) | 业务无关的前端、后端基础工程候选目录 |
-| [`docs/pcm-product-catalog.json`](docs/pcm-product-catalog.json) | 产品初稿目录数据，不等同于成品目录 |
+| [`docs/prd/pcm-product-catalog.json`](docs/prd/pcm-product-catalog.json) | 产品初稿目录数据，不等同于成品目录 |
 | `frontend/`、`backend/` | 根工作区约定的独立前后端代码仓位置；当前不代表正式 PCM 或商业平台已实现 |
 
 ## 技术入口
@@ -25,8 +25,6 @@
 - [人工调度的 AI Agent 产品开发流程](.claude/AI%20Agent开发流程设计.md)
 - [PCM 程序化调度的 AI Agent 产品开发流程](.claude/PCM版AI%20Agent自动化流程设计.md)
 - [PCM 自动化流程 Demo](pcm-demo/README.md)
-- [PCM 自动化流程 Demo 项目设计](docs/pcm/PCM自动化流程Demo项目设计.md)
-- [PCM 自动化流程 Demo 项目 TRD](docs/pcm/PCM自动化流程Demo项目TRD.md)
 
 ## 仓库与客户交付边界
 

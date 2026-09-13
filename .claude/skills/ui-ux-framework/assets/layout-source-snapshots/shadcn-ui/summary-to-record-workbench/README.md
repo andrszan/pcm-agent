@@ -6,9 +6,8 @@
 - Block ID：`dashboard-01`
 - 类型：Block-derived installed-output
 - 运行状态：缺少宿主项目与基础依赖，不可独立运行
-- Provenance：unknown provenance；CLI 版本、upstream commit、精确安装命令、导入前修改和截图精确 provenance 均未随素材提供，不推断
+- 技术版本信息：CLI 版本、upstream commit、精确安装命令、导入前修改和截图捕获信息均未随素材提供，不推断
 - 预览：desktop only，`3840 × 1984`；未提供 mobile preview
-- 许可边界：shadcn/ui 派生部分见 [`../LICENSE.md`](../LICENSE.md)；`source/components/theme-provider.tsx` 的精确来源与许可未随素材提供
 
 ## 决策问题
 
@@ -58,13 +57,11 @@
 - `source/app/dashboard/data.json`：记录表演示 fixture。
 - `source/components/`：侧栏、摘要卡、趋势图、记录表、header、导航和捕获宿主 ThemeProvider，共 10 个文件。
 
-## 上游参考与许可
+## 上游技术参考
 
-以下是当前官方参考，不是本地 provenance：
+以下是当前官方技术参考，不用于标定本地快照的固定 upstream commit：
 
 - Blocks：<https://ui.shadcn.com/blocks>
 - Preview：<https://ui.shadcn.com/view/new-york-v4/dashboard-01>
 - Registry JSON：<https://ui.shadcn.com/r/styles/new-york-v4/dashboard-01.json>
 - GitHub source：<https://github.com/shadcn-ui/ui/tree/main/apps/v4/registry/new-york-v4/blocks/dashboard-01>
-- 官方 License：<https://github.com/shadcn-ui/ui/blob/main/LICENSE.md>
-- shadcn/ui 派生部分的本地许可：[`../LICENSE.md`](../LICENSE.md)

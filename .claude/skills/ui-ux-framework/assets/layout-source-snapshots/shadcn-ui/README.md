@@ -1,6 +1,6 @@
 # shadcn/ui Layout Source Snapshots
 
-这里保存 shadcn/ui Block-derived installed-output snapshots，用于比较布局预览、查阅实现细节，并在许可明确、技术兼容且任务适配时复用代码。它们不是字节级绑定某个固定 commit 的官方快照，不是可独立使用的模板、生产组件库，也不代表项目默认技术选型。
+这里保存 shadcn/ui Block-derived installed-output snapshots，用于比较布局预览、查阅实现细节，并在技术兼容且任务适配时复用代码。它们不是字节级绑定某个固定 commit 的官方快照，不是可独立使用的模板、生产组件库，也不代表项目默认技术选型。
 
 ## 使用规则
 
@@ -14,13 +14,13 @@ React + shadcn/ui 项目可优先考察本目录，但仍须核对组件版本�
 
 随附内容缺少 `package.json`、`components.json`、路径 aliases、base UI 组件、hooks、global CSS 和完整宿主配置，因此任何一套都不可独立编译或运行。`source/components/theme-provider.tsx` 在四套中均保留，但未被随附 Block 源码引用；它属于捕获宿主代码，不是官方 registry manifest 的必需文件。
 
-以下信息未随素材提供，不推断：
+以下技术版本与捕获信息未随素材提供，不推断：
 
 - shadcn CLI 版本；
 - upstream commit；
 - 精确安装命令；
 - 导入前修改；
-- 截图的精确 provenance，包括捕获 URL、构建、浏览器、主题切换方式和操作路径。
+- 截图捕获信息，包括 URL、构建、浏览器、主题切换方式和操作路径。
 
 ## 快照映射与首要决策
 
@@ -31,11 +31,11 @@ React + shadcn/ui 项目可优先考察本目录，但仍须核对组件版本�
 | [`mode-rail-collection-workbench/`](mode-rail-collection-workbench/) | `sidebar-09` | `sidebar-09` | 任务是否确实存在“模式—集合—内容”三层关系，并能为窄屏定义进入与返回？ | 它不是真正 list-detail，状态带随机和原地排序，移动端直接隐藏集合列。 |
 | [`sectioned-preferences-dialog/`](sectioned-preferences-dialog/) | `sidebar-13` | `sidebar-13` | 设置任务是否中短、可中断，并适合在保留原页面上下文的模态子系统中完成？ | 分类、面包屑和内容未联动；移动端隐藏分类，关键模态行为依赖未随附的 Dialog base。 |
 
-四套均为 unknown provenance、仅有 `3840 × 1984` desktop preview，未提供 mobile preview。
+四套均未附 CLI 版本、upstream commit、精确安装命令、导入前修改和截图捕获信息，仅有 `3840 × 1984` desktop preview，未提供 mobile preview。
 
 ## 官方当前参考
 
-以下 URL 仅用于当前人工核对，不构成本地文件的 provenance，也不证明本地内容对应某个固定 upstream commit：
+以下 URL 用于当前人工技术核对，不标定本地文件对应的固定 upstream commit：
 
 - Blocks：<https://ui.shadcn.com/blocks>
 
@@ -45,7 +45,3 @@ React + shadcn/ui 项目可优先考察本目录，但仍须核对组件版本�
 | `sidebar-07` | <https://ui.shadcn.com/view/new-york-v4/sidebar-07> | <https://ui.shadcn.com/r/styles/new-york-v4/sidebar-07.json> | <https://github.com/shadcn-ui/ui/tree/main/apps/v4/registry/new-york-v4/blocks/sidebar-07> |
 | `sidebar-09` | <https://ui.shadcn.com/view/new-york-v4/sidebar-09> | <https://ui.shadcn.com/r/styles/new-york-v4/sidebar-09.json> | <https://github.com/shadcn-ui/ui/tree/main/apps/v4/registry/new-york-v4/blocks/sidebar-09> |
 | `sidebar-13` | <https://ui.shadcn.com/view/new-york-v4/sidebar-13> | <https://ui.shadcn.com/r/styles/new-york-v4/sidebar-13.json> | <https://github.com/shadcn-ui/ui/tree/main/apps/v4/registry/new-york-v4/blocks/sidebar-13> |
-
-## 许可
-
-[`LICENSE.md`](LICENSE.md) 只记录可确认的 shadcn/ui 上游派生部分所适用的 MIT License。四个 `source/components/theme-provider.tsx` 的精确来源和许可未随素材提供，本目录不声称该 MIT License 自动覆盖这些宿主捕获文件；它们仅用于保留用户提供的上下文，在来源澄清前不得作为可复用素材复制。该许可文件不修改、替代或扩展仓库根许可。官方当前 License 参考：<https://github.com/shadcn-ui/ui/blob/main/LICENSE.md>。

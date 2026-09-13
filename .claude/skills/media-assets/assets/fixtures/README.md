@@ -27,7 +27,7 @@
 2. 选择稳定、语义中性的文件名，例如 `image-valid-landscape.jpg`、`image-invalid-extension.txt`、`image-corrupt-truncated.jpg`。文件名表达测试行为，不表达一次性的 Provider URL。
 3. 保持文件足够小；大小边界测试应优先由目标项目按真实阈值确定性生成，只有形成稳定的共享限制合同后才考虑增加对应 fixture。
 4. 校验文件真实类型、尺寸和用途，并使用当前环境可用的 SHA-256 工具计算哈希；不要把 API key、Cookie、完整请求响应或临时下载 URL 写进任何文件。
-5. 在 `manifest.json` 中记录稳定 ID、相对路径、MIME、尺寸或时长、哈希、测试用途、预期结果和状态。来源、许可、模型、提示词摘要或替换依据仅在维护者确有需要时作为最小内部记录，不用于产品 UI 展示。
+5. 在 `manifest.json` 中记录稳定 ID、相对路径、MIME、尺寸或时长、哈希、测试用途、预期结果和状态。来源、模型、提示词摘要或替换依据仅在维护者确有需要时作为最小内部记录，不用于产品 UI 展示。
 6. 检查 Git diff，确认只加入预期文件；随后用目标项目真实上传路径验证 fixture。
 
 ## 清单约定
@@ -52,7 +52,6 @@
     "origin": "external | generated | internal",
     "providerId": "可选的受控 Provider ID",
     "reference": "可选的稳定资源页或内部说明",
-    "licenseNote": "可选的维护说明",
     "model": "可选的生成模型",
     "promptSummary": "可选的脱敏摘要"
   }
