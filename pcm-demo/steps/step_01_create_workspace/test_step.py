@@ -40,6 +40,7 @@ from steps.step_01_create_workspace.workspace import (
     parse_default_branch,
     prepare_staging,
     reject_nested_workspace,
+    remove_recorded_staging,
     validate_initial_resources,
     verify_clone,
     verify_prepared,
@@ -634,6 +635,35 @@ class WorkspaceStepTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 inspect_clone(staging, "ssh://template")
             self.assertEqual(marker.read_text(encoding="utf-8"), "keep")
+
+    def test_recorded_staging_cleanup_rejects_symlink_and_non_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "target"
+            target.mkdir()
+            marker = target / "keep"
+            marker.write_text("keep", encoding="utf-8")
+            staging_link = root / "staging-link"
+            staging_link.symlink_to(target, target_is_directory=True)
+            with self.assertRaisesRegex(RuntimeError, "非符号链接目录"):
+                remove_recorded_staging(staging_link)
+            self.assertEqual(marker.read_text(encoding="utf-8"), "keep")
+
+            staging_file = root / "staging-file"
+            staging_file.write_text("keep", encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "非符号链接目录"):
+                remove_recorded_staging(staging_file)
+            self.assertEqual(staging_file.read_text(encoding="utf-8"), "keep")
+
+    def test_recorded_staging_cleanup_removes_real_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            staging = Path(directory) / "staging"
+            (staging / "nested").mkdir(parents=True)
+            (staging / "nested/residue").write_text("old", encoding="utf-8")
+
+            remove_recorded_staging(staging)
+
+            self.assertFalse(staging.exists())
 
     def test_symlink_final_is_not_accepted_as_prepared(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

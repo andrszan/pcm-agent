@@ -313,6 +313,23 @@ def require_real_directory(path: Path, description: str) -> None:
         raise RuntimeError(f"{description}不是可确认归属的真实目录：{path}")
 
 
+def remove_recorded_staging(staging: Path) -> None:
+    try:
+        staging_stat = staging.lstat()
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        raise RuntimeError(f"无法检查本 run 的临时目录：{staging}") from error
+    if staging.is_symlink() or not S_ISDIR(staging_stat.st_mode):
+        raise RuntimeError(f"本 run 的临时路径不是非符号链接目录，拒绝清理：{staging}")
+    try:
+        shutil.rmtree(staging)
+    except OSError as error:
+        raise RuntimeError(f"清理本 run 的临时目录失败：{staging}") from error
+    if os.path.lexists(staging):
+        raise RuntimeError(f"本 run 的临时目录清理后仍存在：{staging}")
+
+
 def inspect_clone(staging: Path, template_repository: str) -> dict[str, str]:
     require_real_directory(staging, "临时 clone")
     if not (staging / ".git").is_dir() or not verify_required_paths(staging):

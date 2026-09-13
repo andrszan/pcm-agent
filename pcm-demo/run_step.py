@@ -56,11 +56,11 @@ from steps.step_01_create_workspace import (
     extract_project_identity,
     initial_resources_are_ignored,
     initialize_root_repository,
-    inspect_clone,
     inspect_root_repository,
     prepare_staging,
     publish,
     reject_nested_workspace,
+    remove_recorded_staging,
     validate_initial_resources,
     verify_clone,
     verify_prepared,
@@ -550,7 +550,11 @@ def complete_step_one(
     }:
         reject_nested_workspace(resources_source, final_path, staging_path)
 
-    if "workspace" in state:
+    workspace_recorded = "workspace" in state
+    staging_exists = staging_path.is_symlink() or staging_path.exists()
+    if not workspace_recorded and staging_exists:
+        raise RuntimeError("当前运行记录尚未登记该临时目录，拒绝清理或续接")
+    if workspace_recorded:
         recorded = state["workspace"]
         if (
             Path(recorded["root"]) != workspace_root
@@ -578,13 +582,15 @@ def complete_step_one(
     if standalone_product_lock is not None:
         standalone_product_lock.close()
     coordination = state["coordination"]
+    final_exists = final_path.is_symlink() or final_path.exists()
+    staging_exists = staging_path.is_symlink() or staging_path.exists()
     if final_path.is_dir():
         ensure_runtime(final_path, coordination["product_key"], run_id, record)
     phase = state["publication_phase"]
-    if final_path.exists():
+    if final_exists:
         if (
             phase == "prepared_verified"
-            and not staging_path.exists()
+            and not staging_exists
             and verify_published_content(
                 final_path, source_hash, workspace_env_bytes, resources_relative
             )
@@ -594,7 +600,7 @@ def complete_step_one(
             phase = "published"
         elif (
             phase in {"published", "git_initialized"}
-            and not staging_path.exists()
+            and not staging_exists
             and verify_published_content(
                 final_path, source_hash, workspace_env_bytes, resources_relative
             )
@@ -602,12 +608,15 @@ def complete_step_one(
             pass
         else:
             raise RuntimeError("最终项目路径已存在或发布现场冲突")
-    elif staging_path.exists() and phase == "intent_recorded":
-        state["template"] = inspect_clone(staging_path, template_repository)
-        state["publication_phase"] = "clone_verified"
+    else:
+        if phase not in {"intent_recorded", "clone_verified", "prepared_verified"}:
+            raise RuntimeError(f"未发布工作区的第 1 步阶段不符合预期：{phase}")
+        if staging_exists:
+            remove_recorded_staging(staging_path)
+        state.pop("template", None)
+        state.pop("checks", None)
+        state["publication_phase"] = "intent_recorded"
         write_state(run_dir, state)
-        phase = "clone_verified"
-    elif phase == "intent_recorded":
         state["template"] = clone_and_verify(staging_path, template_repository)
         state["publication_phase"] = "clone_verified"
         write_state(run_dir, state)

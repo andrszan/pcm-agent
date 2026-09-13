@@ -593,6 +593,233 @@ raise SystemExit(run_step.retrying_main())
                 (2, 2, "project:02_intake"),
             )
 
+    def test_step_one_same_run_restarts_prepublication_staging_from_fresh_clone(self) -> None:
+        for phase, residue in (
+            ("intent_recorded", "clone-timeout"),
+            ("clone_verified", "prepare-after-git-removal"),
+        ):
+            with self.subTest(phase=phase), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                run_dir = root / "run"
+                run_dir.mkdir()
+                draft = root / "draft.md"
+                draft.write_text("产品初稿", encoding="utf-8")
+                workspace_root = root / "products"
+                workspace_root.mkdir()
+                staging_path = workspace_root / "project.pcm-tmp-test-run"
+                staging_path.mkdir()
+                (staging_path / residue).write_text("old", encoding="utf-8")
+                workspace_env_file = root / "agent-workspace.env"
+                workspace_env_file.write_bytes(b"KEY=value\n")
+                state = {
+                    "run_id": "test-run",
+                    "status": "failed",
+                    "phase": "project_initialization",
+                    "step": 1,
+                    "current_step": 1,
+                    "current_node": run_step.CREATE_WORKSPACE_NODE,
+                    "input": {
+                        "source_path": str(draft),
+                        "source_sha256": run_step.sha256(draft),
+                        "content": draft.read_text(encoding="utf-8"),
+                        "published_path": None,
+                    },
+                    "project": {"project_directory_name": "project"},
+                    "workspace": {
+                        "root": str(workspace_root),
+                        "staging_path": str(staging_path),
+                        "final_path": str(workspace_root / "project"),
+                        "template_repository": "template.git",
+                        "agent_workspace_env_file": str(workspace_env_file),
+                    },
+                    "publication_phase": phase,
+                    "template": {
+                        "repository": "template.git",
+                        "commit_sha": "old-sha",
+                    },
+                    "checks": {"template_capabilities_present": True},
+                    "coordination": {"product_key": "product-key"},
+                    "blocked": None,
+                    "error": None,
+                }
+                fresh_template = {
+                    "repository": "template.git",
+                    "remote_url": "template.git",
+                    "default_branch": "main",
+                    "actual_branch": "main",
+                    "commit_sha": "fresh-sha",
+                }
+
+                def fresh_clone(path: Path, _repository: str) -> dict[str, str]:
+                    self.assertFalse(path.exists())
+                    path.mkdir()
+                    (path / "fresh-clone").write_text("new", encoding="utf-8")
+                    return fresh_template
+
+                args = Mock(workspace_root=workspace_root)
+                with (
+                    patch.object(run_step, "load_workspace_root", return_value=(workspace_root, "cli")),
+                    patch.object(run_step, "load_template_repository", return_value=("template.git", "env")),
+                    patch.object(
+                        run_step,
+                        "load_agent_workspace_env_file",
+                        return_value=(workspace_env_file, "env_file"),
+                    ),
+                    patch.object(run_step, "_ensure_product_claim", return_value=({}, None)),
+                    patch.object(run_step, "clone_and_verify", side_effect=fresh_clone) as clone,
+                    patch.object(run_step, "verify_clone", return_value=True),
+                    patch.object(
+                        run_step,
+                        "prepare_staging",
+                        side_effect=RuntimeError("stop after fresh clone"),
+                    ),
+                    self.assertRaisesRegex(RuntimeError, "stop after fresh clone"),
+                ):
+                    run_step.complete_step_one(args, run_dir, state, draft)
+
+                clone.assert_called_once_with(staging_path, "template.git")
+                self.assertFalse((staging_path / residue).exists())
+                self.assertTrue((staging_path / "fresh-clone").is_file())
+                self.assertEqual(state["template"], fresh_template)
+                self.assertNotIn("checks", state)
+
+    def test_step_one_unrecorded_or_mismatched_staging_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            run_dir = root / "run"
+            run_dir.mkdir()
+            draft = root / "draft.md"
+            draft.write_text("产品初稿", encoding="utf-8")
+            workspace_root = root / "products"
+            workspace_root.mkdir()
+            staging_path = workspace_root / "project.pcm-tmp-test-run"
+            staging_path.mkdir()
+            marker = staging_path / "unknown"
+            marker.write_text("keep", encoding="utf-8")
+            workspace_env_file = root / "agent-workspace.env"
+            workspace_env_file.write_bytes(b"KEY=value\n")
+            state = {
+                "run_id": "test-run",
+                "status": "running",
+                "phase": "project_initialization",
+                "step": 1,
+                "current_step": 1,
+                "current_node": run_step.CREATE_WORKSPACE_NODE,
+                "input": {
+                    "source_path": str(draft),
+                    "source_sha256": run_step.sha256(draft),
+                    "content": draft.read_text(encoding="utf-8"),
+                    "published_path": None,
+                },
+                "project": {"project_directory_name": "project"},
+                "publication_phase": None,
+                "blocked": None,
+                "error": None,
+            }
+            args = Mock(workspace_root=workspace_root)
+            with (
+                patch.object(run_step, "load_workspace_root", return_value=(workspace_root, "cli")),
+                patch.object(run_step, "load_template_repository", return_value=("template.git", "env")),
+                patch.object(
+                    run_step,
+                    "load_agent_workspace_env_file",
+                    return_value=(workspace_env_file, "env_file"),
+                ),
+                patch.object(run_step, "clone_and_verify") as clone,
+                self.assertRaisesRegex(RuntimeError, "运行记录.*临时目录"),
+            ):
+                run_step.complete_step_one(args, run_dir, state, draft)
+
+            clone.assert_not_called()
+            self.assertEqual(marker.read_text(encoding="utf-8"), "keep")
+            self.assertNotIn("workspace", state)
+
+            state["workspace"] = {
+                "root": str(workspace_root),
+                "staging_path": str(workspace_root / "different-staging"),
+                "final_path": str(workspace_root / "project"),
+                "template_repository": "template.git",
+                "agent_workspace_env_file": str(workspace_env_file),
+            }
+            with (
+                patch.object(run_step, "load_workspace_root", return_value=(workspace_root, "cli")),
+                patch.object(run_step, "load_template_repository", return_value=("template.git", "env")),
+                patch.object(
+                    run_step,
+                    "load_agent_workspace_env_file",
+                    return_value=(workspace_env_file, "env_file"),
+                ),
+                patch.object(run_step, "remove_recorded_staging") as cleanup,
+                self.assertRaisesRegex(RuntimeError, "工作区或模板配置.*不一致"),
+            ):
+                run_step.complete_step_one(args, run_dir, state, draft)
+            cleanup.assert_not_called()
+            self.assertEqual(marker.read_text(encoding="utf-8"), "keep")
+
+    def test_step_one_final_product_conflict_preserves_final_and_staging(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            run_dir = root / "run"
+            run_dir.mkdir()
+            draft = root / "draft.md"
+            draft.write_text("产品初稿", encoding="utf-8")
+            workspace_root = root / "products"
+            final_path = workspace_root / "project"
+            final_path.mkdir(parents=True)
+            final_marker = final_path / "keep-final"
+            final_marker.write_text("final", encoding="utf-8")
+            staging_path = workspace_root / "project.pcm-tmp-test-run"
+            staging_path.mkdir()
+            staging_marker = staging_path / "keep-staging"
+            staging_marker.write_text("staging", encoding="utf-8")
+            workspace_env_file = root / "agent-workspace.env"
+            workspace_env_file.write_bytes(b"KEY=value\n")
+            state = {
+                "run_id": "test-run",
+                "status": "failed",
+                "phase": "project_initialization",
+                "step": 1,
+                "current_step": 1,
+                "current_node": run_step.CREATE_WORKSPACE_NODE,
+                "input": {
+                    "source_path": str(draft),
+                    "source_sha256": run_step.sha256(draft),
+                    "content": draft.read_text(encoding="utf-8"),
+                    "published_path": None,
+                },
+                "project": {"project_directory_name": "project"},
+                "workspace": {
+                    "root": str(workspace_root),
+                    "staging_path": str(staging_path),
+                    "final_path": str(final_path),
+                    "template_repository": "template.git",
+                    "agent_workspace_env_file": str(workspace_env_file),
+                },
+                "publication_phase": "published",
+                "coordination": {"product_key": "product-key"},
+                "blocked": None,
+                "error": None,
+            }
+            args = Mock(workspace_root=workspace_root)
+            with (
+                patch.object(run_step, "load_workspace_root", return_value=(workspace_root, "cli")),
+                patch.object(run_step, "load_template_repository", return_value=("template.git", "env")),
+                patch.object(
+                    run_step,
+                    "load_agent_workspace_env_file",
+                    return_value=(workspace_env_file, "env_file"),
+                ),
+                patch.object(run_step, "_ensure_product_claim", return_value=({}, None)),
+                patch.object(run_step, "ensure_runtime"),
+                patch.object(run_step, "remove_recorded_staging") as cleanup,
+                self.assertRaisesRegex(RuntimeError, "发布现场冲突"),
+            ):
+                run_step.complete_step_one(args, run_dir, state, draft)
+
+            cleanup.assert_not_called()
+            self.assertEqual(final_marker.read_text(encoding="utf-8"), "final")
+            self.assertEqual(staging_marker.read_text(encoding="utf-8"), "staging")
+
     def test_legacy_own_step_success_is_not_downgraded(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             demo_root = Path(directory)
