@@ -48,7 +48,7 @@ Demo v1 的适用性是确定性规则：仅当第 8 步严格 success 的空 `o
 
 ## 适用路径、边界、提交与恢复
 
-适用时只使用一个领域键和 Claude session：`ui_ux_framework`。初始提示首行固定为 `/ui-ux-framework`，明确授权 `bootstrap` 模式，只允许创建或更新唯一固定产物 `docs/ui-ux/framework.md`。适用范围必须闭合 App Shell Contract，明确产品表面、区域职责、导航层级、页面模式、常规滚动所有者、sticky 基准和窄屏转换；文档必须区分 Current、已确认 Target、默认 Target、具体待确认、已知偏差和非目标。能由项目事实安全推导的低风险结构直接收敛为保留依据和重议条件的默认 Target；仅实质高影响、会改变跨需求体验骨架、迁移成本或兼容性的具体分歧交由负责人决定，负责人可用 `continue` 作出决定并要求回写，不接受整份框架泛化待确认。Agent 按需读取本能力自带的 `references/` 或 `assets/` 辅助判断，但资源不是项目默认实现，不得将示例内容当作项目事实。
+适用时只使用一个领域键和 Claude session：`ui_ux_framework`。初始提示首行固定为 `/ui-ux-framework`，明确授权 `bootstrap` 模式，只允许创建或更新唯一固定产物 `docs/ui-ux/framework.md`。适用范围必须闭合 App Shell Contract，明确产品表面、区域职责、导航层级、页面模式、常规滚动所有者、sticky 基准和窄屏转换；文档按实际需要区分实现事实、目标设计和未决事项；新项目记录目标与适用范围，不逐项填写状态或重议条件，既有框架调整时再补实际偏差与必要迁移。能由项目事实安全推导的低风险结构直接收敛为有依据的目标设计；仅实质高影响、会改变跨需求体验骨架、迁移成本或兼容性的具体分歧交由负责人决定，负责人可用 `continue` 作出决定并要求回写，不接受整份框架泛化待确认。Agent 按需读取本能力自带的 `references/` 或 `assets/` 辅助判断，但资源不是项目默认实现，不得将示例内容当作项目事实。
 
 每轮完整 Agent 回复均由公共 `run_agent_decision_loop` 保存、读取和解释，并交给 AI-compatible 负责人返回 `AgentDecision(completed/continue/blocked)`；领域步骤不解析 conversation 消息 schema、角色顺序、尾部 decision、session/reference 组合或完整 commit prompt，也不把 conversation 当长期成功证据。Agent 不得进行单项需求设计、页面/CSS/组件/主题设计或实现，不得修改代码、测试、配置、项目规则或其它文档，不得执行 Git 写操作。Python 只读 Git，并在当前现场核验权威仓库均为自身 top-level、`main`；子仓始终 clean，根仓只能出现固定文档变更。
 
