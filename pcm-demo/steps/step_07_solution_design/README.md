@@ -4,7 +4,7 @@
 
 - 运行状态位于 `project:07_solution_design`，产品根仍是第 1 步初始化的零提交、空 index 独立 Git `main` 仓库；每个适用基础工程已在第 4 步建立自身 top-level 为目录本身、unborn HEAD、空 index 的 `main` Git 边界，不适用端不存在。
 - `steps/02.json` 引用两份工作区内非空、非符号链接的产品定义文档。
-- `steps/04.json` 提供实际适用工程、模板 ID、路径、分支、commit SHA 和组装证据；用于提示的白名单投影不含 `git_url` 或 `origin`。
+- `steps/04.json` 提供实际适用工程、模板 ID、路径、分支、commit SHA 和组装证据；用于提示的白名单投影不含 `git_url` 或 `origin`。Agent 另接收 `steps/03.json` 中各适用端已保存的选型理由，作为承接既有选择的依据，不重做模板选型或补写历史比较。
 - `steps/05.json` 是严格成功结果，当前项目准备清单和两份产品定义与其无秘密 `readiness_baseline` 指纹一致。
 - `steps/06.json` 成功，其 `outputs` 与第 4 步实际适用工程一致，且专属布尔 `tailwind_theme` 严格等于 outputs 是否含 `frontend`；字段缺失、非布尔或不一致的旧成功不可复用。
 

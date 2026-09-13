@@ -72,7 +72,7 @@ def decision(
 
 class SolutionDesignTests(unittest.TestCase):
     def make_run(
-        self, root: Path, *, applicable: bool = True
+        self, root: Path, *, applicable: bool = True, backend_applicable: bool = False
     ) -> tuple[Path, Path, dict]:
         run_dir = root / "run"
         (run_dir / "steps").mkdir(parents=True)
@@ -97,7 +97,7 @@ class SolutionDesignTests(unittest.TestCase):
                 git_url="file:///templates.git",
                 default_branch="main",
                 path="templates/frontend",
-                reason="test",
+                reason="产品需要前端交互界面，沿用轻量前端基础模板。",
             ).model_dump(mode="json")
             outputs = ["frontend"]
             assembly_frontend = {
@@ -111,6 +111,30 @@ class SolutionDesignTests(unittest.TestCase):
                 "commit_sha": "a" * 40,
             }
 
+        backend = None
+        assembly_backend = None
+        if backend_applicable:
+            (workspace / "backend").mkdir()
+            initialize_root_repository(workspace / "backend")
+            backend = TemplateSelection(
+                id="backend-template",
+                git_url="ssh://private.example/backend.git",
+                default_branch="main",
+                path="templates/backend",
+                reason="产品需要服务端数据能力，沿用轻量后端基础模板。",
+            ).model_dump(mode="json")
+            outputs.append("backend")
+            assembly_backend = {
+                "target": "backend",
+                "id": "backend-template",
+                "git_url": "ssh://private.example/backend.git",
+                "default_branch": "main",
+                "path": "templates/backend",
+                "origin": "ssh://private.example/backend.git",
+                "branch": "main",
+                "commit_sha": "b" * 40,
+            }
+
         write_json(
             run_dir / "steps/02.json",
             {"step": 2, "status": "success", "outputs": [requirements, features]},
@@ -120,7 +144,7 @@ class SolutionDesignTests(unittest.TestCase):
             {
                 "step": 3,
                 "status": "success",
-                "template_selection": {"frontend": frontend, "backend": None},
+                "template_selection": {"frontend": frontend, "backend": backend},
             },
         )
         write_json(
@@ -128,9 +152,9 @@ class SolutionDesignTests(unittest.TestCase):
             {
                 "step": 4,
                 "status": "success",
-                "applicable": applicable,
+                "applicable": applicable or backend_applicable,
                 "outputs": outputs,
-                "assembly": {"frontend": assembly_frontend, "backend": None},
+                "assembly": {"frontend": assembly_frontend, "backend": assembly_backend},
             },
         )
         write_json(
@@ -220,6 +244,21 @@ class SolutionDesignTests(unittest.TestCase):
             self.assertIn("docs/requirements/项目准备清单.md", prompt)
             self.assertIn("@./frontend", prompt)
             self.assertIn('"commit_sha"', prompt)
+            selection_context = json.loads(
+                prompt.split("```json\n", 1)[1].split("\n```", 1)[0]
+            )
+            self.assertEqual(
+                selection_context["frontend"],
+                {
+                    "applicable": True,
+                    "id": "frontend-template",
+                    "reason": "产品需要前端交互界面，沿用轻量前端基础模板。",
+                },
+            )
+            self.assertEqual(
+                selection_context["backend"],
+                {"applicable": False, "id": None, "reason": None},
+            )
             for private_source in ("file:///templates.git", "git_url", "origin"):
                 self.assertNotIn(private_source, prompt)
             self.assertEqual(calls[0]["max_turns"], SOLUTION_DESIGN_MAX_TURNS)
@@ -266,6 +305,65 @@ class SolutionDesignTests(unittest.TestCase):
             )
             self.assertEqual(reused["status"], "success")
             self.assertIn("确认既有成功", reused["summary"])
+
+    def test_initial_prompt_hands_off_each_applicable_template_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(
+                Path(directory), backend_applicable=True
+            )
+            prompts: list[str] = []
+            system_prompts: list[str] = []
+
+            async def fake_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
+                prompts.append(prompt)
+                self.write_design(workspace)
+                current = agent_result(cwd=kwargs["cwd"])  # type: ignore[arg-type, index]
+                kwargs["on_update"](current)  # type: ignore[index, operator]
+                return current
+
+            async def completed(messages, config, *, system_prompt):
+                system_prompts.append(system_prompt)
+                return decision("completed")
+
+            self.run_step(
+                run_dir,
+                state,
+                agent_runner=fake_agent,
+                decision_runner=completed,
+                config_loader=lambda: object(),
+            )
+            self.assertEqual(len(prompts), 1)
+            selection_context = json.loads(
+                prompts[0].split("```json\n", 1)[1].split("\n```", 1)[0]
+            )
+            self.assertEqual(
+                selection_context,
+                {
+                    "frontend": {
+                        "applicable": True,
+                        "id": "frontend-template",
+                        "reason": "产品需要前端交互界面，沿用轻量前端基础模板。",
+                    },
+                    "backend": {
+                        "applicable": True,
+                        "id": "backend-template",
+                        "reason": "产品需要服务端数据能力，沿用轻量后端基础模板。",
+                    },
+                },
+            )
+            self.assertEqual(len(system_prompts), 1)
+            for reason in (
+                "产品需要前端交互界面，沿用轻量前端基础模板。",
+                "产品需要服务端数据能力，沿用轻量后端基础模板。",
+            ):
+                self.assertNotIn(reason, system_prompts[0])
+            for private_source in (
+                "file:///templates.git",
+                "ssh://private.example/backend.git",
+                "git_url",
+                "origin",
+            ):
+                self.assertNotIn(private_source, prompts[0])
 
     def test_agent_reply_is_preserved_as_raw_text(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

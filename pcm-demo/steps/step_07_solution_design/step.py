@@ -11,6 +11,7 @@ from common.decision import render_decision_system_prompt, request_decision
 from common.files import resolve_workspace_output
 from common.state import step_result_status, write_state, write_step_result
 from config import LLMConfig
+from steps.step_03_foundation_selection.step import FoundationSelectionResult
 from steps.step_04_assemble_foundation.step import (
     temporary_root,
     verify_existing_success,
@@ -135,7 +136,7 @@ def verify_existing_solution_success(run_dir: Path) -> dict[str, Any]:
 
 def validate_inputs(
     run_dir: Path, state: dict[str, Any]
-) -> tuple[Path, list[str], dict[str, Any], list[str]]:
+) -> tuple[Path, list[str], FoundationSelectionResult, dict[str, Any], list[str]]:
     position = (state.get("step"), state.get("current_step"), state.get("current_node"))
     if position not in {(STEP, STEP, CURRENT_NODE), (STEP + 1, STEP + 1, NEXT_NODE)}:
         raise RuntimeError("运行状态不位于总体技术方案锚点")
@@ -159,7 +160,7 @@ def validate_inputs(
         raise RuntimeError("第 4 步适用工程目录不符合约定")
     verify_existing_bootstrap_success(run_dir, outputs)
     verify_git_boundaries(workspace, outputs)
-    return workspace, product_outputs, assembly, outputs
+    return workspace, product_outputs, selection, assembly, outputs
 
 
 def advance_success(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
@@ -206,13 +207,30 @@ def prompt_assembly(assembly: dict[str, Any]) -> dict[str, Any]:
     return visible
 
 
+def prompt_selection_reasons(
+    selection: FoundationSelectionResult,
+) -> dict[str, dict[str, str | bool | None]]:
+    def project(item: Any) -> dict[str, str | bool | None]:
+        return {
+            "applicable": item is not None,
+            "id": item.id if item is not None else None,
+            "reason": item.reason if item is not None else None,
+        }
+
+    return {"frontend": project(selection.frontend), "backend": project(selection.backend)}
+
+
 def initial_prompt(
     product_outputs: list[str],
+    selection: FoundationSelectionResult,
     assembly: dict[str, Any],
     outputs: list[str],
 ) -> str:
     product_references = "\n".join(f"- @./{output}" for output in product_outputs)
     project_references = "\n".join(f"- @./{output}" for output in outputs)
+    selection_json = json.dumps(
+        prompt_selection_reasons(selection), ensure_ascii=False, indent=2
+    )
     assembly_json = json.dumps(prompt_assembly(assembly), ensure_ascii=False, indent=2)
     return f"""/solution-design
 请依据以下权威资料和实际工程，创建或更新唯一固定产物 `docs/design/技术方案.md`。
@@ -225,6 +243,12 @@ def initial_prompt(
 
 实际适用工程：
 {project_references}
+
+既有模板选择理由：
+```json
+{selection_json}
+```
+请承接既有模板选择，不重新选择模板，不得补写未经发生的历史比较；本次新增的总体技术决定按产品与工程的真实需要设计。
 
 组装白名单事实：
 ```json
@@ -243,11 +267,11 @@ async def run(
     config_loader=LLMConfig.load,
     resume_message: ResumeMessage | None = None,
 ) -> dict[str, Any]:
-    workspace, product_outputs, assembly, outputs = validate_inputs(run_dir, state)
+    workspace, product_outputs, selection, assembly, outputs = validate_inputs(run_dir, state)
     position = (state.get("step"), state.get("current_step"), state.get("current_node"))
 
     def completion_verifier() -> str | None:
-        verified_workspace, _, _, _ = validate_inputs(run_dir, state)
+        verified_workspace, _, _, _, _ = validate_inputs(run_dir, state)
         return design_repair(verified_workspace)
 
     if position == (STEP + 1, STEP + 1, NEXT_NODE) and state.get("status") == "success":
@@ -295,7 +319,7 @@ async def run(
         state,
         workspace,
         decision_spec,
-        initial_prompt(product_outputs, assembly, outputs),
+        initial_prompt(product_outputs, selection, assembly, outputs),
         completion_verifier,
         agent_runner=agent_runner,
         decision_runner=decision_runner,
