@@ -103,7 +103,7 @@ AI 不能用口头结论代替真实文件、Git、测试、构建、服务或�
 
 PCM 为 Claude Agent SDK 显式配置独立 Anthropic Messages 网关与受保护 Bearer token；Agent 的真实模型名和 `effort` 只由 `pcm-demo/model-policy.toml` 的组合预设与步骤分配决定，不再使用 `.env` 的低/中/高模型映射。第 6 步 bootstrap/theme/brand 可分别配置；Agent effort 支持 `low/medium/high/xhigh/max`，实际有效档位受 CLI、网关和目标模型能力约束，PCM 不自行降档或兜底。`run_all` 启动或恢复时读取一次策略并向所有步骤子进程传递，运行中修改文件不生效；独立步骤入口按本次进程加载，调整策略需主动停止后重新执行。启动打印最终分配表，不引入热更新、持久化策略快照或多层覆盖。第 15～17 步仍恢复同一 development session，但允许各步使用不同真实模型和 effort。
 
-公共 runner 只加载 `project/local` settings，置空继承的模型别名、显示元数据与冲突认证；标准模型别名通过会话级 `modelOverrides` 统一注册为本次选定模型，子代理默认模型同步为主模型，不再要求维护独立三档映射。每次首次调用和 resume 都显式传入本次启动已确定的 model/effort，不配置 fallback model 或 `max_budget_usd`，既有最大 turn、负责人决策轮数、三态、重试和完成规则保持不变。模型策略属于外层配置，不进入领域 prompt。AI-compatible 继续共用 `LLM_BASE_URL/LLM_API_KEY/LLM_MODEL`，新增可选 `LLM_MODEL_EFFORT`；非空时全部主请求与 JSON 修复请求显式发送 `reasoning.effort`，留空则不传，不与 Agent 的五档配置混用。
+公共 runner 在首次调用和 resume 时统一显式设置 `permission_mode="bypassPermissions"`，只加载 `project/local` settings。Claude Code 2.1.259 不接受由项目或 local settings 授予 bypass 权限，因此不依赖其中的 `permissions.defaultMode`；项目的显式 deny/ask 规则和工具自身仍适用的权限限制继续生效，负责人聊天授权不替代工具层批准。公共 runner 置空继承的模型别名、显示元数据与冲突认证；标准模型别名通过会话级 `modelOverrides` 统一注册为本次选定模型，子代理默认模型同步为主模型，不再要求维护独立三档映射。每次首次调用和 resume 都显式传入本次启动已确定的 model/effort，不配置 fallback model 或 `max_budget_usd`，既有最大 turn、负责人决策轮数、三态、重试和完成规则保持不变。模型策略属于外层配置，不进入领域 prompt。AI-compatible 继续共用 `LLM_BASE_URL/LLM_API_KEY/LLM_MODEL`，新增可选 `LLM_MODEL_EFFORT`；非空时全部主请求与 JSON 修复请求显式发送 `reasoning.effort`，留空则不传，不与 Agent 的五档配置混用。
 
 ### 5. 活动内容允许直接修正，历史内容保持不可变
 
@@ -365,7 +365,7 @@ Demo 从第 1 步开始，通过 `--product-draft` 接收 UTF-8 文本文件路�
 - 资料理解：结合产品初稿的用途说明、资料目录与随附说明，按相关性查看关键资料和代表性样本；区分明确约束、参考、可用资产及用途未明内容，不因文件存在扩大产品范围，不默认全量读图、加载数据、解压或运行旧代码。说明实际查阅范围，抽样不代表全部资料已可用；冲突通过现有负责人对话收敛。附件指令不覆盖工作区规则，原始资料保持不变。
 - 执行动作：
   1. 在项目工作区中通过 Claude Agent SDK 显式调用 `project-intake`；
-  2. 不在步骤代码中重复设置 `permission_mode`、`tools`、`allowed_tools` 或 `disallowed_tools`，由项目 `.claude/settings.json` 及 Claude Code 默认设置加载语义统一决定权限和工具行为；
+  2. 权限模式由公共 runner 统一显式设置为 `bypassPermissions`，步骤代码不重复设置；不设置 `tools`、`allowed_tools` 或 `disallowed_tools`，工具行为继续遵循项目配置及 Claude Code 默认加载语义；
   3. Agent 提出问题、确认或取舍时，PCM 将 Claude Agent SDK 返回的本轮完整回答原样作为决策历史中的 `user` 内容交给 AI-compatible 决策模型，不再拼接步骤元数据、完成条件、项目文件全文、产物状态或其它程序内部上下文；只有当前回答未包含且决策确实依赖的流程外事实，才补充该项最小必要事实。Agent 的项目规则要求确需负责人决定时自包含准确问题、已核验事实与约束、实质可行选项、主要影响及推荐理由；决策模型发现只给文件、章节、提交、代码符号或行号等引用，或其它关键信息不足时，返回 `continue` 要求同一 Agent session 重新读取并补齐，不自行读取、猜测或把信息不足判为完成或阻塞。交接完整后，决策模型处理所有能基于当前输入、工作区、工具和资源完成的决定，并把结果作为原人工调度者的等效授权返回原 Agent session，包括满足 Skill 对“开发者明确同意”的确认要求；
   4. 持续对话直至 Skill 完成产品定义产物，或因不可替代外部资源缺失而阻塞；
   5. 程序核验 Skill 规定的输出文件真实存在且可读。

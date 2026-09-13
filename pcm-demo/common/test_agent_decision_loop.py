@@ -2010,6 +2010,48 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
                         )
             self.assertEqual(len(captured), 10)
 
+    async def test_new_and_resumed_sessions_always_bypass_permissions(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            write_json(workspace / "plugins-lock.json", {"version": 1, "plugins": []})
+            captured = []
+
+            async def fake_query(*_args: object, **kwargs: object):
+                options = kwargs["options"]
+                captured.append(options)
+                session_id = options.resume or "session-1"
+                yield SystemMessage(
+                    subtype="init",
+                    data={"session_id": session_id, "model": options.model},
+                )
+                yield ResultMessage(
+                    subtype="success",
+                    duration_ms=1,
+                    duration_api_ms=1,
+                    is_error=False,
+                    num_turns=1,
+                    session_id=session_id,
+                    result="测试回复",
+                    terminal_reason="completed",
+                )
+
+            with patch("common.claude_agent.query", new=fake_query):
+                for session_id in (None, "session-1"):
+                    with self.subTest(resume_session_id=session_id):
+                        result = await run_claude(
+                            "测试提示",
+                            cwd=workspace,
+                            model="medium-model",
+                            effort="high",
+                            resume_session_id=session_id,
+                        )
+                        self.assertIsNone(result.exception)
+
+            self.assertEqual(
+                [options.permission_mode for options in captured],
+                ["bypassPermissions", "bypassPermissions"],
+            )
+
     async def test_result_terminal_reason_api_status_and_errors_are_preserved(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             workspace = Path(directory)

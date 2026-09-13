@@ -308,6 +308,7 @@ async def run_claude(
         cwd=cwd,
         system_prompt={"type": "preset", "preset": "claude_code"},
         skills="all",
+        permission_mode="bypassPermissions",
         setting_sources=["project", "local"],
         # SDK 与插件的标准模型别名统一使用本次策略，不另设子代理档位。
         settings=json.dumps({"modelOverrides": {
