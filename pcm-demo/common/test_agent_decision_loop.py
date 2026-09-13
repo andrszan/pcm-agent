@@ -2638,6 +2638,25 @@ class AgentDecisionTest(unittest.IsolatedAsyncioTestCase):
                 self.assertIn(f"CONTEXT_{marker} &lt;data&gt; &amp; 正文", prompt)
                 self.assertNotIn(content, prompt)
 
+    def test_rendered_system_prompt_covers_decision_and_completion_boundaries(self) -> None:
+        prompt = render_decision_system_prompt(
+            "实现已确认范围并通过相关测试。",
+            {"document": {"path": "docs/trd.md", "content": "权威正文"}},
+        )
+
+        decision_request_forms = ("待确认", "存在冲突", "请拍板", "列出选项后等待选择")
+        for request_form in decision_request_forms:
+            with self.subTest(request_form=request_form):
+                self.assertIn(request_form, prompt)
+        self.assertIn("只要明确仍需负责人决定", prompt)
+        self.assertIn("已解决的冲突，以及普通风险、假设或观察，不自动成为决策请求", prompt)
+        self.assertIn("只要求 Agent 在原会话补齐本次决定缺少的具体事实", prompt)
+        self.assertIn("不得夹带完善 TRD、重新审查既有工作、扩展设计", prompt)
+        self.assertIn("始终按 completion 段判断当前工作应继续、完成或阻塞", prompt)
+        self.assertIn("作出信息充分的决定后", prompt)
+        self.assertIn("普通、明确且尚未完成的工作仍返回 continue", prompt)
+        self.assertIn("完成报告不因缺少逐项完成复述、“无问题”声明", prompt)
+
     def test_strict_invariants_and_legacy_actions(self) -> None:
         with self.assertRaises(ValueError):
             AgentDecision(
