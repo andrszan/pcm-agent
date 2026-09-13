@@ -530,11 +530,11 @@ Demo 从第 1 步开始，通过 `--product-draft` 接收 UTF-8 文本文件路�
 - **自动化与历史**：现行本体 7 项、CLI 4 项，共 11 项；全量 282 项、`compileall`、`git diff --check` 通过。真实 `step01-mendmark` 曾复用 development session `e6bd1b82-39f9-41b2-9cc9-a69b281015dc` 完成规则复盘并新增 `.claude/rules/frontend-playwright-container.md`。旧实现的三仓提前提交失败、`git reset --mixed` 现场恢复和 Git-visible baseline 是历史事实，不再是现行 success 条件，也不会由现行代码重复核验。
 ### 第 17 步：统一提交需求变更
 
-- **能力与 session**：在产品根直接调用 `run_claude()`，使用单一 `requirement_commit_<ID>` session。fresh dirty 时初始 prompt 只调用一次 `/commit-changes`；已有 session 时每次运行只恢复一次，恢复提示不重复 slash command。没有 AI-compatible 负责人决策或多轮 repair。
-- **输入与边界**：只消费当前 active requirement/cycle、完整 scoped 第 16 步 success、统一需求分支和各仓 `base_sha`。Python 只核验有序 `applicable_repositories` 白名单、仓库自身 top-level、非符号链接路径、`main==base`、`HEAD==target` 和包含未跟踪文件的 `status --porcelain`。
-- **执行职责**：diff 内容、提交分组、精确暂存、空提交和提交历史由 `commit-changes` 自己负责。Python 不读取完整 diff，不制作 fingerprint，不检查 blob/tree、merge commit 或净零提交，也不执行 Git 写操作。
-- **结果与恢复**：全仓 fresh clean 时零 Agent、`tip=base`。Agent init 后立即保存 session；调用异常、非正常结果或最终仍 dirty 时保留 session/现场并 failed，下次只 resume 同一 session 一次。success 写 scoped `17.json` 的 `name/path/base_sha/tip_sha`，cycle 写 `{base_sha,tip_sha,merged:false}` 并推进 step 18；result→state 可零 Agent 恢复，advanced 幂等忽略旧 fingerprint/conversation 字段。
-- **验证事实**：现行实现本体 10 项、CLI 3 项，共 13 项；全量 282 项、`compileall` 和 `git diff --check` 通过，独立只读审查无高、中置信发现。旧真实 run 的 4 个提交、session、conversation 与 fingerprint 是历史执行事实，不再是现行合同条件；现行代码已验证 step18 advanced 幂等时 state/result/旧 conversation 字节不变。
+- **能力与 session**：在产品根通过公共 `run_agent_decision_loop` 调用 `commit-changes`，使用独立的 `requirement_commit_<ID>` Agent session 和负责人 conversation。初始 prompt 只调用一次 Skill，交付需求标识、标题、有序仓库清单、统一分支和已完成开发验收的事实；不传开发历史或 TRD 全文，也不重新验收。
+- **输入与边界**：信任当前提交节点的前序交接，读取 active requirement/cycle、统一需求分支和各仓 `base_sha`，不读取 `16.json` 或复验 development/retrospective alias。cycle 中的 `development_session_id` 用于拒绝提交 alias 错绑开发 session。Python 核验有序仓库白名单、仓库自身 top-level、非符号链接路径、统一分支、`base_sha ≤ local main ≤ HEAD`（祖先或相等）、`HEAD == target`、无进行中的 Git 操作和包含未跟踪文件的 clean 状态。
+- **执行与决策**：Agent 负责完整 diff、分组、精确暂存、创建提交及提交后核验；必要的产物准备和纯格式修复受实际授权范围约束。负责人只在这些提交职责内作出 `completed/continue/blocked`，不授权业务语义变更、重新开发验收、扩大范围、改写历史或绕过检查。Python 不读取完整 diff、不制作 fingerprint 或 index 快照，也不执行 Git 写操作；`completed` 后只有 dirty 时向同一 session 发出 repair，Git 边界冲突则保留现场并失败。
+- **结果与恢复**：fresh 全仓 clean 时不调用 Agent 或负责人，记录当前 HEAD 为 `tip_sha`。init 后立即保存提交 session，continue、repair、blocked 解除及 retry 均复用该 session；通用 conversation 结构和恢复锚点由公共循环模块统一校验，残缺锚点不可盲目重跑，仅保留初始指令且尚无 session 事实的 init 前失败可以重入。success 写 scoped `17.json` 的 `name/path/base_sha/tip_sha`，cycle 写 `{base_sha,tip_sha,merged:false}` 并推进 step 18；result→state 中断按当前 Git facts 补状态，已推进后的幂等调用不读取 Git 或会话历史。
+- **使用与验证入口**：定向测试、恢复合同和历史兼容说明见 [第 17 步说明](../pcm-demo/steps/step_17_commit/README.md)。
 
 ### 第 18 步：程序化合并并完成需求
 

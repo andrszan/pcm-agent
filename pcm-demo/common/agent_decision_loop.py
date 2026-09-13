@@ -360,6 +360,66 @@ def _validate_messages(messages: Any) -> list[dict[str, str]]:
     return normalized
 
 
+def validate_agent_decision_loop_scene(
+    run_dir: Path, state: dict[str, Any], spec: AgentDecisionLoopSpec
+) -> bool:
+    """确认已有决策循环具备可安全恢复的完整锚点。"""
+
+    sessions = state.get("claude_sessions")
+    references = state.get("decision_conversations")
+    session_present = isinstance(sessions, dict) and spec.key in sessions
+    reference_present = isinstance(references, dict) and spec.key in references
+    session = _session(state, spec)
+    reference = _conversation_reference(state, spec)
+    path = run_dir / conversation_path(spec)
+    section = state.get(spec.state_key)
+    started = (
+        spec.state_key in state
+        or session_present
+        or reference_present
+        or path.exists()
+        or path.is_symlink()
+        or state.get("status") == "blocked"
+    )
+    if not started:
+        return False
+
+    if reference is None:
+        raise RuntimeError("Agent 决策恢复缺少原决策历史引用")
+    if path.is_symlink() or not path.is_file():
+        raise RuntimeError("Agent 决策恢复缺少原决策历史")
+    messages = _load_conversation(run_dir, state, spec)
+    if (
+        len(messages) < 2
+        or messages[1]["role"] != "assistant"
+        or not messages[1]["content"].strip()
+    ):
+        raise RuntimeError("Agent 决策历史缺少初始负责人指令")
+
+    if session is None:
+        last_agent_result = (
+            section.get("last_agent_result") if isinstance(section, dict) else None
+        )
+        if not (
+            len(messages) == 2
+            and not session_present
+            and state.get("status") != "blocked"
+            and (
+                not isinstance(section, dict)
+                or (
+                    "init" not in section
+                    and section.get("pending_agent_text") is None
+                    and (
+                        not isinstance(last_agent_result, dict)
+                        or not last_agent_result.get("session_id")
+                    )
+                )
+            )
+        ):
+            raise RuntimeError("Agent 决策已有回复或 session 事实但缺少 session 别名")
+    return True
+
+
 def _load_conversation(
     run_dir: Path, state: dict[str, Any], spec: AgentDecisionLoopSpec
 ) -> list[dict[str, str]]:

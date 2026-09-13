@@ -20,7 +20,7 @@ Python 不重复实现工作树 fingerprint、blob/tree hashing、Git attributes
 步骤接受：
 
 - `phase_1_requirement_development` / `requirement:17_commit` / step 17；
-- 唯一 active requirement、对应 cycle 和完整 scoped `16.json` success；
+- 唯一 active requirement、对应 cycle，以及当前节点已经推进到本步骤的交接事实；
 - 统一 `req/<lowercase-id>` 分支；
 - 有序仓库白名单及每仓 `base_sha`。
 
@@ -41,7 +41,7 @@ conversation key 为：
 requirement_commit_<ID>
 ```
 
-对应 `claude_sessions.requirement_commit_<ID>` 保存第 17 步自己的 Claude session ID。首次 dirty 调用不预填 alias，也不传 `resume_session_id`；Agent init 一旦返回 session ID，公共循环立即保存，后续 continue、repair、blocked 恢复和 retry 都只复用该提交 session。`requirement_cycle.development_session_id`、`claude_sessions.development_<ID>` 与 `claude_sessions.rule_retrospective_<ID>` 继续保留第 15/16 步的开发 session 事实，不因提交步骤而修改。步骤 18 只接收 Git 结果，不绑定提交 session。本步骤只传不含需求 ID 的稳定任务标识 `requirement_commit`，实际 model 与 effort 由 `model-policy.toml` 解析并按本次进程启动时加载的策略固定，每次 resume 显式传入本步骤在本次启动确定的组合。各步骤仍保留独立的负责人 conversation。
+对应 `claude_sessions.requirement_commit_<ID>` 保存第 17 步自己的 Claude session ID。首次 dirty 调用不预填 alias，也不传 `resume_session_id`；Agent init 一旦返回 session ID，公共循环立即保存，后续 continue、repair、blocked 恢复和 retry 都只复用该提交 session。`requirement_cycle.development_session_id` 仅作为拒绝提交 alias 错绑旧开发 session 的边界；本步骤不重复读取 `16.json`，也不复验 `claude_sessions.development_<ID>` 与 `claude_sessions.rule_retrospective_<ID>`，这些前序事实不因提交步骤而修改。步骤 18 只接收 Git 结果，不绑定提交 session。本步骤只传不含需求 ID 的稳定任务标识 `requirement_commit`，实际 model 与 effort 由 `model-policy.toml` 解析并按本次进程启动时加载的策略固定，每次 resume 显式传入本步骤在本次启动确定的组合。各步骤仍保留独立的负责人 conversation。
 
 有 dirty 仓时，公共循环创建独立的负责人对话：
 
@@ -87,7 +87,7 @@ blocked 会写 scoped `17.json` 和 state；条件解除后，公共循环从同
 - `decision_conversations.requirement_commit_<ID>.path`；
 - 非符号链接的 `conversations/requirement_commit_<ID>.json`。
 
-首次调用在 Agent init 前失败时，允许在没有提交 session alias 的情况下重入，但历史必须只有已保存的 `system` 和非空初始 `assistant` 指令，且不得存在 init、Agent 回复、负责人决定、blocked 状态或其它 session 事实。已有 Agent 回复却没有 alias、已有 alias 却没有完整历史等损坏状态拒绝。历史 system 和指令不与当前模板逐字比较，也不在恢复时重渲染，避免文案更新破坏合法续接。旧活动失败若 alias 仍等于开发 session，明确拒绝并要求一次性备份迁移，不自动丢弃或继续复用。
+首次调用在 Agent init 前失败时，允许在没有提交 session alias 的情况下重入，但历史必须只有已保存的 `system` 和非空初始 `assistant` 指令，且不得存在 init、Agent 回复、负责人决定、blocked 状态或其它 session 事实。已有 Agent 回复却没有 alias、已有 alias 却没有完整历史等损坏状态拒绝。conversation 的 schema、角色顺序和引用路径由公共决策循环统一读取和校验，本步骤不再维护一套私有解析；历史 system 和指令不与当前模板逐字比较，也不在恢复时重渲染，避免文案更新破坏合法续接。旧活动失败若 alias 仍等于开发 session，明确拒绝并要求一次性备份迁移，不自动丢弃或继续复用。
 
 fresh 全仓 clean 时零 Agent、零负责人决策、零 conversation，直接记录当前 HEAD 为 `tip_sha`；可以等于 base，也可以是已包含当前 main 的后续提交，原始 `base_sha` 保持不变。
 
@@ -116,7 +116,7 @@ steps/requirements/<ID>/17.json
 
 ## 验证
 
-定向测试覆盖 fresh clean、首次 dirty 独立 session、init 前失败重入、init 后捕获 session 的 retry、独立 conversation、纯提交范围 continue、completed repair、blocked 与 blocked resume、旧开发 alias 的显式迁移拒绝、残缺 session/history、未跟踪文件、symlink、result→state、advanced 兼容和 CLI blocked。验证时运行第 17 步本体与 CLI 测试；需要确认第 18 步兼容时额外运行其定向测试，并执行 `compileall` 和 `git diff --check`。
+定向测试覆盖 fresh clean、当前节点交接不重复复验 `16.json` 和前序 session alias、首次 dirty 独立 session、init 前失败重入、init 后捕获 session 的 retry、独立 conversation、纯提交范围 continue、completed repair、blocked 与 blocked resume、旧开发 alias 的显式迁移拒绝、残缺 session/history、未跟踪文件、symlink、result→state、advanced 兼容和 CLI blocked。验证时运行第 17 步本体与 CLI 测试；需要确认第 18 步兼容时额外运行其定向测试，并执行 `compileall` 和 `git diff --check`。
 
 ## 历史事实
 

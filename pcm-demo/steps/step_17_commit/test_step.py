@@ -219,6 +219,45 @@ class RequirementCommitTests(unittest.TestCase):
         self.assertNotEqual(tip, bases["root"])
         self.assertEqual(saved["repositories"][0]["tip_sha"], tip)
 
+    def test_current_handoff_does_not_revalidate_upstream_result_or_aliases(self) -> None:
+        run_dir, workspace, state, _bases = self.make_run()
+        self.dirty(workspace, ["root"])
+        write_requirement_step_result(run_dir, "BR-001", 16, {"status": "stale"})
+        state["claude_sessions"] = {
+            "development_BR-001": "other-development-session",
+        }
+        write_state(run_dir, state)
+
+        async def agent(prompt: str, **kwargs: Any) -> ClaudeRunResult:
+            self.assertIsNone(kwargs["resume_session_id"])
+            self.commit_names(workspace, ["root"])
+            value = agent_result(kwargs["cwd"])
+            kwargs["on_update"](value)
+            return value
+
+        async def completed(messages, config, *, system_prompt):
+            return decision("completed")
+
+        saved = self.execute(
+            run_dir,
+            state,
+            agent_runner=agent,
+            decision_runner=completed,
+            config_loader=lambda: object(),
+        )
+
+        self.assertEqual(saved["status"], "success")
+        completed_state = read_state(run_dir)
+        self.assertEqual(
+            completed_state["claude_sessions"]["development_BR-001"],
+            "other-development-session",
+        )
+        self.assertNotIn("rule_retrospective_BR-001", completed_state["claude_sessions"])
+        self.assertEqual(
+            completed_state["claude_sessions"]["requirement_commit_BR-001"],
+            "commit-session-1",
+        )
+
     def test_dirty_head_ahead_of_base_uses_normal_commit_path(self) -> None:
         run_dir, workspace, state, _bases = self.make_run()
         (workspace / "committed.txt").write_text("committed\n", encoding="utf-8")
@@ -627,7 +666,15 @@ class RequirementCommitTests(unittest.TestCase):
         self.assertEqual(calls[0]["resume_session_id"], "commit-session-1")
 
     def test_incomplete_resume_anchors_are_rejected(self) -> None:
-        variants = ("session", "reference", "conversation", "reply_without_session", "init_without_session")
+        variants = (
+            "session",
+            "null_session",
+            "reference",
+            "null_reference",
+            "conversation",
+            "reply_without_session",
+            "init_without_session",
+        )
         for variant in variants:
             with self.subTest(variant=variant):
                 run_dir, workspace, state, _bases = self.make_run()
@@ -636,10 +683,14 @@ class RequirementCommitTests(unittest.TestCase):
                 path = run_dir / f"conversations/{key}.json"
                 if variant == "session":
                     state["claude_sessions"][key] = "commit-session-1"
+                elif variant == "null_session":
+                    state["claude_sessions"][key] = None
                 elif variant == "reference":
                     state["decision_conversations"] = {
                         key: {"path": f"conversations/{key}.json"}
                     }
+                elif variant == "null_reference":
+                    state["decision_conversations"] = {key: None}
                 elif variant == "conversation":
                     path.parent.mkdir(parents=True, exist_ok=True)
                     path.write_text("{}", encoding="utf-8")
@@ -668,6 +719,51 @@ class RequirementCommitTests(unittest.TestCase):
                         run_dir, state, agent_runner=unexpected,
                         decision_runner=unexpected, config_loader=lambda: object(),
                     )
+
+    def test_null_session_alias_with_initial_history_is_rejected(self) -> None:
+        run_dir, workspace, state, _bases = self.make_run()
+        self.dirty(workspace, ["root"])
+        key = "requirement_commit_BR-001"
+        state["claude_sessions"][key] = None
+        state["decision_conversations"] = {
+            key: {"path": f"conversations/{key}.json"}
+        }
+        context = commit_step._context(run_dir, state, advanced=False)
+        history_path = run_dir / f"conversations/{key}.json"
+        history_path.parent.mkdir(parents=True, exist_ok=True)
+        history_path.write_text(
+            json.dumps(
+                {
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": commit_step._decision_spec(
+                                context
+                            ).decision_system_prompt,
+                        },
+                        {
+                            "role": "assistant",
+                            "content": commit_step.initial_prompt(context),
+                        },
+                    ]
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        write_state(run_dir, state)
+
+        async def unexpected(*args: Any, **kwargs: Any) -> Any:
+            raise AssertionError("空值 session alias 不得按 init 前失败场景重入")
+
+        with self.assertRaisesRegex(RuntimeError, "缺少 session 别名"):
+            self.execute(
+                run_dir,
+                state,
+                agent_runner=unexpected,
+                decision_runner=unexpected,
+                config_loader=lambda: object(),
+            )
 
     def test_legacy_development_alias_requires_explicit_migration(self) -> None:
         run_dir, workspace, state, _bases = self.make_run()

@@ -6,7 +6,12 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from common.agent_decision_loop import AgentDecisionLoopSpec, ResumeMessage, _validate_messages, run_agent_decision_loop
+from common.agent_decision_loop import (
+    AgentDecisionLoopSpec,
+    ResumeMessage,
+    run_agent_decision_loop,
+    validate_agent_decision_loop_scene,
+)
 from common.claude_agent import run_claude
 from common.decision import render_decision_system_prompt, request_decision
 from common.state import (
@@ -136,16 +141,6 @@ def _valid_result(saved: Any, *, step: int, name: str, requirement_id: str, fiel
     )
 
 
-def _step_sixteen_success(run_dir: Path, requirement_id: str, cycle: dict[str, Any]) -> None:
-    saved = _read_json(requirement_step_result_path(run_dir, requirement_id, 16), "规则复盘结果不可读取")
-    session_id = cycle.get("development_session_id")
-    _require(
-        _valid_result(saved, step=16, name="规则复盘", requirement_id=requirement_id, fields=(_RESULT_FIELDS - {"branch", "repositories"}) | {"development_session_id"})
-        and isinstance(session_id, str) and bool(session_id) and saved.get("development_session_id") == session_id,
-        "第 16 步没有当前活动需求的完整一致成功结果",
-    )
-
-
 def _context(run_dir: Path, state: dict[str, Any], *, advanced: bool) -> dict[str, Any]:
     _require(state.get("phase") == PHASE and _position(state) in {(STEP, STEP, CURRENT_NODE), (STEP + 1, STEP + 1, NEXT_NODE)}, "运行状态不位于需求提交锚点")
     requirement_id, title, cycle = _active(state, require_title=not advanced)
@@ -188,15 +183,6 @@ def _context(run_dir: Path, state: dict[str, Any], *, advanced: bool) -> dict[st
             "适用仓库描述不符合约定",
         )
         repositories.append({"name": name, "path": path.resolve()})
-    _step_sixteen_success(run_dir, requirement_id, cycle)
-    sessions = state.get("claude_sessions")
-    _require(
-        isinstance(sessions, dict)
-        and sessions.get(f"development_{requirement_id}") == development_session_id
-        and sessions.get(f"rule_retrospective_{requirement_id}")
-        == development_session_id,
-        "开发与规则复盘没有共享原开发 session",
-    )
     return {**context, "workspace": workspace, "repositories": repositories}
 
 
@@ -350,66 +336,21 @@ def _complete_facts(context: dict[str, Any], saved: dict[str, Any] | None = None
     return facts
 
 
-def _conversation_messages(path: Path) -> list[dict[str, Any]]:
-    data = _read_json(path, "需求提交决策历史不可读取")
-    messages = data.get("messages")
-    _require(set(data) == {"messages"}, "需求提交决策历史内容不符合约定")
-    try:
-        return _validate_messages(messages)
-    except RuntimeError as error:
-        raise RuntimeError("需求提交决策历史消息不符合约定") from error
-
-
-def _execution_scene(run_dir: Path, state: dict[str, Any], context: dict[str, Any]) -> bool:
-    key, expected = context["key"], f"conversations/{context['key']}.json"
-    sessions, references = state.get("claude_sessions"), state.get("decision_conversations")
-    _require(sessions is None or isinstance(sessions, dict), "Claude session 状态不符合约定")
-    _require(references is None or isinstance(references, dict), "决策历史引用不符合约定")
-    conversation = run_dir / expected
-    session_present = isinstance(sessions, dict) and key in sessions
-    reference_present = isinstance(references, dict) and key in references
-    started = key in state or session_present or reference_present or conversation.exists() or conversation.is_symlink() or state.get("status") == "blocked"
-    if not started:
-        return False
-
-    session = sessions.get(key) if isinstance(sessions, dict) else None
-    reference = references.get(key) if isinstance(references, dict) else None
-    if session == context["development_session_id"]:
-        raise RuntimeError("需求提交仍使用旧开发 session 别名，需要先显式迁移为独立提交 session")
-    _require(isinstance(reference, dict) and reference.get("path") == expected, "需求提交恢复缺少原决策历史引用")
-    _require(not conversation.is_symlink() and conversation.is_file(), "需求提交恢复缺少原决策历史")
-    messages = _conversation_messages(conversation)
-    _require(
-        len(messages) >= 2
-        and messages[1]["role"] == "assistant"
-        and bool(messages[1]["content"].strip()),
-        "需求提交决策历史缺少初始负责人指令",
-    )
-
-    if session is None:
-        section = state.get(key)
-        last_agent_result = section.get("last_agent_result") if isinstance(section, dict) else None
-        _require(
-            len(messages) == 2
-            and not session_present
-            and state.get("status") != "blocked"
-            and (
-                not isinstance(section, dict)
-                or (
-                    "init" not in section
-                    and section.get("pending_agent_text") is None
-                    and (
-                        not isinstance(last_agent_result, dict)
-                        or not last_agent_result.get("session_id")
-                    )
-                )
-            ),
-            "需求提交已有 Agent 回复或 session 事实但缺少提交 session 别名",
+def _execution_scene(
+    run_dir: Path,
+    state: dict[str, Any],
+    context: dict[str, Any],
+    spec: AgentDecisionLoopSpec,
+) -> bool:
+    sessions = state.get("claude_sessions")
+    if (
+        isinstance(sessions, dict)
+        and sessions.get(context["key"]) == context["development_session_id"]
+    ):
+        raise RuntimeError(
+            "需求提交仍使用旧开发 session 别名，需要先显式迁移为独立提交 session"
         )
-        return True
-
-    _require(isinstance(session, str) and bool(session), "需求提交 session ID 不符合约定")
-    return True
+    return validate_agent_decision_loop_scene(run_dir, state, spec)
 
 
 def _decision_spec(context: dict[str, Any]) -> AgentDecisionLoopSpec:
@@ -546,7 +487,8 @@ async def run(
         _complete_facts(context, complete)
         return _advance(run_dir, state, context, complete)
 
-    scene = _execution_scene(run_dir, state, context)
+    spec = _decision_spec(context)
+    scene = _execution_scene(run_dir, state, context, spec)
     facts = _facts(context)
     _verify_boundary(context, facts)
     if not scene and not any(fact["dirty"] for fact in facts):
@@ -554,7 +496,6 @@ async def run(
     if state.get("status") != "blocked":
         _running(run_dir, state)
 
-    spec = _decision_spec(context)
     decision = await run_agent_decision_loop(
         run_dir, state, context["workspace"], spec, initial_prompt(context),
         lambda: _completion_repair(context), agent_runner=agent_runner,
