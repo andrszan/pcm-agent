@@ -27,6 +27,7 @@ CURRENT_NODE = "project:04_assemble_foundation"
 NEXT_NODE = "project:05_verify_readiness"
 MARKER = ".pcm-assemble-owner.json"
 TARGETS = ("frontend", "backend")
+AGENT_IGNORE_RULES = (".agents/", ".claude/", "AGENTS.md", "CLAUDE.md")
 
 
 class AssemblyBlocked(RuntimeError):
@@ -224,6 +225,17 @@ def clone_repository(
     return clone, evidence
 
 
+def configure_agent_ignores(payload: Path) -> None:
+    path = payload / ".gitignore"
+    content = path.read_bytes() if path.exists() else b""
+    lines = content.splitlines()
+    missing = [rule.encode("utf-8") for rule in AGENT_IGNORE_RULES if rule.encode("utf-8") not in lines]
+    if missing:
+        separator = b"\n" if content and not content.endswith(b"\n") else b""
+        header = "\n# 内部 AI Agent 开发配置\n".encode("utf-8")
+        path.write_bytes(content + separator + header + b"\n".join(missing) + b"\n")
+
+
 def prepare_payloads(
     temporary: Path, selection: FoundationSelectionResult, *, git_runner=git
 ) -> dict[str, dict[str, Any] | None]:
@@ -245,9 +257,19 @@ def prepare_payloads(
         payload = temporary / "payloads" / target
         shutil.copytree(source, payload)
         verify_tree(payload)
+        configure_agent_ignores(payload)
         initialize_repository(payload)
-        if not git_runner("ls-files", "--others", "--exclude-standard", cwd=payload):
+        candidates = git_runner(
+            "-c", "core.excludesFile=/dev/null", "ls-files", "--others", "--exclude-standard", "-z", cwd=payload
+        )
+        if not candidates:
             raise RuntimeError(f"适用基础工程没有可提交文件：{target}")
+        for relative in candidates.split("\0"):
+            path = Path(relative)
+            if path.name in {"AGENTS.md", "CLAUDE.md"} or any(
+                part in {".agents", ".claude"} for part in path.parts[:-1]
+            ):
+                raise RuntimeError(f"基础工程的内部 AI Agent 配置未被忽略：{target}/{relative}")
         assembly[target] = {
             "target": target,
             "id": chosen.id,

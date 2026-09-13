@@ -27,6 +27,7 @@ from steps.step_04_assemble_foundation.step import (
     CURRENT_NODE,
     MARKER,
     NEXT_NODE,
+    configure_agent_ignores,
     ownership_marker,
     run,
     temporary_root,
@@ -65,6 +66,7 @@ class AssembleFoundationTests(unittest.TestCase):
         escape_link: bool = False,
         git_link: bool = False,
         ignore_all_frontend: bool = False,
+        agent_configs: bool = False,
     ) -> tuple[Path, str]:
         source = root / "template-source"
         command("init", "-b", branch, str(source))
@@ -85,7 +87,17 @@ class AssembleFoundationTests(unittest.TestCase):
             (frontend / "git-metadata").symlink_to("../../.git", target_is_directory=True)
         if ignore_all_frontend:
             (frontend / ".gitignore").write_text("*\n", encoding="utf-8")
+        if agent_configs:
+            (frontend / ".gitignore").write_bytes(b".agents/\n*.cache")
+            for target in (frontend, backend):
+                for prefix in (Path(), Path("src/module")):
+                    for relative in (".agents/config.md", ".claude/config.md", "AGENTS.md", "CLAUDE.md"):
+                        path = target / prefix / relative
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_text("内部开发配置", encoding="utf-8")
         command("add", ".", cwd=source)
+        if agent_configs:
+            command("add", "-f", "templates/frontend", "templates/backend", cwd=source)
         if ignore_all_frontend:
             command(
                 "add",
@@ -185,6 +197,85 @@ class AssembleFoundationTests(unittest.TestCase):
             saved_state = read_state(run_dir)
             self.assertEqual((saved_state["current_step"], saved_state["current_node"]), (5, NEXT_NODE))
             self.assertFalse(temporary_root(workspace, "recorded-run").exists())
+
+    def test_agent_configs_stay_local_and_are_absent_from_product_clone(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, url = self.create_remote(root, agent_configs=True)
+            run_dir, workspace, state = self.make_run(root, self.selection(url))
+            (workspace / ".gitignore").write_text("frontend/\nbackend/\n", encoding="utf-8")
+            (workspace / "AGENTS.md").write_text("工作区规则", encoding="utf-8")
+            root_ignore = (workspace / ".gitignore").read_bytes()
+            source = root / "template-source"
+            source_files = command("ls-files", cwd=source)
+            source_ignore = (source / "templates/frontend/.gitignore").read_bytes()
+
+            saved = run(run_dir, state)
+
+            self.assertEqual(saved["status"], "success", saved)
+            self.assertEqual((workspace / ".gitignore").read_bytes(), root_ignore)
+            self.assertEqual((workspace / "AGENTS.md").read_text(), "工作区规则")
+            self.assertEqual(command("ls-files", cwd=source), source_files)
+            self.assertEqual((source / "templates/frontend/.gitignore").read_bytes(), source_ignore)
+            self.assertEqual(command("status", "--porcelain", cwd=source), "")
+            for target in ("frontend", "backend"):
+                product = workspace / target
+                ignore = (product / ".gitignore").read_bytes()
+                if target == "frontend":
+                    self.assertTrue(ignore.startswith(source_ignore + b"\n"))
+                for rule in (".agents/", ".claude/", "AGENTS.md", "CLAUDE.md"):
+                    self.assertEqual(ignore.decode().splitlines().count(rule), 1)
+                self.assertNotIn(".agent/", ignore.decode().splitlines())
+                for prefix in (Path(), Path("src/module")):
+                    for relative in (".agents/config.md", ".claude/config.md", "AGENTS.md", "CLAUDE.md"):
+                        path = prefix / relative
+                        self.assertEqual((product / path).read_text(), "内部开发配置")
+                        command("-c", "core.excludesFile=/dev/null", "check-ignore", "--no-index", "--", path.as_posix(), cwd=product)
+                self.assertEqual(command("ls-files", cwd=product), "")
+                command("add", ".", cwd=product)
+                self.assertEqual(set(command("ls-files", cwd=product).splitlines()), {".gitignore", f"{target}.txt"})
+                command("-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "产品初始提交", cwd=product)
+                checkout = root / f"{target}-delivery"
+                command("clone", product.as_uri(), str(checkout))
+                self.assertEqual((checkout / f"{target}.txt").read_text(), target)
+                self.assertEqual((checkout / ".gitignore").read_bytes(), ignore)
+                for name in (".agents", ".claude", "AGENTS.md", "CLAUDE.md"):
+                    self.assertFalse(list(checkout.rglob(name)))
+
+    def test_agent_ignore_configuration_preserves_content_and_is_idempotent(self) -> None:
+        for original in (None, b"", b"*.cache", b"*.cache\r\n.claude/\r\n", b".agents/\n.claude/\nAGENTS.md\nCLAUDE.md"):
+            with self.subTest(original=original), tempfile.TemporaryDirectory() as directory:
+                payload = Path(directory)
+                path = payload / ".gitignore"
+                if original is not None:
+                    path.write_bytes(original)
+                configure_agent_ignores(payload)
+                first = path.read_bytes()
+                self.assertTrue(first.startswith(original or b""))
+                for rule in (b".agents/", b".claude/", b"AGENTS.md", b"CLAUDE.md"):
+                    self.assertEqual(first.splitlines().count(rule), 1)
+                configure_agent_ignores(payload)
+                self.assertEqual(path.read_bytes(), first)
+
+    def test_nested_ignore_override_fails_before_publishing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, url = self.create_remote(root, agent_configs=True)
+            run_dir, workspace, state = self.make_run(root, self.selection(url))
+
+            def override_ignore(*args: str, **kwargs: object) -> str:
+                value = git(*args, **kwargs)
+                if args[0] == "clone":
+                    nested = Path(args[-1]) / "templates/frontend/src/module/.gitignore"
+                    nested.write_text("!AGENTS.md\n", encoding="utf-8")
+                return value
+
+            saved = run(run_dir, state, git_runner=override_ignore)
+
+            self.assertEqual(saved["status"], "failed")
+            self.assertIn("内部 AI Agent 配置未被忽略", saved["error"]["message"])
+            for target in ("frontend", "backend"):
+                self.assertTrue((workspace / target / ".gitkeep").is_file())
 
     def test_same_repository_is_cloned_once_and_success_is_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
