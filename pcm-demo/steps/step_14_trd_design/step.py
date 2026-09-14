@@ -29,7 +29,8 @@ TRD_DESIGN_MAX_TURNS = 9999
 _FORBIDDEN_TITLE_CHARACTERS = set('<>:"/\\|?*')
 
 TRD_DESIGN_DECISION_RULES = """- completed：Agent 已将当前正式需求的活动 TRD 写入唯一指定路径，范围、关键行为、技术方案、验证场景和需求级体验设计已经收敛，且没有阻碍实现的未决事项。
-- continue：当前环境仍可继续补全活动 TRD、保真承接适用工程归属合同、处理架构 delta 或收敛会影响实现的产品与技术决定时，给出明确的下一步指令。"""
+- continue：仅当活动 TRD 存在会阻碍当前正式范围正确实现、必要跨模块协作或适用关键风险验证的具体缺口，且当前环境可以继续处理时，给出最小必要的下一步指令。
+判断活动 TRD 是否足以指导实现，不以还能补充更多细节、风险或验证方法作为继续理由。普通内部实现细节不必在设计阶段冻结；没有已确认容量、延迟或运行规模依据时，不为结束设计自行生成硬指标或完整性能工程。Agent 提出显著增加实现或验证成本的机制时，先核对它保护的当前用户结果、数据、安全或兼容性要求，并比较能保留这些结果的更简单方案。不得以精简为由缩减正式功能或已确认底线；需要补充时只处理具体问题和受影响内容，不重新全面审查已经收敛的部分。"""
 
 
 class TRDDesignBlocked(RuntimeError):
@@ -252,7 +253,7 @@ def _session(state: dict[str, Any], key: str) -> str | None:
 
 def initial_prompt(context: dict[str, Any], trd_path: str) -> str:
     return f"""/trd-design
-请依据正式需求和项目资料形成可直接指导实现与验证的活动 TRD。
+请依据正式需求和项目资料形成可直接指导实现与验证的活动 TRD；保留正式范围，并优先采用满足当前结果的简单方案和相称验证。
 
 当前需求：`{context['requirement_id']} {context['title']}`
 唯一输出：`{trd_path}`
