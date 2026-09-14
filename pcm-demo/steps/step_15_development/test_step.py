@@ -77,6 +77,9 @@ class DevelopmentTests(unittest.TestCase):
             "# 活动 TRD\n\nTRD_CONTEXT_MARKER：必须验证账户锁定恢复。\n",
             encoding="utf-8",
         )
+        (root / "可信开发资源清单.md").write_text(
+            "RESOURCE_SECRET_MARKER=不得内联\n", encoding="utf-8"
+        )
         (run_dir / "steps").mkdir(parents=True)
         state = {
             "status": "success",
@@ -131,6 +134,8 @@ class DevelopmentTests(unittest.TestCase):
 
     @staticmethod
     def run_step(run_dir: Path, state: dict, **kwargs: object) -> dict:
+        resource_list = run_dir.parent / "可信开发资源清单.md"
+        kwargs.setdefault("resource_loader", lambda: (resource_list, "test"))
         return asyncio.run(run(run_dir, state, **kwargs))
 
     def test_prompt_completed_result_and_session_are_requirement_scoped(self) -> None:
@@ -159,8 +164,14 @@ class DevelopmentTests(unittest.TestCase):
             self.assertTrue(prompts[0].startswith("/dev-workflow\n"))
             self.assertIn("BR-001 账户访问", prompts[0])
             self.assertIn("docs/trd/BR-001.md", prompts[0])
+            self.assertIn("docs/requirements/项目准备清单.md", prompts[0])
+            self.assertIn(str(run_dir.parent / "可信开发资源清单.md"), prompts[0])
+            self.assertNotIn("RESOURCE_SECRET_MARKER", prompts[0])
             self.assertEqual(len(decision_prompts), 1)
             self.assertIn("docs/trd/BR-001.md", decision_prompts[0])
+            self.assertIn("docs/requirements/项目准备清单.md", decision_prompts[0])
+            self.assertIn(str(run_dir.parent / "可信开发资源清单.md"), decision_prompts[0])
+            self.assertNotIn("RESOURCE_SECRET_MARKER", decision_prompts[0])
             self.assertIn("TRD_CONTEXT_MARKER：必须验证账户锁定恢复。", decision_prompts[0])
             self.assertIn(development_step.DEVELOPMENT_DECISION_RULES, decision_prompts[0])
             self.assertNotIn("TRD_CONTEXT_MARKER", prompts[0])
@@ -191,6 +202,40 @@ class DevelopmentTests(unittest.TestCase):
                 (completed["step"], completed["current_step"], completed["current_node"]),
                 (16, 16, NEXT_NODE),
             )
+
+    def test_unavailable_resource_list_is_handed_off_without_preempting_agent(self) -> None:
+        for error in (ValueError("缺少配置"), OSError("不可读取")):
+            with self.subTest(error=type(error).__name__), tempfile.TemporaryDirectory() as directory:
+                run_dir, workspace, state = self.make_run(Path(directory))
+                prompts: list[str] = []
+                decision_prompts: list[str] = []
+
+                def unavailable_loader() -> tuple[Path, str]:
+                    raise error
+
+                async def agent(prompt: str, **_: object) -> ClaudeRunResult:
+                    prompts.append(prompt)
+                    return agent_result(workspace)
+
+                async def decide(*_: object, **kwargs: object) -> tuple[dict, int, str]:
+                    decision_prompts.append(str(kwargs["system_prompt"]))
+                    return decision("completed")
+
+                saved = self.run_step(
+                    run_dir,
+                    state,
+                    agent_runner=agent,
+                    decision_runner=decide,
+                    config_loader=lambda: object(),
+                    resource_loader=unavailable_loader,
+                )
+
+                self.assertEqual(saved["status"], "success")
+                self.assertEqual(len(prompts), 1)
+                self.assertIn("当前配置不可用", prompts[0])
+                self.assertIn('"available": false', decision_prompts[0])
+                self.assertNotIn(str(error), prompts[0])
+                self.assertNotIn(str(error), decision_prompts[0])
 
     def test_blocked_saves_session_and_keeps_current_anchor(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -229,6 +274,7 @@ class DevelopmentTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))
             calls: list[tuple[object, object, object, object]] = []
+            resource_loads = 0
             decisions = iter(
                 [
                     decision("continue", answer="请继续完成遗漏。"),
@@ -252,14 +298,21 @@ class DevelopmentTests(unittest.TestCase):
             async def decide(*_: object, **__: object) -> tuple[dict, int, str]:
                 return next(decisions)
 
+            def load_resources() -> tuple[Path, str]:
+                nonlocal resource_loads
+                resource_loads += 1
+                return run_dir.parent / "可信开发资源清单.md", "test"
+
             self.run_step(
                 run_dir,
                 state,
                 agent_runner=agent,
                 decision_runner=decide,
                 config_loader=lambda: object(),
+                resource_loader=load_resources,
             )
             profile = get_agent_profile("development")
+            self.assertEqual(resource_loads, 1)
             self.assertEqual(
                 calls,
                 [
@@ -340,11 +393,25 @@ class DevelopmentTests(unittest.TestCase):
             async def forbidden(*_: object, **__: object) -> ClaudeRunResult:
                 raise AssertionError("不应再次调用 Agent")
 
-            recovered = self.run_step(run_dir, interrupted, agent_runner=forbidden)
+            def forbidden_resource_loader() -> tuple[Path, str]:
+                raise AssertionError("成功恢复和幂等重跑不应加载可信开发资源清单")
+
+            recovered = self.run_step(
+                run_dir,
+                interrupted,
+                agent_runner=forbidden,
+                resource_loader=forbidden_resource_loader,
+            )
             self.assertEqual(recovered["status"], "success")
             advanced = read_state(run_dir)
             self.assertEqual(
-                self.run_step(run_dir, advanced, agent_runner=forbidden), recovered
+                self.run_step(
+                    run_dir,
+                    advanced,
+                    agent_runner=forbidden,
+                    resource_loader=forbidden_resource_loader,
+                ),
+                recovered,
             )
 
     def test_inconsistent_or_unusable_trd_fails_before_agent(self) -> None:

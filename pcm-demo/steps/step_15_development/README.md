@@ -2,15 +2,15 @@
 
 ## 输入与前置条件
 
-第 15 步只消费当前 state 的活动需求、活动 cycle 与产品工作区，以及当前需求的第 14 步 scoped `success` 和非空活动 TRD。Python 在现有普通文件与非空校验中读取活动 TRD 完整正文并放入负责人的 `<project_context>`；它不读取第 2/5/7/8/9/10/11/13 步文档，不重复加入 Backlog、产品定义、技术方案、工程架构或 UI/UX 文档，不执行 Git 命令，也没有 Git completion verifier。
+第 15 步只消费当前 state 的活动需求、活动 cycle 与产品工作区，以及当前需求的第 14 步 scoped `success` 和非空活动 TRD。Python 在现有普通文件与非空校验中读取活动 TRD 完整正文并放入负责人的 `<project_context>`；项目准备清单只传固定相对路径，不读取正文或增加第 5 步上游验证。可信开发资源清单只加载绝对路径和可读性事实，不读取正文或把秘密回注 prompt；配置缺失、路径不可用等明确失败只向 Agent 和负责人交接“不可用”，不前置终止开发。其它第 2/7/8/9/10/11/13 步文档不重复加入，也不执行 Git 命令或 Git completion verifier。
 
 ## Agent、session 与边界
 
-Claude Agent 在产品根以 requirement-scoped key `development_<requirement-id>` 复用公共 `run_agent_decision_loop` 调用；步骤只传不含需求 ID 的稳定任务标识 `development`，实际 model 与 effort 由 `model-policy.toml` 解析并按本次进程启动时加载的策略固定。初始 Agent prompt 只包含 `/dev-workflow`、需求 ID/标题和活动 TRD 路径；负责人的项目上下文包含同一路径和完整活动 TRD 正文。Agent 按活动 TRD 中适用的体验决定执行，并按需自行读取项目资料、代码、配置、测试和运行环境，不要求固定上游资料。稳定设计偏差可同步至活动 TRD。第 16～17 步只复用本步骤取得的 session，不要求沿用本步骤的 model 或 effort。
+Claude Agent 在产品根以 requirement-scoped key `development_<requirement-id>` 复用公共 `run_agent_decision_loop` 调用；步骤只传不含需求 ID 的稳定任务标识 `development`，实际 model 与 effort 由 `model-policy.toml` 解析并按本次进程启动时加载的策略固定。初始 Agent prompt 包含 `/dev-workflow`、需求 ID/标题、活动 TRD 路径、项目准备清单路径，以及可信开发资源清单路径或不可用事实；负责人的项目上下文获得相同路径，并继续包含活动 TRD 完整正文。Agent 按活动 TRD 中适用的体验决定执行，并按需自行读取项目资料、代码、配置、测试和运行环境，不要求固定上游资料。稳定设计偏差可同步至活动 TRD。第 16～17 步只复用本步骤取得的 session，不要求沿用本步骤的 model 或 effort。
 
 Agent 不得修改 `.claude/rules/`，也不得 stage、commit、创建或切换分支、merge 或 push。完成 verifier 为空；负责人 `AgentDecision.completed` 即为本步骤领域完成，`continue` 和 `blocked` 沿用公共循环语义。
 
-首次从 Agent 取得 session 后，程序立即同步 `requirement_cycle.development_session_id`。success result 写入：
+首次从 Agent 取得 session 后，程序立即同步 `requirement_cycle.development_session_id`。可信开发资源清单只在所有 success 恢复捷径之后、实际需要调用 Agent 时加载一次；同一决策循环的 `continue` 继续复用该事实和原 session。success result 写入：
 
 ```text
 steps/requirements/<requirement-id>/15.json

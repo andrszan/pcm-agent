@@ -13,7 +13,8 @@ from common.state import (
     write_requirement_step_result,
     write_state,
 )
-from config import LLMConfig
+from config import LLMConfig, load_dev_resource_list
+from steps.step_05_project_readiness.step import resource_list_facts
 
 STEP = 15
 NAME = "实现与验证"
@@ -23,6 +24,7 @@ PHASE = "phase_1_requirement_development"
 SKILL_NAME = "dev-workflow"
 MAX_DECISION_ROUNDS = 32
 DEVELOPMENT_MAX_TURNS = 9999
+READINESS_CHECKLIST = Path("docs/requirements/项目准备清单.md")
 
 DEVELOPMENT_DECISION_RULES = """以当前需求的交付结果判断，而非要求每一种验证方法或观察周期全部完成。信任已报告的实现与有效证据，不重新审计未提出问题的部分，也不因缺少逐项完成声明而补问。
 - completed：需求功能已实现，核心路径与适用关键风险已有可信证据，没有已知阻断缺陷或未决重大选择。允许保留非阻断的验证限制，并在 reason 中说明；不得仅因 Agent 自称“未完全验证”而拒绝完成。
@@ -213,11 +215,30 @@ def _context(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def initial_prompt(context: dict[str, Any]) -> str:
+def _development_resource_facts(resource_loader: Any) -> dict[str, Any]:
+    """只返回可信资源清单的位置与可读性事实。"""
+
+    try:
+        resource_list, _ = resource_loader()
+    except (OSError, ValueError):
+        return {"available": False}
+    try:
+        return resource_list_facts(resource_list)
+    except RuntimeError:
+        return {"available": False}
+
+
+def initial_prompt(context: dict[str, Any], resource_facts: dict[str, Any]) -> str:
+    if resource_facts.get("readable") is True:
+        resource_reference = f"@{resource_facts['path']}"
+    else:
+        resource_reference = "当前配置不可用。"
     return f"""/dev-workflow
 请实现并验证当前需求：`{context['requirement_id']} {context['title']}`。
 
 权威活动 TRD：@./{context['trd_path']}
+项目准备清单：@./{READINESS_CHECKLIST.as_posix()}
+可信开发资源清单：{resource_reference}
 项目资料、工程、代码、配置、测试和运行环境请按需读取。发现活动 TRD 的具体工程或验收方法缺少依据且成本显著时，保留正式结果并按影响同步校正，不机械执行或静默少做。保留待提交变更；不得修改 `.claude/rules/`，不得 stage/commit、创建或切换分支、merge 或 push。"""
 
 
@@ -328,6 +349,7 @@ async def run(
     agent_runner=run_claude,
     decision_runner=request_decision,
     config_loader=LLMConfig.load,
+    resource_loader=load_dev_resource_list,
     resume_message: ResumeMessage | None = None,
 ) -> dict[str, Any]:
     context = _context(run_dir, state)
@@ -350,6 +372,8 @@ async def run(
             pass
         else:
             return _advance(run_dir, state, complete)
+
+    resource_facts = _development_resource_facts(resource_loader)
 
     if state.get("status") != "blocked":
         state.update(
@@ -393,6 +417,8 @@ async def run(
                     "path": context["trd_path"],
                     "content": context["trd_content"],
                 },
+                "项目准备清单": {"path": READINESS_CHECKLIST.as_posix()},
+                "可信开发资源清单": resource_facts,
             },
         ),
     )
@@ -401,7 +427,7 @@ async def run(
         state,
         context["workspace"],
         decision_spec,
-        initial_prompt(context),
+        initial_prompt(context, resource_facts),
         lambda: None,
         agent_runner=synchronized_agent_runner,
         decision_runner=decision_runner,
