@@ -34,7 +34,7 @@ test -e .env || cp .env.example .env
 
 只在首次配置且 `.env` 不存在时复制示例，避免覆盖已有本地凭据。配置入口：
 
-- [`.env.example`](.env.example)：AI-compatible、Agent 网关与认证、自动压缩窗口、统一代理、工作区、模板和开发资源路径；实际 `.env` 必须保持 Git 忽略。
+- [`.env.example`](.env.example)：AI-compatible、Agent 网关与认证、自动压缩窗口、Claude Code 单次调用重试次数、统一代理、工作区、模板和开发资源路径；实际 `.env` 必须保持 Git 忽略。
 - [`model-policy.toml`](model-policy.toml)：Claude Agent 各任务使用的真实 `model` 与 `effort`。模型策略不再从 `.env` 的低、中、高变量读取。
 - 产品工作区中的 `.env`：由流程按项目合同维护，不与 `pcm-demo/.env` 混用。
 
@@ -78,7 +78,7 @@ uv run python run_step.py --step <1-18> --run-id <run-id>
 
 第 1 步创建新运行时需提供 `--product-draft`，并可同时提供 `--initial-resources`。完整流程使用 `run_all.py`；单步入口用于定向开发、诊断和恢复，并遵循相同锁、状态和重试合同。
 
-只有 Claude Agent SDK 执行通道明确请求重试时，单步入口才自动恢复当前步骤，不使用网络探针。公共 runner 固定设置 `CLAUDE_CODE_MAX_RETRIES=15`、`CLAUDE_CODE_RETRY_WATCHDOG=0`，覆盖继承环境；不调整单次 API 请求超时，不需要新增 `.env` 配置。底层重试耗尽或遇到无法在原请求内恢复的错误后，单步入口依次等待 30、60、120、300 秒，此后每次等待 300 秒。
+只有 Claude Agent SDK 执行通道明确请求重试时，单步入口才自动恢复当前步骤，不使用网络探针。公共 runner 从 `.env` 的 `CLAUDE_CODE_MAX_RETRIES` 读取 Claude Code 单次调用最大重试次数，默认 10，可按需改为 15；设为 0 可禁用底层重试。进程环境优先于 `.env`，runner 将最终值和固定的 `CLAUDE_CODE_RETRY_WATCHDOG=0` 显式传入 SDK，覆盖子进程继承值；不调整单次 API 请求超时。底层重试耗尽或遇到无法在原请求内恢复的错误后，单步入口依次等待 30、60、120、300 秒，此后每次等待 300 秒。
 
 恢复窗口从外层首次收到可恢复失败开始计时，最多 6 小时；等待与失败尝试的执行时间均计入，后续失败不重置起点。到期不再发起新尝试，但不打断已启动的 Agent，成功仍正常接受；既有单次 Agent 调用 10 小时上限不变。因此进程实际运行时间可能超过 6 小时。日志显示重试序号、窗口已用时间和下一次等待；窗口耗尽后保存最终失败并停止编排。窗口不持久化，进程退出后人工 `--resume` 开始新的恢复窗口。
 

@@ -86,13 +86,14 @@ class AgentProxyTest(unittest.TestCase):
         with patch.dict(os.environ, {"https_proxy": "http://inherited.invalid"}, clear=True):
             env = filtered_env(config, "test-model")
         self.assertEqual(env["https_proxy"], "http://inherited.invalid")
+        self.assertEqual(env["CLAUDE_CODE_MAX_RETRIES"], "10")
 
     def test_all_proxy_is_not_converted_to_http_proxy(self):
         _, env = self.load(environment={"ALL_PROXY": "socks5://socks.invalid:1080"})
         self.assertEqual(env["ALL_PROXY"], "socks5://socks.invalid:1080")
         self.assertNotIn("HTTPS_PROXY", env)
 
-    def test_agent_retry_environment_overrides_parent_values(self):
+    def test_process_retry_configuration_reaches_sdk_and_watchdog_is_fixed(self):
         _, env = self.load(
             environment={
                 "CLAUDE_CODE_MAX_RETRIES": "2",
@@ -100,9 +101,17 @@ class AgentProxyTest(unittest.TestCase):
                 "API_TIMEOUT_MS": "98765",
             }
         )
-        self.assertEqual(env["CLAUDE_CODE_MAX_RETRIES"], "15")
+        self.assertEqual(env["CLAUDE_CODE_MAX_RETRIES"], "2")
         self.assertEqual(env["CLAUDE_CODE_RETRY_WATCHDOG"], "0")
         self.assertEqual(env["API_TIMEOUT_MS"], "98765")
+
+    def test_configured_agent_retry_values_reach_sdk_environment(self):
+        for value in ("15", "0"):
+            with self.subTest(value=value):
+                config, env = self.load(f"CLAUDE_CODE_MAX_RETRIES={value}\n")
+                self.assertEqual(config.max_retries, int(value))
+                self.assertEqual(env["CLAUDE_CODE_MAX_RETRIES"], value)
+                self.assertEqual(env["CLAUDE_CODE_RETRY_WATCHDOG"], "0")
 
     def test_proxy_credentials_are_not_in_repr_and_are_redacted(self):
         config, env = self.load("HTTPS_PROXY=http://user:proxy-secret@proxy.invalid:7890\n")

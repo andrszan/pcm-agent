@@ -105,7 +105,7 @@ def filtered_env(config: AgentConfig, model: str) -> dict[str, str]:
             "PCM_AGENT_WORKSPACE_ENV_FILE": "",
             "PCM_DEV_RESOURCE_LIST": "",
             "CLAUDE_CODE_AUTO_COMPACT_WINDOW": str(config.auto_compact_window),
-            "CLAUDE_CODE_MAX_RETRIES": "15",
+            "CLAUDE_CODE_MAX_RETRIES": str(config.max_retries),
             "CLAUDE_CODE_RETRY_WATCHDOG": "0",
             "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS": "0",
         }

@@ -72,6 +72,57 @@ class ConfigTest(unittest.TestCase):
         config = AgentConfig("http://localhost:8317", SecretStr("agent-secret"))
 
         self.assertEqual(config.auto_compact_window, 500000)
+        self.assertEqual(config.max_retries, 10)
+
+    def test_loads_configured_native_max_retries(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {}, clear=True):
+            env_file = self.write_env(
+                directory,
+                "\n".join(
+                    [
+                        "PCM_AGENT_BASE_URL=http://localhost:8317",
+                        "PCM_AGENT_AUTH_TOKEN=agent-secret",
+                        "CLAUDE_CODE_MAX_RETRIES=15",
+                    ]
+                ),
+            )
+            config = AgentConfig.load(env_file)
+
+        self.assertEqual(config.max_retries, 15)
+
+    def test_allows_zero_native_max_retries(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {}, clear=True):
+            env_file = self.write_env(
+                directory,
+                "\n".join(
+                    [
+                        "PCM_AGENT_BASE_URL=http://localhost:8317",
+                        "PCM_AGENT_AUTH_TOKEN=agent-secret",
+                        "CLAUDE_CODE_MAX_RETRIES=0",
+                    ]
+                ),
+            )
+            config = AgentConfig.load(env_file)
+
+        self.assertEqual(config.max_retries, 0)
+
+    def test_rejects_invalid_native_max_retries(self) -> None:
+        for value in ("-1", "not-an-integer"):
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as directory, patch.dict(
+                os.environ, {}, clear=True
+            ):
+                env_file = self.write_env(
+                    directory,
+                    "\n".join(
+                        [
+                            "PCM_AGENT_BASE_URL=http://localhost:8317",
+                            "PCM_AGENT_AUTH_TOKEN=agent-secret",
+                            f"CLAUDE_CODE_MAX_RETRIES={value}",
+                        ]
+                    ),
+                )
+                with self.assertRaisesRegex(ValueError, "CLAUDE_CODE_MAX_RETRIES"):
+                    AgentConfig.load(env_file)
 
     def test_process_environment_overrides_agent_env_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -82,18 +133,24 @@ class ConfigTest(unittest.TestCase):
                         "PCM_AGENT_BASE_URL=http://from-file",
                         "PCM_AGENT_AUTH_TOKEN=file-secret",
                         "CLAUDE_CODE_AUTO_COMPACT_WINDOW=400001",
+                        "CLAUDE_CODE_MAX_RETRIES=6",
                     ]
                 ),
             )
             with patch.dict(
                 os.environ,
-                {"PCM_AGENT_AUTH_TOKEN": "environment-secret", "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "500001"},
+                {
+                    "PCM_AGENT_AUTH_TOKEN": "environment-secret",
+                    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "500001",
+                    "CLAUDE_CODE_MAX_RETRIES": "12",
+                },
                 clear=True,
             ):
                 config = AgentConfig.load(env_file)
 
         self.assertEqual(config.auth_token.get_secret_value(), "environment-secret")
         self.assertEqual(config.auto_compact_window, 500001)
+        self.assertEqual(config.max_retries, 12)
 
     def test_reports_all_missing_agent_configuration(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -10,6 +10,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 DEFAULT_ENV_FILE = Path(__file__).with_name(".env")
 CAPABILITY_REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CLAUDE_CODE_AUTO_COMPACT_WINDOW = 500000
+DEFAULT_CLAUDE_CODE_MAX_RETRIES = 10
 
 
 class Settings(BaseSettings):
@@ -25,6 +26,11 @@ class Settings(BaseSettings):
         default=DEFAULT_CLAUDE_CODE_AUTO_COMPACT_WINDOW,
         validation_alias="CLAUDE_CODE_AUTO_COMPACT_WINDOW",
         ge=1,
+    )
+    claude_code_max_retries: int = Field(
+        default=DEFAULT_CLAUDE_CODE_MAX_RETRIES,
+        validation_alias="CLAUDE_CODE_MAX_RETRIES",
+        ge=0,
     )
     pcm_workspace_root: Path | None = Field(default=None, validation_alias="PCM_WORKSPACE_ROOT")
     pcm_max_concurrent_projects: int = Field(
@@ -84,6 +90,7 @@ class AgentConfig:
         base_url: str,
         auth_token: SecretStr,
         auto_compact_window: int = DEFAULT_CLAUDE_CODE_AUTO_COMPACT_WINDOW,
+        max_retries: int = DEFAULT_CLAUDE_CODE_MAX_RETRIES,
         *,
         proxy_settings: AgentProxySettings | None = None,
     ) -> None:
@@ -93,15 +100,22 @@ class AgentConfig:
             or auto_compact_window <= 0
         ):
             raise ValueError("CLAUDE_CODE_AUTO_COMPACT_WINDOW 必须是正整数")
+        if (
+            not isinstance(max_retries, int)
+            or isinstance(max_retries, bool)
+            or max_retries < 0
+        ):
+            raise ValueError("CLAUDE_CODE_MAX_RETRIES 必须是非负整数")
         self.base_url = base_url.rstrip("/")
         self.auth_token = auth_token
         self.auto_compact_window = auto_compact_window
+        self.max_retries = max_retries
         self.proxy_settings = proxy_settings
 
     def __repr__(self) -> str:
         return (
             f"AgentConfig(base_url={self.base_url!r}, auth_token=SecretStr('**********'), "
-            f"auto_compact_window={self.auto_compact_window!r})"
+            f"auto_compact_window={self.auto_compact_window!r}, max_retries={self.max_retries!r})"
         )
 
     @classmethod
@@ -121,6 +135,7 @@ class AgentConfig:
             base_url,
             settings.pcm_agent_auth_token,
             settings.claude_code_auto_compact_window,
+            settings.claude_code_max_retries,
             proxy_settings=AgentProxySettings(
                 _env_file=env_file if env_file is not None else DEFAULT_ENV_FILE
             ),
