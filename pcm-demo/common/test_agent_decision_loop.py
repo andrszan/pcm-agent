@@ -2290,7 +2290,23 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
                     )
 
                 self.assertFalse(result.context_window_exceeded)
-                self.assertIsNone(result.assistant_error)
+                expected_assistant_error = next(
+                    (
+                        item.error
+                        for item in reversed(stream)
+                        if isinstance(item, AssistantMessage)
+                        and item.model == "<synthetic>"
+                        and item.parent_tool_use_id is None
+                        and item.error is not None
+                        and any(
+                            isinstance(block, TextBlock)
+                            and block.text.strip().startswith("API Error:")
+                            for block in item.content
+                        )
+                    ),
+                    None,
+                )
+                self.assertEqual(result.assistant_error, expected_assistant_error)
                 expected_status = next((item.api_error_status for item in stream if isinstance(item, ResultMessage)), None)
                 self.assertEqual(result.api_error_status, expected_status)
                 self.assertTrue(result.retry_requested)
@@ -2345,8 +2361,22 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
                     await run_claude("测试提示", cwd=Path.cwd(), model=model, effort=effort)
             mocked.assert_not_called()
 
-    async def test_all_api_statuses_and_api_terminal_reason_request_retry(self) -> None:
-        for status in (400, 403, 500, None):
+    async def test_api_status_retry_classification(self) -> None:
+        for status, expected in (
+            (408, True),
+            (409, True),
+            (429, True),
+            (500, True),
+            (503, True),
+            (599, True),
+            (400, False),
+            (401, False),
+            (403, False),
+            (404, False),
+            (413, False),
+            (422, False),
+            (None, True),
+        ):
             with self.subTest(status=status), tempfile.TemporaryDirectory() as directory:
                 workspace = Path(directory)
                 write_json(
@@ -2380,7 +2410,58 @@ class ClaudeAgentTest(unittest.IsolatedAsyncioTestCase):
                         resume_session_id="session-1",
                     )
 
-                self.assertTrue(result.retry_requested)
+                self.assertEqual(result.retry_requested, expected)
+
+    async def test_structured_assistant_errors_exclude_unrecoverable_failures(self) -> None:
+        for assistant_error, status, expected in (
+            ("authentication_failed", None, False),
+            ("authentication_failed", 503, False),
+            ("invalid_request", None, False),
+            ("invalid_request", 500, False),
+            ("invalid_request", 503, False),
+            ("billing_error", None, False),
+            ("billing_error", 429, False),
+            ("auth_unavailable", 503, True),
+        ):
+            with (
+                self.subTest(
+                    assistant_error=assistant_error, status=status
+                ),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                workspace = Path(directory)
+                write_json(
+                    workspace / "plugins-lock.json",
+                    {"version": 1, "plugins": []},
+                )
+
+                async def fake_query(*_args: object, **_kwargs: object):
+                    yield AssistantMessage(
+                        content=[TextBlock("API Error: provider failure")],
+                        model="<synthetic>",
+                        error=assistant_error,
+                    )
+                    yield ResultMessage(
+                        subtype="success",
+                        duration_ms=1,
+                        duration_api_ms=1,
+                        is_error=True,
+                        num_turns=1,
+                        session_id="session-1",
+                        api_error_status=status,
+                        terminal_reason="api_error",
+                    )
+
+                with patch("common.claude_agent.query", new=fake_query):
+                    result = await run_claude(
+                        "测试提示",
+                        model="medium-model",
+                        effort="high",
+                        cwd=workspace,
+                    )
+
+                self.assertEqual(result.assistant_error, assistant_error)
+                self.assertEqual(result.retry_requested, expected)
 
     async def test_blocking_limit_requests_retry(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

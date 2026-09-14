@@ -67,7 +67,14 @@ PCM 步骤可以顺序调用多个 Skill，但不改变 Skill 自身职责。例
 | `blocked` | 缺少模型和当前环境无法取得的不可替代外部资源 | 保存进度并停止，等待外部资源补齐 |
 | `failed` | 程序、SDK、命令或执行发生错误 | 保存错误并停止，修复后重试当前步骤 |
 
-不单独建设复杂的回退、补偿或状态转移模型。步骤内部可以循环调用、修正和重新验证，但对外只暴露上述结果。`run_step.py` 只对本次失败显式携带的运行时重试请求按 10 秒、30 秒间隔重新运行当前步骤两次；当前仅 Claude Agent SDK 实际执行通道故障设置该请求，任意 API 状态码、明确 `api_error` 终止、连接失败和未取得 Result 的 CLI 进程失败均可重试。每次重试重新读取最新 state、result、session 和工作区事实；重试请求不持久化，第三次仍请求重试时对外返回 `failed` 对应退出码 `1`。业务 `blocked`、普通 `failed`、AI-compatible 裁决失败、本地合同错误、CLI 参数错误、未实现步骤和主动取消不进入自动重试。审计 Skill 回复中的“已完成”“部分完成且有覆盖缺口”或“不适用”是审计内容，不会成为外层第四种 `status`。
+不单独建设复杂的回退、补偿或状态转移模型。步骤内部可以循环调用、修正和重新验证，但对外只暴露上述结果。自动恢复只处理 Claude Agent SDK 执行通道明确携带的运行时重试请求，不使用网络探针，也不在 `run_all` 或进程主管增加重启循环。
+
+- **底层请求重试**：公共 runner 首次调用与 resume 均显式设置 `CLAUDE_CODE_MAX_RETRIES=15`、`CLAUDE_CODE_RETRY_WATCHDOG=0`，覆盖继承环境；复用 Claude Code 的有限退避，不调整 `API_TIMEOUT_MS`。当前 Agent SDK 0.2.152 携带 Claude Code 2.1.259，普通模式默认重试 10 次、上限 15 次；15 次重试最多形成 16 次请求尝试，不代表所有流式中断都会重放 15 次。
+- **步骤恢复窗口**：`run_step.py` 从外层首次收到可恢复失败时开始，以单调时钟计算 6 小时窗口；依次等待 30、60、120、300 秒，此后保持 300 秒，再重入当前步骤。等待与失败尝试的执行时间均计入窗口，后续失败不重置起点。睡眠不超过剩余窗口，睡眠结束后再次检查期限；到期不再发起尝试，对外返回 `failed` 对应退出码 `1`。已启动的调用不因窗口到期而中断，成功仍正常接受；既有单次 Agent 调用 10 小时上限不变。因此 6 小时是发起恢复尝试的期限，不是进程硬退出时间。
+- **错误范围**：HTTP `408/409/429`、临时 `5xx`、已识别的连接故障、未取得 Result 的可恢复 CLI 进程失败，以及无状态码且无不可恢复证据的明确 `api_error/blocking_limit` 可请求恢复。其它明确 `4xx`、上下文超限及明确不可恢复的认证、参数或计费错误不长时间重试；优先使用结构化状态与错误类型，网关 `503 auth_unavailable` 不因名称含 `auth` 被误判为永久认证失败。业务 `blocked`、普通 `failed`、AI-compatible 裁决失败、本地合同错误、CLI 参数错误、CLI 缺失、未实现步骤、主动取消和既有整体超时不进入自动重试。
+- **现场与可见性**：每次恢复重新读取最新 state、result、session 和工作区事实，保留现有锁、消息消费与会话恢复语义。重试意图与窗口只保留在当前进程内，不新增持久化字段；进程退出后人工 `--resume` 获得新的恢复窗口。日志说明重试序号、恢复窗口已用时间、下一次等待及窗口耗尽原因，不新增第四种状态。
+
+审计 Skill 回复中的“已完成”“部分完成且有覆盖缺口”或“不适用”是审计内容，不会成为外层第四种 `status`。
 
 ### 4. AI 负责全部可完成的语义决策，程序负责确定性操作
 
@@ -163,7 +170,7 @@ Demo 和默认 PCM 流程只进行本地文件修改、测试、构建、服务�
 
 ## 四、运行上下文与恢复
 
-第 17、18 步的当前合同与验证入口见各步骤说明。本轮 Agent 模型分级完成后，PCM Demo 当前工作树全量 367 项 `unittest`、`compileall` 与 `git diff --check` 通过（全量耗时 49.802 秒），中模型 + `high` effort 的公共 runner 首轮与同 session resume 真实成功；其余第 17、18 步既有事实保持不变。当前工作树还包含其它公共循环/CLI 的未提交修改，故该全量结果不能全部归因于第 9 步。`run_step.py` 只对 Claude Agent SDK 执行通道故障产生的瞬时请求有界重跑两次；任意 API 状态均可请求重试，业务 `blocked`、普通失败、AI-compatible 裁决失败、本地合同错误和取消不重试，且请求不写入 state/result/diagnostic/conversation。公共错误诊断保留经精确凭据遮盖的 Claude Agent SDK `errors`、异常链和 traceback 位置，以及 AI-compatible provider 的 code/type/message/request ID/HTTP status；完整有界快照写入 Git 忽略的 `logs/`，state/result/stderr 保存具体安全原因和引用。第 13 步直接消费当前需求注册表；第 17 步通过公共 Agent 决策循环运行 `commit-changes`；第 18 步只使用确定性 Python/Git。真实 `step01-mendmark` 已连续完成 BR-001 与 BR-002 两个需求循环。BR-002 在旧 direct-run 第 17 步期间只保存了 Claude session，没有 decision conversation；该历史不能补造，现行合同保证后续需求保存完整 conversation。root/frontend/backend 的 local main tips 分别为 `2f39fbe7e26d6e4905142925ae149ba83d9e70fe`、`f290ff85ed779a1f100eeded7eedfcfb0376b826`、`204a7a6b48c43a80f573dc9e70acedddb59bbe4f`，三仓 clean、`req/br-002` 已删除且未 push。
+第 17、18 步的当前合同与验证入口见各步骤说明。本轮 Agent 模型分级完成后，PCM Demo 当前工作树全量 367 项 `unittest`、`compileall` 与 `git diff --check` 通过（全量耗时 49.802 秒），中模型 + `high` effort 的公共 runner 首轮与同 session resume 真实成功；其余第 17、18 步既有事实保持不变。当前工作树还包含其它公共循环/CLI 的未提交修改，故该全量结果不能全部归因于第 9 步。`run_step.py` 的当前可恢复错误范围、有限底层重试与 6 小时步骤恢复窗口统一遵循第 3 节结果合同；重试意图不写入 state/result/diagnostic/conversation。公共错误诊断保留经精确凭据遮盖的 Claude Agent SDK `errors`、异常链和 traceback 位置，以及 AI-compatible provider 的 code/type/message/request ID/HTTP status；完整有界快照写入 Git 忽略的 `logs/`，state/result/stderr 保存具体安全原因和引用。第 13 步直接消费当前需求注册表；第 17 步通过公共 Agent 决策循环运行 `commit-changes`；第 18 步只使用确定性 Python/Git。真实 `step01-mendmark` 已连续完成 BR-001 与 BR-002 两个需求循环。BR-002 在旧 direct-run 第 17 步期间只保存了 Claude session，没有 decision conversation；该历史不能补造，现行合同保证后续需求保存完整 conversation。root/frontend/backend 的 local main tips 分别为 `2f39fbe7e26d6e4905142925ae149ba83d9e70fe`、`f290ff85ed779a1f100eeded7eedfcfb0376b826`、`204a7a6b48c43a80f573dc9e70acedddb59bbe4f`，三仓 clean、`req/br-002` 已删除且未 push。
 
 本轮第 9、14、15 步工程架构约束传递修正已完成：第 9 步区分稳定 owner、目录/包/模块边界与边界内部文件粒度，并对前端巨型路由/页面或通用收纳、后端同名平铺文件及跨所有者穿透给出一致合同；第 14 步按每个受影响交付单元把适用工程归属和架构 delta 写入活动 TRD；第 15 步负责人补齐架构约束/模块归属到改动、依赖、diff/导入/调用证据和实际结果的完成映射。第 9/14/15 步本体 35 项、公共循环与三步 CLI 相关回归 91 项、当前工作树全量 367 项 `unittest`（49.013 秒）通过；完整 `compileall`、修改 Python 文件 IDE diagnostics、两个 eval JSON 解析和 `git diff --check` 通过。第 14/15 步负责人上下文仍分别只增加完整 Backlog 与活动 TRD，没有新增工程架构全文注入、Markdown 解析、JSON 架构 DSL、Git verifier、公共循环或状态字段；第 14/15 步真实集成留给 BR-003 自然验证，第 9 步等待下一 fresh 项目。
 
@@ -652,7 +659,7 @@ def run_all():
         return stopped.result
 ```
 
-所有节点统一返回 `success`、`blocked` 或 `failed`。单步入口只对显式的运行时重试请求有界重跑当前步骤两次；完整编排复用同一瞬时信号语义，而不把重试意图写入三态结果或持久化 state。当前只有 Claude Agent SDK 执行通道故障设置该请求；业务 `blocked`、普通 `failed`、AI-compatible 裁决失败、本地合同错误和取消直接停止。第三次仍请求重试时，`require_success()` 原子保留最终 `failed` 并停止，不继续候选分流、Backlog 入池、需求开发或回归；重试不放宽任何节点完成条件。
+所有节点统一返回 `success`、`blocked` 或 `failed`。单步入口按第 3 节结果合同，只对 Claude Agent SDK 执行通道的显式可恢复失败在 6 小时窗口内退避重入；完整编排等待单步的最终结果，不叠加第二层重试，也不把重试意图或窗口写入持久化 state。业务 `blocked`、普通 `failed`、AI-compatible 裁决失败、本地合同错误和取消直接停止。恢复窗口耗尽时保留最终 `failed` 并停止，不继续候选分流、Backlog 入池、需求开发或回归；重试不放宽任何节点完成条件。
 
 项目最终结束的最低条件是阶段一和阶段二均完成：不存在仍应开发的正式需求；所有纳入范围的需求状态与代码事实一致；`applicable_repositories` 中各仓库均在预期 `main` 且工作树清楚；适用的最终安装、构建、测试、启动和真实联调通过；关键用户流程浏览器验收及阶段二最终完整审计通过；适用数据基线与当前版本一致，接手者能按说明单入口初始化、逐角色登录并完成主要任务，明确重置可恢复完整起点，所需文件与对象存储共同可用，审计修复已同步受影响的恢复证据；最终结果和未解决限制已汇总。项目最终检查属于总流程收口，不新增复杂业务步骤编号。
 
@@ -677,7 +684,7 @@ python run_all.py --run-id <run-id> --from-node phase_2:audit
 
 ### 步骤耗时观测
 
-Demo 将步骤生命周期与 Claude Code 调用计时分开：`agent_elapsed_seconds` 累计各次主调用的已知执行区间，不包含调用外的负责人决策、Python 核验、10/30 秒退避和停机等待；`wall_elapsed_seconds` 持久化步骤首次开始到首次成功结束的自然时间跨度，包含这些等待。第 1～12 步按项目、第 13～18 步按需求 ID 和步骤编号区分；每次真实调用、continue、修复和恢复均保留独立区间，成功复用不新增虚假区间或重置首次完成数据。
+Demo 将步骤生命周期与 Claude Code 调用计时分开：`agent_elapsed_seconds` 累计各次主调用的已知执行区间，不包含调用外的负责人决策、Python 核验、步骤恢复退避和停机等待；`wall_elapsed_seconds` 持久化步骤首次开始到首次成功结束的自然时间跨度，包含这些等待。第 1～12 步按项目、第 13～18 步按需求 ID 和步骤编号区分；每次真实调用、continue、修复和恢复均保留独立区间，成功复用不新增虚假区间或重置首次完成数据。
 
 计时独立保存在 `runs/<run-id>/timings.json`，程序只读取和写入 `schema_version: 2`，时间戳统一北京时间 `+08:00`。新增 Agent 执行记录保存 `task/model/effort` 与原始 `usage/model_usage/total_cost_usd`；实时结果回调和最终返回更新同一记录，不重复计数。AI-compatible 的主请求与 JSON 修复请求分别写入同一步骤的 `ai_executions`，不计入 Agent 执行时间。当前单输入 `query()` 每次独立计量，`model_usage` 包含子代理、`usage` 只覆盖主循环，不重复相加；Responses 的缓存和推理 token 属于明细，不再加到总数上。缺失或中断未取得的用量保持未知，不根据当前配置补造历史。费用是 SDK 估算，不作为订阅扣费事实。可观测中断记录时刻，不可捕获退出保持未知；缺口仅以步骤级提示说明，不重复业务适用性与复用布尔。程序不转换旧计时文件，不自动迁移、归档或删除旧数据；不在当前 run 计时读写路径上的旧数据原样保留。若旧格式 `timings.json` 实际阻碍所需新版记录，先确认没有旧进程正在写入该 run，再只移除这一份冲突文件，不批量清理，也不动 `state.json`、步骤 result 或 `conversations/`。计时不可用只警告，不改变业务三态、prompt、负责人裁决、恢复和退出码。字段定义与存储策略见 [计时记录与字段说明](../pcm-demo/docs/timing.md)，不新增业务节点或外部监控服务。
 

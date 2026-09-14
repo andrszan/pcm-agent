@@ -18,6 +18,22 @@ from common.agent_decision_loop import ResumeMessage
 _REAL_PARSE_ARGS = run_step.parse_args
 
 
+class FakeClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.sleeps: list[float] = []
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
 class RunStepRetryTests(unittest.TestCase):
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory()
@@ -85,35 +101,106 @@ class RunStepRetryTests(unittest.TestCase):
         runner.assert_called_once_with(ANY, ANY, ANY)
         sleeper.assert_not_called()
 
-    def test_retry_requested_retries_twice(self) -> None:
+    def test_retry_requested_continues_beyond_two_failures_and_caps_delay(self) -> None:
         runner = Mock(
-            side_effect=[
-                run_step._RETRY_REQUESTED_EXIT_CODE,
-                run_step._RETRY_REQUESTED_EXIT_CODE,
-                0,
-            ]
+            side_effect=[run_step._RETRY_REQUESTED_EXIT_CODE] * 6 + [0]
         )
-        sleeper = Mock()
+        clock = FakeClock()
         stderr = io.StringIO()
         with (
             patch.object(run_step, "_execute", runner),
-            patch.object(run_step.time, "sleep", sleeper),
+            patch.object(run_step.time, "monotonic", clock.monotonic),
+            patch.object(run_step.time, "sleep", clock.sleep),
             contextlib.redirect_stderr(stderr),
         ):
             self.assertEqual(run_step.retrying_main(), 0)
-        self.assertEqual(runner.call_count, 3)
-        self.assertEqual([call.args[0] for call in sleeper.call_args_list], [10, 30])
-        self.assertIn("10 秒后重试", stderr.getvalue())
-        self.assertIn("30 秒后重试", stderr.getvalue())
+        self.assertEqual(runner.call_count, 7)
+        self.assertEqual(clock.sleeps, [30, 60, 120, 300, 300, 300])
+        self.assertIn("第 6 次重试", stderr.getvalue())
+        self.assertIn("已等待 810.0 秒", stderr.getvalue())
+        self.assertIn("下次等待 300.0 秒", stderr.getvalue())
 
-    def test_retry_exhaustion_returns_public_failure(self) -> None:
+    def test_retry_window_clips_final_sleep_and_returns_public_failure(self) -> None:
         runner = Mock(return_value=run_step._RETRY_REQUESTED_EXIT_CODE)
+        clock = FakeClock()
+        stderr = io.StringIO()
         with (
             patch.object(run_step, "_execute", runner),
-            patch.object(run_step.time, "sleep"),
+            patch.object(run_step.time, "monotonic", clock.monotonic),
+            patch.object(run_step.time, "sleep", clock.sleep),
+            contextlib.redirect_stderr(stderr),
         ):
             self.assertEqual(run_step.retrying_main(), 1)
-        self.assertEqual(runner.call_count, 3)
+        self.assertGreater(runner.call_count, 3)
+        self.assertEqual(sum(clock.sleeps), run_step.STEP_RETRY_WINDOW_SECONDS)
+        self.assertEqual(clock.sleeps[-1], 90)
+        self.assertIn("已到 6 小时期限", stderr.getvalue())
+        self.assertIn("不再发起新尝试", stderr.getvalue())
+
+    def test_retry_window_includes_attempt_time_and_does_not_reset_after_failure(self) -> None:
+        clock = FakeClock()
+        calls = 0
+
+        def execute(*_args):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                clock.advance(40)
+            return run_step._RETRY_REQUESTED_EXIT_CODE
+
+        with (
+            patch.object(run_step, "STEP_RETRY_DELAYS", (10, 20)),
+            patch.object(run_step, "STEP_RETRY_WINDOW_SECONDS", 60),
+            patch.object(run_step, "_execute", side_effect=execute),
+            patch.object(run_step.time, "monotonic", clock.monotonic),
+            patch.object(run_step.time, "sleep", clock.sleep),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(run_step.retrying_main(), 1)
+
+        self.assertEqual(calls, 2)
+        self.assertEqual(clock.sleeps, [10, 10])
+        self.assertEqual(clock.now, 60)
+
+    def test_retry_started_before_deadline_may_finish_successfully_after_deadline(self) -> None:
+        clock = FakeClock()
+        calls = 0
+
+        def execute(*_args):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                clock.advance(91)
+                return 0
+            return run_step._RETRY_REQUESTED_EXIT_CODE
+
+        with (
+            patch.object(run_step, "STEP_RETRY_DELAYS", (10,)),
+            patch.object(run_step, "STEP_RETRY_WINDOW_SECONDS", 100),
+            patch.object(run_step, "_execute", side_effect=execute),
+            patch.object(run_step.time, "monotonic", clock.monotonic),
+            patch.object(run_step.time, "sleep", clock.sleep),
+        ):
+            self.assertEqual(run_step.retrying_main(), 0)
+
+        self.assertEqual(calls, 2)
+        self.assertEqual(clock.now, 101)
+
+    def test_reaching_deadline_after_sleep_does_not_start_another_attempt(self) -> None:
+        runner = Mock(return_value=run_step._RETRY_REQUESTED_EXIT_CODE)
+        clock = FakeClock()
+        with (
+            patch.object(run_step, "STEP_RETRY_DELAYS", (30,)),
+            patch.object(run_step, "STEP_RETRY_WINDOW_SECONDS", 20),
+            patch.object(run_step, "_execute", runner),
+            patch.object(run_step.time, "monotonic", clock.monotonic),
+            patch.object(run_step.time, "sleep", clock.sleep),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(run_step.retrying_main(), 1)
+
+        runner.assert_called_once_with(ANY, ANY, ANY)
+        self.assertEqual(clock.sleeps, [20])
 
     def test_regular_failure_does_not_retry(self) -> None:
         runner = Mock(return_value=1)

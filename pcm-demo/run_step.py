@@ -165,7 +165,8 @@ from steps.step_18_merge.step import (
 
 DEMO_ROOT = Path(__file__).resolve().parent
 CREATE_WORKSPACE_NODE = "project:01_create_workspace"
-STEP_RETRY_DELAYS = (10, 30)
+STEP_RETRY_DELAYS = (30, 60, 120, 300)
+STEP_RETRY_WINDOW_SECONDS = 6 * 60 * 60
 _RETRY_REQUESTED_EXIT_CODE = 3
 
 
@@ -1841,14 +1842,53 @@ def _retry_locked(args: argparse.Namespace, locks: ExecutionLocks) -> int:
     with timing.activate():
         try:
             exit_code = _execute(args, locks, timing)
-            for delay in STEP_RETRY_DELAYS:
-                if exit_code != _RETRY_REQUESTED_EXIT_CODE:
+            retry_started: float | None = None
+            retry_count = 0
+            waited_seconds = 0.0
+            while exit_code == _RETRY_REQUESTED_EXIT_CODE:
+                now = time.monotonic()
+                if retry_started is None:
+                    retry_started = now
+                elapsed = now - retry_started
+                remaining = STEP_RETRY_WINDOW_SECONDS - elapsed
+                if remaining <= 0:
+                    print(
+                        "Claude Agent SDK 自动重试已到 6 小时期限："
+                        f"共发起 {retry_count} 次重试，已等待 {waited_seconds:.1f} 秒，"
+                        f"已用 {elapsed:.1f} 秒；不再发起新尝试。",
+                        file=sys.stderr,
+                    )
+                    exit_code = 1
                     break
-                print(f"Claude Agent SDK 执行异常，{delay} 秒后重试。", file=sys.stderr)
-                time.sleep(delay)
+
+                delay = STEP_RETRY_DELAYS[
+                    min(retry_count, len(STEP_RETRY_DELAYS) - 1)
+                ]
+                wait_seconds = min(delay, remaining)
+                print(
+                    f"Claude Agent SDK 执行异常，准备第 {retry_count + 1} 次重试："
+                    f"已等待 {waited_seconds:.1f} 秒，已用 {elapsed:.1f} 秒，"
+                    f"下次等待 {wait_seconds:.1f} 秒。",
+                    file=sys.stderr,
+                )
+                before_sleep = time.monotonic()
+                time.sleep(wait_seconds)
+                after_sleep = time.monotonic()
+                waited_seconds += max(0.0, after_sleep - before_sleep)
+                elapsed = after_sleep - retry_started
+                if elapsed >= STEP_RETRY_WINDOW_SECONDS:
+                    print(
+                        "Claude Agent SDK 自动重试已到 6 小时期限："
+                        f"共发起 {retry_count} 次重试，已等待 {waited_seconds:.1f} 秒，"
+                        f"已用 {elapsed:.1f} 秒；不再发起新尝试。",
+                        file=sys.stderr,
+                    )
+                    exit_code = 1
+                    break
+                retry_count += 1
                 exit_code = _execute(args, locks, timing)
             returned = True
-            return 1 if exit_code == _RETRY_REQUESTED_EXIT_CODE else exit_code
+            return exit_code
         finally:
             timing.finish(returned=returned)
 

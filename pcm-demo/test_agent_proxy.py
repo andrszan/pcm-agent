@@ -92,6 +92,18 @@ class AgentProxyTest(unittest.TestCase):
         self.assertEqual(env["ALL_PROXY"], "socks5://socks.invalid:1080")
         self.assertNotIn("HTTPS_PROXY", env)
 
+    def test_agent_retry_environment_overrides_parent_values(self):
+        _, env = self.load(
+            environment={
+                "CLAUDE_CODE_MAX_RETRIES": "2",
+                "CLAUDE_CODE_RETRY_WATCHDOG": "1",
+                "API_TIMEOUT_MS": "98765",
+            }
+        )
+        self.assertEqual(env["CLAUDE_CODE_MAX_RETRIES"], "15")
+        self.assertEqual(env["CLAUDE_CODE_RETRY_WATCHDOG"], "0")
+        self.assertEqual(env["API_TIMEOUT_MS"], "98765")
+
     def test_proxy_credentials_are_not_in_repr_and_are_redacted(self):
         config, env = self.load("HTTPS_PROXY=http://user:proxy-secret@proxy.invalid:7890\n")
         self.assertEqual(env["HTTPS_PROXY"], "http://user:proxy-secret@proxy.invalid:7890")

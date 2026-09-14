@@ -105,6 +105,8 @@ def filtered_env(config: AgentConfig, model: str) -> dict[str, str]:
             "PCM_AGENT_WORKSPACE_ENV_FILE": "",
             "PCM_DEV_RESOURCE_LIST": "",
             "CLAUDE_CODE_AUTO_COMPACT_WINDOW": str(config.auto_compact_window),
+            "CLAUDE_CODE_MAX_RETRIES": "15",
+            "CLAUDE_CODE_RETRY_WATCHDOG": "0",
             "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS": "0",
         }
     )
@@ -217,12 +219,17 @@ def _retry_requested(
     error: BaseException | None = None,
     has_result: bool = False,
     context_window_exceeded: bool = False,
+    assistant_error: str | None = None,
 ) -> bool:
     if context_window_exceeded:
         return False
     if terminal_reason in {"aborted_streaming", "aborted_tools"}:
         return False
-    if api_error_status is not None or terminal_reason in {"api_error", "blocking_limit"}:
+    if assistant_error in {"authentication_failed", "billing_error", "invalid_request"}:
+        return False
+    if api_error_status is not None:
+        return api_error_status in {408, 409, 429} or 500 <= api_error_status <= 599
+    if terminal_reason in {"api_error", "blocking_limit"}:
         return True
     return is_retryable_claude_sdk_error(error, has_result=has_result)
 
@@ -375,12 +382,12 @@ async def run_claude(
                     )
                 else:
                     if api_error is not None:
-                        assistant_error = None
+                        assistant_error = api_error[0]
                         context_window_api_error = None
                         synthetic_api_error_body = redact_text(
                             api_error[1], known_secrets=known_secrets
                         )
-                    elif message.model == "<synthetic>" and message.error is not None:
+                    else:
                         assistant_error = None
                         synthetic_api_error_body = None
                         context_window_api_error = None
@@ -427,8 +434,9 @@ async def run_claude(
                                 terminal_reason=result.terminal_reason,
                                 has_result=True,
                                 context_window_exceeded=context_window_exceeded,
+                                assistant_error=assistant_error,
                             ),
-                            assistant_error=assistant_error if context_window_exceeded else None,
+                            assistant_error=assistant_error,
                             context_window_exceeded=context_window_exceeded,
                         )
                     )
@@ -553,7 +561,8 @@ async def run_claude(
             error=caught_error,
             has_result=result is not None,
             context_window_exceeded=context_window_exceeded,
+            assistant_error=assistant_error,
         ),
-        assistant_error=assistant_error if context_window_exceeded else None,
+        assistant_error=assistant_error,
         context_window_exceeded=context_window_exceeded,
     )

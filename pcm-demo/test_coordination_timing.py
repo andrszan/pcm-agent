@@ -93,7 +93,7 @@ class CoordinationTimingTests(unittest.TestCase):
         ):
             self.assertEqual(run_step.retrying_main(), 0, sys.stderr.getvalue())
         self.assertEqual(attempts, ["run"] * 3)
-        self.assertEqual(delays, [10, 30])
+        self.assertEqual(delays, [30, 60])
         self.assertGreaterEqual(len(writes), 12)
         self.assertTrue(all(writes))
         self.assertFalse(self.held())

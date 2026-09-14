@@ -437,6 +437,7 @@ class StepTimingIntegrationTests(unittest.TestCase):
                     return_value=Namespace(step=2, run_id="retry-run"),
                 ),
                 patch.object(run_step, "run_step_two", side_effect=run_attempt),
+                patch.object(run_step, "STEP_RETRY_WINDOW_SECONDS", 94),
                 patch.object(run_step.time, "sleep", side_effect=backoff),
                 patch.object(timing_module.time, "monotonic", side_effect=lambda: clock[0]),
                 patch.object(timing_module, "beijing_now", side_effect=lambda: fake_now(clock)),
@@ -445,7 +446,7 @@ class StepTimingIntegrationTests(unittest.TestCase):
             ):
                 self.assertEqual(run_step.retrying_main(), 0)
 
-            self.assertEqual(delays, [10, 30])
+            self.assertEqual(delays, [30, 60])
             record = json.loads((run_dir / "timings.json").read_text(encoding="utf-8"))["steps"][0]
             self.assertEqual(
                 [call["elapsed_seconds"] for call in record["agent_executions"]],
@@ -456,7 +457,7 @@ class StepTimingIntegrationTests(unittest.TestCase):
                 ["exception", "exception", "returned"],
             )
             self.assertEqual(record["agent_elapsed_seconds"], 9.0)
-            self.assertEqual(record["wall_elapsed_seconds"], 49.0)
+            self.assertEqual(record["wall_elapsed_seconds"], 99.0)
 
     def test_exhausted_automatic_retries_keep_failure_exit_code(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -491,6 +492,7 @@ class StepTimingIntegrationTests(unittest.TestCase):
                     return_value=Namespace(step=2, run_id="retry-run"),
                 ),
                 patch.object(run_step, "run_step_two", side_effect=run_attempt),
+                patch.object(run_step, "STEP_RETRY_WINDOW_SECONDS", 92),
                 patch.object(run_step.time, "sleep", side_effect=backoff),
                 patch.object(timing_module.time, "monotonic", side_effect=lambda: clock[0]),
                 patch.object(timing_module, "beijing_now", side_effect=lambda: fake_now(clock)),
@@ -499,7 +501,7 @@ class StepTimingIntegrationTests(unittest.TestCase):
             ):
                 self.assertEqual(run_step.retrying_main(), 1)
 
-            self.assertEqual(delays, [10, 30])
+            self.assertEqual(delays, [30, 60])
             record = json.loads((run_dir / "timings.json").read_text(encoding="utf-8"))["steps"][0]
             self.assertEqual(len(record["agent_executions"]), 3)
             self.assertEqual(record["agent_elapsed_seconds"], 3.0)
