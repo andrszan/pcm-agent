@@ -156,7 +156,7 @@ project_bootstrap
 - `pcm-demo/steps/step_06_project_bootstrap/step.py` 及 `test_step.py`：品牌任务、调度、轻量裁决和恢复回归。
 - `pcm-demo/model_policy.py`、`model-policy.toml` 及相关策略测试：新任务登记及严格完整性校验。
 - `pcm-demo/common/agent_decision_loop.py` 及相关测试：新增合法恢复领域，不改公共三态和循环机制。
-- `pcm-demo/steps/step_06_project_bootstrap/README.md`、`pcm-demo/README.md`、`.claude/PCM版AI Agent自动化流程设计.md`：实现时同步三任务顺序、职责和恢复说明。
+- `pcm-demo/steps/step_06_project_bootstrap/README.md`、`pcm-demo/README.md`、`docs/pcm/PCM版AI Agent自动化流程设计.md`：实现时同步三任务顺序、职责和恢复说明。
 
 原则上不修改 `media-assets`、`project-bootstrap`、`tailwind-theme` 和 `ui-ux-framework` Skill 正文。本需求的资产范围和有限尝试属于调用方任务授权，保持各能力独立。
 
