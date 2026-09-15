@@ -97,7 +97,7 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 | `project-readiness` | 建立当前自动化开发周期唯一的开发资源准备基线，实际准备外部服务、运行凭据和受保护配置，并维护脱敏清单 |
 | `project-bootstrap` | 将已有基础工程项目化，按既有资源绑定迁移配置接线，并完成适用安装、构建、启动和基础验证 |
 | `product-experience-audit` | 对当前完整集成产品执行跨需求、跨模块、跨页面的全项目级体验审计，输出经核验候选、重复项和覆盖缺口，不修改正式 Backlog |
-| `product-feedback-triage` | 核验、拆解、去重和分级人工产品反馈，并按项目约定形成候选变更项 |
+| `product-feedback-triage` | 核验、筛选和去重整批人工产品反馈，保留原始材料，生成包含推荐项和其他处置摘要的精简反馈文档，供后续增量需求规划使用 |
 | `engineering-architecture` | 在单份项目架构文档中，按每个适用业务代码交付单元设计可核验的 Current/Target、职责/边界/依赖和代表性文件归属；默认不修改 `AGENTS.md` |
 | `ui-ux-framework` | 建立、校正或演进跨需求稳定的产品表面、App Shell Contract、内容语言、视觉和交互框架；可主动调用，也支持设计或开发时只查阅布局预览与兼容源码，不重做既定框架；不接管单需求设计、实现或开发后验收 |
 | `requirement-breakdown` | 完整覆盖最终产品范围，拆成有明确结果、依赖和验收方向的 Backlog，并建议首条验证切片 |
