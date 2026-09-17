@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import model_policy
+import provider
 import run_step
 
 
@@ -48,10 +49,19 @@ class ModelPolicyTest(unittest.TestCase):
             model_policy, "_MODEL_POLICY_PATH", self.policy_path
         )
         self.path_patcher.start()
+        # 清空进程环境并隔离真实 .env，避免测试依赖本机提供商选择。
+        self.env_patcher = patch.dict(os.environ, {}, clear=True)
+        self.env_patcher.start()
+        self.default_env_patcher = patch.object(
+            provider, "DEFAULT_ENV_FILE", self.policy_path.parent / ".env"
+        )
+        self.default_env_patcher.start()
         model_policy._cached_policy = None
 
     def tearDown(self) -> None:
         model_policy._cached_policy = None
+        self.default_env_patcher.stop()
+        self.env_patcher.stop()
         self.path_patcher.stop()
         self.temporary_directory.cleanup()
 
@@ -72,7 +82,7 @@ class ModelPolicyTest(unittest.TestCase):
             "rule_retrospective": ("routine", "routine-model", "medium"),
             "requirement_commit": ("routine", "routine-model", "medium"),
         }
-        with patch.dict(os.environ, {}, clear=True):
+        with patch.dict(os.environ, {"PCM_MODEL_POLICY_SNAPSHOT": ""}):
             for task, values in expected.items():
                 with self.subTest(task=task):
                     profile = model_policy.get_agent_profile(task)
@@ -86,7 +96,7 @@ class ModelPolicyTest(unittest.TestCase):
             model_policy.get_agent_profile("unknown")
 
     def test_loaded_policy_does_not_change_when_file_changes(self) -> None:
-        with patch.dict(os.environ, {}, clear=True):
+        with patch.dict(os.environ, {"PCM_MODEL_POLICY_SNAPSHOT": ""}):
             first = model_policy.get_agent_profile("project_intake")
             self.policy_path.write_text(
                 VALID_POLICY.replace("planning-model", "changed-model"),
@@ -100,6 +110,7 @@ class ModelPolicyTest(unittest.TestCase):
     def test_new_process_reads_changed_file(self) -> None:
         directory = Path(self.temporary_directory.name)
         shutil.copy(Path(model_policy.__file__), directory / "model_policy.py")
+        shutil.copy(Path(provider.__file__), directory / "provider.py")
         command = [
             sys.executable,
             "-c",
@@ -152,6 +163,27 @@ class ModelPolicyTest(unittest.TestCase):
 
         self.assertEqual(profile.model, "planning-model")
 
+    def test_provider_selects_dedicated_policy_file(self) -> None:
+        provider_policy_path = (
+            Path(self.temporary_directory.name) / "model-policy.other.toml"
+        )
+        provider_policy_path.write_text(
+            VALID_POLICY.replace("planning-model", "provider-model"), encoding="utf-8"
+        )
+        model_policy._cached_policy = None
+
+        with patch.dict(os.environ, {"PCM_PROVIDER": "other"}):
+            profile = model_policy.get_agent_profile("project_intake")
+
+        self.assertEqual(profile.model, "provider-model")
+
+    def test_missing_provider_policy_file_is_rejected(self) -> None:
+        model_policy._cached_policy = None
+
+        with patch.dict(os.environ, {"PCM_PROVIDER": "absent"}):
+            with self.assertRaisesRegex(ValueError, "PCM_PROVIDER=absent"):
+                model_policy.load_model_policy()
+
     def test_run_step_entry_loads_policy_once_before_execution(self) -> None:
         args = Mock()
         locks = Mock()
@@ -192,7 +224,7 @@ class ModelPolicyTest(unittest.TestCase):
             with self.subTest(name=name):
                 self.policy_path.write_text(content, encoding="utf-8")
                 model_policy._cached_policy = None
-                with patch.dict(os.environ, {}, clear=True):
+                with patch.dict(os.environ, {"PCM_MODEL_POLICY_SNAPSHOT": ""}):
                     with self.assertRaises(ValueError):
                         model_policy.load_model_policy()
 

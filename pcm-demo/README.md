@@ -36,6 +36,7 @@ test -e .env || cp .env.example .env
 
 - [`.env.example`](.env.example)：AI-compatible、Agent 网关与认证、自动压缩窗口、Claude Code 单次调用重试次数、统一代理、工作区、模板和开发资源路径；实际 `.env` 必须保持 Git 忽略。
 - [`model-policy.toml`](model-policy.toml)：Claude Agent 各任务使用的真实 `model` 与 `effort`。模型策略不再从 `.env` 的低、中、高变量读取。
+- 模型提供商切换：`.env` 中设置 `PCM_PROVIDER=<名称>` 后，程序叠加读取 Git 忽略的 `.env.d/<名称>.env`（提供商各自的 LLM_* 与 PCM_AGENT_* 配置），模型策略同步改用 `model-policy.<名称>.toml`；两个文件都必须存在。留空时直接使用 `.env` 与 `model-policy.toml`。切换提供商或修改 `model-policy.toml` 前，都先停止当前编排，再用 `uv run python run_all.py --resume <run-id>` 从原节点恢复。
 - 产品工作区中的 `.env`：由流程按项目合同维护，不与 `pcm-demo/.env` 混用。
 
 AI-compatible 与 Claude Agent SDK 使用独立配置，不相互回退。`PCM_AGENT_WORKSPACE_ENV_FILE` 只由第 1 步安装为产品工作区根的受保护工具配置，不并入 SDK 子进程环境，也不作为目标产品运行配置或开发资源清单。

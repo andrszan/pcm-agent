@@ -7,7 +7,8 @@ from stat import S_ISREG
 from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-DEFAULT_ENV_FILE = Path(__file__).with_name(".env")
+from provider import DEFAULT_ENV_FILE, resolve_env_files
+
 CAPABILITY_REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CLAUDE_CODE_AUTO_COMPACT_WINDOW = 500000
 DEFAULT_CLAUDE_CODE_MAX_RETRIES = 10
@@ -136,9 +137,7 @@ class AgentConfig:
             settings.pcm_agent_auth_token,
             settings.claude_code_auto_compact_window,
             settings.claude_code_max_retries,
-            proxy_settings=AgentProxySettings(
-                _env_file=env_file if env_file is not None else DEFAULT_ENV_FILE
-            ),
+            proxy_settings=AgentProxySettings(_env_file=resolve_env_files(env_file)),
         )
 
 
@@ -185,8 +184,8 @@ class LLMConfig:
 
 def load_settings(env_file: Path | None = None, **overrides: object) -> Settings:
     kwargs: dict[str, object] = dict(overrides)
-    if env_file is not None:
-        kwargs["_env_file"] = env_file
+    if "_env_file" not in kwargs:
+        kwargs["_env_file"] = resolve_env_files(env_file)
     try:
         return Settings(**kwargs)
     except ValueError as error:

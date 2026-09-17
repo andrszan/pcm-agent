@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import model_policy
+import provider
 import run_all
 from common.files import write_json
 from steps.step_01_create_workspace import validate_initial_resources
@@ -30,6 +31,9 @@ class RunAllTests(unittest.TestCase):
             patch.object(run_all, "RUNS_DIR", self.runs),
             patch.object(run_all, "COORDINATION_ROOT", self.runs / ".coordination"),
             patch.object(model_policy, "_MODEL_POLICY_PATH", self.policy_path),
+            # 隔离真实 .env 与进程环境的提供商选择，避免测试依赖本机配置。
+            patch.dict(os.environ, {"PCM_PROVIDER": ""}),
+            patch.object(provider, "DEFAULT_ENV_FILE", self.root / ".env"),
         ]
         for patcher in self.patchers:
             patcher.start()

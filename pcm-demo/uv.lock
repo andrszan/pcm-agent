@@ -511,6 +511,7 @@ dependencies = [
     { name = "claude-agent-sdk" },
     { name = "openai" },
     { name = "pydantic-settings" },
+    { name = "python-dotenv" },
 ]
 
 [package.metadata]
@@ -518,6 +519,7 @@ requires-dist = [
     { name = "claude-agent-sdk", specifier = ">=0.2.152" },
     { name = "openai" },
     { name = "pydantic-settings", specifier = ">=2.15,<3" },
+    { name = "python-dotenv", specifier = ">=1.0" },
 ]
 
 [[package]]

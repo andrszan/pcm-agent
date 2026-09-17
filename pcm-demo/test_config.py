@@ -12,6 +12,14 @@ from config import AgentConfig, LLMConfig
 
 
 class ConfigTest(unittest.TestCase):
+    def setUp(self) -> None:
+        # 清空进程环境，避免测试依赖本机导出或真实 .env 的提供商选择。
+        self.env_patcher = patch.dict(os.environ, {}, clear=True)
+        self.env_patcher.start()
+
+    def tearDown(self) -> None:
+        self.env_patcher.stop()
+
     def write_env(self, directory: str, content: str) -> Path:
         path = Path(directory) / ".env"
         path.write_text(content, encoding="utf-8")
@@ -206,6 +214,116 @@ class ConfigTest(unittest.TestCase):
             "   ",
         )
         self.assertIsNone(config.effort)
+
+    def write_provider_env(self, directory: str, name: str, content: str) -> None:
+        providers = Path(directory) / ".env.d"
+        providers.mkdir(exist_ok=True)
+        (providers / f"{name}.env").write_text(content, encoding="utf-8")
+
+    def test_provider_env_file_overrides_base_configuration(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = self.write_env(
+                directory,
+                "\n".join(
+                    [
+                        "PCM_PROVIDER=other",
+                        "LLM_BASE_URL=http://llm-base.example.invalid",
+                        "LLM_API_KEY=llm-base-secret",
+                        "LLM_MODEL=base-model",
+                        "PCM_AGENT_BASE_URL=http://agent-base.example.invalid",
+                        "PCM_AGENT_AUTH_TOKEN=agent-base-secret",
+                        "CLAUDE_CODE_MAX_RETRIES=6",
+                    ]
+                ),
+            )
+            self.write_provider_env(
+                directory,
+                "other",
+                "\n".join(
+                    [
+                        "LLM_BASE_URL=http://llm-other.example.invalid",
+                        "LLM_API_KEY=llm-other-secret",
+                        "LLM_MODEL=other-model",
+                        "PCM_AGENT_BASE_URL=http://agent-other.example.invalid",
+                        "PCM_AGENT_AUTH_TOKEN=agent-other-secret",
+                    ]
+                ),
+            )
+            agent_config = AgentConfig.load(env_file)
+            llm_config = LLMConfig.load(env_file)
+
+        self.assertEqual(agent_config.base_url, "http://agent-other.example.invalid")
+        self.assertEqual(
+            agent_config.auth_token.get_secret_value(), "agent-other-secret"
+        )
+        self.assertEqual(agent_config.max_retries, 6)
+        self.assertEqual(llm_config.base_url, "http://llm-other.example.invalid")
+        self.assertEqual(llm_config.model, "other-model")
+        self.assertNotIn("llm-other-secret", repr(llm_config))
+        self.assertNotIn("agent-other-secret", repr(agent_config))
+
+    def test_process_environment_provider_overrides_env_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = self.write_env(
+                directory,
+                "\n".join(
+                    [
+                        "PCM_PROVIDER=other",
+                        "LLM_BASE_URL=http://llm-base.example.invalid",
+                        "LLM_API_KEY=llm-secret",
+                        "LLM_MODEL=base-model",
+                        "PCM_AGENT_BASE_URL=http://agent-base.example.invalid",
+                        "PCM_AGENT_AUTH_TOKEN=agent-secret",
+                    ]
+                ),
+            )
+            self.write_provider_env(
+                directory,
+                "other",
+                "PCM_AGENT_BASE_URL=http://agent-other.example.invalid\n"
+                "PCM_AGENT_AUTH_TOKEN=agent-other-secret\n",
+            )
+            self.write_provider_env(
+                directory,
+                "picked",
+                "PCM_AGENT_BASE_URL=http://agent-picked.example.invalid\n"
+                "PCM_AGENT_AUTH_TOKEN=agent-picked-secret\n",
+            )
+            with patch.dict(os.environ, {"PCM_PROVIDER": "picked"}):
+                config = AgentConfig.load(env_file)
+
+        self.assertEqual(config.base_url, "http://agent-picked.example.invalid")
+
+    def test_missing_provider_env_file_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = self.write_env(
+                directory,
+                "\n".join(
+                    [
+                        "PCM_PROVIDER=absent",
+                        "PCM_AGENT_BASE_URL=http://localhost:8317",
+                        "PCM_AGENT_AUTH_TOKEN=agent-secret",
+                    ]
+                ),
+            )
+            with self.assertRaisesRegex(ValueError, "PCM_PROVIDER=absent"):
+                AgentConfig.load(env_file)
+
+    def test_rejects_invalid_provider_name(self) -> None:
+        for value in ("../escape", "with/slash", ".", ".."):
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as directory:
+                env_file = self.write_env(
+                    directory,
+                    "\n".join(
+                        [
+                            f"PCM_PROVIDER={value}",
+                            "PCM_AGENT_BASE_URL=http://localhost:8317",
+                            "PCM_AGENT_AUTH_TOKEN=agent-secret",
+                        ]
+                    ),
+                )
+                with self.assertRaisesRegex(ValueError, "名称无效"):
+                    AgentConfig.load(env_file)
 
 
 if __name__ == "__main__":

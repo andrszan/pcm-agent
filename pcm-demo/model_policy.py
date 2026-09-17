@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
 
+from provider import resolve_provider_name
+
 ModelEffort = Literal["low", "medium", "high", "xhigh", "max"]
 
 _MODEL_POLICY_PATH = Path(__file__).with_name("model-policy.toml")
@@ -92,16 +94,29 @@ def _parse_model_policy(data: Any) -> _ModelPolicy:
     return _ModelPolicy(profiles=profiles, steps=steps)
 
 
+def _model_policy_path() -> Path:
+    provider = resolve_provider_name()
+    if provider is None:
+        return _MODEL_POLICY_PATH
+    provider_path = _MODEL_POLICY_PATH.with_name(f"model-policy.{provider}.toml")
+    if not provider_path.is_file():
+        raise ValueError(
+            f"PCM_PROVIDER={provider} 的模型策略不存在：{provider_path}"
+        )
+    return provider_path
+
+
 def _read_model_policy_file() -> _ModelPolicy:
+    policy_path = _model_policy_path()
     try:
-        with _MODEL_POLICY_PATH.open("rb") as file:
+        with policy_path.open("rb") as file:
             return _parse_model_policy(tomllib.load(file))
     except FileNotFoundError as error:
-        raise ValueError(f"模型策略配置不存在：{_MODEL_POLICY_PATH}") from error
+        raise ValueError(f"模型策略配置不存在：{policy_path}") from error
     except tomllib.TOMLDecodeError as error:
         raise ValueError(f"模型策略 TOML 无效：{error}") from error
     except OSError as error:
-        raise ValueError(f"模型策略配置不可读取：{_MODEL_POLICY_PATH}") from error
+        raise ValueError(f"模型策略配置不可读取：{policy_path}") from error
 
 
 def _read_model_policy_snapshot(snapshot: str) -> _ModelPolicy:

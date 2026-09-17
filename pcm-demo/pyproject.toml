@@ -7,4 +7,5 @@ dependencies = [
     "claude-agent-sdk>=0.2.152",
     "openai",
     "pydantic-settings>=2.15,<3",
+    "python-dotenv>=1.0",
 ]
