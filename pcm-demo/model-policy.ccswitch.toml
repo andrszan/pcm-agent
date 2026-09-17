@@ -1,15 +1,15 @@
 [profiles]
-# model: 与 cc switch 转发上游的实际模型名保持一致；当前为 cliproxy 同款占位，切换前先核对
-# model: gpt-6-astra / gpt-5.6-sol / gpt-5.6-terra / gpt-5.6-luna
+# model: 与 cc switch 转发上游的实际模型名保持一致；切换前先核对
+# model: claude-fable-5 / claude-opus-4-8 / claude-sonnet-4-6 / claude-haiku-4-5
 # effort: low / medium / high / xhigh / max
-#planning = { model = "gpt-5.6-sol[1m]", effort = "high" }
-#building = { model = "gpt-5.6-sol[1m]", effort = "medium" }
-#routine = { model = "gpt-5.6-terra[1m]", effort = "medium" }
+#planning = { model = "claude-opus-4-8[1m]", effort = "high" }
+#building = { model = "claude-opus-4-8[1m]", effort = "medium" }
+#routine = { model = "claude-sonnet-4-6[1m]", effort = "medium" }
 
 # 低模型测试组
-planning = { model = "gpt-5.6-sol[1m]", effort = "medium" }
-building = { model = "gpt-5.6-terra[1m]", effort = "medium" }
-routine = { model = "gpt-5.6-luna[1m]", effort = "medium" }
+planning = { model = "claude-fable-5[1m]", effort = "medium" }
+building = { model = "claude-sonnet-4-6[1m]", effort = "medium" }
+routine = { model = "claude-haiku-4-5", effort = "medium" }
 
 [steps]
 "2" = "planning"
