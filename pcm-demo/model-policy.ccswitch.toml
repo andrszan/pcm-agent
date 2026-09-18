@@ -7,7 +7,7 @@
 #routine = { model = "claude-sonnet-4-6[1m]", effort = "medium" }
 
 # 低模型测试组
-planning = { model = "claude-fable-5[1m]", effort = "medium" }
+planning = { model = "claude-opus-4-8[1m]", effort = "medium" }
 building = { model = "claude-sonnet-4-6[1m]", effort = "medium" }
 routine = { model = "claude-haiku-4-5", effort = "medium" }
 
