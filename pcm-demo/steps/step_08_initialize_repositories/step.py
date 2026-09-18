@@ -9,6 +9,7 @@ from common.agent_decision_loop import AgentDecisionLoopSpec, ResumeMessage, con
 from common.claude_agent import run_claude
 from common.decision import parse_agent_decision, render_decision_system_prompt, request_decision
 from common.files import write_json
+from common.git_identity import parse_git_identity
 from common.state import write_state, write_step_result
 from config import LLMConfig
 
@@ -152,6 +153,43 @@ def _repository_facts(workspace: Path, names: list[str]) -> list[dict[str, Any]]
             }
         )
     return repositories
+
+
+def _configure_git_identity(state: dict[str, Any], repositories: list[dict[str, Any]]) -> None:
+    if "git_identity" not in state:
+        return
+    identity = state["git_identity"]
+    if not isinstance(identity, dict):
+        raise RuntimeError("运行状态中的 Git 提交身份尚未确定")
+    try:
+        identity = parse_git_identity(identity.get("name"), identity.get("email"))
+    except ValueError as error:
+        raise RuntimeError("运行状态中的 Git 提交身份无效") from error
+    if identity is None:
+        raise RuntimeError("运行状态中的 Git 提交身份无效")
+    expected = f"{identity['name']} <{identity['email']}> "
+    for repository in repositories:
+        path = Path(repository["path"])
+        for field in ("name", "email"):
+            try:
+                completed = subprocess.run(
+                    ["git", "config", "--local", "--replace-all", "--", f"user.{field}", identity[field]],
+                    cwd=path,
+                    text=True,
+                    capture_output=True,
+                    timeout=120,
+                )
+            except (OSError, subprocess.TimeoutExpired) as error:
+                raise RuntimeError("无法配置仓库本地 Git 提交身份") from error
+            if completed.returncode != 0:
+                raise RuntimeError("无法配置仓库本地 Git 提交身份")
+            if _git_read(path, "config", "--local", "--get", f"user.{field}") != identity[field]:
+                raise RuntimeError("仓库本地 Git 提交身份与运行记录不一致")
+        for variable in ("GIT_AUTHOR_IDENT", "GIT_COMMITTER_IDENT"):
+            if not _git_read(path, "var", variable).startswith(expected):
+                raise RuntimeError(
+                    "Git 实际提交身份与运行记录不一致，请检查 author/committer 配置及 GIT_* 环境覆盖"
+                )
 
 
 def _all_clean(repositories: list[dict[str, Any]]) -> bool:
@@ -337,6 +375,7 @@ async def run(
     if position != (STEP, STEP, CURRENT_NODE):
         raise RuntimeError("运行状态不位于仓库提交锚点")
 
+    _configure_git_identity(state, repositories)
     if _all_clean(repositories):
         return advance_success(run_dir, state, names, repositories)
 

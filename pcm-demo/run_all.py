@@ -27,6 +27,7 @@ from common.coordination import (
     release_product,
     run_lock_path,
 )
+from common.git_identity import parse_git_identity
 from common.state import read_state, step_result_status, write_state
 from common.timing import print_timing_summary
 from config import load_settings
@@ -76,12 +77,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--initial-resources", type=Path)
     parser.add_argument("--workspace-root", type=Path)
     parser.add_argument("--catalog-path", type=Path)
+    parser.add_argument("--git-user-name")
+    parser.add_argument("--git-user-email")
     parser.add_argument(
         "--resume-message-file",
         type=Path,
         help="用于当前 blocked、running 中断或 AgentExecutionFailure：读取 UTF-8 文件作为人工负责人恢复指令",
     )
     args = parser.parse_args(argv)
+    try:
+        git_identity = parse_git_identity(args.git_user_name, args.git_user_email)
+    except ValueError as error:
+        parser.error(str(error))
+    if git_identity is not None and args.product_draft is None:
+        parser.error("Git 提交身份只能用于提供产品初稿的新运行")
     if args.initial_resources is not None and args.product_draft is None:
         parser.error("--initial-resources 只能用于提供产品初稿的新运行")
     if args.resume and args.run_id:
@@ -297,6 +306,17 @@ def build_step_command(
             )
         if args.workspace_root is not None:
             command.extend(["--workspace-root", str(args.workspace_root.resolve())])
+        git_identity = parse_git_identity(
+            getattr(args, "git_user_name", None),
+            getattr(args, "git_user_email", None),
+        )
+        if git_identity is not None:
+            command.extend(
+                [
+                    f"--git-user-name={git_identity['name']}",
+                    f"--git-user-email={git_identity['email']}",
+                ]
+            )
     if step == 3 and args.catalog_path is not None:
         command.extend(["--catalog-path", str(args.catalog_path.resolve())])
     resume_message_file = getattr(args, "resume_message_file", None)
@@ -331,6 +351,17 @@ def fresh_command(run_id: str, args: argparse.Namespace) -> str:
         command.extend(["--workspace-root", str(args.workspace_root.resolve())])
     if args.catalog_path is not None:
         command.extend(["--catalog-path", str(args.catalog_path.resolve())])
+    git_identity = parse_git_identity(
+        getattr(args, "git_user_name", None),
+        getattr(args, "git_user_email", None),
+    )
+    if git_identity is not None:
+        command.extend(
+            [
+                f"--git-user-name={git_identity['name']}",
+                f"--git-user-email={git_identity['email']}",
+            ]
+        )
     return shlex.join(command)
 
 

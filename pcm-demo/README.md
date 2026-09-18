@@ -61,7 +61,11 @@ uv run python run_all.py \
 --initial-resources <普通文件或目录>   只用于新运行，发布后不再同步源路径
 --workspace-root <绝对路径>           覆盖 PCM_WORKSPACE_ROOT
 --catalog-path <绝对路径>             覆盖 PCM_TEMPLATE_CATALOG
+--git-user-name <提交姓名>            与 --git-user-email 成对提供
+--git-user-email <提交邮箱>           覆盖本次新产品的默认提交身份
 ```
+
+新产品默认提交姓名为第 1 步解析出的 `project_directory_name`，邮箱为 `<project_directory_name>@example.com`，例如 `rulefolio <rulefolio@example.com>`；邮箱仅用于提交署名展示。需要指定身份时，在上述新建命令中同时追加 `--git-user-name "规则研发团队" --git-user-email "team@example.com"`。身份保存在本次运行状态中，第 8 步首次提交前统一写入产品根仓与适用前后端仓库的本地 Git 配置；不修改全局配置、其它项目或已有提交历史。没有身份记录的旧运行保持原行为。
 
 ### 恢复已有运行
 
@@ -69,7 +73,7 @@ uv run python run_all.py \
 uv run python run_all.py --resume <run-id>
 ```
 
-恢复只进入 `state.json` 指向的当前节点，并重新核验该节点负责的现场；不会从头重跑已完成流程。进程退出会释放实时执行锁，但产品登记及配对端口会继续保留。
+恢复只进入 `state.json` 指向的当前节点，并重新核验该节点负责的现场；不会从头重跑已完成流程。Git 提交身份继续使用运行状态中的记录，`--resume` 不接受重新指定姓名和邮箱。进程退出会释放实时执行锁，但产品登记及配对端口会继续保留。
 
 ### 单独运行当前步骤
 
@@ -77,7 +81,7 @@ uv run python run_all.py --resume <run-id>
 uv run python run_step.py --step <1-18> --run-id <run-id>
 ```
 
-第 1 步创建新运行时需提供 `--product-draft`，并可同时提供 `--initial-resources`。完整流程使用 `run_all.py`；单步入口用于定向开发、诊断和恢复，并遵循相同锁、状态和重试合同。
+第 1 步创建新运行时需提供 `--product-draft`，并可同时提供 `--initial-resources` 和成对的 `--git-user-name`、`--git-user-email`。完整流程使用 `run_all.py`；单步入口用于定向开发、诊断和恢复，并遵循相同锁、状态和重试合同。
 
 只有 Claude Agent SDK 执行通道明确请求重试时，单步入口才自动恢复当前步骤，不使用网络探针。公共 runner 从 `.env` 的 `CLAUDE_CODE_MAX_RETRIES` 读取 Claude Code 单次调用最大重试次数，默认 10，可按需改为 15；设为 0 可禁用底层重试。进程环境优先于 `.env`，runner 将最终值和固定的 `CLAUDE_CODE_RETRY_WATCHDOG=0` 显式传入 SDK，覆盖子进程继承值；不调整单次 API 请求超时。底层重试耗尽或遇到无法在原请求内恢复的错误后，单步入口依次等待 30、60、120、300 秒，此后每次等待 300 秒。
 

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -16,6 +18,7 @@ from pydantic import BaseModel, SecretStr
 DEMO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(DEMO_ROOT))
 
+import run_step
 from common.error_diagnostics import write_diagnostic
 from common.files import resolve_workspace_output, write_json
 from common.openai_responses import ResponsesAccessError, ResponsesFailure, parse_response
@@ -79,6 +82,250 @@ class WorkspaceStepTests(unittest.TestCase):
                 resolve_workspace_output(workspace, "/tmp/产品初稿.md")
             with self.assertRaisesRegex(ValueError, "超出产品工作区"):
                 resolve_workspace_output(workspace, "../产品初稿.md")
+
+    def test_run_step_cli_accepts_paired_identity_only_for_step_one(self) -> None:
+        with patch.object(
+            sys,
+            "argv",
+            [
+                "run_step.py",
+                "--step",
+                "1",
+                "--product-draft",
+                "draft.md",
+                "--git-user-name",
+                "张 三",
+                "--git-user-email",
+                "zhang.san@example.com",
+            ],
+        ):
+            args = run_step.parse_args()
+        self.assertEqual(args.git_user_name, "张 三")
+        self.assertEqual(args.git_user_email, "zhang.san@example.com")
+
+        invalid_argv = (
+            ["--step", "1", "--git-user-name", "PCM"],
+            [
+                "--step",
+                "1",
+                "--git-user-name",
+                "",
+                "--git-user-email",
+                "pcm@example.com",
+            ],
+            [
+                "--step",
+                "2",
+                "--run-id",
+                "run",
+                "--git-user-name",
+                "PCM",
+                "--git-user-email",
+                "pcm@example.com",
+            ],
+        )
+        for argv in invalid_argv:
+            with (
+                self.subTest(argv=argv),
+                patch.object(sys, "argv", ["run_step.py", *argv]),
+                contextlib.redirect_stderr(io.StringIO()),
+                self.assertRaises(SystemExit),
+            ):
+                run_step.parse_args()
+
+    def test_new_step_one_run_records_explicit_or_pending_git_identity(self) -> None:
+        for label, name, email, expected in (
+            (
+                "explicit",
+                "张 三",
+                "zhang.san@example.com",
+                {"name": "张 三", "email": "zhang.san@example.com"},
+            ),
+            ("default-pending", None, None, None),
+        ):
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
+                demo_root = Path(directory)
+                draft = demo_root / "draft.md"
+                draft.write_text("产品初稿", encoding="utf-8")
+                args = SimpleNamespace(
+                    run_id=f"run-{label}",
+                    product_draft=draft,
+                    initial_resources=None,
+                    git_user_name=name,
+                    git_user_email=email,
+                )
+                with patch.object(run_step, "DEMO_ROOT", demo_root):
+                    run_dir, state, _ = run_step.load_or_create_step_one_run(args)
+                self.assertEqual(state["git_identity"], expected)
+                saved = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+                self.assertIn("git_identity", saved)
+                self.assertEqual(saved["git_identity"], expected)
+
+    def test_step_one_resolves_default_identity_after_project_extraction(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = Path(directory) / "run"
+            run_dir.mkdir()
+            state = {
+                "git_identity": None,
+                "project": {"project_directory_name": "mendmark"},
+            }
+            write_json(run_dir / "state.json", state)
+
+            self.assertEqual(
+                run_step.resolve_default_git_identity(run_dir, state),
+                {"name": "mendmark", "email": "mendmark@example.com"},
+            )
+            saved = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+            self.assertEqual(saved["git_identity"], state["git_identity"])
+
+            explicit = {
+                "git_identity": {"name": "Custom", "email": "custom@example.com"},
+                "project": {"project_directory_name": "mendmark"},
+            }
+            legacy = {"project": {"project_directory_name": "mendmark"}}
+            for label, existing in (("explicit", explicit), ("legacy", legacy)):
+                with self.subTest(label=label), patch.object(
+                    run_step, "write_state"
+                ) as write_state_mock:
+                    result = run_step.resolve_default_git_identity(run_dir, existing)
+                self.assertEqual(result, existing.get("git_identity"))
+                write_state_mock.assert_not_called()
+            self.assertNotIn("git_identity", legacy)
+
+    def test_step_one_persists_identity_across_extraction_failure_and_workspace_preparation(self) -> None:
+        for explicit in (False, True):
+            with self.subTest(explicit=explicit), tempfile.TemporaryDirectory() as directory:
+                demo_root = Path(directory)
+                draft = demo_root / "draft.md"
+                draft.write_text("好玩实验室：工程标识 rulefolio", encoding="utf-8")
+                args = SimpleNamespace(
+                    run_id="identity-recovery", product_draft=draft,
+                    initial_resources=None, workspace_root=None,
+                    git_user_name="规则研发团队" if explicit else None,
+                    git_user_email="team@example.com" if explicit else None,
+                )
+                expected = (
+                    {"name": "规则研发团队", "email": "team@example.com"}
+                    if explicit else {"name": "rulefolio", "email": "rulefolio@example.com"}
+                )
+                with patch.object(run_step, "DEMO_ROOT", demo_root):
+                    run_dir, state, _ = run_step.load_or_create_step_one_run(args)
+                    with (
+                        patch.object(run_step.LLMConfig, "load", return_value=object()),
+                        patch.object(run_step, "extract_project_identity", side_effect=RuntimeError("模拟提取中断")),
+                        self.assertRaisesRegex(RuntimeError, "模拟提取中断"),
+                    ):
+                        run_step.complete_step_one(args, run_dir, state, draft)
+                    args.git_user_name = None
+                    args.git_user_email = None
+                    run_dir, recovered, _ = run_step.load_or_create_step_one_run(args)
+                    self.assertEqual(recovered["git_identity"], expected if explicit else None)
+                    extracted = {
+                        "topic_name": "好玩实验室", "project_directory_name": "rulefolio",
+                        "directory_name_source": "source", "reason": "初稿明确工程标识",
+                        "blocked_reason": None,
+                    }
+                    with (
+                        patch.object(run_step.LLMConfig, "load", return_value=object()),
+                        patch.object(run_step, "extract_project_identity", return_value=(extracted, 1)),
+                        patch.object(run_step, "load_workspace_root", side_effect=RuntimeError("测试停止于工作区准备")),
+                        self.assertRaisesRegex(RuntimeError, "测试停止于工作区准备"),
+                    ):
+                        run_step.complete_step_one(args, run_dir, recovered, draft)
+                saved = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+                self.assertEqual(saved["git_identity"], expected)
+                self.assertEqual(saved["project"]["project_directory_name"], "rulefolio")
+
+    def test_step_one_recovery_preserves_identity_and_does_not_migrate_legacy_state(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            demo_root = Path(directory)
+            draft = demo_root / "draft.md"
+            draft.write_text("产品初稿", encoding="utf-8")
+            identities = {
+                "explicit": {"name": "张 三", "email": "zhang.san@example.com"},
+                "default": {"name": "project", "email": "project@example.com"},
+            }
+            for label, identity in identities.items():
+                run_dir = demo_root / "runs" / label
+                (run_dir / "steps").mkdir(parents=True)
+                state = {
+                    "run_id": label,
+                    "status": "failed",
+                    "phase": "project_initialization",
+                    "step": 1,
+                    "current_step": 1,
+                    "current_node": run_step.CREATE_WORKSPACE_NODE,
+                    "input": {"source_path": str(draft.resolve())},
+                    "git_identity": identity,
+                }
+                write_json(run_dir / "state.json", state)
+                before = (run_dir / "state.json").read_bytes()
+                args = SimpleNamespace(
+                    run_id=label,
+                    product_draft=None,
+                    initial_resources=None,
+                    git_user_name=identity["name"] if label == "explicit" else None,
+                    git_user_email=identity["email"] if label == "explicit" else None,
+                )
+                with patch.object(run_step, "DEMO_ROOT", demo_root):
+                    _, loaded, _ = run_step.load_or_create_step_one_run(args)
+                self.assertEqual(loaded["git_identity"], identity)
+                self.assertEqual((run_dir / "state.json").read_bytes(), before)
+
+            explicit_dir = demo_root / "runs" / "explicit"
+            explicit_before = (explicit_dir / "state.json").read_bytes()
+            mismatch = SimpleNamespace(
+                run_id="explicit",
+                product_draft=None,
+                initial_resources=None,
+                git_user_name="Other",
+                git_user_email="other@example.com",
+            )
+            with (
+                patch.object(run_step, "DEMO_ROOT", demo_root),
+                self.assertRaisesRegex(RuntimeError, "不一致"),
+            ):
+                run_step.load_or_create_step_one_run(mismatch)
+            self.assertEqual((explicit_dir / "state.json").read_bytes(), explicit_before)
+
+            legacy_dir = demo_root / "runs" / "legacy"
+            (legacy_dir / "steps").mkdir(parents=True)
+            legacy_state = {
+                "run_id": "legacy",
+                "status": "failed",
+                "phase": "project_initialization",
+                "step": 1,
+                "current_step": 1,
+                "current_node": run_step.CREATE_WORKSPACE_NODE,
+                "input": {"source_path": str(draft.resolve())},
+            }
+            write_json(legacy_dir / "state.json", legacy_state)
+            before = (legacy_dir / "state.json").read_bytes()
+            ordinary = SimpleNamespace(
+                run_id="legacy",
+                product_draft=None,
+                initial_resources=None,
+                git_user_name=None,
+                git_user_email=None,
+            )
+            with patch.object(run_step, "DEMO_ROOT", demo_root):
+                _, loaded, _ = run_step.load_or_create_step_one_run(ordinary)
+            self.assertNotIn("git_identity", loaded)
+            self.assertEqual((legacy_dir / "state.json").read_bytes(), before)
+
+            supplement = SimpleNamespace(
+                run_id="legacy",
+                product_draft=None,
+                initial_resources=None,
+                git_user_name="PCM",
+                git_user_email="pcm@example.com",
+            )
+            with (
+                patch.object(run_step, "DEMO_ROOT", demo_root),
+                self.assertRaisesRegex(RuntimeError, "旧运行不能补充"),
+            ):
+                run_step.load_or_create_step_one_run(supplement)
+            self.assertEqual((legacy_dir / "state.json").read_bytes(), before)
 
     def test_identity_input_accepts_one_sentence_without_rewriting(self) -> None:
         draft = "做一个供档案修复人员使用的手稿拼合 Web 工具。"

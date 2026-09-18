@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from argparse import Namespace
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -80,6 +82,27 @@ def decision(
         "required_inputs": required_inputs or [],
     }
     return data, 1, json.dumps(data, ensure_ascii=False)
+
+
+@contextmanager
+def isolated_git_environment(root: Path):
+    home = root / "home"
+    home.mkdir()
+    global_config = home / ".gitconfig"
+    global_config.write_text(
+        "[user]\n\tname = Global User\n\temail = global@example.com\n"
+        "[commit]\n\tgpgsign = false\n",
+        encoding="utf-8",
+    )
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    env.update(
+        HOME=str(home),
+        XDG_CONFIG_HOME=str(home / ".config"),
+        GIT_CONFIG_GLOBAL=str(global_config),
+        GIT_CONFIG_NOSYSTEM="1",
+    )
+    with patch.dict(os.environ, env, clear=True):
+        yield global_config
 
 
 class InitializeRepositoriesTests(unittest.TestCase):
@@ -165,6 +188,167 @@ class InitializeRepositoriesTests(unittest.TestCase):
                 self.assertEqual(
                     workspace.resolve(), Path(completed_state["repositories"][0]["path"])
                 )
+
+    def test_project_identity_controls_real_commits_without_changing_global_or_other_repositories(self) -> None:
+        for name, email in (("rulefolio", "rulefolio@example.com"), ("规则研发团队", "team@example.com")):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                with isolated_git_environment(root) as global_config:
+                    original_global = global_config.read_bytes()
+                    run_dir, workspace, state = self.make_run(root, ["frontend", "backend"])
+                    state["git_identity"] = {"name": name, "email": email}
+                    write_state(run_dir, state)
+                    names = ["root", "frontend", "backend"]
+                    self.dirty(workspace, names)
+                    outside = root / "other-project"
+                    outside.mkdir()
+                    initialize_root_repository(outside)
+                    outside_config = (outside / ".git/config").read_bytes()
+
+                    async def fake_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
+                        for repository_name in names:
+                            repository = workspace if repository_name == "root" else workspace / repository_name
+                            command("add", "-A", cwd=repository)
+                            command("commit", "-m", "首次提交", cwd=repository)
+                        value = agent_result(cwd=workspace)
+                        kwargs["on_update"](value)
+                        return value
+
+                    async def completed(messages, config, *, system_prompt):
+                        return decision("completed")
+
+                    saved = self.run_step(
+                        run_dir, state, agent_runner=fake_agent,
+                        decision_runner=completed, config_loader=lambda: object(),
+                    )
+                    self.assertEqual(saved["status"], "success")
+                    expected = f"{name}|{email}|{name}|{email}"
+                    for repository_name in names:
+                        repository = workspace if repository_name == "root" else workspace / repository_name
+                        self.assertEqual(command("config", "--local", "user.name", cwd=repository), name)
+                        self.assertEqual(command("config", "--local", "user.email", cwd=repository), email)
+                        self.assertEqual(command("log", "-1", "--format=%an|%ae|%cn|%ce", cwd=repository), expected)
+                        (repository / "later.txt").write_text("后续开发\n", encoding="utf-8")
+                        command("add", "later.txt", cwd=repository)
+                        command("commit", "-m", "后续提交", cwd=repository)
+                        self.assertEqual(command("log", "-1", "--format=%an|%ae|%cn|%ce", cwd=repository), expected)
+                    self.assertEqual(global_config.read_bytes(), original_global)
+                    self.assertEqual((outside / ".git/config").read_bytes(), outside_config)
+                    self.assertEqual(command("config", "user.name", cwd=outside), "Global User")
+                    self.assertEqual(command("config", "user.email", cwd=outside), "global@example.com")
+
+    def test_clean_new_repositories_receive_identity_and_retries_are_idempotent(self) -> None:
+        for outputs in ([], ["frontend"], ["frontend", "backend"]):
+            with self.subTest(outputs=outputs), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                with isolated_git_environment(root):
+                    run_dir, workspace, state = self.make_run(root, outputs)
+                    state["git_identity"] = {"name": "rulefolio", "email": "rulefolio@example.com"}
+                    write_state(run_dir, state)
+
+                    async def unexpected(*args: object, **kwargs: object):
+                        raise AssertionError("干净仓库不应调用模型")
+
+                    for _ in range(2):
+                        self.assertEqual(self.run_step(
+                            run_dir, dict(state), agent_runner=unexpected, decision_runner=unexpected,
+                        )["status"], "success")
+                    for repository in [workspace, *(workspace / name for name in outputs)]:
+                        self.assertEqual(command("config", "--local", "--get-all", "user.name", cwd=repository), "rulefolio")
+                        self.assertEqual(command("config", "--local", "--get-all", "user.email", cwd=repository), "rulefolio@example.com")
+
+    def test_legacy_run_keeps_existing_repository_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with isolated_git_environment(root) as global_config:
+                run_dir, workspace, state = self.make_run(root, ["frontend", "backend"])
+                originals = {}
+                for repository in (workspace, workspace / "frontend", workspace / "backend"):
+                    command("config", "--local", "user.name", "Existing User", cwd=repository)
+                    command("config", "--local", "user.email", "existing@example.com", cwd=repository)
+                    originals[repository] = (repository / ".git/config").read_bytes()
+                global_bytes = global_config.read_bytes()
+                self.run_step(run_dir, state)
+                self.assertNotIn("git_identity", read_state(run_dir))
+                self.assertEqual(global_config.read_bytes(), global_bytes)
+                for repository, original in originals.items():
+                    self.assertEqual((repository / ".git/config").read_bytes(), original)
+
+    def test_invalid_saved_identity_fails_before_config_or_agent(self) -> None:
+        for identity in (None, {}, {"name": "rulefolio"}, {"name": "rulefolio", "email": "bad"}):
+            with self.subTest(identity=identity), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                with isolated_git_environment(root):
+                    run_dir, workspace, state = self.make_run(root, [])
+                    state["git_identity"] = identity
+                    original = (workspace / ".git/config").read_bytes()
+                    with self.assertRaisesRegex(RuntimeError, "Git 提交身份"):
+                        self.run_step(run_dir, state)
+                    self.assertEqual((workspace / ".git/config").read_bytes(), original)
+
+    def test_effective_author_and_committer_overrides_fail_before_agent(self) -> None:
+        overrides = (
+            {"GIT_AUTHOR_NAME": "Another Author"},
+            {"GIT_AUTHOR_EMAIL": "another@example.com"},
+            {"GIT_COMMITTER_NAME": "Another Committer"},
+            {"GIT_COMMITTER_EMAIL": "another@example.com"},
+        )
+        for override in overrides:
+            with self.subTest(override=override), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                with isolated_git_environment(root):
+                    run_dir, workspace, state = self.make_run(root, [])
+                    state["git_identity"] = {"name": "rulefolio", "email": "rulefolio@example.com"}
+                    self.dirty(workspace, ["root"])
+                    with patch.dict(os.environ, override):
+                        with self.assertRaisesRegex(RuntimeError, "实际提交身份"):
+                            self.run_step(run_dir, state)
+                    self.assertFalse((run_dir / "conversations").exists())
+                    self.assertNotEqual(subprocess.run(
+                        ["git", "rev-parse", "--verify", "HEAD"], cwd=workspace,
+                        capture_output=True,
+                    ).returncode, 0)
+
+    def test_author_specific_global_config_is_not_silently_overridden(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with isolated_git_environment(root) as global_config:
+                with global_config.open("a", encoding="utf-8") as stream:
+                    stream.write("[author]\n\tname = Another Author\n")
+                original = global_config.read_bytes()
+                run_dir, _workspace, state = self.make_run(root, [])
+                state["git_identity"] = {"name": "rulefolio", "email": "rulefolio@example.com"}
+                with self.assertRaisesRegex(RuntimeError, "实际提交身份"):
+                    self.run_step(run_dir, state)
+                self.assertEqual(global_config.read_bytes(), original)
+
+    def test_configuration_failure_stops_before_agent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with isolated_git_environment(root):
+                run_dir, workspace, state = self.make_run(root, [])
+                state["git_identity"] = {"name": "rulefolio", "email": "rulefolio@example.com"}
+                original = (workspace / ".git/config").read_bytes()
+                (workspace / ".git/config.lock").touch()
+                with self.assertRaisesRegex(RuntimeError, "无法配置仓库本地 Git 提交身份"):
+                    self.run_step(run_dir, state)
+                self.assertEqual((workspace / ".git/config").read_bytes(), original)
+                self.assertFalse((run_dir / "conversations").exists())
+
+    def test_repository_boundaries_are_checked_before_any_identity_write(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with isolated_git_environment(root):
+                run_dir, workspace, state = self.make_run(root, [])
+                state["git_identity"] = {"name": "rulefolio", "email": "rulefolio@example.com"}
+                (workspace / "frontend").mkdir()
+                write_json(run_dir / "steps/04.json", {
+                    "step": 4, "status": "success", "outputs": ["frontend"],
+                })
+                original = (workspace / ".git/config").read_bytes()
+                with self.assertRaisesRegex(RuntimeError, "顶层目录"):
+                    self.run_step(run_dir, state)
+                self.assertEqual((workspace / ".git/config").read_bytes(), original)
 
     def test_dirty_repositories_use_one_product_root_session(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

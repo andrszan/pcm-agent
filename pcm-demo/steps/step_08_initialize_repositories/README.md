@@ -10,9 +10,9 @@
 
 步骤名仍为“首次提交适用仓库”。它是第一次全仓提交检查和形成干净基线的节点，不再要求仓库处于 unborn HEAD、产生提交或证明提交历史形态。
 
-Python 生产逻辑对每个权威仓库只执行三个只读 Git 命令：`git rev-parse --show-toplevel`、`git branch --show-current` 和 `git status --porcelain`。前两项确认仓库边界和 `main`，最后一项为空即为工作区及暂存区干净。Python 不执行 `add`、`commit`、`reset`、`amend`、`rebase` 或其它 Git 写操作。
+Python 通过 `git rev-parse --show-toplevel`、`git branch --show-current` 和 `git status --porcelain` 核验仓库边界、`main` 分支及干净状态。新 run 已登记 `state.git_identity` 时，在提交前统一配置权威仓库的本地 `user.name`、`user.email`，并核验本地配置和实际 Author、Committer；覆盖冲突或写入失败时停止，不调用提交 Agent。旧 run 缺少该字段时保持原配置；不修改全局身份或已有历史。身份输入和默认规则见[流程主文档](../../../docs/pcm/PCM版AI%20Agent自动化流程设计.md#第-1-步建立项目工作区)。Python 不执行 `add`、`commit`、`reset`、`amend` 或 `rebase`。
 
-创建 conversation/session 或写入 `running` 前，Python 先读取全部权威仓库的事实：若均干净，零 Agent 调用、零决策模型调用，直接写入成功，summary 说明已经形成全仓干净基线。任一仓库 dirty 时，才在产品根创建一个 Claude Agent SDK session，领域键和稳定任务标识均为 `initialize_repositories`；实际 model 与 effort 由 `model-policy.toml` 解析并按本次进程启动时加载的策略固定，首条提示第一行调用 `/commit-changes`。提示只给有序权威仓库清单和边界：只处理清单内已有变更、各仓分别完成必要提交、不得创建或切换分支、改写历史或 push，完成后各仓必须仍在 `main` 且干净。产品工作区根的 `.agents/`、`.claude/` 和 `plugins-lock.json` 是仓库组建时从已定稿权威能力模板取得的只读提交输入，只允许读取、核对 Git 状态、精确暂存并原样提交；不得创建、修改、删除、移动、格式化、清理、忽略或重写，也不得因版本、测试产物判断或权限安全偏好要求修复。全部 Git 写操作均由 Agent 负责。
+创建 conversation/session 或写入 `running` 前，Python 先读取全部权威仓库的事实：若均干净，零 Agent 调用、零决策模型调用，直接写入成功，summary 说明已经形成全仓干净基线。任一仓库 dirty 时，才在产品根创建一个 Claude Agent SDK session，领域键和稳定任务标识均为 `initialize_repositories`；实际 model 与 effort 由 `model-policy.toml` 解析并按本次进程启动时加载的策略固定，首条提示第一行调用 `/commit-changes`。提示只给有序权威仓库清单和边界：只处理清单内已有变更、各仓分别完成必要提交、不得创建或切换分支、改写历史或 push，完成后各仓必须仍在 `main` 且干净。产品工作区根的 `.agents/`、`.claude/` 和 `plugins-lock.json` 是仓库组建时从已定稿权威能力模板取得的只读提交输入，只允许读取、核对 Git 状态、精确暂存并原样提交；不得创建、修改、删除、移动、格式化、清理、忽略或重写，也不得因版本、测试产物判断或权限安全偏好要求修复。除上述仓库本地身份配置外，暂存与提交均由 Agent 负责。
 
 ## 决策、核验与恢复
 

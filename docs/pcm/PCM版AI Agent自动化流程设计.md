@@ -350,6 +350,7 @@ Demo 从第 1 步开始，通过 `--product-draft` 接收 UTF-8 文本文件路�
 - 资料复制与恢复：使用第 1 步临时工作区，在发布前完成复制；源及递归内容仅接受普通文件和目录，拒绝符号链接、特殊文件及会递归包含临时或最终工作区的输入。半复制不视为成功，当前失败保留现场；同一 run 恢复且最终目录尚未发布时，在精确 staging 路径归属核验通过后清理整个残留并从模板重新 clone、准备和复制，不覆盖目录中的局部内容。最终目录发布后的恢复只使用工作区副本，不重新读取或同步客户源目录，不新增全量内容哈希、资源清单、大小配额或上传机制。
 - 资料 Git 边界：模板维护者在工作区 `.gitignore` 中声明 `initial-resources/`。有资料输入时，Python 只核验最终根仓库的实际 Git 忽略事实，不编辑或补写 `.gitignore`；规则缺失或目标资料目录冲突时返回 `failed`，保留现场。忽略只保护原始资料的常规入库边界，不代表可以公开秘密或个人数据。
 - AI 输出：从初稿提取 `topic_name` 和 `project_directory_name`。后者必须是单段小写 kebab-case；初稿没有明确名称时允许根据选题生成，并记录生成理由。
+- Git 提交身份：新运行入口 `run_all.py`、`run_step.py --step 1` 支持成对的 `--git-user-name`、`--git-user-email`，仅提供一项或内容无效时在创建 run 前拒绝。未提供时，在项目名称解析成功后采用 `project_directory_name` 与 `<project_directory_name>@example.com`；不另行提取或翻译品牌。显式身份在新建 run 时保存，默认身份在项目名称确定后保存到 `state.git_identity`，第 8 步再配置仓库。恢复沿用原记录；第 1 步单步恢复如重传参数必须与记录一致，完整入口 `--resume` 不接受身份参数。仅为新运行登记此字段，旧运行不补写、不迁移。
 - 模板：使用 `PCM_TEMPLATE_REPOSITORY` 配置的模板仓库默认分支最新内容，不由 AI 或单次运行更换来源。
 - 执行动作：
   1. 在产品工作区根目录中计算最终路径 `<root>/<project_directory_name>` 和同级临时路径 `<root>/<project_directory_name>.pcm-tmp-<run-id>`；
@@ -435,9 +436,10 @@ Demo 从第 1 步开始，通过 `--product-draft` 接收 UTF-8 文本文件路�
 
 ### 第 8 步：首次提交适用仓库
 
-- 能力：这是第一次全仓提交检查和干净基线节点。Python 只执行确定性输入、状态及 Git 只读核验；存在未提交变更时，才在产品根创建一个 Claude Agent SDK session，显式调用 `commit-changes`。
+- 能力：这是第一次全仓提交检查和干净基线节点。Python 执行确定性输入、状态及 Git 核验，并为已登记提交身份的新产品配置仓库本地身份；存在未提交变更时，才在产品根创建一个 Claude Agent SDK session，显式调用 `commit-changes`。
 - 输入：权威有序仓库严格为 `['root', *steps/04.json.outputs]`；每个权威路径必须是自身 top-level、`main` 的独立 Git 仓库。不从固定前后端目录、历史状态或 Agent 回复扩充该清单。
-- 执行动作：Python 对每仓只执行 `git rev-parse --show-toplevel`、`git branch --show-current`、`git status --porcelain`。若全部干净，在创建 conversation/session 或写入 `running` 前零 Agent、零决策模型调用，直接成功并记录全仓干净基线。任一仓 dirty 时，初始 prompt 首行是 `/commit-changes`，只给仓库清单及边界；Agent 负责必要 Git 写操作，Python 不逐仓派发、不 `add`、不 `commit`、不 `reset`、`amend` 或 `rebase`。Agent 不得切换分支、改写历史或 push。
+- 提交身份：仓库边界核验后，若本 run 有 `state.git_identity`，Python 在干净快速完成或调用 Agent 之前，对全部权威仓库执行 `git config --local --replace-all user.name`、`user.email`，并读取本地配置及 `git var GIT_AUTHOR_IDENT`、`GIT_COMMITTER_IDENT` 核验实际生效身份。身份记录未确定、无效、写入失败或被其它配置／环境覆盖时返回 `failed`，不调用提交 Agent。只修改产品仓库本地配置，不改全局配置、其它项目或提交历史；没有该字段的旧 run 保持原行为。
+- 执行动作：Python 用 `git rev-parse --show-toplevel`、`git branch --show-current`、`git status --porcelain` 读取每仓事实。完成适用的身份配置后，若全部干净，在创建 conversation/session 或写入 `running` 前零 Agent、零决策模型调用，直接成功并记录全仓干净基线。任一仓 dirty 时，初始 prompt 首行是 `/commit-changes`，只给仓库清单及边界；Agent 负责暂存与提交，Python 不逐仓派发、不 `add`、不 `commit`、不 `reset`、`amend` 或 `rebase`。Agent 不得切换分支、改写历史或 push。
 - 输出：`steps/08.json` 的 `outputs` 固定为空，并保存 `applicable_repositories` 和 `repositories` 列表；每项为相对 `path`、`branch`、`worktree_clean`。状态保存同样事实但路径为绝对路径，成功推进到 `project:09_engineering_architecture`。
 - 完成条件：每仓自身 top-level、`main` 且 `status --porcelain` 为空。无需检查 HEAD、提交是否产生、提交数、父提交、SHA、marker、历史替换或根 tree。
 - 恢复：`completed` 后 Python 只读复验；仍 dirty 则以固定 repair prompt 继续同一 session。`blocked` 后重读，已全干净直接成功，仍 dirty 才保存 blocked。恢复也先读现场，已全干净直接成功，仍 dirty 才恢复原 session。`failed` / `blocked` 的步骤结果不能当作成功；只有 `status=success` 可幂等复用。成功后的第 9 步状态若权威仓库变 dirty，拒绝复用，避免第 8 步替后续修改提交。

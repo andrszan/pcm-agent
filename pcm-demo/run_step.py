@@ -32,6 +32,7 @@ from common.coordination import (
 )
 from common.error_diagnostics import exception_projection, write_diagnostic
 from common.files import sha256
+from common.git_identity import parse_git_identity
 from common.state import (
     create_run_dir,
     read_state,
@@ -198,6 +199,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--initial-resources", type=Path)
     parser.add_argument("--workspace-root", type=Path)
     parser.add_argument("--catalog-path", type=Path)
+    parser.add_argument("--git-user-name")
+    parser.add_argument("--git-user-email")
     parser.add_argument("--run-id")
     parser.add_argument(
         "--resume-message-file",
@@ -206,6 +209,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--coordination-locks", help=argparse.SUPPRESS)
     args = parser.parse_args()
+    try:
+        git_identity = parse_git_identity(args.git_user_name, args.git_user_email)
+    except ValueError as error:
+        parser.error(str(error))
+    if git_identity is not None and args.step != 1:
+        parser.error("Git 提交身份只能在第 1 步创建或恢复新运行时提供")
     if args.initial_resources is not None and args.step != 1:
         parser.error("--initial-resources 只能在第 1 步创建新运行时提供")
     if args.resume_message_file is not None and not args.run_id:
@@ -269,6 +278,56 @@ def bind_initial_resources(
         "published_path": None,
     }
     return requested
+
+
+def requested_git_identity(args: argparse.Namespace) -> dict[str, str] | None:
+    arguments = vars(args)
+    return parse_git_identity(
+        arguments.get("git_user_name"), arguments.get("git_user_email")
+    )
+
+
+def bind_git_identity(
+    state: dict[str, Any], requested: dict[str, str] | None
+) -> dict[str, str] | None:
+    if "git_identity" in state:
+        recorded = state["git_identity"]
+        if recorded is not None:
+            if not isinstance(recorded, dict):
+                raise RuntimeError("运行状态中的 Git 提交身份无效")
+            try:
+                validated = parse_git_identity(
+                    recorded.get("name"), recorded.get("email")
+                )
+            except ValueError as error:
+                raise RuntimeError("运行状态中的 Git 提交身份无效") from error
+            if validated != recorded:
+                raise RuntimeError("运行状态中的 Git 提交身份无效")
+        if requested is not None and requested != recorded:
+            raise RuntimeError("Git 提交身份与已有运行记录不一致")
+        return recorded
+    if requested is not None:
+        raise RuntimeError("旧运行不能补充 Git 提交身份，请创建新运行")
+    return None
+
+
+def resolve_default_git_identity(
+    run_dir: Path, state: dict[str, Any]
+) -> dict[str, str] | None:
+    if "git_identity" not in state or state["git_identity"] is not None:
+        return state.get("git_identity")
+    project = state.get("project")
+    project_name = (
+        project.get("project_directory_name") if isinstance(project, dict) else None
+    )
+    if not isinstance(project_name, str) or not project_name:
+        raise RuntimeError("运行状态缺少可用于 Git 提交身份的项目目录名")
+    identity = parse_git_identity(project_name, f"{project_name}@example.com")
+    if identity is None:
+        raise RuntimeError("无法生成默认 Git 提交身份")
+    state["git_identity"] = identity
+    write_state(run_dir, state)
+    return identity
 
 
 def run_dir_for(run_id: str) -> Path:
@@ -435,6 +494,7 @@ def has_step_success(run_dir: Path, step: int) -> bool:
 
 def load_or_create_step_one_run(args: argparse.Namespace) -> tuple[Path, dict[str, Any], Path]:
     requested_resources = requested_initial_resources(args)
+    requested_identity = requested_git_identity(args)
     if args.run_id and run_dir_for(args.run_id).is_dir():
         run_dir = run_dir_for(args.run_id)
         state = read_state(run_dir)
@@ -456,6 +516,7 @@ def load_or_create_step_one_run(args: argparse.Namespace) -> tuple[Path, dict[st
         if args.product_draft and args.product_draft.resolve() != draft_path:
             raise RuntimeError("--product-draft 与已有运行记录不一致")
         bind_initial_resources(state, requested_resources)
+        bind_git_identity(state, requested_identity)
         return run_dir, state, draft_path
 
     draft_path = require_draft(args.product_draft)
@@ -480,6 +541,7 @@ def load_or_create_step_one_run(args: argparse.Namespace) -> tuple[Path, dict[st
             "published_path": None,
         },
         "publication_phase": None,
+        "git_identity": requested_identity,
         "blocked": None,
         "error": None,
     }
@@ -530,6 +592,7 @@ def complete_step_one(
         }
         write_state(run_dir, state)
 
+    resolve_default_git_identity(run_dir, state)
     workspace_root, root_source = load_workspace_root(args.workspace_root)
     template_repository, template_source = load_template_repository()
     workspace_env_file, _ = load_agent_workspace_env_file()

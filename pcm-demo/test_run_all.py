@@ -4,7 +4,9 @@ import contextlib
 import io
 import json
 import os
+import shlex
 import signal
+import sys
 import tempfile
 import unittest
 from argparse import Namespace
@@ -14,6 +16,7 @@ from unittest.mock import Mock, patch
 import model_policy
 import provider
 import run_all
+import run_step
 from common.files import write_json
 from steps.step_01_create_workspace import validate_initial_resources
 
@@ -54,6 +57,8 @@ class RunAllTests(unittest.TestCase):
         workspace_root: Path | None = None,
         catalog_path: Path | None = None,
         resume_message_file: Path | None = None,
+        git_user_name: str | None = None,
+        git_user_email: str | None = None,
     ) -> Namespace:
         return Namespace(
             resume=resume,
@@ -63,6 +68,8 @@ class RunAllTests(unittest.TestCase):
             workspace_root=workspace_root,
             catalog_path=catalog_path,
             resume_message_file=resume_message_file,
+            git_user_name=git_user_name,
+            git_user_email=git_user_email,
             product_status=None,
             release_product=None,
         )
@@ -276,6 +283,8 @@ class RunAllTests(unittest.TestCase):
             initial_resources=resources,
             workspace_root=workspace_root,
             catalog_path=catalog_path,
+            git_user_name="张 三",
+            git_user_email="zhang.san@example.com",
         )
         step_one = run_all.build_step_command(1, "test-run", args, {})
         step_three = run_all.build_step_command(3, "test-run", args, {})
@@ -285,8 +294,33 @@ class RunAllTests(unittest.TestCase):
         )
         self.assertIn("--initial-resources", step_one)
         self.assertIn("--workspace-root", step_one)
+        with patch.object(sys, "argv", step_one[1:]):
+            child_args = run_step.parse_args()
+        self.assertEqual(child_args.git_user_name, "张 三")
+        self.assertEqual(child_args.git_user_email, "zhang.san@example.com")
         self.assertNotIn("--catalog-path", step_one)
+        with patch.object(sys, "argv", step_three[1:]):
+            later_args = run_step.parse_args()
+        self.assertIsNone(later_args.git_user_name)
+        self.assertIsNone(later_args.git_user_email)
         self.assertIn("--catalog-path", step_three)
+        fresh_args = run_all.parse_args(shlex.split(run_all.fresh_command("test-run", args))[2:])
+        self.assertEqual(fresh_args.git_user_name, "张 三")
+        self.assertEqual(fresh_args.git_user_email, "zhang.san@example.com")
+
+    def test_git_identity_round_trips_through_child_and_fresh_commands(self) -> None:
+        for name, email in (("张 三", "team@example.com"), ("-n", "-team@example.com")):
+            with self.subTest(name=name):
+                args = run_all.parse_args([
+                    "--product-draft", str(self.root / "draft.md"),
+                    f"--git-user-name={name}", f"--git-user-email={email}",
+                ])
+                command = run_all.build_step_command(1, "test-run", args, None)
+                with patch.object(sys, "argv", command[1:]):
+                    child_args = run_step.parse_args()
+                self.assertEqual((child_args.git_user_name, child_args.git_user_email), (name, email))
+                retry_args = run_all.parse_args(shlex.split(run_all.fresh_command("test-run", args))[2:])
+                self.assertEqual((retry_args.git_user_name, retry_args.git_user_email), (name, email))
 
     def test_initial_resources_symlink_is_not_resolved_before_input_validation(self) -> None:
         target = self.root / "实际资料.txt"
@@ -677,6 +711,42 @@ class RunAllTests(unittest.TestCase):
         help_text = stdout.getvalue()
         self.assertIn("blocked、running 中断或 AgentExecutionFailure", help_text)
         self.assertIn("UTF-8 文件作为人工负责人恢复指令", help_text)
+
+    def test_cli_validates_git_identity_for_new_runs_only(self) -> None:
+        args = run_all.parse_args(
+            [
+                "--product-draft",
+                "draft.md",
+                "--git-user-name",
+                "张 三",
+                "--git-user-email",
+                "zhang.san@example.com",
+            ]
+        )
+        self.assertEqual(args.git_user_name, "张 三")
+        self.assertEqual(args.git_user_email, "zhang.san@example.com")
+
+        invalid = (
+            ["--git-user-name", "PCM"],
+            ["--git-user-email", "pcm@example.com"],
+            ["--git-user-name", "", "--git-user-email", "pcm@example.com"],
+            ["--git-user-name", "PCM", "--git-user-email", "pcm example.com"],
+        )
+        for extra in invalid:
+            with self.subTest(extra=extra), self.assertRaises(SystemExit):
+                run_all.parse_args(["--product-draft", "draft.md", *extra])
+
+        with self.assertRaises(SystemExit):
+            run_all.parse_args(
+                [
+                    "--resume",
+                    "run",
+                    "--git-user-name",
+                    "PCM",
+                    "--git-user-email",
+                    "pcm@example.com",
+                ]
+            )
 
     def test_cli_requires_exactly_one_fresh_or_resume_entry(self) -> None:
         with self.assertRaises(SystemExit):

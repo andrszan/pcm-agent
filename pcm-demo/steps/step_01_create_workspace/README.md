@@ -56,6 +56,8 @@ Demo 必需输入为本地产品初稿路径。新运行直接从本步骤开始
 
 `project_directory_name` 必须是小写 kebab-case。初稿没有明确名称时允许模型生成，并记录来源和理由；初稿无法确定明确产品选题时返回 `status: blocked`，其余身份结果字段为 `null`，当前步骤按既有规则记录为 `failed`。
 
+新产品的 Git 提交身份也在本步骤确定并保存，仓库配置由首次提交节点执行；可选参数、默认值和恢复规则见 [Demo 启动说明](../../README.md#新建阶段一运行)。Git 身份不参与模型提取，也不写入产品 `.env`。
+
 身份提取将产品初稿构造成 Pydantic 输入模型，并使用 OpenAI Python SDK `responses.parse(..., text_format=ProjectIdentity)`；结果直接从 `response.output_parsed` 取得，不手写 JSON Schema 或解析原始 JSON 字符串。
 
 ## 单独运行
