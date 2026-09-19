@@ -155,7 +155,9 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 ├── README.md
 ├── AI Agent开发流程设计.md
 ├── rules/
-│   └── model-prompts.md     # 仅匹配 PCM Demo 的 Python 文件
+│   ├── existing-resource-use.md
+│   ├── markdown-writing.md
+│   └── testing.md
 ├── agents/
 │   ├── dev.md
 │   └── reviewer.md
