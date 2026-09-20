@@ -121,8 +121,12 @@ class ProjectBootstrapTests(unittest.TestCase):
         requirements = "docs/requirements/项目需求说明.md"
         features = "docs/requirements/产品功能说明.md"
         checklist = "docs/requirements/项目准备清单.md"
-        for output in (requirements, features, checklist):
+        for output in (requirements, features):
             (workspace / output).write_text(f"# {Path(output).stem}\n", encoding="utf-8")
+        (workspace / checklist).write_text(
+            "# 项目准备清单\n\n最终数据库绑定：PostgreSQL\n",
+            encoding="utf-8",
+        )
 
         outputs: list[str] = []
         selections: dict[str, dict | None] = {"frontend": None, "backend": None}
@@ -301,6 +305,8 @@ class ProjectBootstrapTests(unittest.TestCase):
                 self.assertIn(reference, bootstrap_prompt)
             for hidden in ("file:///templates.git", "git_url", "origin"):
                 self.assertNotIn(hidden, bootstrap_prompt)
+            self.assertIn("最终绑定为权威选择", bootstrap_prompt)
+            self.assertIn("本地 Agent 规则", bootstrap_prompt)
             self.assertEqual(calls[0]["max_turns"], PROJECT_BOOTSTRAP_MAX_TURNS)
             self.assertNotIn("max_budget_usd", calls[0])
 
@@ -345,6 +351,12 @@ class ProjectBootstrapTests(unittest.TestCase):
                 bootstrap_context["产品定义"],
                 product_output_contents(workspace, product_outputs),
             )
+            self.assertEqual(
+                bootstrap_context["已完成的项目准备基线"],
+                "# 项目准备清单\n\n最终数据库绑定：PostgreSQL\n",
+            )
+            self.assertIn("README", bootstrap_context["派生变体收口"])
+            self.assertIn(".claude/rules", bootstrap_context["派生变体收口"])
             self.assertEqual(
                 bootstrap_context["组装白名单事实"], prompt_assembly(assembly)
             )

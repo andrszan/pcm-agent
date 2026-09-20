@@ -48,8 +48,8 @@ TAILWIND_THEME_MAX_TURNS = 9999
 BRAND_ASSETS_MAX_TURNS = 9999
 LEGACY_COMPLETION_MESSAGES = PROJECT_BOOTSTRAP_LEGACY_COMPLETION_MESSAGES
 
-BOOTSTRAP_DECISION_RULES = """- completed：产品根 README 和各适用工程的项目身份、配置、文档及模板残留已完成项目化。
-- continue：项目化或上述验证尚未完成，可用既有工程、配置和工具继续修复。"""
+BOOTSTRAP_DECISION_RULES = """- completed：产品根 README 和各适用工程的项目身份、配置、文档、模板残留及声明的派生变体已完成项目化；派生变体已按准备清单最终资源绑定收口到唯一选择，未选变体的目录、依赖、配置、README 和适用本地 Agent 规则已完成引用检查与清理，真实构建及适用运行验证通过。
+- continue：项目化或上述验证尚未完成，仍有未选变体残留、文档/规则漂移或可修复验证缺口时，使用既有工程、配置和工具继续修复。"""
 
 TAILWIND_THEME_DECISION_RULES = """- completed：项目风格定制已完成。
 - continue：本次风格定制尚未完成，可用当前产品定义、工程和工具继续处理。"""
@@ -398,7 +398,7 @@ def initial_prompt(
 {assembly_json}
 ```
 
-复用既有资源绑定，不重新选择、创建、派生、轮换或替换凭据。保持可替换的 Tailwind 基础视觉主题基础设施，但不选择项目专属主题。"""
+复用既有资源绑定，不重新选择、创建、派生、轮换或替换凭据。模板声明需按资源绑定保留唯一派生变体时，以项目准备事实的最终绑定为权威选择，同步收口未选变体的目录、依赖、配置、README 和适用本地 Agent 规则，并完成真实构建及运行验证。保持可替换的 Tailwind 基础视觉主题基础设施，但不选择项目专属主题。"""
 
 
 def tailwind_theme_initial_prompt(product_outputs: list[str]) -> str:
@@ -525,6 +525,10 @@ async def run(
         "配置迁移与既有资源边界": (
             "可以调整实际本地配置的变量名称和结构并同步公开示例，但必须复用同一既有资源绑定、endpoint、权限范围和秘密值；"
             "不得重新选择、创建、派生、轮换或替换外部资源或凭据。"
+        ),
+        "派生变体收口": (
+            "模板声明需按资源绑定保留唯一变体时，以准备清单的最终绑定为权威选择；完成目录、依赖和锁文件、配置与公开示例、"
+            "构建测试入口、README、AGENTS.md、CLAUDE.md 和适用 .claude/rules 的引用检查与收口，不保留未选变体。"
         ),
         "适用工程": outputs,
         "组装白名单事实": prompt_assembly(assembly),
