@@ -50,6 +50,7 @@ CATALOG = {
                     "project_type": "backend",
                     "name": "FastAPI API",
                     "description": "API 基础工程",
+                    "applicability": "仅在产品明确要求 Python 后端时适用。",
                 }
             ],
         },
@@ -136,9 +137,14 @@ class FoundationSelectionTests(unittest.TestCase):
             selection_input = load_selection_input(run_dir, state, catalog_path)
             self.assertIsInstance(selection_input, FoundationSelectionInput)
             self.assertEqual(selection_input.frontend_candidates[0].id, "web-next")
+            self.assertIsNone(selection_input.frontend_candidates[0].applicability)
             self.assertEqual(
                 selection_input.backend_candidates[0].git_url,
                 "https://example.invalid/api.git",
+            )
+            self.assertEqual(
+                selection_input.backend_candidates[0].applicability,
+                "仅在产品明确要求 Python 后端时适用。",
             )
 
     def test_uses_inline_system_prompt_and_pydantic_output(self) -> None:
@@ -169,6 +175,7 @@ class FoundationSelectionTests(unittest.TestCase):
                     path="templates/api-fastapi",
                     name="FastAPI API",
                     description="API 基础工程",
+                    applicability="仅在产品明确要求 Python 后端时适用。",
                 )
             ],
         )
@@ -182,6 +189,10 @@ class FoundationSelectionTests(unittest.TestCase):
         self.assertEqual(result.frontend.id, "web-next")
         self.assertEqual(result.frontend.git_url, "https://example.invalid/web.git")
         self.assertIs(calls[0]["input_model"], selection_input)
+        self.assertEqual(
+            calls[0]["input_model"].backend_candidates[0].applicability,
+            "仅在产品明确要求 Python 后端时适用。",
+        )
         self.assertIs(calls[0]["output_model"], FoundationSelectionDecision)
         self.assertEqual(
             set(FoundationSelectionDecision.model_fields), {"frontend", "backend"}
@@ -189,6 +200,7 @@ class FoundationSelectionTests(unittest.TestCase):
         self.assertEqual(
             set(TemplateSelectionDecision.model_fields), {"candidate_id", "reason"}
         )
+        self.assertNotIn("applicability", result.backend.model_dump())
         self.assertEqual(calls[0]["system_prompt"], SYSTEM_PROMPT)
 
     def test_rejects_unknown_and_duplicate_candidate_ids(self) -> None:

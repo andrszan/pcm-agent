@@ -23,6 +23,7 @@ SYSTEM_PROMPT = """<task>
 
 <selection_rules>
 - 依据产品明确需求和候选已知能力选型，不假设未来规模或未说明的模板能力。
+- 候选声明 applicability 时，它是资格门槛而不是偏好加分项；只有产品定义或明确工程约束提供直接证据满足该条件时才可选择，缺少证据视为不适用，并在 reason 中说明满足依据。
 - frontend 只能从 frontend_candidates 中选择，backend 只能从 backend_candidates 中选择。
 - 产品明确需要某个交付面时，结合前后端搭配选择最匹配的一个候选；均能满足时，优先避免不必要的复杂度。
 - 产品明确不需要某个交付面时，对应结果返回 null。
@@ -48,7 +49,7 @@ SYSTEM_PROMPT = """<task>
 - frontend 和 backend 必须始终存在，每个字段只能是上述对象或 null。
 - 非 null 对象只能包含 candidate_id 和 reason，两个字段都必须是非空字符串。
 - candidate_id 必须与对应候选的 id 完全一致。
-- 禁止增加、删除或重命名字段，不得返回候选的 git_url、default_branch、path、name 或 description。
+- 禁止增加、删除或重命名字段，不得返回候选的 git_url、default_branch、path、name、description 或 applicability。
 - 首字符必须是 {，末字符必须是 }。字段名和字符串值必须使用双引号。
 - 只返回 JSON 对象；不要返回 Markdown、代码围栏、YAML、注释、分析过程或 JSON 之外的任何文本。
 </output>"""
@@ -67,6 +68,7 @@ class CatalogTemplate(BaseModel):
     project_type: Literal["frontend", "backend"]
     name: str
     description: str
+    applicability: str | None = Field(default=None, min_length=1)
 
 
 class CatalogRepository(BaseModel):
@@ -91,6 +93,11 @@ class TemplateCandidate(BaseModel):
     path: str = Field(min_length=1, description="候选模板在仓库中的相对路径。")
     name: str = Field(min_length=1, description="候选模板名称。")
     description: str = Field(min_length=1, description="候选模板能力说明。")
+    applicability: str | None = Field(
+        default=None,
+        min_length=1,
+        description="候选模板的额外资格门槛；缺少直接满足证据时不得选择。",
+    )
 
 
 class FoundationSelectionInput(BaseModel):
@@ -280,6 +287,7 @@ def load_selection_input(
                     path=template.path,
                     name=template.name,
                     description=template.description,
+                    applicability=template.applicability,
                 )
             )
     return FoundationSelectionInput(
