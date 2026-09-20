@@ -28,6 +28,13 @@ NEXT_NODE = "project:05_verify_readiness"
 MARKER = ".pcm-assemble-owner.json"
 TARGETS = ("frontend", "backend")
 AGENT_IGNORE_RULES = (".agents/", ".claude/", "AGENTS.md", "CLAUDE.md")
+LOCAL_SETTINGS = Path(".claude/settings.local.json")
+SHADCN_VUE_SCHEMA = "https://shadcn-vue.com/schema.json"
+REACT_SHADCN_DENY_RULES = (
+    "Bash(npx shadcn@latest *)",
+    "Bash(pnpm dlx shadcn@latest *)",
+    "Bash(bunx --bun shadcn@latest *)",
+)
 
 
 class AssemblyBlocked(RuntimeError):
@@ -236,6 +243,99 @@ def configure_agent_ignores(payload: Path) -> None:
         path.write_bytes(content + separator + header + b"\n".join(missing) + b"\n")
 
 
+def is_shadcn_vue_frontend(frontend: Path) -> bool:
+    components_path = frontend / "components.json"
+    package_path = frontend / "package.json"
+    if any(path.is_symlink() or not path.is_file() for path in (components_path, package_path)):
+        return False
+    try:
+        components = json.loads(components_path.read_text(encoding="utf-8"))
+        package = json.loads(package_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return False
+    if not isinstance(components, dict) or components.get("$schema") != SHADCN_VUE_SCHEMA:
+        return False
+    if not isinstance(package, dict):
+        return False
+    dependencies = package.get("dependencies")
+    return (
+        isinstance(dependencies, dict)
+        and isinstance(dependencies.get("vue"), str)
+        and isinstance(dependencies.get("reka-ui"), str)
+    )
+
+
+def _read_local_settings(workspace: Path) -> dict[str, Any]:
+    settings_path = workspace / LOCAL_SETTINGS
+    settings_dir = settings_path.parent
+    if settings_dir.is_symlink() or not settings_dir.is_dir():
+        raise RuntimeError("产品根 .claude 配置目录不存在或不是普通目录")
+    if settings_path.is_symlink():
+        raise RuntimeError("产品根本地 settings 不能是符号链接")
+    if not settings_path.exists():
+        return {}
+    if not settings_path.is_file():
+        raise RuntimeError("产品根本地 settings 不是普通文件")
+    try:
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise RuntimeError("产品根本地 settings 不可读取或不是合法 JSON") from error
+    if not isinstance(settings, dict):
+        raise RuntimeError("产品根本地 settings 顶层必须是对象")
+    return settings
+
+
+def _verify_local_settings_ignored(workspace: Path, *, git_runner=git) -> None:
+    try:
+        ignored = git_runner(
+            "-c",
+            "core.excludesFile=/dev/null",
+            "check-ignore",
+            "--no-index",
+            "--",
+            LOCAL_SETTINGS.as_posix(),
+            cwd=workspace,
+        )
+    except Exception as error:
+        raise RuntimeError("产品根必须忽略 .claude/settings.local.json") from error
+    if ignored != LOCAL_SETTINGS.as_posix():
+        raise RuntimeError("产品根本地 settings 忽略范围不符合约定")
+
+
+def configure_vue_local_settings(workspace: Path, *, git_runner=git) -> None:
+    _verify_local_settings_ignored(workspace, git_runner=git_runner)
+    settings = _read_local_settings(workspace)
+    skill_overrides = settings.setdefault("skillOverrides", {})
+    if not isinstance(skill_overrides, dict):
+        raise RuntimeError("产品根本地 settings 的 skillOverrides 必须是对象")
+    skill_overrides["shadcn"] = "off"
+    permissions = settings.setdefault("permissions", {})
+    if not isinstance(permissions, dict):
+        raise RuntimeError("产品根本地 settings 的 permissions 必须是对象")
+    deny = permissions.setdefault("deny", [])
+    if not isinstance(deny, list) or any(not isinstance(rule, str) for rule in deny):
+        raise RuntimeError("产品根本地 settings 的 permissions.deny 必须是字符串数组")
+    for rule in REACT_SHADCN_DENY_RULES:
+        if rule not in deny:
+            deny.append(rule)
+    write_json(workspace / LOCAL_SETTINGS, settings)
+
+
+def verify_vue_local_settings(workspace: Path, *, git_runner=git) -> None:
+    _verify_local_settings_ignored(workspace, git_runner=git_runner)
+    settings = _read_local_settings(workspace)
+    skill_overrides = settings.get("skillOverrides")
+    permissions = settings.get("permissions")
+    deny = permissions.get("deny") if isinstance(permissions, dict) else None
+    if (
+        not isinstance(skill_overrides, dict)
+        or skill_overrides.get("shadcn") != "off"
+        or not isinstance(deny, list)
+        or any(rule not in deny for rule in REACT_SHADCN_DENY_RULES)
+    ):
+        raise RuntimeError("Vue 前端缺少不兼容 React shadcn 能力的本地关闭配置")
+
+
 def prepare_payloads(
     temporary: Path, selection: FoundationSelectionResult, *, git_runner=git
 ) -> dict[str, dict[str, Any] | None]:
@@ -358,6 +458,9 @@ def verify_existing_assembly(
         git_dir = destination / ".git"
         if git_dir.is_symlink() or not git_dir.is_dir():
             raise RuntimeError(f"基础工程 Git 元数据不完整：{target}")
+    frontend = workspace / "frontend"
+    if selection.frontend is not None and is_shadcn_vue_frontend(frontend):
+        verify_vue_local_settings(workspace)
 
 
 def verify_existing_success(
@@ -438,6 +541,9 @@ def run(run_dir: Path, state: dict[str, Any], *, git_runner=git) -> dict[str, An
         temporary = prepare_temporary_root(workspace, state["run_id"])
         try:
             assembly = prepare_payloads(temporary, selection, git_runner=git_runner)
+            frontend_payload = temporary / "payloads" / "frontend"
+            if assembly["frontend"] is not None and is_shadcn_vue_frontend(frontend_payload):
+                configure_vue_local_settings(workspace, git_runner=git_runner)
             publish_payloads(workspace, targets, assembly, temporary)
             if not owns_temporary_root(temporary, ownership_marker(workspace, state["run_id"])):
                 raise RuntimeError("临时目录归属核验失败")

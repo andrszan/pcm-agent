@@ -67,6 +67,7 @@ class AssembleFoundationTests(unittest.TestCase):
         git_link: bool = False,
         ignore_all_frontend: bool = False,
         agent_configs: bool = False,
+        frontend_stack: str | None = None,
     ) -> tuple[Path, str]:
         source = root / "template-source"
         command("init", "-b", branch, str(source))
@@ -78,6 +79,23 @@ class AssembleFoundationTests(unittest.TestCase):
         backend.mkdir(parents=True)
         (frontend / "frontend.txt").write_text("frontend", encoding="utf-8")
         (backend / "backend.txt").write_text("backend", encoding="utf-8")
+        if frontend_stack is not None:
+            schema = (
+                "https://shadcn-vue.com/schema.json"
+                if frontend_stack == "vue"
+                else "https://ui.shadcn.com/schema.json"
+            )
+            dependencies = (
+                {"vue": "^3.5.0", "reka-ui": "^2.0.0"}
+                if frontend_stack == "vue"
+                else {"react": "^19.0.0"}
+            )
+            (frontend / "components.json").write_text(
+                json.dumps({"$schema": schema}), encoding="utf-8"
+            )
+            (frontend / "package.json").write_text(
+                json.dumps({"dependencies": dependencies}), encoding="utf-8"
+            )
         if source_symlink:
             frontend.rename(source / "templates" / "real-frontend")
             frontend.symlink_to("real-frontend", target_is_directory=True)
@@ -197,6 +215,64 @@ class AssembleFoundationTests(unittest.TestCase):
             saved_state = read_state(run_dir)
             self.assertEqual((saved_state["current_step"], saved_state["current_node"]), (5, NEXT_NODE))
             self.assertFalse(temporary_root(workspace, "recorded-run").exists())
+
+    def test_vue_frontend_disables_incompatible_react_shadcn_capability(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, url = self.create_remote(root, frontend_stack="vue")
+            run_dir, workspace, state = self.make_run(root, self.selection(url, backend=None))
+            (workspace / ".claude").mkdir()
+            (workspace / ".gitignore").write_text(
+                "/.claude/settings.local.json\n", encoding="utf-8"
+            )
+            write_json(
+                workspace / ".claude/settings.local.json",
+                {"custom": "keep", "permissions": {"deny": ["Bash(existing *)"]}},
+            )
+
+            saved = run(run_dir, state)
+
+            self.assertEqual(saved["status"], "success", saved)
+            settings_path = workspace / ".claude/settings.local.json"
+            settings = json.loads(settings_path.read_text(encoding="utf-8"))
+            self.assertEqual(settings["custom"], "keep")
+            self.assertEqual(settings["skillOverrides"]["shadcn"], "off")
+            self.assertEqual(
+                settings["permissions"]["deny"],
+                [
+                    "Bash(existing *)",
+                    "Bash(npx shadcn@latest *)",
+                    "Bash(pnpm dlx shadcn@latest *)",
+                    "Bash(bunx --bun shadcn@latest *)",
+                ],
+            )
+            first = settings_path.read_bytes()
+            self.assertEqual(run(run_dir, read_state(run_dir)), saved)
+            self.assertEqual(settings_path.read_bytes(), first)
+            command(
+                "-c",
+                "core.excludesFile=/dev/null",
+                "check-ignore",
+                "--no-index",
+                "--",
+                ".claude/settings.local.json",
+                cwd=workspace,
+            )
+
+    def test_react_frontend_does_not_change_product_local_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, url = self.create_remote(root, frontend_stack="react")
+            run_dir, workspace, state = self.make_run(root, self.selection(url, backend=None))
+            (workspace / ".claude").mkdir()
+            (workspace / ".gitignore").write_text(
+                "/.claude/settings.local.json\n", encoding="utf-8"
+            )
+
+            saved = run(run_dir, state)
+
+            self.assertEqual(saved["status"], "success", saved)
+            self.assertFalse((workspace / ".claude/settings.local.json").exists())
 
     def test_agent_configs_stay_local_and_are_absent_from_product_clone(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

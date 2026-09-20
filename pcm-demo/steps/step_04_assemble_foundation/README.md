@@ -8,7 +8,7 @@
 
 对每个非 `null` 选择，按唯一的 `(git_url, default_branch)` 执行一次浅克隆，核验 origin、分支和 HEAD SHA 后复制选中的模板子目录。准备过程位于产品目录同级的 run-owned 临时目录：上游 `.git` 和任何符号链接均在复制前拒绝；复制后，对每个实际适用 payload 执行 `git init -b main`，核验 Git top-level 就是 payload 自身、分支为 `main`、HEAD 为 unborn、index 为空，并且 `git ls-files --others --exclude-standard` 至少返回一个可提交文件。全部内容被自身 ignore 或没有文件的适用模板会在发布前失败。
 
-新复制的前后端 payload 在初始化 Git 前补充内部 Agent 配置的 `.gitignore` 规则，保留配置文件和已有忽略内容；初始化后核验内部配置不在可提交候选中，冲突时发布前失败。该策略不改模板源仓库、产品根工作区或已组装产品，具体规则见 [PCM 流程第 4 步](../../../.claude/PCM版AI%20Agent自动化流程设计.md#第-4-步组装基础工程)。
+新复制的前后端 payload 在初始化 Git 前补充内部 Agent 配置的 `.gitignore` 规则，保留配置文件和已有忽略内容；初始化后核验内部配置不在可提交候选中，冲突时发布前失败。若实际前端同时符合 shadcn-vue schema、Vue 和 Reka UI 工程事实，本步骤在产品根被忽略的 `.claude/settings.local.json` 中关闭不兼容的 React shadcn 能力和 CLI；React 前端不受影响。该策略不改模板源仓库或第三方 Skill，具体规则见 [PCM 流程第 4 步](../../../.claude/PCM版AI%20Agent自动化流程设计.md#第-4-步组装基础工程)。
 
 只有全部 payload 均通过上述核验，才替换 `frontend/`、`backend/` 中严格唯一的 `.gitkeep` 占位目录并以 `os.rename()` 发布。目标不存在也可发布；空目录、符号链接、额外内容和既有工程均会被拒绝。`null` 端仅移除严格占位目录，发布后必须不存在。第 4 步不执行 `git add`、`git commit` 或 push。
 
