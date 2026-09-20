@@ -1,324 +1,81 @@
-# AI Agent 开发能力说明
+# AI Agent 开发能力
 
-## 1. 目录定位
+`.claude/` 提供一组可独立调用的 Claude Code Skills、两个 Subagent 角色和通用项目规则，用于支持产品定义、技术设计、工程准备、需求开发、真实验证、独立审查和 Git 提交。
 
-`.claude/` 提供一组可独立调用的 AI Agent Skills、两个 Subagent 角色和项目内配置，用于支持产品定义、技术与工程设计、开发验证、只读审查、Git 提交和会话复盘。
+这些能力不依赖固定编排器。调用者根据项目事实选择步骤、传递上下文并处理必要决定；不适用的能力可以直接跳过。
 
-本目录只定义**能力**；具体的先后顺序、重复、跳过、分支、合并和停止条件属于人工流程。默认人工流程见 [`AI Agent开发流程设计.md`](./AI%20Agent开发流程设计.md)。
+## 设计原则
 
-## 2. 受控 Claude Agent SDK Plugins
+- **能力独立**：每个 Skill 在没有其它自定义 Skill 的情况下仍能完成自身职责。
+- **事实优先**：以当前代码、配置、运行结果、测试和 Git 状态为依据，不用口头结论替代证据。
+- **职责清楚**：Skill 通过项目文档、活动 TRD、代码和验证结果协作，不通过隐藏指令建立耦合。
+- **真实验证**：测试、构建、服务、数据库和浏览器行为按任务风险实际执行；工具缺失时保留缺口。
+- **保护工作树**：普通能力不提交、不建分支、不合并；Git 提交只由 `commit-changes` 显式完成。
+- **凭据隔离**：密码、API key、token、私钥和个人认证信息只放在受保护且 Git 忽略的配置中。
 
-模板根目录的 `.agents/plugins/` 保存由维护者管理的本地 Plugin 快照，根目录 `plugins-lock.json` 是 PCM 通过 Claude Agent SDK 加载 Plugin 的唯一清单。每个条目的 `path` 必须指向一个 Plugin root，版本、提供方和来源标识随快照更新同步维护。
-
-SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/plugins/cache/`；`pcm-demo/common/claude_agent.py` 会读取产品项目根的 `plugins-lock.json`，校验路径仍位于项目根内且目录存在，再把每个 Plugin root 显式传给 `ClaudeAgentOptions.plugins`。Plugin 变更后应创建新的 Agent SDK session，并从 `SystemMessage(init)` 核对实际加载的 `plugins`、`skills` 和 `slash_commands`；SDK 不使用 CLI 的 `/reload-plugin` 作为热加载接口。
-
-项目 `.claude/settings.json` 中的 `enabledPlugins` 继续服务人工 Claude Code CLI 的启用声明，不替代 `plugins-lock.json`，也不负责下载、安装或解析 Plugin 路径。更新 Plugin 时先更新 `.agents/plugins/<plugin>` 快照，再同步 `plugins-lock.json` 的版本和提供方信息；不得写入用户目录绝对路径、密钥或 Marketplace cache 路径。
-
-### 2.1 独立性原则
-
-- 每个 Skill 必须能在没有其它自定义 Skill 时可以完成自身职责。
-- Skill 不写死固定上游或下游，不明确说一定要调用其它某个 Skill，不强制依赖。
-- 能力之间通过调用方传入的资料和已有项目事实协作，例如产品文档、选模资料、活动 TRD、代码、Git diff 和验证结果；这些资料不要求由某个特定 Skill 生成或采用固定文件格式。
-- 每个 Skill 只保留完成自身职责所需的最小安全边界，不通过共享隐藏指令建立耦合。
-- 工具适配型 Skill 可以依赖对应运行工具，但必须是可选能力；核心领域 Skill 不得硬依赖它们。
-- 审计或反馈分诊只形成带证据的候选、重复项和覆盖缺口，不创建正式需求、不分配需求 ID、不修改 canonical Backlog；是否需求化、如何纳入以及如何进入后续开发，由调用方按项目事实显式调度。
-- 第三方 Skill 不属于核心流程隐藏依赖，不因“可能有用”自动安装。
-- 最终产品范围表达当前产品承诺；首条验证切片只用于尽早验证关键假设，不表示缩减或完成最终范围。复杂度删减和条件式原型按风险决定；全项目级产品体验审计只在完整集成产品进入阶段二后执行，不构成单需求或验证切片的调用链。
-
-## 3. 运行环境与使用准备
-
-将本目录复制到目标工作区后，先确认基础工具、目录权限和目标项目自身的运行依赖。不同项目可以使用不同语言、框架、数据库、浏览器和第三方服务，但不能因此省略完整环境检查。
-
-### 基础运行环境
-
-| 项 | 要求 | 缺位时 |
-|---|---|---|
-| **Claude Code** | 能够打开目标工作区并读取项目内的 Agent、Skill 和配置文件 | 无法按本目录定义的能力和角色运行 |
-| **Git** | 根仓库以及实际涉及的独立代码仓库均已正确初始化，Agent 能读取状态、差异和历史 | 无法可靠保护已有修改、建立审查基线或执行提交步骤 |
-| **目录授权** | Agent 对本次任务涉及的工作区和外部仓库具有必要的读取、编辑与命令权限 | 只能准确报告不可访问范围，不能假设文件或验证结果 |
-| **权限策略** | `.claude/settings.json` 或实际运行环境允许当前项目需要的 Git、运行时、包管理、测试、构建和服务命令 | 先补充或确认必要权限，不通过绕过安全边界伪造执行结果 |
-| **项目运行时与包管理器** | 根据目标仓库的 README、贡献说明、版本文件、锁文件和构建配置使用正确版本 | 不凭经验替换技术栈、版本或包管理器；环境未就绪时先处理准备问题 |
-| **项目依赖与验证工具** | 安装目标项目实际需要的依赖，并保证测试、静态检查、类型检查、构建等适用命令可执行 | 保留真实验证缺口，不以代码阅读或历史结果代替本次执行 |
-| **本地服务与数据** | 按项目事实准备数据库、中间件、迁移、初始化数据、第三方沙箱或其它必要服务 | 不使用 Mock、假数据或删除验收项来掩盖真实依赖缺失 |
-| **本地配置** | 按项目说明准备开发 `.env` 或等价配置，实际秘密保持 Git 忽略 | 可补齐本机可生成或项目已提供的配置；不得伪造外部账号、授权或凭据 |
-
-### 开发账号与凭据边界
-
-凭据分类遵循根目录 [Agent 工作规范](../AGENTS.md)。账号交付由需求规划、技术设计和开发能力按各自职责落实；创建、文档交接、真实登录验证及初始化／重置的完整执行要求见 [开发规范](skills/dev-workflow/SKILL.md#真实环境与数据闸门)。
-
-开始文档设计或开发前，根据当前任务至少检查：
-
-1. 阅读目标仓库的 README、贡献说明、`AGENTS.md`、版本文件、锁文件和构建配置；
-2. 分别确认根仓库及适用子仓库的目录、当前分支、Git 基线和工作树状态；
-3. 确认语言运行时、包管理器、项目依赖和目标命令能够执行；
-4. 确认必要服务、迁移、初始化数据和本地配置可用；
-5. 确认本次完成标准需要的测试、构建、真实接口、浏览器或其它验证条件已经具备。
-
-环境检查的深度应与当前任务相称。纯文档修改不机械启动全部服务；实现、联调和交付验收不能因环境准备复杂而跳过适用条件。
-
-### UI 浏览器验收环境
-
-只要任务包含 UI、用户交互或浏览器可见结果，就应使用真实浏览器验证动态行为，并实际读取代表性渲染结果；不能只依赖代码阅读、组件测试、Mock、DOM 结构或未查看的截图。验证不仅确认“可以操作”，还要按任务风险检查流程复杂度、内容理解、信息与操作层级、目标视口和基本可访问性。
-
-可以使用当前项目已经具备的任一可靠通道：
-
-1. 项目已有的 Playwright、端到端测试或其它浏览器测试能力；
-2. 已安装并可用的 Playwright MCP 或等价浏览器工具；
-3. 当前环境已经可用的 `playwright-cli`；
-4. 只有自动化无法替代主观体验、外部设备或特殊授权时，才由用户进行现场验收。
-
-实现前若核心任务、信息架构或视觉方向存在多个高影响方案，可以采用任务流、关键状态草图、可抛弃点击原型或真实项目窄范围预览取得最低成本证据；不固定工具、目录或文件格式，也不要求普通局部变化机械制作原型。
-
-核心领域 Skill 不依赖某一个固定浏览器 Skill 或插件。浏览器工具缺失时，继续完成其它可执行验证，但相关 UI 验收必须保持未完成，并明确缺失条件和补验方式；不得删除验收项后宣称完成。
-
-`product-experience-audit` 只用于完整集成产品的全项目级审计，同样使用目标项目已经具备的真实浏览器通道，不硬依赖 `playwright-cli` 或其它固定适配。单页面、单需求、验证切片或局部改动由当前设计和开发验收覆盖，不调用该 Skill；缺少全项目范围、环境、测试身份、可复位数据或动态证据能力时，只能报告范围不足或真实覆盖缺口，不能用代码阅读、Mock 或截图替代任务级体验结论。
-
-## 4. Git 职责
-
-| 能力 | Git 边界 |
-|---|---|
-| 普通领域 Skill | 可以读取状态和 diff；留下待提交变更，不 stage、不 commit、不建分支、不合并、不 push |
-| `dev-workflow` | 完成实现与验证并报告受影响仓库；不 stage、不 commit、不建分支、不合并、不 push |
-| `session-rule-retrospective` | 只编辑 `.claude/rules/`，不提交 |
-| `commit-changes` | 唯一负责精确 stage/commit；按仓库分别显式调用，默认不 push |
-| `dev` Subagent | 不 stage、不 commit、不改 Git 历史 |
-| `reviewer` Subagent | 只读，不改变文件或 Git 状态 |
-
-建分支、切换分支和合并回 `main` 是人工流程中的显式 Git 操作，不属于 `commit-changes`。
-
-## 5. 能力分类
-
-### 核心领域 Skills
+## 核心 Skills
 
 | Skill | 职责 |
 |---|---|
-| `project-intake` | 通过对话收敛最终产品范围、核心任务、用户语言、复杂度取舍和需要尽早验证的高风险假设；对调用方资料按需摸底，将用途结论、来源与重要未知写入产品定义，不默认全量读取或将附件全部纳入范围 |
-| `solution-design` | 基于已组装的工程事实确定项目级技术方向、系统边界和跨模块技术方案 |
-| `project-readiness` | 建立当前自动化开发周期唯一的开发资源准备基线，实际准备外部服务、运行凭据和受保护配置，并维护脱敏清单 |
-| `project-bootstrap` | 将已有基础工程项目化，按既有资源绑定迁移配置接线，并完成适用安装、构建、启动和基础验证 |
-| `product-experience-audit` | 对当前完整集成产品执行跨需求、跨模块、跨页面的全项目级体验审计，输出经核验候选、重复项和覆盖缺口，不修改正式 Backlog |
-| `product-feedback-triage` | 核验、筛选和去重整批人工产品反馈，保留原始材料，生成包含推荐项和其他处置摘要的精简反馈文档，供后续增量需求规划使用 |
-| `engineering-architecture` | 在单份项目架构文档中，按每个适用业务代码交付单元设计可核验的 Current/Target、职责/边界/依赖和代表性文件归属；默认不修改 `AGENTS.md` |
-| `ui-ux-framework` | 建立、校正或演进跨需求稳定的产品表面、App Shell Contract、内容语言、视觉和交互框架；可主动调用，也支持设计或开发时只查阅布局预览与兼容源码，不重做既定框架；不接管单需求设计、实现或开发后验收 |
-| `requirement-breakdown` | 完整覆盖最终产品范围，拆成有明确结果、依赖和验收方向的 Backlog，并建议首条验证切片 |
-| `trd-design` | 为一个内聚需求设计产品行为、体验复杂度、关键内容意图和技术实现，形成或更新活动 TRD |
-| `dev-workflow` | 实现功能、Bug 或重构，以自动化、真实运行、浏览器、实际渲染和独立审查证明功能与体验结果 |
-| `session-rule-retrospective` | 从一次真实执行中提炼可复用项目规则，只增量编辑 `.claude/rules/` |
-| `commit-changes` | 分析真实 Git 变更，按功能结果精确创建一个或多个本地提交 |
+| `project-intake` | 通过对话收敛目标用户、产品范围、核心任务和高风险假设 |
+| `solution-design` | 基于已组装的工程事实确定系统边界和总体技术方向 |
+| `project-readiness` | 建立开发资源准备基线，核验外部服务、权限和本地配置 |
+| `project-bootstrap` | 将业务无关的基础工程项目化，并完成安装、构建、启动和基础验证 |
+| `engineering-architecture` | 明确代码交付单元、模块职责、边界、依赖和代表性文件归属 |
+| `ui-ux-framework` | 建立或演进跨需求稳定的产品界面、内容语言和交互框架 |
+| `tailwind-theme` | 为 Tailwind CSS v4 项目选择、适配或定制基础主题 |
+| `media-assets` | 复用、检索、生成、检查并固化开发期媒体资源 |
+| `requirement-breakdown` | 将最终产品范围拆成有结果、依赖和验收方向的 Backlog |
+| `trd-design` | 为一个内聚需求形成或更新活动 TRD |
+| `dev-workflow` | 实现功能、Bug 或重构，并完成与风险相称的真实验证 |
+| `product-experience-audit` | 对完整集成产品执行跨需求、跨页面的体验审计 |
+| `product-feedback-triage` | 核验、筛选并去重一批人工产品反馈 |
+| `project-data-baseline` | 为已集成产品建立可初始化、可重置、可交接的数据基线 |
+| `session-rule-retrospective` | 从真实执行中提炼可复用规则，只增量维护项目 rules |
+| `commit-changes` | 分析真实 Git 变更并创建一个或多个精确的本地提交 |
+| `pcm-product-factory` | 在明确需要时辅助产品构思，并在目标工作区维护产品想法目录 |
 
-### 可选技术与工具适配 Skills
+`docs/prd/`、`docs/trd/`、`docs/backlog/` 等路径是部分 Skills 在**目标项目**中的默认文档位置，不表示本仓库附带真实产品资料。
 
-| Skill | 依赖与边界 |
-|---|---|
-| `tailwind-theme` | 适用于 Tailwind CSS v4 CSS-first 前端；依据产品资料和实际前端完成风格定制，可自主选择保留默认、采用全部或部分 preset、适配或 custom，并按实际改动验证和诚实报告；具体规则以 [Skill 正文](skills/tailwind-theme/SKILL.md) 为唯一真源 |
-| `ui-component-patterns` | 适用于 React + shadcn/ui Base UI + Tailwind CSS v4 的具体 Chat、认证、业务卡片、结构化表单、真实趋势、区域加载反馈和 Markdown 内容阅读场景；从本地受控参考中选择少量候选并按真实业务、品牌、数据和状态二次设计，不安装或复制 registry，不决定 Shell、信息架构或主题；Radix 及其它不兼容栈无副作用跳过 |
-| `playwright-cli` | 依赖当前环境已具备的对应浏览器运行工具；用于真实浏览器操作与验证，核心 Skills 不得把它作为隐藏必需 Skill |
-| `media-assets` | 工作区固有、按需调用的开发期媒体工具；统一负责已有资产复用、图库检索、单张定制生成、传入与生成结果检查、资产固化及测试 fixture，不构成产品运行时依赖 |
-
-可选技术或工具能力不适用、不可用时，应无副作用跳过或记录真实验证缺口；本仓库不自动安装任意新的 CLI、插件或项目依赖。已准入受控工具随附的声明式依赖可以按其使用合同由隔离运行时准备，不等同于允许任意安装新工具或把工具依赖加入目标产品。
-
-### 第三方 Skills
-
-- `find-skills`
-- `shadcn`
-- `ui-ux-pro-max` 系列：可选的设计、品牌和 UI 实现辅助，不是核心流程前置，也不能作为体验合格或开发完成的证据。
-
-它们由外部来源维护，本仓库不直接重写其内容，也不把它们作为核心流程必经能力。
-
-### 流程外辅助能力
-
-`project-data-baseline` 是项目主要业务已经开发并集成完成后的独立数据收尾能力。它直接完成必要设计、实现、真实初始化／重置、角色使用、文件恢复和交接验证，不限于产出 TRD，也不依赖 `dev-workflow` 或其它设计／开发 Skill。它不接入或修改原有编号步骤，不自动创建需求、提交或推送；已有数据基线则复用并收口，已经满足时实际核验后可以无代码变更结束。
-
-在目标项目准备交接时显式调用，例如：
-
-```text
-/project-data-baseline 对当前已完成项目做数据交付收尾，建立自然、完整、可操作的 init/reset 基线，按实际业务恢复所需文件并完成真实验证。
-```
-
-调用本能力不等于授权清空任意现有环境。实际删除仍须说明精确目标、当前数据和影响并取得对应确认；完成标准是接手者真正能初始化、登录或使用、明确重置并恢复，而不是只留下方案或脚本。详见 [项目数据基线收口](skills/project-data-baseline/SKILL.md)。
-
-`pcm-product-factory` 是流程外的可选产品构思能力，默认通过讨论选定方向和命名后形成初稿，只有用户明确要求时才直接生成。它同时维护产品目录索引，本工作区入口为 [`docs/prd/pcm-product-catalog.json`](../docs/prd/pcm-product-catalog.json)，格式以 [Skill 正文](skills/pcm-product-factory/SKILL.md#5-产品目录格式) 为准。它不预设市场、功能或初稿章节，也不是核心开发流程的必经 Skill；一句话想法或已有资料即可进入产品定义，由 `project-intake` 通过沟通形成当前项目权威产品文档。
-
-## 6. Subagents
+## Subagents
 
 | Subagent | 职责 | 边界 |
 |---|---|---|
-| `dev` | 在 Leader 给定的目标与边界内实现内聚修改，完成局部真实验证；用户可见范围同时提供可理解性、关键状态和实际渲染证据或明确缺口 | 实质扩大范围或重大迁移时返回 `needs-decision`；不提交、不维护 Backlog 或最终状态 |
-| `reviewer` | 独立、只读、基于证据检查正确性、安全、数据、回归和验证缺口；有 UI 证据时同时检查任务理解、关键状态和明显视觉退化 | 不修改文件，不运行会写状态的测试，不作最终裁决 |
+| `dev` | 在给定目标和边界内完成内聚修改及局部验证 | 不提交、不维护最终 Backlog、不擅自扩大范围 |
+| `reviewer` | 只读检查正确性、安全、数据、回归和验证缺口 | 不修改文件，不代替负责人作最终裁决 |
 
-`reviewer` 是本仓库内建的独立只读审查路径。调用方如因高风险变更另行引入外部审查结果，仍须确保审查者获得权威工作区中的完整变更、验收条件和验证证据，并由 Leader 结合项目事实作最终判断。
+## Rules
 
-## 7. 目录结构
+| Rule | 作用 |
+|---|---|
+| `existing-resource-use.md` | 优先调查和复用目标项目已有资源 |
+| `markdown-writing.md` | 约束 Markdown 文档的结构、链接和表达 |
+| `testing.md` | 按真实行为与风险选择验证方式 |
 
-```text
-.claude/
-├── README.md
-├── AI Agent开发流程设计.md
-├── rules/
-│   ├── existing-resource-use.md
-│   ├── markdown-writing.md
-│   └── testing.md
-├── agents/
-│   ├── dev.md
-│   └── reviewer.md
-├── skills/
-│   ├── commit-changes/SKILL.md
-│   ├── dev-workflow/
-│   │   ├── SKILL.md
-│   │   └── evals/evals.json
-│   ├── engineering-architecture/
-│   │   ├── SKILL.md
-│   │   └── evals/evals.json
-│   ├── media-assets/
-│   │   ├── SKILL.md
-│   │   ├── scripts/generate_image.py
-│   │   ├── scripts/pixabay.py
-│   │   ├── providers/
-│   │   │   ├── README.md
-│   │   │   ├── openai-compatible-image/README.md
-│   │   │   └── pixabay/README.md
-│   │   ├── assets/fixtures/
-│   │   │   ├── README.md
-│   │   │   └── manifest.template.json
-│   │   └── evals/evals.json
-│   ├── pcm-product-factory/SKILL.md
-│   ├── playwright-cli/
-│   │   ├── SKILL.md
-│   │   └── references/
-│   ├── product-experience-audit/
-│   │   ├── SKILL.md
-│   │   └── evals/evals.json
-│   ├── product-feedback-triage/
-│   │   ├── SKILL.md
-│   │   └── evals/evals.json
-│   ├── project-bootstrap/SKILL.md
-│   ├── project-intake/
-│   │   ├── SKILL.md
-│   │   └── evals/evals.json
-│   ├── project-readiness/
-│   │   ├── SKILL.md
-│   │   └── evals/evals.json
-│   ├── requirement-breakdown/
-│   │   ├── SKILL.md
-│   │   └── evals/evals.json
-│   ├── session-rule-retrospective/SKILL.md
-│   ├── solution-design/SKILL.md
-│   ├── tailwind-theme/
-│   │   ├── SKILL.md
-│   │   ├── references/theme-selection.md
-│   │   ├── assets/tweakcn/
-│   │   │   ├── README.md
-│   │   │   ├── LICENSE
-│   │   │   ├── catalog.json
-│   │   │   └── themes/
-│   │   └── evals/
-│   │       ├── evals.json
-│   │       └── files/
-│   ├── ui-component-patterns/
-│   │   ├── SKILL.md
-│   │   ├── references/
-│   │   │   ├── adaptation-checklist.md
-│   │   │   └── catalog.md
-│   │   ├── assets/react-shadcn/base-tailwind-v4/
-│   │   │   ├── LICENSE.md
-│   │   │   ├── manifest.json
-│   │   │   ├── chat/
-│   │   │   │   ├── attachment-conversation/
-│   │   │   │   ├── streaming-chat-card/
-│   │   │   │   └── transcript-foundation/
-│   │   │   ├── business/
-│   │   │   │   ├── faq/
-│   │   │   │   ├── invoice/
-│   │   │   │   ├── invite-team/
-│   │   │   │   ├── login-two-column/
-│   │   │   │   ├── notification-settings/
-│   │   │   │   └── shipping-address/
-│   │   │   ├── loading/         # 区域加载反馈，本地改造候选
-│   │   │   ├── markdown/        # Markdown 阅读，本地改造候选
-│   │   │   └── chart/line-trend/
-│   │   └── evals/evals.json
-│   ├── trd-design/
-│   │   ├── SKILL.md
-│   │   └── evals/evals.json
-│   ├── ui-ux-framework/
-│   │   ├── SKILL.md
-│   │   ├── references/
-│   │   │   ├── app-shell-contract.md
-│   │   │   ├── layout-resource-library.md
-│   │   │   └── layout-selection-guide.md
-│   │   ├── assets/layout-source-snapshots/shadcn-ui/
-│   │   │   ├── summary-to-record-workbench/
-│   │   │   ├── context-switching-navigation-shell/
-│   │   │   ├── mode-rail-collection-workbench/
-│   │   │   └── sectioned-preferences-dialog/
-│   │   └── evals/evals.json
-│   ├── find-skills -> 第三方 Skill
-│   └── shadcn -> 第三方 Skill
-├── settings.json
-└── settings.local.json
-```
+## Git 职责
 
-普通运行不创建专属过程目录、Manifest、Run ID 或阶段报告；需要长期保留的事实进入产品文档、活动 TRD、代码、测试、Git 或项目已有记录位置。
+| 能力 | Git 边界 |
+|---|---|
+| 普通领域 Skill | 可以读取状态和 diff；留下待提交修改 |
+| `dev-workflow` | 完成实现与验证，不暂存、不提交、不建分支、不合并 |
+| `session-rule-retrospective` | 只维护项目 rules，不提交 |
+| `commit-changes` | 唯一负责精确暂存和本地提交的 Skill，默认不 push |
+| `dev` | 不暂存、不提交、不改写历史 |
+| `reviewer` | 全程只读 |
 
-媒体价值判断遵循根目录工作规范；获取、检查、固化和测试 fixture 的执行约定统一见 [media-assets](skills/media-assets/SKILL.md)。工具内部入口：
+分支创建、切换、合并、push 和远端操作仍由调用者显式决定。
 
-- [Provider catalog](skills/media-assets/providers/README.md)：已准入来源及适配说明。
-- [Pixabay](skills/media-assets/providers/pixabay/README.md)：图库检索、下载命令、配置与缓存。
-- [定制生成](skills/media-assets/providers/openai-compatible-image/README.md)：固定生成命令、参数及配置。
-- [测试 fixture](skills/media-assets/assets/fixtures/README.md)：测试输入及复制、维护边界。
+## 接入目标项目
 
-`tailwind-theme` 面向实际采用 Tailwind CSS v4 CSS-first 的前端，依据产品资料和现有工程完成基础风格定制。Agent 可自主选择保留默认、采用全部或部分 preset、适配或 custom，并按实际改动执行相称验证、诚实报告结果；本地资源的选择、安全、修改和验证规则统一以 [Skill 正文](skills/tailwind-theme/SKILL.md) 为唯一真源。
+1. 将 `.claude/`、`AGENTS.md` 和 `CLAUDE.md` 复制到目标项目，先检查并合并已有规则，不直接覆盖冲突内容。
+2. 根据目标项目的版本文件、依赖声明和 README 准备运行时、包管理器、数据库、外部服务与本地配置。
+3. 空白项目通常从 `project-intake` 开始；已有项目、Bug 或局部重构只调用当前任务需要的能力。
+4. 需要基础工程时，根据 `catalog.json` 选择业务无关模板，再在派生项目中完成裁剪、通信、认证、数据和部署接线。
+5. UI 任务使用目标项目已有的 Playwright、端到端测试或其它可靠浏览器通道；没有固定工具时不自动安装，也不伪造验证结果。
+6. 真实凭据保留在 Git 忽略的配置中；文档只记录环境、入口、角色、账号标识、初始化方式和安全获取凭据的方法。
 
-`ui-component-patterns` 只面向实际采用 React、shadcn/ui Base UI 与 Tailwind CSS v4 的具体 UI 实现场景。其 `assets/react-shadcn/base-tailwind-v4/` 保存固定上游 commit 的独立 registry block、preview 内部模块和明确标记为派生的 example 函数摘录；不复制基础 primitives、完整 gallery、可运行 demo 或正式预览。Agent 每次只读取最相关的少量候选，并使用目标项目自己的业务、品牌、数据、状态、组件和 token 二次设计。另有 `loading`、`markdown` 候选，接入前核对目标项目依赖。
+## 外部能力
 
-`ui-ux-framework` 的 `assets/layout-source-snapshots/` 保存带实际预览与上游依赖的部分框架源码快照，不保证独立运行。先依据任务和实际技术栈筛选少量候选、查看预览比较，再深入选中源码；React + shadcn/ui 项目优先考察兼容的本地 shadcn/ui 资源，不将现有资源当作设计上限。允许复用技术兼容且适用的布局与响应式代码，接入真实业务、权限、路由、组件和 token，不照搬品牌、fixture 或演示逻辑。开发时仅查阅资源不要求重做框架或写文档。当前尚未收录独立纯图片资源；源码与纯图片的具体选择、使用和维护规则以 `ui-ux-framework/references/layout-resource-library.md` 为准。
+本仓库不分发第三方 Plugin 或通用第三方 Skills，也不会自动安装 CLI、插件或项目依赖。某个 Skill 提到外部工具时，应先确认目标环境已经具备该工具；不可用时继续完成其它工作，并准确报告剩余验证缺口。
 
-## 8. 使用边界摘要
-
-- 先读取真实项目事实，再决定是否以及如何调用某个 Skill。
-- 最终产品范围与首条验证切片分开表达；验证切片用于降低关键不确定性，不能冒充范围缩减或最终完成。
-- 用户可见功能以任务简单、内容易懂、产品化视觉和真实运行证据共同判断，不能只检查逻辑闭环与组件正确。
-- 不因为示例流程存在就机械运行所有能力；不适用时允许无副作用跳过。
-- 活动需求和活动 TRD 可随当前事实调整；归档历史保持不可变。
-- 开发 `.env` 可以在项目范围内安全使用；用于登录目标产品的交付开发账号及密码应进入受跟踪账号文档，PCM 或目标产品用于访问其它系统或资源的凭据及其它秘密必须保持 Git 忽略并在输出中脱敏。
-- 工作区媒体工具的私有配置供相应的已有素材检索或定制生成/编辑能力使用；它们是 AI Agent 工作区工具配置，不属于目标项目配置、开发资源清单或产品运行时依赖。
-- 不为当前任务擅自引入新基础设施、CLI、插件或第三方 Skill。
-- 验证以真实行为和风险为中心，局部 Mock、代码阅读或工具缺位不能冒充完成。
-
-## 9. 复制到新项目
-
-1. 复制本仓库作为新项目工作区，或按需复制 `.claude/` 与 `AGENTS.md`；保留并核对目标项目已有的贡献规范、安全要求和 Agent 指令，不直接覆盖冲突内容。
-2. 检查 `.claude/settings.json` 中的权限和插件配置是否适合目标机器与项目；不需要的可选插件可以停用，缺失工具不会由 Skill 自动安装。
-3. 根据目标项目的版本文件、锁文件和说明准备运行时、包管理器、依赖、数据库、服务、迁移、初始化数据与浏览器验证条件。
-4. 补齐被 Git 忽略的开发 `.env` 或等价本地配置，不复制、提交或输出原项目用于访问外部系统或资源的真实凭据及真实个人认证信息；目标产品最终保留的交付开发账号及密码按新项目事实写入其受跟踪账号文档。
-5. 从当前目标需要的独立能力开始；空白项目通常先收敛产品定义，再根据实际不确定性选择技术设计、项目准备核验、工程项目化或其它适用步骤。
-6. 使用目标项目自身的测试、构建、服务、数据和浏览器环境验证，不假设所有项目采用同一技术栈或工具组合。
-7. 进入产品体验审计时，准备目标项目可访问的真实环境、项目专用且真实可登录的开发账号、可复位开发数据和允许操作边界；缺少固定浏览器工具不会触发自动安装，但缺少必要动态证据时必须保留覆盖缺口。
-
-完整的新项目人工调度顺序以 [`AI Agent开发流程设计.md`](./AI%20Agent开发流程设计.md) 为准；已有项目、小改动、Bug 修复或重构不需要机械执行所有初始化步骤。
-
-## 10. 常见问题
-
-### 前端、后端或前后端分离项目怎么使用？
-
-分别确认每个独立仓库的分支、状态、依赖和验证结果。后端验证真实数据库、迁移、初始化数据和接口行为；前端依赖后端时连接真实后端，在浏览器中联调关键路径。两个仓库可以分别推进，但最终验收必须覆盖真实集成。工程架构仍只维护根仓的单份项目文档；前端与后端均为适用业务代码交付单元时必须分别覆盖，不能相互替代。
-
-### 空白项目怎么开始？
-
-先使用 `project-intake` 收敛目标用户、产品范围、核心流程和外部约束；需要模板选型时，基于当前可读参考资料完成选型并组装适用基础工程。随后使用 `project-readiness` 建立当前自动化开发周期唯一的开发资源准备基线，实际准备并核验后续编码和开发联调所需的外部资源、权限和开发配置；生产发布条件不属于该基线。基线完成后执行 `project-bootstrap` 项目化工程；当前存在 Tailwind CSS v4 CSS-first 前端时，在项目化完成后、初始提交前条件性调用 `tailwind-theme`，只提供产品资料和实际前端并请求完成风格定制，不新增固定编号步骤。然后基于真实工程事实调用 `solution-design` 形成总体技术方案。默认完整顺序见人工流程文档，但每个 Skill 仍可独立调用。
-
-### 小改动或 Bug 修复也要走完整流程吗？
-
-不需要机械执行项目初始化或完整 TRD 工作量，但仍要按行为影响完成相称验证。涉及业务规则、数据写入、权限、安全、接口兼容、跨服务集成或用户可见流程时，不能仅因改动文件少而降低完成标准。
-
-### 没有现成接口契约怎么办？
-
-以现有代码、真实调用方、测试和可运行行为为依据，明确尚不确定的边界并补充必要验证。接口契约有帮助，但不是开始调查或形成当前技术判断的绝对前提；无法安全推断的产品或兼容性决定仍应交由人确认。
-
-### 执行中途被打断怎么办？
-
-先读取活动 TRD、代码、测试结果、各仓库 Git 状态和最近提交，从这些权威事实恢复。只有项目已经约定长期协作或交接记录位置时才增量使用，不为普通中断创建专属过程目录、Manifest 或运行流水。
-
-### 已归档的需求或 TRD 需要调整怎么办？
-
-已完成并归档的历史需求和 TRD 保持不可变。后续升级、重构、补完或缺陷修复创建新的需求和新 TRD；当前实现需要改变旧行为时，在新的活动范围中记录变化、兼容性和验证结果。
+保留的少量第三方设计参考位于对应 Skill 的 assets 目录，来源与许可证见根目录 [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md)。
