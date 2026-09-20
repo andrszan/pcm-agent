@@ -350,6 +350,7 @@ Demo 从第 1 步开始，通过 `--product-draft` 接收 UTF-8 文本文件路�
 - 资料复制与恢复：使用第 1 步临时工作区，在发布前完成复制；源及递归内容仅接受普通文件和目录，拒绝符号链接、特殊文件及会递归包含临时或最终工作区的输入。半复制不视为成功，当前失败保留现场；同一 run 恢复且最终目录尚未发布时，在精确 staging 路径归属核验通过后清理整个残留并从模板重新 clone、准备和复制，不覆盖目录中的局部内容。最终目录发布后的恢复只使用工作区副本，不重新读取或同步客户源目录，不新增全量内容哈希、资源清单、大小配额或上传机制。
 - 资料 Git 边界：模板维护者在工作区 `.gitignore` 中声明 `initial-resources/`。有资料输入时，Python 只核验最终根仓库的实际 Git 忽略事实，不编辑或补写 `.gitignore`；规则缺失或目标资料目录冲突时返回 `failed`，保留现场。忽略只保护原始资料的常规入库边界，不代表可以公开秘密或个人数据。
 - AI 输出：从初稿提取 `topic_name` 和 `project_directory_name`。后者必须是单段小写 kebab-case；初稿没有明确名称时允许根据选题生成，并记录生成理由。
+- Git 提交身份：新运行入口 `run_all.py`、`run_step.py --step 1` 支持成对的 `--git-user-name`、`--git-user-email`，仅提供一项或内容无效时在创建 run 前拒绝。未提供时，在项目名称解析成功后采用 `project_directory_name` 与 `<project_directory_name>@example.com`；不另行提取或翻译品牌。显式身份在新建 run 时保存，默认身份在项目名称确定后保存到 `state.git_identity`，第 8 步再配置仓库。恢复沿用原记录；第 1 步单步恢复如重传参数必须与记录一致，完整入口 `--resume` 不接受身份参数。仅为新运行登记此字段，旧运行不补写、不迁移。
 - 模板：使用 `PCM_TEMPLATE_REPOSITORY` 配置的模板仓库默认分支最新内容，不由 AI 或单次运行更换来源。
 - 执行动作：
   1. 在产品工作区根目录中计算最终路径 `<root>/<project_directory_name>` 和同级临时路径 `<root>/<project_directory_name>.pcm-tmp-<run-id>`；
@@ -384,7 +385,7 @@ Demo 从第 1 步开始，通过 `--product-draft` 接收 UTF-8 文本文件路�
 
 ### 第 3 步：基础工程选型
 
-- 执行方式：Python 将产品定义和 catalog 候选构造成 Pydantic 输入模型，通过公共 Responses API 调用封装和代码内的 system prompt 获取 `FoundationSelectionDecision`；模型只返回各交付面的 `candidate_id` 与 `reason`，明确不需要的交付面返回 `null`。程序校验候选 ID，并从 catalog 回填仓库地址、默认分支和模板路径，形成完整选型结果。
+- 执行方式：Python 将产品定义和 catalog 候选构造成 Pydantic 输入模型，通过公共 Responses API 调用封装和代码内的 system prompt 获取 `FoundationSelectionDecision`；模型只返回各交付面的 `candidate_id` 与 `reason`，明确不需要的交付面返回 `null`。候选可携带可选 `applicability` 资格条件，只有产品定义或明确工程约束提供直接满足证据时才可选择，缺少证据不得作为默认方案；该条件只进入模型输入，不进入下游选择结果或运行状态。程序校验候选 ID，并从 catalog 回填仓库地址、默认分支和模板路径，形成完整选型结果。
 - 输入：第 2 步结果中记录的项目需求说明、产品功能说明，以及本次 `catalog.json` 中的前端和后端候选。system prompt 只描述选型功能、输入、输出和约束，不包含步骤编号、PCM、Skill 或其它外层编排背景，并要求严格 JSON、禁止 Markdown、代码围栏、YAML 或 JSON 之外的文本。
 - 输出：Pydantic `FoundationSelectionResult`，其中 `frontend`、`backend` 分别为完整模板选择或 `null`；每个选择直接包含 `id`、`git_url`、`default_branch`、`path` 和 `reason`。程序使用 `model_dump()` 将该结果写入 `steps/03.json.template_selection`。
 - 完成条件：SDK 成功返回 `output_parsed`，步骤结果已经写入，状态推进到 `project:04_assemble_foundation`。本步骤不获取、复制或组装模板，不初始化前后端仓库。
@@ -394,7 +395,7 @@ Demo 从第 1 步开始，通过 `--product-draft` 接收 UTF-8 文本文件路�
 
 - 输入：只读取第 3 步成功结果 `steps/03.json`，以既有 `FoundationSelectionResult` / `TemplateSelection` 校验 `template_selection`；不读取 catalog、产品文档，不调用模型、Skill 或 Agent。状态必须位于 `project:04_assemble_foundation`，`workspace.final_path`、state 的根 Git 证据和现场必须一致，产品根仍为零提交 `main`。
 - 执行动作：目标固定为 `frontend/`、`backend/`。每个目标只能不存在，或是非符号链接且唯一内容为普通 `.gitkeep` 的目录；空目录、额外内容、符号链接和既有工程一律拒绝。对唯一 `(git_url, default_branch)` 执行一次 `git clone --depth 1 --branch <branch> --single-branch`，核验 origin、分支和 HEAD SHA；选中的相对模板路径不得为空、绝对、含 `..`、逃出 clone 或指向符号链接，子树不得包含上游 `.git` 或任何符号链接。每个适用 payload 复制到同级 run-owned 临时根后，在 payload 内执行 `git init -b main`，核验 Git top-level 就是 payload 自身、分支为 `main`、HEAD 为 unborn、index 为空，并且至少存在一个不被自身 ignore 的可提交文件；所有 payload 均合格后才移除经核验的占位目录并以 `os.rename()` 发布。第 4 步不执行 `git add`、`git commit` 或 push。
-- Agent 配置：仅对新复制的适用前后端 payload，在初始化 Git 前由 Python 向各自 `.gitignore` 补充缺少的 `.agents/`、`.claude/`、`AGENTS.md`、`CLAUDE.md` 规则，覆盖仓库内各层级；保留原文件内容，重复执行不重复追加。配置文件原样保留供本地开发使用，模板源仓库和产品根工作区不改。初始化后使用不依赖用户全局 ignore 的 Git 候选文件列表核验实际效果；若现有反向规则等导致内部配置仍可提交，则发布前失败并保留现场，不覆盖其它忽略规则。不迁移已组装产品，第 8 步及通用提交 Skill 不重复维护此策略。
+- Agent 配置：仅对新复制的适用前后端 payload，在初始化 Git 前由 Python 向各自 `.gitignore` 补充缺少的 `.agents/`、`.claude/`、`AGENTS.md`、`CLAUDE.md` 规则，覆盖仓库内各层级；保留原文件内容，重复执行不重复追加。配置文件原样保留供本地开发使用，模板源仓库和产品根受跟踪能力文件不改。初始化后使用不依赖用户全局 ignore 的 Git 候选文件列表核验实际效果；若现有反向规则等导致内部配置仍可提交，则发布前失败并保留现场，不覆盖其它忽略规则。实际前端同时符合 shadcn-vue schema、Vue 和 Reka UI 工程事实时，Python 在产品根被 Git 忽略的 `.claude/settings.local.json` 中合并关闭不兼容 React shadcn 能力及 CLI；读取并保留已有 local settings，React 模板无副作用。不迁移已组装产品，第 8 步及通用提交 Skill 不重复维护此策略。
 - 临时与恢复：临时根固定为产品目录同级 `<project>.pcm-assemble-<run-id>`，只以 run ID、产品路径和步骤号的 marker 证明归属。仅当路径、marker 完全匹配且两端仍是占位或不存在时，才删除失败残留并 fresh 重试；未知残留和部分发布现场均保留并 `failed`。`null` 端只删除严格占位目录，原本不存在则无副作用。成功后核验每个适用端自身 top-level、`main`、unborn HEAD、空 index，不适用端不存在，核验 marker 后清理临时根；已有成功结果且状态已到第 5 步时，最小现场核验来源记录、上述仓库边界、目标和临时根后幂等复用，不重新 clone。
 - 输出：`steps/04.json` 记录 `applicable`、实际 `outputs` 和 `assembly.frontend/backend`；每个适用端保存 `target`、`id`、`git_url`、`default_branch`、`path`、实际 `origin`、`branch`、`commit_sha`，不适用端为 `null`。成功推进 `phase: project_initialization`、`current_node: project:05_verify_readiness`、`step/current_step: 5`。
 - 阻塞与失败：明确的模板仓库认证或读取权限缺失为 `blocked`；状态、目录、Git、来源、路径、复制、发布、清理和核验错误为 `failed`。步骤自行保存 result/state；入口只输出结果路径与退出码，不重复写第 4 步结果。
@@ -405,7 +406,7 @@ Demo 从第 1 步开始，通过 `--product-draft` 接收 UTF-8 文本文件路�
 - 能力：`project-readiness`。
 - 输入：当前开发范围、基础工程选型结论、已组装工程，以及调用方本次提供的动态真实开发资源资料。
 - 执行动作：建立当前 PCM 自动化开发周期唯一的资源准备基线，识别完成编码、开发环境联调和开发环境真实验收所需、且必须由调用方提供的外部服务、账号、凭据、素材、私有数据或专用设备；匹配候选前先验证受保护实际配置中的非空运行凭据与资源绑定，满足开发合同时原样保留，不用候选池中的维护、共享或更宽权限身份替换，也不把候选凭据探针结果误记为最终项目凭据结果；清单只描述最终选定绑定，不得提及、比较或说明未采用候选，否定表述也不例外；只有绑定缺失、失效或不合格时才使用动态候选池。在授权和配置合同允许时，在既有服务内准备项目专用逻辑资源和最小权限运行凭据；具体资源操作边界由 `project-readiness` 维护。资源使用稳定产品级环境身份，不以单个需求编号命名长期数据库或存储作用域；保持既有有效绑定，不为命名偏好擅自重建资源。服务不支持派生项目身份时，只有调用方明确授权的非管理、非生产共享开发身份，且实际作用范围满足开发合同，才可以兼容使用；共享管理或根凭据、生产身份和可访问合同外资源的身份不得写入应用配置，无法派生合格开发身份时属于第二类阻塞。权限与隔离按实际可见范围和范围外拒绝判断，不因“共享”标签或仅返回获授权资源的列表接口成功而误判不可用。每项被判为 `ready` 的外部运行资源都必须把最终项目凭据与资源绑定持久化到所属仓库被忽略的实际 `.env` 或等价受保护配置，确保后续开发能直接复用已有绑定；后续设计明确的新逻辑资源和身份由当前开发任务在同一服务及授权范围内补齐；同步无秘密 `.env.example` 或公开说明，含秘密文件在 POSIX 上通常使用 `0600`，并使用最终运行凭据完成最小行为和隔离验证。资源资料不要求固定格式，Python 不读取或解析其正文。
-- 输出：项目准备清单，以及实际落地的受保护开发配置、公开配置示例和项目级开发/测试资源。清单按资源类别交接最终绑定、配置落点与实际验证结果，共同事实集中说明，环境差异与真实缺口保持清楚，不机械铺满固定字段；组织与证据表达以 [`project-readiness` Skill](../../.claude/skills/project-readiness/SKILL.md#清单格式) 为准。`steps/05.json` 另外保存固定的清单准入合同版本，以及清单与两份权威产品定义的无秘密 SHA-256 指纹；合同版本使旧语义 success 不可复用，指纹防止完成基线被静默替换，二者都不证明资源 `ready`，也不记录 `.env`、凭据或资源资料正文。
+- 输出：项目准备清单，以及实际落地的受保护开发配置、公开配置示例和项目级开发/测试资源。清单按资源类别交接最终绑定、配置落点与实际验证结果，共同事实集中说明，环境差异与真实缺口保持清楚，不机械铺满固定字段；模板声明需要从多个兼容变体保留唯一选择时，最终资源绑定同时作为第 6 步项目化的权威选择事实，不新增数据库枚举或平行变体状态。组织与证据表达以 [`project-readiness` Skill](../../.claude/skills/project-readiness/SKILL.md#清单格式) 为准。`steps/05.json` 另外保存固定的清单准入合同版本，以及清单与两份权威产品定义的无秘密 SHA-256 指纹；合同版本使旧语义 success 不可复用，指纹防止完成基线被静默替换，二者都不证明资源 `ready`，也不记录 `.env`、凭据或资源资料正文。
 - 完成条件：所有进入项目准备清单的当前开发必需外部资源均真实可用；不存在两类阻塞：开发必需外部资源在候选池中缺失、当前环境无法安全生成且无兼容替代，或已匹配资源真实不可用、凭据无效、权限不足、隔离不合格，或缺少开发所需接口能力、可用配额、回调/白名单及其它既定能力。清单、管理凭据、Mock、截图或 Agent 自述不能单独证明完成。
 - 自动化说明：依赖安装、migration、Seed、业务实现、项目内测试账号、完整联调和浏览器验收由后续开发步骤完成。只服务生产部署或生产运行的正式域名、DNS/TLS、生产资源与凭据、生产回调与配额、监控、备份恢复、容量和发布安全属于开发及清单准入范围外。项目准备清单正文任何位置都不得列举、命名或汇总这些事项，也不得以“未纳入清单”、范围外、未来事项、非阻塞、无状态或 `not-applicable` 章节保留它们；开发 SMTP TLS、localhost 回调、开发白名单、沙箱范围和开发配额仍按当前开发用途纳入。产品规则和隐私治理同样不写入清单。已有成功结果只有在当前 `scope_contract`、清单和产品定义指纹一致时才可幂等复用。
 
@@ -413,12 +414,12 @@ Demo 从第 1 步开始，通过 `--product-draft` 接收 UTF-8 文本文件路�
 
 - 能力：同一数字步骤顺序显式调用 `project-bootstrap`；当 `steps/04.json.outputs` 含 `frontend` 时，再依次调用 `tailwind-theme` 和 `media-assets`。三个领域任务 `project_bootstrap`、`tailwind_theme`、`brand_assets` 各自使用独立 Claude session、decision conversation、XML system snapshot 和私有恢复状态，不由 Skill 彼此隐式调用，也不新增步骤编号或内部节点。
 - 输入：基础工程、产品定义、基础工程选型结论和经过严格指纹核验的准备基线；已有项目可另外提供既有技术方案。主题调用只引用两份产品定义和实际 frontend，工程事实由 Agent 现场读取，不依赖尚未执行的 UI/UX 框架产物。
-- 项目化：`project-bootstrap` 完成项目身份、基础配置、文档和最小联调，保持或建立可替换的 Tailwind 基础主题接线，但不选择或生成项目专属主题，也不把模板默认样式认定为最终产品主题。配置可以为匹配工程实际加载合同迁移键名与结构并同步无秘密公开示例，但必须复用同一既有资源绑定和真实值，保持资源身份、endpoint 与权限范围，不重新选择、创建、派生、轮换或替换外部资源或凭据。
+- 项目化：`project-bootstrap` 完成项目身份、基础配置、文档和最小联调，保持或建立可替换的 Tailwind 基础主题接线，但不选择或生成项目专属主题，也不把模板默认样式认定为最终产品主题。配置可以为匹配工程实际加载合同迁移键名与结构并同步无秘密公开示例，但必须复用同一既有资源绑定和真实值，保持资源身份、endpoint 与权限范围，不重新选择、创建、派生、轮换或替换外部资源或凭据。模板声明需按资源绑定保留唯一派生变体时，以准备清单最终绑定为权威选择，Agent 完整收口未选变体的目录、依赖和锁文件、配置与公开示例、构建测试入口、README 及适用本地 Agent 规则，并完成真实构建和适用运行验证；Python 不解析清单 Markdown、不持久化数据库枚举，也不新增变体状态机。
 - 主题适用性：无 frontend 时只运行项目化并以 `tailwind_theme:false` 跳过主题。存在 frontend 时，bootstrap 完成后由 Python 确认 `frontend/package.json` 直接声明可明确判断为 major 4 的 `tailwindcss`，并在 frontend 自身 Git 可见且未忽略的 CSS 中找到 `@import "tailwindcss"` CSS-first 证据；版本不明确、非 v4 或缺少 CSS-first 证据属于本地模板合同 `failed`，不创建主题 session，也不作为 `blocked`。
 - 主题动作：`tailwind-theme` 初始提示只引用两份产品定义和实际 frontend，并请求依据产品和前端完成风格定制。Agent 可自主选择保留默认、采用全部或部分 preset、适配或 custom，按实际改动执行相称验证并诚实报告；具体规则以 [`tailwind-theme` Skill](../../.claude/skills/tailwind-theme/SKILL.md) 为唯一真源，不在步骤合同重复固定属性范围、选择顺序或全套检查。
 - 品牌资产：theme 完成后，Agent 依据产品定义、当前 frontend 和适用运行配置调用 `media-assets`，交付同一视觉身份的页面品牌标识与 favicon，其它资产按需。优先复用，品牌文字保持可编辑，Agent 负责实际看图、质量、派生、接入及验证。整套共享最多 8 次生成调用，仅作为提示约束，继续或恢复不重置，满足用途即停；额度耗尽或生成服务不可用时允许合格简洁 SVG／文字标识兜底。负责人只根据回复防漏，不读文件或复做视觉验收；Python 不增加预算状态、次数核验或图像评分。
 - 输出：完成项目化、条件性风格定制与品牌资产准备的工程。`steps/06.json.outputs` 继续等于第 4 步实际适用工程，顶层 `applicable` 语义不变，保留真实布尔 `tailwind_theme`，严格满足 `tailwind_theme == ("frontend" in outputs)`；有 frontend 时 success 摘要的风格定制部分只写“已完成项目风格定制”。字段缺失、类型错误或不一致的旧 success 不可复用。品牌任务不增加 result 必需字段，也不收紧历史 success 准入。
-- 完成条件：适用安装、检查、测试、构建、启动、健康检查、真实浏览器检查和基础联调通过；有 frontend 时项目风格定制任务完成，并按实际改动完成相称验证或准确说明未验证范围；品牌资产已交付并完成适用接入，允许合理复用或合格兜底。各独立适用领域 completed 后才写 success 并推进第 7 步，留下待提交变更；负责人不要求逐项完成声明。
+- 完成条件：适用安装、检查、测试、构建、启动、健康检查、真实浏览器检查和基础联调通过；声明派生变体的模板已按准备清单最终绑定收口到唯一选择，未选变体在目录、依赖、配置、README 和适用本地 Agent 规则中没有残留；有 frontend 时项目风格定制任务完成，并按实际改动完成相称验证或准确说明未验证范围；品牌资产已交付并完成适用接入，允许合理复用或合格兜底。各独立适用领域 completed 后才写 success 并推进第 7 步，留下待提交变更；负责人不要求逐项完成声明。
 - 恢复：仍停留在 `project:06_bootstrap_foundation`。前序任务 completed 后只复验、不重跑 Agent；品牌失败或 blocked 时恢复原品牌会话，人工消息只投递当前 blocked 领域，前序 blocked 不创建后续执行产物。品牌 completed 后推进中断不重复生成；result 已写而 state 未推进时按严格 marker、前序交接、Tailwind gate 和 Git 事实只补状态。已成功历史第 6 步不补跑品牌，也不宣称已补齐；未完成旧 bootstrap/theme 沿用原 snapshot/session，完成后再创建品牌任务。
 - 自动化说明：发现模板残留、配置读取、变量迁移、脚本、代码、代理、启动、健康入口、前后端连接或测试入口问题时在项目化领域修正并重跑；主题或验证可继续完成时在主题领域修正并重跑。`blocked` 仍只用于当前环境无法取得的不可替代外部条件；本地版本、文件、主题入口、工作树或状态冲突为 `failed`，不得用替代资源、新凭据或降低验证标准规避。第 8 步自然提交主题与品牌资产变更，第 10 步把已提交主题及品牌资产视为 Current，负责跨页面使用规则，不重新调用主题或生成能力。
 - 历史验证（主题任务接入时）：第 6 步 14 项、第 7 步 9 项、相关第 6/7/8/10 步 58 项、公共循环与入口 64 项及全量 351 项自动化通过。隔离 run `step06-tailwind-theme-20260831` 已确认 bootstrap Skill/slash command、产品 cwd 与原 session 加载；内置 Explore 未识别模型后，run-local 同 session 恢复实际执行 43 turns 并修改项目，但 SDK 以 `terminal_reason=api_error` 结束且没有完整 Agent 回复，后续严格拒绝不合法 `pending_agent_text`，未进入独立 theme session。该结果只证明真实通道失败和恢复保护生效，不构成 `/tailwind-theme`、实际 CSS light/dark 修改或浏览器集成成功证据。
@@ -435,9 +436,10 @@ Demo 从第 1 步开始，通过 `--product-draft` 接收 UTF-8 文本文件路�
 
 ### 第 8 步：首次提交适用仓库
 
-- 能力：这是第一次全仓提交检查和干净基线节点。Python 只执行确定性输入、状态及 Git 只读核验；存在未提交变更时，才在产品根创建一个 Claude Agent SDK session，显式调用 `commit-changes`。
+- 能力：这是第一次全仓提交检查和干净基线节点。Python 执行确定性输入、状态及 Git 核验，并为已登记提交身份的新产品配置仓库本地身份；存在未提交变更时，才在产品根创建一个 Claude Agent SDK session，显式调用 `commit-changes`。
 - 输入：权威有序仓库严格为 `['root', *steps/04.json.outputs]`；每个权威路径必须是自身 top-level、`main` 的独立 Git 仓库。不从固定前后端目录、历史状态或 Agent 回复扩充该清单。
-- 执行动作：Python 对每仓只执行 `git rev-parse --show-toplevel`、`git branch --show-current`、`git status --porcelain`。若全部干净，在创建 conversation/session 或写入 `running` 前零 Agent、零决策模型调用，直接成功并记录全仓干净基线。任一仓 dirty 时，初始 prompt 首行是 `/commit-changes`，只给仓库清单及边界；Agent 负责必要 Git 写操作，Python 不逐仓派发、不 `add`、不 `commit`、不 `reset`、`amend` 或 `rebase`。Agent 不得切换分支、改写历史或 push。
+- 提交身份：仓库边界核验后，若本 run 有 `state.git_identity`，Python 在干净快速完成或调用 Agent 之前，对全部权威仓库执行 `git config --local --replace-all user.name`、`user.email`，并读取本地配置及 `git var GIT_AUTHOR_IDENT`、`GIT_COMMITTER_IDENT` 核验实际生效身份。身份记录未确定、无效、写入失败或被其它配置／环境覆盖时返回 `failed`，不调用提交 Agent。只修改产品仓库本地配置，不改全局配置、其它项目或提交历史；没有该字段的旧 run 保持原行为。
+- 执行动作：Python 用 `git rev-parse --show-toplevel`、`git branch --show-current`、`git status --porcelain` 读取每仓事实。完成适用的身份配置后，若全部干净，在创建 conversation/session 或写入 `running` 前零 Agent、零决策模型调用，直接成功并记录全仓干净基线。任一仓 dirty 时，初始 prompt 首行是 `/commit-changes`，只给仓库清单及边界；Agent 负责暂存与提交，Python 不逐仓派发、不 `add`、不 `commit`、不 `reset`、`amend` 或 `rebase`。Agent 不得切换分支、改写历史或 push。
 - 输出：`steps/08.json` 的 `outputs` 固定为空，并保存 `applicable_repositories` 和 `repositories` 列表；每项为相对 `path`、`branch`、`worktree_clean`。状态保存同样事实但路径为绝对路径，成功推进到 `project:09_engineering_architecture`。
 - 完成条件：每仓自身 top-level、`main` 且 `status --porcelain` 为空。无需检查 HEAD、提交是否产生、提交数、父提交、SHA、marker、历史替换或根 tree。
 - 恢复：`completed` 后 Python 只读复验；仍 dirty 则以固定 repair prompt 继续同一 session。`blocked` 后重读，已全干净直接成功，仍 dirty 才保存 blocked。恢复也先读现场，已全干净直接成功，仍 dirty 才恢复原 session。`failed` / `blocked` 的步骤结果不能当作成功；只有 `status=success` 可幂等复用。成功后的第 9 步状态若权威仓库变 dirty，拒绝复用，避免第 8 步替后续修改提交。

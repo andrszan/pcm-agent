@@ -1,39 +1,8 @@
 {
   "permissions": {
-    "allow": [
-      "Bash(find *)",
-      "Bash(pnpm *)",
-      "Bash(git -C * status*)",
-      "Bash(git -C * log*)",
-      "Bash(git -C * diff*)",
-      "Bash(git -C * branch*)",
-      "Bash(git -C * show*)",
-      "Bash(git -C * add -- *)",
-      "Bash(git -C * add -N -- *)",
-      "Bash(git -C * commit*)",
-      "Bash(git -C * rev-parse*)",
-      "Bash(git -C * init*)",
-      "Bash(git status*)",
-      "Bash(git log*)",
-      "Bash(git diff*)",
-      "Bash(git add -- *)",
-      "Bash(git add -N -- *)",
-      "Bash(git commit*)",
-      "Bash(git rev-parse*)",
-      "Bash(git init*)",
-      "Bash(node *)",
-      "Bash(npm *)",
-      "Read(*)",
-      "Edit(*)"
-    ],
-    "deny": [
-      "Bash(rm -rf ~:*)"
-    ],
-    "ask": [
-      "Bash(git push *)",
-      "Bash(git -C * push*)"
-    ],
-    "defaultMode": "bypassPermissions"
+    "allow": [],
+    "deny": [],
+    "ask": []
   },
   "enabledPlugins": {
     "context7@claude-plugins-official": true,

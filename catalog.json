@@ -19,6 +19,13 @@
           "project_type": "frontend",
           "name": "Vite + React + shadcn/ui 单页应用项目起点",
           "description": "面向不需要服务端渲染的 Web 应用起步的业务无关 Vite React SPA 项目起点。"
+        },
+        {
+          "id": "vite-vue-shadcn-spa",
+          "path": "templates/vite-vue-shadcn-spa",
+          "project_type": "frontend",
+          "name": "Vite + Vue + shadcn-vue 单页应用项目起点",
+          "description": "面向明确要求 Vue 且不需要服务端渲染的独立 Web 应用起步的业务无关 Vite Vue 3 SPA 项目起点；提供 TypeScript、Vue Router、Pinia、TanStack Vue Query、Axios/Zod API 层、vee-validate 表单、Tailwind CSS 4 与完整本地 shadcn-vue 组件集、三态主题、错误边界和通用组合组件，不包含认证、权限、国际化和客户业务。"
         }
       ]
     },
@@ -47,6 +54,21 @@
           "project_type": "backend",
           "name": "FastAPI + SQLAlchemy + PostgreSQL Async API 项目起点",
           "description": "面向异步 PostgreSQL API 服务起步的业务无关 FastAPI 项目起点。"
+        }
+      ]
+    },
+    "pcm-java-templates": {
+      "git_url": "git@gitlab.com:baiyiyu/andrszan/pcm-repository/pcm-java-templates.git",
+      "default_branch": "main",
+      "description": "PCM Java 模板仓库",
+      "templates": [
+        {
+          "id": "springboot-mybatisplus-api",
+          "path": "templates/springboot-mybatisplus-api",
+          "project_type": "backend",
+          "name": "Spring Boot + MyBatis-Plus API 项目起点",
+          "description": "面向独立 Web API 服务起步的业务无关 Spring Boot 4 + MyBatis-Plus 项目起点；基础模板兼容 MySQL 与 PostgreSQL，派生项目按实际需求选定并保留一种数据库。",
+          "applicability": "仅当产品定义或明确工程约束要求 Java/JVM 生态、Spring Boot、MyBatis-Plus，或必须承接既有 Java 系统时适用；只有通用 Web API、关系型数据库或普通后端需求时不适用。"
         }
       ]
     }
