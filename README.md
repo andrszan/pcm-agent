@@ -6,23 +6,7 @@ PCM 是 Project Customization & Management（项目定制与管理）的缩写�
 
 ## 工作方式
 
-```mermaid
-flowchart TD
-    A[产品想法或已有资料] --> B[产品定义<br/>project-intake]
-    B --> C[模板选型与工程初始化<br/>catalog.json · project-readiness · project-bootstrap]
-    T[基础工程模板<br/>前端 · Python · Java] -. 提供业务无关的项目起点 .-> C
-    C --> D[总体方案、工程架构与 UI/UX 框架<br/>solution-design · engineering-architecture · ui-ux-framework]
-    D --> E[Backlog 拆分<br/>requirement-breakdown]
-    E --> F[单需求 TRD<br/>trd-design]
-    F --> G[开发与真实验证<br/>dev-workflow<br/>测试 · 构建 · 服务 · 浏览器]
-    G --> H[独立审查与规则复盘<br/>reviewer · session-rule-retrospective]
-    H --> I{达到完成条件?}
-    I -- 需要修正 --> G
-    I -- 是 --> J[精确提交<br/>commit-changes]
-    J --> K{还有需求?}
-    K -- 是 --> F
-    K -- 否 --> L[完整产品体验审计<br/>product-experience-audit]
-```
+![PCM Agent Skills 推荐协作流程](public/images/pcm-workflow.svg)
 
 这是一条推荐的人工协作路径：调用者负责根据项目事实组织步骤、传递上下文并作出必要决定。仓库提供能力与边界，不包含程序化自动编排器。
 
@@ -39,6 +23,87 @@ flowchart TD
 | Git 交付 | `commit-changes` | 按功能结果精确暂存和创建本地提交 |
 
 完整能力列表和职责边界见 [`.claude/README.md`](.claude/README.md)。
+
+## 自动化开发产品案例
+
+以下产品由 PCM Agent Skills 的能力组合开发完成，涵盖从产品与需求设计到工程实现、验证和本地交付的完整过程。每个案例展示代表性界面和已交付的功能范围。
+
+### 食序 MealFlow
+
+面向个人、合住伙伴和家庭的饮食协作工具。用户先管理家中食材库存，再安排一周菜单、生成采购清单，并在烹饪后确认食材消耗，让家庭成员围绕日常饮食持续协作。
+
+**功能模块：**
+
+- **账号与家庭协作：** 注册登录、个人与通知偏好、家庭创建与切换、成员／访客邀请、角色授权、所有权转让和受规则约束的家庭删除。
+- **库存与菜谱：** 按批次维护食材数量、位置、保质期和状态，追溯库存流水、设置阈值提醒；浏览、收藏、创建、复制和导入公共或家庭菜谱。
+- **菜单与采购：** 按日期和餐次安排一周菜单，设置份数与负责人，基于库存生成短缺建议和购物清单，并支持常购模板、采购领取、购买登记、批量入库、打印和移动端购物模式。
+- **烹饪与日常概览：** 预览并确认实际食材消耗、选择扣减批次、记录部分完成和有条件撤销；集中展示今日餐次、临期食材、采购待办与成员变化。
+- **运营与通用体验：** 在权限范围内搜索、筛选和排序食材与菜谱，提供站内通知、邮件摘要、内容运营、平台治理、审计，以及桌面、平板和移动端统一反馈。
+
+<table>
+  <tr>
+    <td width="32%" rowspan="3" valign="top"><img src="public/images/projects-example/mealflow/mealflow-nav-mobile.png" alt="食序移动端导航"></td>
+    <td width="68%"><img src="public/images/projects-example/mealflow/mealflow-login.png" alt="食序登录页"></td>
+  </tr>
+  <tr>
+    <td><img src="public/images/projects-example/mealflow/mealflow-client-home.png" alt="食序客户端首页"></td>
+  </tr>
+  <tr>
+    <td><img src="public/images/projects-example/mealflow/mealflow-admin-platform.png" alt="食序管理端"></td>
+  </tr>
+</table>
+
+### 尾屿 Tailisle
+
+面向城市社区的宠物照护伙伴智能匹配系统。宠物主人可以发布照护需求、筛选和邀请合适的服务者，双方围绕正式约定完成履约、反馈和评价；平台同时提供治理与异常处理能力。
+
+**功能模块：**
+
+- **角色与个人资料：** 区分普通用户、宠物主人、照护服务者和平台管理员，支持注册登录、管理员独立登录、会话管理、个人资料和站内通知。
+- **宠物与服务者档案：** 维护宠物生活习惯、照护事项和禁忌；服务者可配置服务区域、时间、能力、经验、服务模式和接单状态。
+- **需求与匹配：** 通过表单或 AI 自然语言创建照护需求，根据时间、区域、宠物类型、能力、经验和禁忌等条件筛选、排序并推荐服务者。
+- **邀请与履约：** 支持串行邀请、接受、拒绝、撤回、超时和失效处理；接受后生成服务约定，提供时段反馈、完成确认、取消、重新匹配和异常终止流程。
+- **评价与平台治理：** 支持服务评价、收藏、黑名单、举报与申诉；管理员可进行用户治理、内容管理、异常处理、字典配置和运营统计，并在 AI、匹配或并发异常时提供明确降级反馈。
+
+<table>
+  <tr>
+    <td width="32%" rowspan="3" valign="top"><img src="public/images/projects-example/tailisle/tailisle-nav-mobile.png" alt="尾屿移动端导航"></td>
+    <td width="68%"><img src="public/images/projects-example/tailisle/tailisle-login.png" alt="尾屿登录页"></td>
+  </tr>
+  <tr>
+    <td><img src="public/images/projects-example/tailisle/tailisle-client-home.png" alt="尾屿客户端首页"></td>
+  </tr>
+  <tr>
+    <td><img src="public/images/projects-example/tailisle/tailisle-admin-home.png" alt="尾屿管理端首页"></td>
+  </tr>
+</table>
+
+### 好玩实验室 Rulefolio
+
+面向独立桌游创作者、小型工作室和创作型俱乐部的桌面 Web 产品。它将作品材料、测试计划、试玩场次、玩家反馈、问题、调整决定和复测结论串联为可追查的规则迭代记录。
+
+**公开源码：** [服务端](https://github.com/andrszan/rulefolio-server) · [前端](https://github.com/andrszan/rulefolio-web)。可在两个仓库中查看源代码与提交历史。
+
+**功能模块：**
+
+- **账户与协作空间：** 支持受控开通、登录退出、会话管理和账户恢复；可创建工作空间、邀请或移除成员，并管理协作资格。
+- **作品与私有材料：** 支持私有作品和作品级角色授权，安全上传、预览和下载图片、规则与附件，并可建立或重置带开发账号和示例数据的可操作环境。
+- **试玩计划与场次：** 维护当前规则和材料，制定测试目标、安排场次、邀请玩家、确认人数、固定测试材料，并记录实际参与者、时长、状态、结果和现场观察。
+- **反馈、问题与复测：** 收集或代录文本、单选和数值反馈，将反馈与观察归纳为问题，记录处理决定与理由，再通过规则或材料调整及针对性复测更新结论。
+- **待办、导出与恢复：** 汇总邀请、反馈、问题和复测待办，追踪邮件状态与重试；支持按角色导出作品资料、受控终止客户在线访问，以及恢复后的凭据撤销、关系核验和分阶段重新开放服务。
+
+<table>
+  <tr>
+    <td width="32%" rowspan="3" valign="top"><img src="public/images/projects-example/rulefolio/rulefolio-index-mobile.png" alt="好玩实验室移动端首页"></td>
+    <td width="68%"><img src="public/images/projects-example/rulefolio/rulefolio-login.png" alt="好玩实验室登录页"></td>
+  </tr>
+  <tr>
+    <td><img src="public/images/projects-example/rulefolio/rulefolio-clent-home.png" alt="好玩实验室客户端首页"></td>
+  </tr>
+  <tr>
+    <td><img src="public/images/projects-example/rulefolio/rulefolio-admin-home.png" alt="好玩实验室管理端首页"></td>
+  </tr>
+</table>
 
 ## 仓库结构
 

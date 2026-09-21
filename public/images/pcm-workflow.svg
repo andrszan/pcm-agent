@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1800" viewBox="0 0 1280 1800" role="img" aria-labelledby="title desc">
+  <title id="title">PCM Agent Skills 推荐协作流程</title>
+  <desc id="desc">从产品想法开始，依次经过产品定义、工程初始化、方案设计、Backlog、TRD、开发验证、审查复盘和提交；未达到完成条件或仍有需求时回到对应环节。</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#5f6d7a"/>
+    </marker>
+    <style>
+      .title { font: 700 34px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; fill: #17212b; }
+      .subtitle { font: 400 18px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; fill: #5f6d7a; }
+      .label { font: 700 22px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; fill: #17212b; text-anchor: middle; }
+      .detail { font: 400 17px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; fill: #4b5b6a; text-anchor: middle; }
+      .decision { font: 700 20px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; fill: #17212b; text-anchor: middle; }
+      .edge-label { font: 600 17px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; fill: #4b5b6a; }
+      .flow { fill: none; stroke: #5f6d7a; stroke-width: 3; marker-end: url(#arrow); }
+      .dashed { fill: none; stroke: #5f6d7a; stroke-width: 3; stroke-dasharray: 10 8; marker-end: url(#arrow); }
+      .node { fill: #f8fafc; stroke: #91a4b8; stroke-width: 2; }
+      .highlight { fill: #e9f5ff; stroke: #4c91c8; stroke-width: 2.5; }
+      .review { fill: #f5efff; stroke: #8965c7; stroke-width: 2.5; }
+      .deliver { fill: #ebf8f0; stroke: #4b9a70; stroke-width: 2.5; }
+      .audit { fill: #fff8e8; stroke: #bd8c28; stroke-width: 2.5; }
+      .decision-box { fill: #fffdf5; stroke: #bd8c28; stroke-width: 2.5; }
+    </style>
+  </defs>
+
+  <rect width="1280" height="1800" rx="24" fill="#ffffff"/>
+  <text x="640" y="66" class="title" text-anchor="middle">PCM Agent Skills 推荐协作流程</text>
+  <text x="640" y="100" class="subtitle" text-anchor="middle">根据项目事实、任务范围和风险选择需要的步骤</text>
+
+  <path class="flow" d="M640 196V238"/>
+  <path class="flow" d="M640 350V392"/>
+  <path class="flow" d="M640 504V546"/>
+  <path class="flow" d="M640 658V700"/>
+  <path class="flow" d="M640 812V854"/>
+  <path class="flow" d="M640 966V1008"/>
+  <path class="flow" d="M640 1120V1162"/>
+  <path class="flow" d="M640 1274V1314"/>
+  <path class="flow" d="M640 1392V1434"/>
+  <path class="flow" d="M640 1520V1570"/>
+
+  <path class="dashed" d="M300 427H390"/>
+  <text x="55" y="356" class="edge-label">提供业务无关的</text>
+  <text x="95" y="378" class="edge-label">项目起点</text>
+
+  <path class="flow" d="M530 1353H246V1064H390"/>
+  <text x="266" y="1212" class="edge-label">需要修正</text>
+
+  <path class="flow" d="M750 1609H1034V910H890"/>
+  <text x="1052" y="1256" class="edge-label">还有需求</text>
+
+  <rect class="node" x="430" y="126" width="420" height="70" rx="14"/>
+  <text x="640" y="169" class="label">产品想法或已有资料</text>
+
+  <rect class="highlight" x="390" y="238" width="500" height="112" rx="14"/>
+  <text x="640" y="282" class="label">产品定义</text>
+  <text x="640" y="316" class="detail">project-intake</text>
+
+  <rect class="highlight" x="390" y="392" width="500" height="112" rx="14"/>
+  <text x="640" y="436" class="label">模板选型与工程初始化</text>
+  <text x="640" y="470" class="detail">catalog.json · project-readiness · project-bootstrap</text>
+
+  <rect class="node" x="55" y="392" width="245" height="70" rx="14"/>
+  <text x="178" y="421" class="label" style="font-size:19px">基础工程模板</text>
+  <text x="178" y="447" class="detail" style="font-size:15px">前端 · Python · Java</text>
+
+  <rect class="highlight" x="390" y="546" width="500" height="112" rx="14"/>
+  <text x="640" y="580" class="label">总体方案、工程架构与 UI/UX 框架</text>
+  <text x="640" y="618" class="detail">solution-design · engineering-architecture · ui-ux-framework</text>
+
+  <rect class="node" x="390" y="700" width="500" height="112" rx="14"/>
+  <text x="640" y="744" class="label">Backlog 拆分</text>
+  <text x="640" y="778" class="detail">requirement-breakdown</text>
+
+  <rect class="node" x="390" y="854" width="500" height="112" rx="14"/>
+  <text x="640" y="898" class="label">单需求 TRD</text>
+  <text x="640" y="932" class="detail">trd-design</text>
+
+  <rect class="highlight" x="390" y="1008" width="500" height="112" rx="14"/>
+  <text x="640" y="1042" class="label">开发与真实验证</text>
+  <text x="640" y="1076" class="detail">dev-workflow · 测试 · 构建 · 服务 · 浏览器</text>
+
+  <rect class="review" x="390" y="1162" width="500" height="112" rx="14"/>
+  <text x="640" y="1206" class="label">独立审查与规则复盘</text>
+  <text x="640" y="1240" class="detail">reviewer · session-rule-retrospective</text>
+
+  <path class="decision-box" d="M640 1314 L750 1353 L640 1392 L530 1353 Z"/>
+  <text x="640" y="1346" class="decision">达到完成条件？</text>
+  <text x="662" y="1420" class="edge-label">是</text>
+
+  <rect class="deliver" x="390" y="1434" width="500" height="86" rx="14"/>
+  <text x="640" y="1470" class="label">精确提交</text>
+  <text x="640" y="1498" class="detail">commit-changes</text>
+
+  <path class="decision-box" d="M640 1570 L750 1609 L640 1648 L530 1609 Z"/>
+  <text x="640" y="1602" class="decision">还有需求？</text>
+  <path class="flow" d="M640 1648V1690"/>
+  <text x="662" y="1678" class="edge-label">否</text>
+
+  <rect class="audit" x="390" y="1690" width="500" height="86" rx="14"/>
+  <text x="640" y="1726" class="label">完整产品体验审计</text>
+  <text x="640" y="1754" class="detail">product-experience-audit</text>
+</svg>
