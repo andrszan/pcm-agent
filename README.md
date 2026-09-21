@@ -1,6 +1,6 @@
 # PCM Agent Skills
 
-PCM Agent Skills 是一组面向完整软件产品开发过程的 Claude Code Skills、Subagents 与项目规则。它从产品想法或已有资料出发，覆盖产品定义、工程准备、技术设计、需求拆分、开发验证、独立审查和 Git 提交收口。
+PCM 是 Project Customization & Management（项目定制与管理）的缩写。本仓库是 PCM 的内部开发管理、AI Agent 能力、产品开发流程和 `pcm-demo` 技术验证工作区。它不是客户产品仓库，也不是已经建成的正式 PCM Core 或对外商业平台。
 
 每项能力可以独立调用；实际使用时根据项目现状、任务范围和风险选择需要的步骤，不要求所有项目机械执行同一条流程。
 
