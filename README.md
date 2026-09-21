@@ -1,6 +1,6 @@
 # PCM 开发管理与能力工作区
 
-本仓库是 PCM 的内部开发管理、AI Agent 能力、产品开发流程和 `pcm-demo` 技术验证工作区。它不是客户产品仓库，也不是已经建成的正式 PCM Core 或对外商业平台。
+PCM 是 Project Customization & Management（项目定制与管理）的缩写。本仓库是 PCM 的内部开发管理、AI Agent 能力、产品开发流程和 `pcm-demo` 技术验证工作区。它不是客户产品仓库，也不是已经建成的正式 PCM Core 或对外商业平台。
 
 ## 从这里开始
 
