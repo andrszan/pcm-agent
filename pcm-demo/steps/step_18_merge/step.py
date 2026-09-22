@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from common.requirement_context import phase_for, selection_node_for
 from common.state import (
     is_valid_requirement_id,
     requirement_step_result_path,
@@ -114,7 +115,7 @@ def _active(state: dict[str, Any]) -> tuple[str, dict[str, Any], dict[str, Any]]
         and isinstance(cycle, dict)
         and cycle.get("requirement_id") == requirement_id
         and cycle.get("branch") == f"req/{requirement_id.lower()}"
-        and cycle.get("return_node_after_completion") == NEXT_NODE,
+        and cycle.get("return_node_after_completion") == selection_node_for(state),
         "活动需求上下文不符合约定",
     )
     active = [
@@ -199,7 +200,7 @@ def _workspace_repositories(state: dict[str, Any], names: list[str]) -> list[dic
 
 def _context(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
     _require(
-        state.get("phase") == PHASE and _position(state) == (STEP, STEP, CURRENT_NODE),
+        state.get("phase") == phase_for(state) and _position(state) == (STEP, STEP, CURRENT_NODE),
         "运行状态不位于需求合并锚点",
     )
     requirement_id, active, cycle = _active(state)
@@ -582,7 +583,7 @@ def _validate_success(saved: Any, context: dict[str, Any]) -> dict[str, Any]:
 
 def _advance(run_dir: Path, state: dict[str, Any], context: dict[str, Any], saved: dict[str, Any]) -> dict[str, Any]:
     _require(
-        context["cycle"].get("return_node_after_completion") == NEXT_NODE,
+        context["cycle"].get("return_node_after_completion") == selection_node_for(state),
         "活动需求 cycle 缺少完成后的返回节点",
     )
     context["active"]["status"] = "completed"
@@ -590,10 +591,10 @@ def _advance(run_dir: Path, state: dict[str, Any], context: dict[str, Any], save
     state.update(
         {
             "status": "success",
-            "phase": PHASE,
-            "step": 13,
-            "current_step": 13,
-            "current_node": NEXT_NODE,
+            "phase": phase_for(state),
+            "step": None if state.get("workflow") == "product_quality" else 13,
+            "current_step": None if state.get("workflow") == "product_quality" else 13,
+            "current_node": selection_node_for(state),
             "active_requirement": None,
             "requirement_cycle": None,
             "blocked": None,

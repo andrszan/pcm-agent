@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
-from pydantic import BaseModel, ConfigDict, SecretStr
+from pydantic import BaseModel, ConfigDict, SecretStr, field_validator
 
 DEMO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(DEMO_ROOT))
@@ -103,6 +103,31 @@ class OpenAIResponsesTests(unittest.TestCase):
             SecretStr("secret"),
             "test-model",
         )
+
+    def test_validator_exception_context_is_not_serialized_in_repair(self) -> None:
+        class CheckedOutput(BaseModel):
+            value: str
+
+            @field_validator("value")
+            @classmethod
+            def valid(cls, value: str) -> str:
+                if value != "ok":
+                    raise ValueError("值不符合格式")
+                return value
+
+        responses = Responses('{"value":"bad"}', repair_output='{"value":"ok"}')
+        client = Client(responses)
+        with patch("common.openai_responses.AsyncOpenAI", return_value=client):
+            result = asyncio.run(parse_response(
+                self.config, system_prompt="返回结果。", input_model=InputModel(text="input"),
+                output_model=CheckedOutput,
+            ))
+        self.assertEqual(result.value, "ok")
+        self.assertEqual(len(responses.repair_calls), 1)
+        payload = json.loads(responses.repair_calls[0]["input"][1]["content"])
+        self.assertNotIn("ctx", payload["validation_error"][0])
+        self.assertIn("值不符合格式", payload["validation_error"][0]["msg"])
+        self.assertTrue(client.closed)
 
     def run_parse(self, responses: Responses) -> OutputModel:
         client = Client(responses)

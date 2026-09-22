@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from dataclasses import FrozenInstanceError
 from pathlib import Path
@@ -37,6 +38,10 @@ routine = { model = "routine-model", effort = "medium" }
 "15" = "building"
 "16" = "routine"
 "17" = "routine"
+"quality_prepare" = "planning"
+"quality_audit" = "planning"
+"quality_route" = "planning"
+"quality_pool" = "building"
 """
 
 
@@ -67,6 +72,10 @@ class ModelPolicyTest(unittest.TestCase):
 
     def test_resolves_all_stable_tasks_and_returns_frozen_profile(self) -> None:
         expected = {
+            "quality_prepare": ("planning", "planning-model", "high"),
+            "quality_audit": ("planning", "planning-model", "high"),
+            "quality_route": ("planning", "planning-model", "high"),
+            "quality_pool": ("building", "building-model", "high"),
             "project_intake": ("planning", "planning-model", "high"),
             "project_readiness": ("planning", "planning-model", "high"),
             "project_bootstrap": ("building", "building-model", "high"),
@@ -94,6 +103,20 @@ class ModelPolicyTest(unittest.TestCase):
             profile.model = "changed"  # type: ignore[misc]
         with self.assertRaisesRegex(ValueError, "未知 Agent 任务"):
             model_policy.get_agent_profile("unknown")
+
+    def test_all_provider_files_have_exact_task_keys_and_round_trip_snapshot(self) -> None:
+        for path in Path(model_policy.__file__).parent.glob("model-policy*.toml"):
+            with self.subTest(path=path.name):
+                policy = model_policy._parse_model_policy(tomllib.loads(path.read_text()))
+                self.assertEqual(set(policy.steps), set(model_policy._STEP_TASKS))
+                self.assertEqual(policy, model_policy._read_model_policy_snapshot(
+                    model_policy._model_policy_snapshot(policy)
+                ))
+                for task in ("quality_prepare", "quality_audit", "quality_route", "quality_pool"):
+                    incomplete = tomllib.loads(path.read_text())
+                    del incomplete["steps"][task]
+                    with self.assertRaises(ValueError):
+                        model_policy._parse_model_policy(incomplete)
 
     def test_loaded_policy_does_not_change_when_file_changes(self) -> None:
         with patch.dict(os.environ, {"PCM_MODEL_POLICY_SNAPSHOT": ""}):

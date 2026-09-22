@@ -32,6 +32,9 @@ from common.agent_decision_loop import (  # noqa: E402
     ResumeMessage,
     persist_agent_failure,
     prepare_resume_message,
+    prepare_node_resume_message,
+    validate_node_resume_target,
+    latest_agent_reply,
     run_agent_decision_loop,
 )
 from common.claude_agent import ClaudeRunResult, filtered_env, run_claude  # noqa: E402
@@ -124,6 +127,81 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
 
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
+
+    async def test_plain_task_needs_no_skill_but_preserves_session_and_cwd_checks(self) -> None:
+        self.spec = AgentDecisionLoopSpec(**{**self.spec.__dict__, "skill_name": None})
+        reply = "完整回复\r\n保留格式\n"
+        outcome = await self.run_loop(
+            FakeAgentRunner([self.result(reply, skills=[], commands=[])]),
+            FakeDecisionRunner([decision("completed")]),
+        )
+        self.assertEqual(outcome.verdict, "completed")
+        self.assertEqual(latest_agent_reply(self.run_dir, self.state, self.spec), reply)
+        reused_agent = FakeAgentRunner([])
+        reused = await self.run_loop(reused_agent, FakeDecisionRunner([]))
+        self.assertEqual(reused.verdict, "completed")
+        self.assertEqual(reused_agent.calls, [])
+        self.assertEqual(latest_agent_reply(self.run_dir, self.state, self.spec), reply)
+        for changes in ({"cwd": self.run_dir}, {"session_id": None}):
+            with self.subTest(changes=changes):
+                with self.assertRaises(AgentExecutionFailure):
+                    from common.agent_decision_loop import _validate_agent_result
+                    _validate_agent_result(self.run_dir, {}, self.workspace, self.spec,
+                                           self.result("回复", skills=[], commands=[], **changes))
+
+    def test_node_resume_rejects_ambiguous_conversations_and_skips_completed(self) -> None:
+        keys = ("quality_pool_r0001", "quality_pool_commit_r0001")
+        (self.run_dir / "conversations").mkdir()
+        self.state.update(status="running", current_node="quality:pool", step=None,
+                          current_step=None, claude_sessions={}, decision_conversations={})
+        for key in keys:
+            self.state["claude_sessions"][key] = f"session-{key}"
+            self.state["decision_conversations"][key] = {"path": f"conversations/{key}.json"}
+            write_json(self.run_dir / "conversations" / f"{key}.json", {"messages": [
+                {"role": "system", "content": "system"},
+                {"role": "assistant", "content": "初始任务"},
+            ]})
+        with self.assertRaisesRegex(ValueError, "唯一"):
+            validate_node_resume_target(self.run_dir, self.state, "quality:pool", keys)
+        write_json(self.run_dir / "conversations" / f"{keys[0]}.json", {"messages": [
+            {"role": "system", "content": "system"},
+            {"role": "assistant", "content": "初始任务"},
+            {"role": "user", "content": "Agent 已完成"},
+            {"role": "assistant", "content": decision("completed").model_dump_json()},
+        ]})
+        self.assertEqual(validate_node_resume_target(self.run_dir, self.state, "quality:pool", keys), keys[1])
+
+    def test_latest_reply_rejects_missing_reply(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "回复正文"):
+            latest_agent_reply(self.run_dir, self.state, self.spec)
+
+    def test_node_resume_is_current_unique_and_preserves_message_bytes(self) -> None:
+        key = self.spec.key
+        self.save_conversation([
+            {"role": "system", "content": "system"},
+            {"role": "assistant", "content": "初始任务"},
+            {"role": "user", "content": "Agent 原文"},
+            {"role": "assistant", "content": decision("blocked", required_inputs=["决定"]).model_dump_json()},
+        ])
+        self.state.update(status="blocked", current_node="quality:audit", step=None,
+                          current_step=None, claude_sessions={key: "session-1"})
+        path = self.run_dir / "message.txt"
+        original = "决定\r\n保留原文\n"
+        path.write_bytes(original.encode())
+        message = prepare_node_resume_message(self.run_dir, self.state, "quality:audit", (key,), path)
+        self.assertEqual((message.target_key, message.content), (key, original))
+        self.assertEqual(latest_agent_reply(self.run_dir, self.state, self.spec), "Agent 原文")
+        for node, keys in (("quality:route", (key,)), ("quality:audit", ("../bad",)),
+                           ("quality:audit", (key, key)), ("quality:audit", ("other",))):
+            with self.subTest(node=node, keys=keys), patch.object(Path, "read_bytes", side_effect=AssertionError("不能读取消息")):
+                with self.assertRaises(ValueError):
+                    prepare_node_resume_message(self.run_dir, self.state, node, keys, path)
+        self.state["status"] = "failed"
+        self.state["error"] = {"type": "AgentExecutionFailure"}
+        self.assertEqual(validate_node_resume_target(self.run_dir, self.state, "quality:audit", (key,)), key)
+        self.state["error"] = {"type": "OtherError"}
+        with self.assertRaises(ValueError):
+            validate_node_resume_target(self.run_dir, self.state, "quality:audit", (key,))
 
     def test_spec_requires_task(self) -> None:
         with self.assertRaisesRegex(ValueError, "task"):

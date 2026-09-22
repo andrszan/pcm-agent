@@ -22,6 +22,7 @@ from common.coordination import (
     acquire_execution_locks,
     acquire_product_lock,
     adopt_execution_locks,
+    attach_product,
     claim_product,
     coordination_root,
     ensure_runtime,
@@ -33,6 +34,7 @@ from common.coordination import (
 from common.error_diagnostics import exception_projection, write_diagnostic
 from common.files import sha256
 from common.git_identity import parse_git_identity
+from common.requirement_context import phase_for, selection_node_for
 from common.state import (
     create_run_dir,
     read_state,
@@ -117,8 +119,6 @@ from steps.step_12_initialize_requirement_registry.step import has_complete_succ
 from steps.step_13_select_requirement import result as requirement_selection_result
 from steps.step_13_select_requirement import run as run_requirement_selection
 from steps.step_13_select_requirement.step import (
-    CURRENT_NODE as SELECT_REQUIREMENT_NODE,
-    PHASE as SELECT_REQUIREMENT_PHASE,
     NoPendingRequirements,
     RequirementSelectionError,
     failure_scope as requirement_selection_failure_scope,
@@ -1102,6 +1102,11 @@ def _prepare_execution_locks(args: argparse.Namespace) -> ExecutionLocks:
                 state = read_state(run_dir)
             except Exception:  # 由步骤现有错误路径保存损坏状态诊断。
                 return locks
+            if state.get("workflow") == "product_quality":
+                if args.step not in range(13, 19):
+                    raise RuntimeError("质量运行仅支持需求步骤 13～18")
+                attach_product(root, run_id, state, locks)
+                return locks
             coordination = state.get("coordination")
             if isinstance(coordination, dict):
                 product_path = coordination.get("product_path")
@@ -1611,7 +1616,7 @@ def _execute(
                 state.update(
                     {
                         "status": result["status"],
-                        "phase": "phase_1_requirement_development",
+                        "phase": phase_for(state),
                         "step": 18,
                         "current_step": 18,
                         "current_node": REQUIREMENT_MERGE_NODE,
@@ -1646,7 +1651,7 @@ def _execute(
                 state.update(
                     {
                         "status": result["status"],
-                        "phase": "phase_1_requirement_development",
+                        "phase": phase_for(state),
                         "step": 17,
                         "current_step": 17,
                         "current_node": REQUIREMENT_COMMIT_NODE,
@@ -1681,7 +1686,7 @@ def _execute(
                 state.update(
                     {
                         "status": result["status"],
-                        "phase": "phase_1_requirement_development",
+                        "phase": phase_for(state),
                         "step": 16,
                         "current_step": 16,
                         "current_node": RULE_RETROSPECTIVE_NODE,
@@ -1712,7 +1717,7 @@ def _execute(
                 state.update(
                     {
                         "status": result["status"],
-                        "phase": "phase_1_requirement_development",
+                        "phase": phase_for(state),
                         "step": 15,
                         "current_step": 15,
                         "current_node": DEVELOPMENT_NODE,
@@ -1737,6 +1742,8 @@ def _execute(
                         context={"requirement": trd_scope["requirement_id"], "node": TRD_DESIGN_NODE},
                     )
                     error_message = result["error"]["message"]
+                if isinstance(result.get("blocked"), dict):
+                    result["blocked"]["resume_phase"] = phase_for(state)
                 state.update(
                     {
                         "status": result["status"],
@@ -1759,19 +1766,19 @@ def _execute(
                 state = None
             at_selection_anchor = (
                 state is not None
-                and state.get("phase") == SELECT_REQUIREMENT_PHASE
+                and state.get("phase") == phase_for(state)
                 and (
                     state.get("step"),
                     state.get("current_step"),
                     state.get("current_node"),
                 )
-                == (13, 13, SELECT_REQUIREMENT_NODE)
+                == (13, 13, selection_node_for(state))
             )
             if state is not None and at_selection_anchor and selection_scope is not None:
                 if caught_error is not None:
                     attach_failure_diagnostic(
                         run_dir, 13, caught_error, result,
-                        context={"requirement": selection_scope[0], "node": SELECT_REQUIREMENT_NODE},
+                        context={"requirement": selection_scope[0], "node": selection_node_for(state)},
                     )
                     error_message = result["error"]["message"]
                 state.update(
@@ -1779,7 +1786,7 @@ def _execute(
                         "status": "failed",
                         "step": 13,
                         "current_step": 13,
-                        "current_node": SELECT_REQUIREMENT_NODE,
+                        "current_node": state["current_node"],
                         "blocked": None,
                         "error": result["error"],
                     }
@@ -1899,12 +1906,13 @@ def main(*, retry: bool = False) -> int:
         return 2
 
 
-def _retry_locked(args: argparse.Namespace, locks: ExecutionLocks) -> int:
+def _retry_locked(args: argparse.Namespace, locks: ExecutionLocks, *, execute=None) -> int:
+    execute = execute or _execute
     timing = StepTiming()
     returned = False
     with timing.activate():
         try:
-            exit_code = _execute(args, locks, timing)
+            exit_code = execute(args, locks, timing)
             retry_started: float | None = None
             retry_count = 0
             waited_seconds = 0.0
@@ -1949,7 +1957,7 @@ def _retry_locked(args: argparse.Namespace, locks: ExecutionLocks) -> int:
                     exit_code = 1
                     break
                 retry_count += 1
-                exit_code = _execute(args, locks, timing)
+                exit_code = execute(args, locks, timing)
             returned = True
             return exit_code
         finally:

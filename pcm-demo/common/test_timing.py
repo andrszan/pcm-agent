@@ -55,6 +55,62 @@ class TimingTests(unittest.TestCase):
         clock.observe_result(self.run_dir, {"status": status, "step": clock.step})
         clock.finish(returned=True)
 
+    def test_quality_nodes_rounds_and_legacy_records_share_v2_without_double_counting(self):
+        self.complete(self.start())
+        clock = timing.StepTiming()
+        clock.begin_attempt(node="quality:audit", round_number=1)
+        clock.bind_run(self.run_dir)
+        now = [1.0]
+        async def runner(**kwargs):
+            result = agent_result(usage={"input_tokens": 3})
+            kwargs["on_update"](result)
+            now[0] += 3
+            return result
+        with clock.activate(), patch.object(timing.time, "monotonic", side_effect=lambda: now[0]):
+            asyncio.run(timing.run_timed_agent(runner, task="quality_audit", on_update=lambda _: None))
+            with timing.measure_response("decision-model", "high", "primary") as response:
+                response["usage"] = {"input_tokens": 2}
+        self.complete(clock)
+        saved = self.data()["steps"][1]
+        self.assertEqual((saved["step"], saved["node"], saved["round"]), (None, "quality:audit", 1))
+        self.assertEqual(saved["agent_elapsed_seconds"], 3)
+        self.assertEqual(len(saved["agent_executions"]), 1)
+        self.assertEqual(len(saved["ai_executions"]), 1)
+        self.assertIsNone(saved["requirement_id"])
+        reused = timing.StepTiming()
+        reused.begin_attempt(node="quality:audit", round_number=1)
+        reused.bind_run(self.run_dir, existing=True)
+        self.complete(reused)
+        self.assertEqual(self.data()["steps"][1], saved)
+        for node, round_number in (("quality:audit", 2), ("quality:route", 1), ("quality:prepare", None)):
+            other = timing.StepTiming()
+            other.begin_attempt(node=node, round_number=round_number)
+            other.bind_run(self.run_dir)
+            self.complete(other)
+        records = timing._read_timings(self.run_dir)["steps"]
+        self.assertEqual(len(records), 5)
+        self.assertEqual(records[0]["step"], 15)
+        timing.print_timing_summary(self.run_dir)
+        self.assertIn("quality:audit", self.stderr.getvalue())
+        self.assertNotIn("警告", self.stderr.getvalue())
+
+    def test_quality_timing_resumes_blocked_and_rejects_invalid_identity(self):
+        clock = timing.StepTiming()
+        clock.begin_attempt(node="quality:pool", round_number=1)
+        clock.bind_run(self.run_dir)
+        self.complete(clock, "blocked")
+        resumed = timing.StepTiming()
+        resumed.begin_attempt(node="quality:pool", round_number=1)
+        resumed.bind_run(self.run_dir, existing=True)
+        resumed.begin_attempt(node="quality:pool", round_number=1)
+        self.complete(resumed)
+        self.assertEqual(len(self.data()["steps"]), 1)
+        self.assertEqual(self.data()["steps"][0]["started_at"], clock.started_at)
+        for kwargs in ({"node": "quality:"}, {"node": "quality:audit", "round_number": True},
+                       {"node": "quality:audit", "round_number": 0}, {"step": 2, "node": "quality:audit"}):
+            with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
+                timing.StepTiming().begin_attempt(**kwargs)
+
     def test_beijing_offset_and_conversion_preserve_instant(self):
         value = "2026-09-05T06:51:19.141561+00:00"
         converted = timing._beijing(value)

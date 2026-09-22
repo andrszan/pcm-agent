@@ -26,6 +26,7 @@ from common.coordination import (
     product_key,
     release_product,
     run_lock_path,
+    share_product_execution_locks,
 )
 from common.git_identity import parse_git_identity
 from common.state import read_state, step_result_status, write_state
@@ -74,6 +75,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     source.add_argument("--product-status", type=Path)
     source.add_argument("--release-product", type=Path)
     parser.add_argument("--run-id")
+    parser.add_argument("--with-quality", action="store_true", help="阶段一完成后串联独立质量周期")
     parser.add_argument("--initial-resources", type=Path)
     parser.add_argument("--workspace-root", type=Path)
     parser.add_argument("--catalog-path", type=Path)
@@ -97,6 +99,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--resume 不能与 --run-id 同时使用")
     if args.resume_message_file is not None and not args.resume:
         parser.error("--resume-message-file 只能与 --resume 一起使用")
+    if args.with_quality and (args.product_status is not None or args.release_product is not None):
+        parser.error("--with-quality 只能用于新运行或恢复")
     return args
 
 
@@ -329,6 +333,8 @@ def build_step_command(
 
 def recovery_command(run_id: str, args: argparse.Namespace) -> str:
     command = [sys.executable, str(Path(__file__).resolve()), "--resume", run_id]
+    if getattr(args, "with_quality", False):
+        command.append("--with-quality")
     if args.workspace_root is not None:
         command.extend(["--workspace-root", str(args.workspace_root.resolve())])
     if args.catalog_path is not None:
@@ -345,6 +351,8 @@ def fresh_command(run_id: str, args: argparse.Namespace) -> str:
         "--run-id",
         run_id,
     ]
+    if getattr(args, "with_quality", False):
+        command.append("--with-quality")
     if args.initial_resources is not None:
         command.extend(["--initial-resources", str(args.initial_resources.absolute())])
     if args.workspace_root is not None:
@@ -453,6 +461,28 @@ def _orchestrate_locked(
         print_timing_summary(run_dir)
 
 
+def _chain_quality(run_id: str, state: dict[str, Any], locks: ExecutionLocks, snapshot: str) -> int:
+    quality_id = f"{run_id}-quality"
+    quality_dir = run_dir_for(quality_id)
+    command = [sys.executable, str(DEMO_ROOT / "run_quality.py")]
+    if quality_dir.exists():
+        quality_state = read_state(quality_dir)
+        if (
+            quality_state.get("workflow") != "product_quality"
+            or quality_state.get("source_run_id") != run_id
+        ):
+            raise RuntimeError("串联质量运行目录已存在但来源不一致")
+        command.extend(["--resume", quality_id])
+    else:
+        command.extend(["--source-run", run_id, "--run-id", quality_id])
+    if not isinstance(state.get("coordination"), dict):
+        raise RuntimeError("质量来源缺少产品协调身份，不能重新认领")
+    _attach_product_lock(locks, state, run_dir_for(run_id), run_id)
+    with share_product_execution_locks(COORDINATION_ROOT, quality_id, locks) as quality_locks:
+        command.extend(["--coordination-locks", inherited_lock_argument(quality_locks)])
+        return run_child(command, quality_locks.file_descriptors(), _child_environment(snapshot))
+
+
 def _run_steps(
     args: argparse.Namespace,
     run_id: str,
@@ -470,6 +500,8 @@ def _run_steps(
             return 1
         if state is not None and phase_one_completed(state):
             print(f"阶段一已完成：{run_dir / 'state.json'}")
+            if getattr(args, "with_quality", False):
+                return _chain_quality(run_id, state, locks, model_policy_snapshot)
             return 0
         try:
             _attach_product_lock(locks, state, run_dir, run_id)

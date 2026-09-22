@@ -9,6 +9,7 @@ from common.agent_decision_loop import AgentDecisionLoopSpec, ResumeMessage, run
 from common.claude_agent import run_claude
 from common.decision import render_decision_system_prompt, request_decision
 from common.files import resolve_workspace_output
+from common.requirement_context import phase_for
 from common.state import (
     is_valid_requirement_id,
     requirement_step_result_path,
@@ -137,7 +138,7 @@ def _backlog_document(workspace: Path, registry: dict[str, Any]) -> tuple[str, s
 
 
 def _context(state: dict[str, Any]) -> dict[str, Any]:
-    if state.get("phase") != PHASE or _position(state) not in {
+    if state.get("phase") != phase_for(state) or _position(state) not in {
         (STEP, STEP, CURRENT_NODE),
         (STEP + 1, STEP + 1, NEXT_NODE),
     }:
@@ -296,7 +297,7 @@ def _advance(run_dir: Path, state: dict[str, Any], saved: dict[str, Any]) -> dic
     state.update(
         {
             "status": "success",
-            "phase": PHASE,
+            "phase": phase_for(state),
             "step": STEP + 1,
             "current_step": STEP + 1,
             "current_node": NEXT_NODE,
@@ -363,7 +364,7 @@ async def run(
         state.update(
             {
                 "status": "running",
-                "phase": PHASE,
+                "phase": phase_for(state),
                 "step": STEP,
                 "current_step": STEP,
                 "current_node": CURRENT_NODE,
@@ -392,7 +393,7 @@ async def run(
         state.update(
             {
                 "status": "running",
-                "phase": PHASE,
+                "phase": phase_for(state),
                 "step": STEP,
                 "current_step": STEP,
                 "current_node": CURRENT_NODE,
@@ -405,6 +406,13 @@ async def run(
     backlog_path, backlog_content = _backlog_document(
         context["workspace"], state["requirement_registry"]
     )
+    quality_input = ""
+    if state.get("workflow") == "product_quality":
+        from quality.workflow import requirement_evidence
+
+        quality_input = requirement_evidence(run_dir, state)
+        if quality_input:
+            quality_input += "\n各需求验证自己的交付结果；regression owner 在必要前置项完成后，由开发 Agent 完成完整原场景回归并报告真实证据。"
     decision_spec = AgentDecisionLoopSpec(
         key=context["key"],
         state_key=context["key"],
@@ -415,6 +423,7 @@ async def run(
         decision_system_prompt=render_decision_system_prompt(
             TRD_DESIGN_DECISION_RULES,
             {
+                **({"质量原发现与回归归属": quality_input} if quality_input else {}),
                 "当前需求": {
                     "id": context["requirement_id"],
                     "title": context["title"],
@@ -438,7 +447,7 @@ async def run(
         state,
         context["workspace"],
         decision_spec,
-        initial_prompt(context, trd_path),
+        initial_prompt(context, trd_path) + ("\n\n" + quality_input if quality_input else ""),
         completion_verifier,
         agent_runner=agent_runner,
         decision_runner=decision_runner,
@@ -466,7 +475,7 @@ async def run(
         state.update(
             {
                 "status": "blocked",
-                "phase": PHASE,
+                "phase": phase_for(state),
                 "step": STEP,
                 "current_step": STEP,
                 "current_node": CURRENT_NODE,

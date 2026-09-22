@@ -6,7 +6,7 @@
 >
 > 本文先服务于 PCM 前置 Demo。正式 PCM 系统可以基于 Demo 的真实结果重新设计状态、持久化、权限、调度和产品界面，不要求直接沿用 Demo 的代码结构。
 >
-> 当前程序已实现初始化与阶段一；阶段二已收敛为独立的产品质量迭代工作流，尚未实现。第七、八节中的新增入口、字段与行为为目标设计，具体合同见[产品质量迭代工作流 TRD](../../pcm-demo/docs/trd/20260922-PCM%20Demo%20产品质量迭代工作流%20TRD.md)。
+> 当前程序已实现初始化、阶段一和独立产品质量迭代工作流。程序回归、隔离真实通道与实际产品验收分别记录，具体使用合同与验证边界见[产品质量迭代工作流 TRD](../../pcm-demo/docs/trd/20260922-PCM%20Demo%20产品质量迭代工作流%20TRD.md)。
 
 ## 一、目标
 
@@ -495,7 +495,7 @@ Demo 从第 1 步开始，通过 `--product-draft` 接收 UTF-8 文本文件路�
 ### 第 13 步：选择需求并建立统一需求分支
 
 - **已实现范围**：纯 Python 确定性节点，零 AI、Claude Agent、Skill、产品文件改动、提交、合并和 push；`run_step.py` 支持第 1～18 步；第 18 步已实现并真实验证。
-- **输入与选择**：直接消费 state 中的有序 `applicable_repositories`、精确对应 workspace 的仓库名称与路径，以及当前 `requirement_registry`；不回读历史 `steps/08.json`、`steps/12.json` 或复验 `source`。注册表是阶段一需求生命周期真源；第 12 步负责完整静态校验，第 13 步只检查选择与恢复所需字段、ID 唯一性、顺序类型、依赖引用和动态状态，不重跑连续顺序或依赖图校验。仓库描述允许附加字段，历史分支与 clean 标记不替代当前 Git 预检。只从 `pending` 中选择依赖均为 `completed` 且 `order` 最小的一项；没有 pending 时当前无副作用失败，阶段二转场延期；有 pending 而无候选是注册表状态错误。
+- **输入与选择**：直接消费 state 中的有序 `applicable_repositories`、精确对应 workspace 的仓库名称与路径，以及当前 `requirement_registry`；不回读历史 `steps/08.json`、`steps/12.json` 或复验 `source`。注册表是阶段一需求生命周期真源；第 12 步负责完整静态校验，第 13 步只检查选择与恢复所需字段、ID 唯一性、顺序类型、依赖引用和动态状态，不重跑连续顺序或依赖图校验。仓库描述允许附加字段，历史分支与 clean 标记不替代当前 Git 预检。只从 `pending` 中选择依赖均为 `completed` 且 `order` 最小的一项；没有 pending 时该步骤无副作用失败，完整编排器负责结束阶段一或显式串联独立质量 run；有 pending 而无候选是注册表状态错误。
 - **fresh 与 intent**：在任何 state/Git 写入前，全局核验全部适用仓为自身非符号链接 top-level、clean local `main`、HEAD/local `main` 相等、目标分支不存在且没有进行中的 merge、rebase、cherry-pick 或 revert。通过后先写 `active_requirement`（仅 ID）及 cycle：`branch: req/<lowercase-id>`、按仓名映射的 `base_sha`、`return_node_after_completion`，再以 `git switch -c <branch> <base>` 建立全部统一分支。第 13 步后续只校验自己拥有的活动需求、统一分支、仓库集合和每仓 `base_sha`；第 14、15、17 步可追加自身字段，但不得改变这些选择与基线证据。
 - **结果、恢复与 CLI**：success 仅写 `steps/requirements/<ID>/13.json`，仓库 path 为 `.` 或仓库名，随后推进 `requirement:14_trd_design`。partial 现场按记录 base 恢复；scoped success 已写但 state 未推进时先只读核验 target/base/clean 后补 state；已推进后续节点时不读 Git。CLI 只以当前 active/cycle 的第 13 步核心投影和完整 scoped success 保护当前需求，历史需求 result 不保护当前需求；只有 state 仍位于第 13 步自身锚点时，失败才可持久化，误调历史步骤不得覆盖已推进节点。
 - **真实验证**：初次 `step01-mendmark` 运行选择 `BR-001` 并建立三仓 `req/br-001`。第 14 步前用户将新 TRD 命名规则提交到产品 root，导致 root `main` 和旧需求分支从原记录 base 前进；经用户明确选择后，先完整归档 run，确认三仓旧需求分支均无独有提交并安全删除，只重置 BR-001 的第 13 步 cycle/result，再从最新 `main` 重跑。bases 为 root `a7d5509df6843a06315aa803d87285569b86e355`、frontend `dbab574dbe4d83a02323a750afd04de007565ac5`、backend `9682be837759c20f1a9ebbdf8fa2cfc09c2768d4`；第 14、15、17 步随后追加 TRD、development session 和提交证据而未改变这些基线。第 18 步已将三仓 local main ff-only 到记录 tip并删除 `req/br-001`，BR-001 已完成，state 返回 `phase_1:select_requirement` / step 13。
@@ -545,7 +545,7 @@ Demo 从第 1 步开始，通过 `--product-draft` 接收 UTF-8 文本文件路�
 
 ## 七、阶段二：独立产品质量迭代工作流
 
-本节是已确认、尚未实现的目标流程。它可以紧随阶段一自动启动，也可以在产品完成后独立运行；隔离运行记录，复用当前产品和需求开发能力。命令、数据合同、恢复与验收细节统一见[产品质量迭代工作流 TRD](../../pcm-demo/docs/trd/20260922-PCM%20Demo%20产品质量迭代工作流%20TRD.md)，不在本节重复字段清单。
+本节流程已实现。它可以通过显式串联紧随阶段一启动，也可以在产品完成后独立运行；隔离运行记录，复用当前产品和需求开发能力。命令、数据合同、恢复与验收细节统一见[产品质量迭代工作流 TRD](../../pcm-demo/docs/trd/20260922-PCM%20Demo%20产品质量迭代工作流%20TRD.md)，不在本节重复字段清单。
 
 ### 1. 接入当前产品与准备现场
 
@@ -579,7 +579,7 @@ Demo 从第 1 步开始，通过 `--product-draft` 接收 UTF-8 文本文件路�
 
 ### 4. 增量登记、开发与原问题回归
 
-入池成功后，从当前 Backlog 进行静态提取，校验新增 ID 精确对应本批、既有项保留、依赖合法且无环。只把新项加入当前质量 run 的注册表并置为 pending，历史动态状态不变；不重跑第 12 步初始化，不修改来源注册表。
+入池会话完成前，先从当前 Backlog 静态提取并校验新增 ID、既有项、合法无环依赖及原场景回归归属；发现内容缺口仍在原会话修正。合并成功后，登记节点确认文件指纹未变并复用同一已核验 catalog，只把新项加入当前质量 run 的注册表并置为 pending，历史动态状态不变；不重复模型提取、不重跑第 12 步初始化，也不修改来源注册表。
 
 随后复用第 13～18 步，由 Python 按依赖和顺序选择需求。第 14 步只接收与本需求相关的原发现，形成新活动 TRD；第 15 步完成实现，并实际重走原复现任务、相关状态及相邻路径。原问题回归属于当前开发完成条件：失败时在原开发任务内继续，需求保持 active；不先完成合并再倒回历史。
 
@@ -597,7 +597,7 @@ Demo 从第 1 步开始，通过 `--product-draft` 接收 UTF-8 文本文件路�
 
 ## 八、循环、结束和运行方式
 
-当前可运行入口仍只覆盖初始化与阶段一。以下质量入口与串联参数均待实现；原 `run_all.py` 的默认行为和旧 run 的恢复合同保持不变。
+初始化、阶段一及独立质量入口均可运行；原 `run_all.py` 的默认行为和旧 run 的恢复合同保持不变，只有显式选择才串联质量周期。
 
 目标调度顺序如下：
 
@@ -612,7 +612,7 @@ Demo 从第 1 步开始，通过 `--product-draft` 接收 UTF-8 文本文件路�
         → 本批全部完成 → 下一轮完整审计
 ```
 
-新命令目标：
+运行命令：
 
 ```bash
 # 单独启动质量周期，来源已经完成

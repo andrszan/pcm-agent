@@ -99,7 +99,7 @@ class AgentExecutionFailure(RuntimeError):
 class AgentDecisionLoopSpec:
     key: str
     state_key: str
-    skill_name: str
+    skill_name: str | None
     max_decision_rounds: int
     max_turns: int
     task: str
@@ -115,7 +115,7 @@ class AgentDecisionLoopSpec:
                 or value in {".", ".."}
             ):
                 raise ValueError(f"{field_name} 必须是安全的非空名称")
-        if not isinstance(self.skill_name, str) or not self.skill_name:
+        if self.skill_name is not None and (not isinstance(self.skill_name, str) or not self.skill_name):
             raise ValueError("skill_name 不能为空")
         if (
             not isinstance(self.max_decision_rounds, int)
@@ -298,6 +298,25 @@ def validate_resume_target(
     expected_node = _RESUME_STEP_NODES.get(step)
     if expected_node is None:
         raise ValueError(f"第 {step} 步不支持负责人消息恢复")
+    if (state.get("step"), state.get("current_step")) != (step, step):
+        raise ValueError("负责人消息只能用于当前步骤")
+    return validate_node_resume_target(run_dir, state, expected_node, _resume_keys(step, state))
+
+
+def validate_node_resume_target(
+    run_dir: Path,
+    state: dict[str, Any],
+    node: str,
+    keys: tuple[str, ...],
+) -> str:
+    """在节点锁内按当前命名节点和稳定 key 选择唯一原对话。"""
+    if not isinstance(node, str) or not node or state.get("current_node") != node:
+        raise ValueError("负责人消息只能用于当前节点")
+    if isinstance(keys, str) or not keys or any(
+        not isinstance(key, str) or not key or Path(key).name != key or key in {".", ".."}
+        for key in keys
+    ) or len(set(keys)) != len(keys):
+        raise ValueError("恢复 key 必须是唯一的安全非空名称")
     status = state.get("status")
     failed_agent = (
         status == "failed"
@@ -307,9 +326,7 @@ def validate_resume_target(
     if (
         status not in {"blocked", "running"}
         and not failed_agent
-    ) or (
-        state.get("step"), state.get("current_step"), state.get("current_node")
-    ) != (step, step, expected_node):
+    ):
         raise ValueError(
             "负责人消息只能用于当前 blocked、running 或 AgentExecutionFailure 节点"
         )
@@ -320,7 +337,7 @@ def validate_resume_target(
         raise ValueError("当前节点没有可恢复的原 Agent 对话")
 
     matches: list[str] = []
-    for key in _resume_keys(step, state):
+    for key in keys:
         session_id = sessions.get(key)
         reference = references.get(key)
         expected_path = f"conversations/{key}.json"
@@ -365,6 +382,22 @@ def prepare_resume_message(
     """读取一次负责人恢复消息并绑定已校验的原对话。"""
 
     target_key = validate_resume_target(run_dir, state, step)
+    return _read_resume_message(path, target_key)
+
+
+def prepare_node_resume_message(
+    run_dir: Path,
+    state: dict[str, Any],
+    node: str,
+    keys: tuple[str, ...],
+    message_file: Path,
+) -> ResumeMessage:
+    """先校验当前节点原对话，再读取一次 UTF-8 人工消息。"""
+    target_key = validate_node_resume_target(run_dir, state, node, keys)
+    return _read_resume_message(message_file, target_key)
+
+
+def _read_resume_message(path: Path, target_key: str) -> ResumeMessage:
     resolved = path.resolve()
     if not resolved.is_file():
         raise ValueError("负责人消息文件不存在或不是普通文件")
@@ -523,6 +556,16 @@ def _load_conversation(
         references[spec.key] = {"path": conversation_path(spec).as_posix()}
         write_state(run_dir, state)
     return messages
+
+
+def latest_agent_reply(
+    run_dir: Path, state: dict[str, Any], spec: AgentDecisionLoopSpec
+) -> str:
+    """返回公共对话中最新保存的 Agent 完整回复，不重新执行任务。"""
+    for message in reversed(_load_conversation(run_dir, state, spec)):
+        if message["role"] == "user" and message["content"].strip():
+            return message["content"]
+    raise RuntimeError("决策历史没有已保存的 Agent 回复正文")
 
 
 def _save_conversation(
@@ -907,10 +950,10 @@ def _validate_agent_result(
     if not isinstance(init_cwd, str) or Path(init_cwd).resolve() != workspace.resolve():
         fail("Agent SDK 实际工作目录与产品项目根不一致")
     skills = {str(item) for item in value.init.get("skills") or []}
-    if spec.skill_name not in skills:
+    if spec.skill_name is not None and spec.skill_name not in skills:
         fail("Agent SDK 未加载所需 Skill")
     commands = {str(item) for item in value.init.get("slash_commands") or []}
-    if spec.skill_name not in commands:
+    if spec.skill_name is not None and spec.skill_name not in commands:
         fail("Agent SDK 未加载所需 slash command")
     if not _session(state, spec):
         fail("Agent 未返回可恢复的 session ID")

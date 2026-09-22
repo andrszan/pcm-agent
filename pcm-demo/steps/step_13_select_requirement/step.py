@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from common.requirement_context import phase_for, selection_node_for
 from common.state import (
     is_valid_requirement_id,
     requirement_step_result_path,
@@ -207,7 +208,7 @@ def _cycle(
         or not required_keys.issubset(cycle)
         or cycle.get("requirement_id") != requirement_id
         or cycle.get("branch") != expected_branch
-        or cycle.get("return_node_after_completion") != CURRENT_NODE
+        or cycle.get("return_node_after_completion") != selection_node_for(state)
         or not isinstance(cycle.get("repositories"), dict)
     ):
         raise RuntimeError("活动需求 cycle 不符合约定")
@@ -230,6 +231,7 @@ def _cycle(
 
 
 def _context(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
+    phase_for(state)
     repositories = _repository_handoff(state)
     catalog, requirements = registry_handoff(state)
     active = state.get("active_requirement")
@@ -477,7 +479,7 @@ def _advance(run_dir: Path, state: dict[str, Any], saved: dict[str, Any]) -> dic
     state.update(
         {
             "status": "success",
-            "phase": PHASE,
+            "phase": phase_for(state),
             "step": STEP + 1,
             "current_step": STEP + 1,
             "current_node": NEXT_NODE,
@@ -492,7 +494,7 @@ def _advance(run_dir: Path, state: dict[str, Any], saved: dict[str, Any]) -> dic
 def _verify_advanced(state: dict[str, Any], context: dict[str, Any], saved: Any) -> dict[str, Any]:
     if (
         state.get("status") != "success"
-        or state.get("phase") != PHASE
+        or state.get("phase") != phase_for(state)
         or _position(state) != (STEP + 1, STEP + 1, NEXT_NODE)
         or state.get("blocked") is not None
         or state.get("error") is not None
@@ -524,7 +526,7 @@ def failure_scope(run_dir: Path, state: dict[str, Any]) -> tuple[str, str] | Non
 
 
 def _run(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
-    if state.get("phase") != PHASE:
+    if state.get("phase") != phase_for(state):
         raise RuntimeError("运行状态不位于需求选择锚点")
     context = _context(run_dir, state)
     position = _position(state)
@@ -533,7 +535,7 @@ def _run(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
             raise RuntimeError("第 13 步成功状态缺少活动需求")
         saved = _saved_result(run_dir, context["requirement_id"])
         return _verify_advanced(state, context, saved)
-    if position != (STEP, STEP, CURRENT_NODE):
+    if position != (STEP, STEP, selection_node_for(state)):
         raise RuntimeError("运行状态不位于需求选择锚点")
 
     if context["mode"] == "fresh":
@@ -558,10 +560,10 @@ def _run(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
         state.update(
             {
                 "status": "running",
-                "phase": PHASE,
+                "phase": phase_for(state),
                 "step": STEP,
                 "current_step": STEP,
-                "current_node": CURRENT_NODE,
+                "current_node": selection_node_for(state),
                 "active_requirement": requirement_id,
                 "requirement_cycle": {
                     "requirement_id": requirement_id,
@@ -570,7 +572,7 @@ def _run(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
                         repository["name"]: {"base_sha": bases[repository["name"]]}
                         for repository in context["repositories"]
                     },
-                    "return_node_after_completion": CURRENT_NODE,
+                    "return_node_after_completion": selection_node_for(state),
                 },
                 "blocked": None,
                 "error": None,

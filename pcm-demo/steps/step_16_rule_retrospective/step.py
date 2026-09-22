@@ -7,6 +7,7 @@ from typing import Any
 from common.agent_decision_loop import AgentDecisionLoopSpec, ResumeMessage, run_agent_decision_loop
 from common.claude_agent import run_claude
 from common.decision import render_decision_system_prompt, request_decision
+from common.requirement_context import phase_for
 from common.state import (
     is_valid_requirement_id,
     requirement_step_result_path,
@@ -113,7 +114,7 @@ def _session(state: dict[str, Any], key: str) -> str | None:
 
 
 def _context(state: dict[str, Any], *, require_workspace: bool = True) -> dict[str, Any]:
-    if state.get("phase") != PHASE or _position(state) not in {
+    if state.get("phase") != phase_for(state) or _position(state) not in {
         (STEP, STEP, CURRENT_NODE),
         (STEP + 1, STEP + 1, NEXT_NODE),
     }:
@@ -208,7 +209,7 @@ def _advance(run_dir: Path, state: dict[str, Any], saved: dict[str, Any]) -> dic
     state.update(
         {
             "status": "success",
-            "phase": PHASE,
+            "phase": phase_for(state),
             "step": STEP + 1,
             "current_step": STEP + 1,
             "current_node": NEXT_NODE,
@@ -254,7 +255,7 @@ def _prepare_session(run_dir: Path, state: dict[str, Any], context: dict[str, An
         state.update(
             {
                 "status": "running",
-                "phase": PHASE,
+                "phase": phase_for(state),
                 "step": STEP,
                 "current_step": STEP,
                 "current_node": CURRENT_NODE,
@@ -333,7 +334,7 @@ async def run(
         state.update(
             {
                 "status": "blocked",
-                "phase": PHASE,
+                "phase": phase_for(state),
                 "step": STEP,
                 "current_step": STEP,
                 "current_node": CURRENT_NODE,

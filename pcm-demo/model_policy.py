@@ -28,6 +28,10 @@ _STEP_TASKS = {
     "15": "development",
     "16": "rule_retrospective",
     "17": "requirement_commit",
+    "quality_prepare": "quality_prepare",
+    "quality_audit": "quality_audit",
+    "quality_route": "quality_route",
+    "quality_pool": "quality_pool",
 }
 _VALID_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
 

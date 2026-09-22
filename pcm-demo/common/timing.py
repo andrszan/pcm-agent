@@ -90,6 +90,9 @@ def format_duration(seconds: float | None) -> str:
 
 
 def _label(record: dict[str, Any]) -> str:
+    if record.get("node") is not None:
+        round_label = f" · 第 {record['round']} 轮" if record.get("round") is not None else ""
+        return f"{record['node']}{round_label}"
     scope = record["requirement_id"] or ("未选定需求" if record["step"] >= 13 else "项目")
     return f"{scope} · 第 {record['step']} 步 {record['name']}"
 
@@ -131,6 +134,13 @@ def _update_totals(record: dict[str, Any]) -> None:
         record["wall_elapsed_seconds"] = None
 
 
+def _valid_node(node: Any, round_number: Any) -> bool:
+    return (
+        isinstance(node, str) and node.startswith("quality:") and len(node) > len("quality:")
+        and (round_number is None or (type(round_number) is int and round_number > 0))
+    )
+
+
 def _read_timings(run_dir: Path) -> dict[str, Any]:
     path = run_dir / "timings.json"
     if path.is_symlink():
@@ -144,7 +154,10 @@ def _read_timings(run_dir: Path) -> dict[str, Any]:
         raise ValueError("计时文件版本或步骤列表无效")
     for record in data["steps"]:
         if (
-            type(record["step"]) is not int or record["step"] not in STEP_NAMES
+            not (
+                (type(record["step"]) is int and record["step"] in STEP_NAMES)
+                or (record["step"] is None and _valid_node(record.get("node"), record.get("round")))
+            )
             or not isinstance(record["name"], str)
             or record["status"] not in STATUSES | {None}
             or (record["requirement_id"] is not None and not is_valid_requirement_id(record["requirement_id"]))
@@ -213,6 +226,8 @@ class StepTiming:
         self.history: dict[str, Any] | None = None
         self.started_at: str | None = None
         self.step: int | None = None
+        self.node: str | None = None
+        self.round_number: int | None = None
         self.attempts = 0
         self.completed_before = False
         self.disabled = False
@@ -251,16 +266,27 @@ class StepTiming:
                 signal.signal(signum, handler)
             _ACTIVE_TIMING.reset(token)
 
-    def begin_attempt(self, step: int) -> None:
-        if self.step is None:
-            self.step, self.started_at = step, beijing_now()
+    def begin_attempt(
+        self, step: int | None = None, *, node: str | None = None,
+        round_number: int | None = None,
+    ) -> None:
+        if node is not None:
+            if step is not None or not _valid_node(node, round_number):
+                raise ValueError("质量计时必须使用命名节点及可选正整数轮次，step 为 None")
+        elif type(step) is not int or step not in STEP_NAMES or round_number is not None:
+            raise ValueError("步骤计时必须使用有效整数步骤")
+        if self.started_at is None:
+            self.step, self.node, self.round_number = step, node, round_number
+            self.started_at = beijing_now()
+        elif (self.step, self.node, self.round_number) != (step, node, round_number):
+            raise ValueError("同一计时实例不能切换节点或轮次")
         self.attempts += 1
         if self.record is not None and not self.completed_before:
             self.record["status"] = None
             self._save()
 
     def bind_run(self, run_dir: Path, *, existing: bool = False) -> None:
-        if self.run_dir is not None or self.step is None or self.disabled:
+        if self.run_dir is not None or self.started_at is None or self.disabled:
             return
         try:
             if not run_dir.is_dir():
@@ -268,35 +294,50 @@ class StepTiming:
             self.run_dir = run_dir
             self.history = _read_timings(run_dir)
             state = read_state(run_dir) if existing else {}
-            requirement_id = state.get("active_requirement") if self.step >= 13 else None
-            if not is_valid_requirement_id(requirement_id):
-                requirement_id = None
-            prior_result = _read_result(run_dir, self.step, requirement_id) if existing else None
-            self.completed_before = (
-                prior_result is not None and prior_result.get("status") == "success"
-                and prior_result.get("step") == self.step
-                and prior_result.get("requirement_id") == requirement_id
-            )
-            if self.step < 13 or requirement_id is not None:
+            if self.node is not None:
                 self.record = next((
                     record for record in self.history["steps"]
-                    if (record["step"], record["requirement_id"]) == (self.step, requirement_id)
+                    if record.get("node") == self.node and record.get("round") == self.round_number
                 ), None)
-            if self.record is None:
-                independent_selection = (
-                    self.step == 13 and requirement_id is None
-                    and any(record["step"] == 13 and record["requirement_id"] is None for record in self.history["steps"])
+                if self.record is None:
+                    missing = existing and state.get("current_node") == self.node and state.get("status") in {"running", "failed", "blocked"}
+                    self.record = _new_step(1, None, None if missing else self.started_at)
+                    self.record.update(step=None, name=self.node, node=self.node, round=self.round_number)
+                    if missing:
+                        self.record["agent_elapsed_seconds"] = None
+                        _note(self.record, MISSING_AGENT_NOTE)
+                        _note(self.record, MISSING_START_NOTE)
+                    self.history["steps"].append(self.record)
+            else:
+                requirement_id = state.get("active_requirement") if self.step >= 13 else None
+                if not is_valid_requirement_id(requirement_id):
+                    requirement_id = None
+                prior_result = _read_result(run_dir, self.step, requirement_id) if existing else None
+                self.completed_before = (
+                    prior_result is not None and prior_result.get("status") == "success"
+                    and prior_result.get("step") == self.step
+                    and prior_result.get("requirement_id") == requirement_id
                 )
-                missing = existing and not independent_selection and (
-                    prior_result is not None
-                    or (state.get("current_step") == self.step and state.get("status") in {"running", "failed", "blocked"})
-                )
-                self.record = _new_step(self.step, requirement_id, None if missing else self.started_at)
-                if missing:
-                    self.record["agent_elapsed_seconds"] = None
-                    _note(self.record, MISSING_AGENT_NOTE)
-                    _note(self.record, MISSING_START_NOTE)
-                self.history["steps"].append(self.record)
+                if self.step < 13 or requirement_id is not None:
+                    self.record = next((
+                        record for record in self.history["steps"]
+                        if (record["step"], record["requirement_id"]) == (self.step, requirement_id)
+                    ), None)
+                if self.record is None:
+                    independent_selection = (
+                        self.step == 13 and requirement_id is None
+                        and any(record["step"] == 13 and record["requirement_id"] is None for record in self.history["steps"])
+                    )
+                    missing = existing and not independent_selection and (
+                        prior_result is not None
+                        or (state.get("current_step") == self.step and state.get("status") in {"running", "failed", "blocked"})
+                    )
+                    self.record = _new_step(self.step, requirement_id, None if missing else self.started_at)
+                    if missing:
+                        self.record["agent_elapsed_seconds"] = None
+                        _note(self.record, MISSING_AGENT_NOTE)
+                        _note(self.record, MISSING_START_NOTE)
+                    self.history["steps"].append(self.record)
             self.completed_before = self.completed_before or self.record["status"] == "success"
             if self.completed_before:
                 self.record["status"] = "success"
@@ -313,8 +354,8 @@ class StepTiming:
             self._disable()
 
     def announce(self) -> None:
-        if self.step is not None and self.attempts == 1:
-            label = _label(self.record) if self.record else f"第 {self.step} 步 {STEP_NAMES[self.step]}"
+        if self.started_at is not None and self.attempts == 1:
+            label = _label(self.record) if self.record else self.node or f"第 {self.step} 步 {STEP_NAMES[self.step]}"
             _emit(f"开始  {label} · {self.started_at}（北京时间）")
 
     def observe_result(self, run_dir: Path | None, result: dict[str, Any]) -> None:
@@ -432,13 +473,13 @@ class StepTiming:
 
     def _set_requirement(self, requirement_id: object) -> None:
         if (
-            self.record is not None and self.record["step"] >= 13
+            self.record is not None and self.record["step"] is not None and self.record["step"] >= 13
             and self.record["requirement_id"] is None and is_valid_requirement_id(requirement_id)
         ):
             self.record["requirement_id"] = requirement_id
 
     def _refresh_requirement(self) -> None:
-        if self.run_dir is None or self.record is None or self.record["step"] < 13 or self.record["requirement_id"] is not None:
+        if self.run_dir is None or self.record is None or self.record["step"] is None or self.record["step"] < 13 or self.record["requirement_id"] is not None:
             return
         try:
             self._set_requirement(read_state(self.run_dir).get("active_requirement"))

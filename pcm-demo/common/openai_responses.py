@@ -216,6 +216,7 @@ async def _repair_json_once(
                         "validation_error": validation_error.errors(
                             include_input=False,
                             include_url=False,
+                            include_context=False,
                         ),
                     },
                     ensure_ascii=False,

@@ -14,6 +14,7 @@ from common.agent_decision_loop import (
 )
 from common.claude_agent import run_claude
 from common.decision import render_decision_system_prompt, request_decision
+from common.requirement_context import phase_for
 from common.state import (
     is_valid_requirement_id,
     requirement_step_result_path,
@@ -142,7 +143,7 @@ def _valid_result(saved: Any, *, step: int, name: str, requirement_id: str, fiel
 
 
 def _context(run_dir: Path, state: dict[str, Any], *, advanced: bool) -> dict[str, Any]:
-    _require(state.get("phase") == PHASE and _position(state) in {(STEP, STEP, CURRENT_NODE), (STEP + 1, STEP + 1, NEXT_NODE)}, "运行状态不位于需求提交锚点")
+    _require(state.get("phase") == phase_for(state) and _position(state) in {(STEP, STEP, CURRENT_NODE), (STEP + 1, STEP + 1, NEXT_NODE)}, "运行状态不位于需求提交锚点")
     requirement_id, title, cycle = _active(state, require_title=not advanced)
     names = _names(state)
     bases, tips = _cycle_repositories(cycle, names, advanced=advanced)
@@ -395,7 +396,7 @@ def _record_blocked(
     state.update(
         {
             "status": "blocked",
-            "phase": PHASE,
+            "phase": phase_for(state),
             "step": STEP,
             "current_step": STEP,
             "current_node": CURRENT_NODE,
@@ -410,7 +411,7 @@ def _running(run_dir: Path, state: dict[str, Any]) -> None:
     state.update(
         {
             "status": "running",
-            "phase": PHASE,
+            "phase": phase_for(state),
             "step": STEP,
             "current_step": STEP,
             "current_node": CURRENT_NODE,
@@ -433,7 +434,7 @@ def _advance(run_dir: Path, state: dict[str, Any], context: dict[str, Any], save
     state.update(
         {
             "status": "success",
-            "phase": PHASE,
+            "phase": phase_for(state),
             "step": STEP + 1,
             "current_step": STEP + 1,
             "current_node": NEXT_NODE,
@@ -458,9 +459,9 @@ def has_complete_success(run_dir: Path, state: dict[str, Any]) -> bool:
 
 
 def failure_scope(_run_dir: Path, state: dict[str, Any]) -> dict[str, str] | None:
-    if state.get("phase") != PHASE or _position(state) != (STEP, STEP, CURRENT_NODE):
-        return None
     try:
+        if state.get("phase") != phase_for(state) or _position(state) != (STEP, STEP, CURRENT_NODE):
+            return None
         requirement_id, _title, cycle = _active(state, require_title=False)
     except (RuntimeError, TypeError, ValueError):
         return None

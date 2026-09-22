@@ -227,6 +227,24 @@ def acquire_execution_locks(root: Path, run_id: str, maximum: int) -> ExecutionL
         raise
 
 
+def share_product_execution_locks(
+    root: Path, run_id: str, parent: ExecutionLocks
+) -> ExecutionLocks:
+    """串联新周期：独占新 run，共享仍由父进程持有的容量和产品锁。"""
+    if parent.product is None or parent.run.path == run_lock_path(root, run_id):
+        raise RuntimeError("串联质量运行需要产品锁和独立 run 身份")
+    stack = ExitStack()
+    try:
+        run = stack.enter_context(acquire_lock(
+            run_lock_path(root, run_id), name="运行锁",
+            metadata=_metadata(run_id, "run"),
+        ))
+        return ExecutionLocks(stack, run, parent.capacity, parent.product)
+    except BaseException:
+        stack.close()
+        raise
+
+
 def acquire_product_lock(root: Path, run_id: str, key: str, product_path: Path) -> HeldLock:
     return acquire_lock(
         product_lock_path(root, key),
@@ -417,10 +435,69 @@ def validate_product_record(
         or record.get("product_path") != str(canonical_path)
         or record.get("owner_run_id") != run_id
         or record.get("lifecycle") != "active"
+        or type(record.get("port_slot")) is not int
+        or record["port_slot"] not in PORT_SLOTS
         or record.get("ports") != _ports_for_slot(record.get("port_slot"))
     ):
         raise RuntimeError("产品注册记录与运行状态不一致")
     return record
+
+
+def attach_product(
+    root: Path, execution_run_id: str, state: dict[str, Any], locks: ExecutionLocks,
+    *, source: bool = False,
+) -> dict[str, Any]:
+    """只读核验现有租约及 runtime，不认领、不补写产品文件。"""
+    coordination = state.get("coordination")
+    workspace = state.get("workspace")
+    if not isinstance(coordination, dict) or not isinstance(workspace, dict):
+        raise RuntimeError("附着来源缺少产品协调身份或工作区")
+    final_path = workspace.get("final_path")
+    if not isinstance(final_path, str) or not final_path:
+        raise RuntimeError("附着工作区路径无效")
+    key, canonical = product_key(Path(final_path))
+    attached = coordination.get("claim_phase") == "attached"
+    owner = coordination.get("owner_run_id") if attached else coordination.get("execution_run_id")
+    if (
+        coordination.get("schema_version") != 1
+        or coordination.get("claim_phase") not in {"claimed", "attached"}
+        or coordination.get("product_key") != key
+        or coordination.get("product_path") != str(canonical)
+        or not isinstance(owner, str) or not owner
+        or coordination.get("execution_run_id") != state.get("run_id")
+        or (not source and (not attached or state.get("run_id") != execution_run_id))
+        or not canonical.is_dir()
+    ):
+        raise RuntimeError("附着产品身份与运行状态不一致")
+    if locks.run.path != run_lock_path(root, execution_run_id):
+        raise RuntimeError("附着必须持有当前执行 run 的锁")
+    if locks.product is None:
+        locks.product = locks.stack.enter_context(
+            acquire_product_lock(root, execution_run_id, key, canonical)
+        )
+    elif locks.product.path != product_lock_path(root, key):
+        raise RuntimeError("继承的产品锁与附着产品不一致")
+    record = validate_product_record(root, owner, key, canonical)
+    if (
+        coordination.get("port_slot") != record["port_slot"]
+        or coordination.get("ports") != record["ports"]
+        or coordination.get("runtime_path") != ".pcm/runtime.json"
+    ):
+        raise RuntimeError("附着端口与产品租约不一致")
+    path = canonical / ".pcm" / "runtime.json"
+    if path.parent.is_symlink() or path.is_symlink():
+        raise RuntimeError("产品本机运行配置不能是符号链接")
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            raise RuntimeError("产品本机运行配置必须是普通文件")
+        current = json.load(handle)
+    if current != runtime_data(key, owner, record):
+        raise RuntimeError("产品本机运行配置与注册记录不一致")
+    return {
+        **coordination, "execution_run_id": execution_run_id,
+        "owner_run_id": owner, "claim_phase": "attached",
+    }
 
 
 def runtime_data(key: str, run_id: str, record: dict[str, Any]) -> dict[str, Any]:
