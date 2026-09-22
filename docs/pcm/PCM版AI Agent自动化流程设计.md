@@ -2,9 +2,11 @@
 
 > 本文是 [`AI Agent开发流程设计.md`](./AI%20Agent开发流程设计.md) 的 PCM 自动化版本。
 >
-> 人工版由人负责选择能力、传递上下文、判断结果和推进步骤；PCM 版由 Python 程序完成这些调度工作。两者使用相同的项目规则、Skills、Git 边界和完成标准，不重新定义各 Skill 的职责。
+> 人工版由人负责选择能力、传递上下文、判断结果和推进步骤；PCM 版由 Python 程序完成这些调度工作。两者使用相同的项目规则、领域能力和真实交付要求；程序版可以调整运行隔离、状态管理和验证时序，不机械照搬人工步骤。
 >
 > 本文先服务于 PCM 前置 Demo。正式 PCM 系统可以基于 Demo 的真实结果重新设计状态、持久化、权限、调度和产品界面，不要求直接沿用 Demo 的代码结构。
+>
+> 当前程序已实现初始化与阶段一；阶段二已收敛为独立的产品质量迭代工作流，尚未实现。第七、八节中的新增入口、字段与行为为目标设计，具体合同见[产品质量迭代工作流 TRD](../../pcm-demo/docs/trd/20260922-PCM%20Demo%20产品质量迭代工作流%20TRD.md)。
 
 ## 一、目标
 
@@ -274,53 +276,40 @@ Demo 和默认 PCM 流程只进行本地文件修改、测试、构建、服务�
 
 需求只使用 `pending`、`active` 和 `completed` 三种持久化生命周期；具体进度由 `phase/current_node` 和 `requirement_cycle` 表达，阻塞信息与生命周期正交。只有第 18 步完成所有适用仓库的 `--ff-only` 合并、SHA 与 clean 核验以及分支清理后，Python 才把活动需求改为 `completed` 并清空 `active_requirement` 与 `requirement_cycle`。
 
-在阶段二审计和候选分流节点中，`requirement_cycle` 为 `null`；顶层 `requirement_registry` 始终保留，继续作为需求生命周期唯一真源，阶段二只在此基础上增加当前审计轮和候选处理所需的最小状态：
+阶段二使用独立质量 run，不向阶段一的 state、步骤结果、会话或计时追加记录。新 run 从已完成来源按稳定需求 ID 承接完成事实，读取当前 canonical Backlog 的静态字段，并在自己的注册表中管理本周期新增需求；来源 run 保持只读。允许来源历史标题、Backlog 指纹与当前文件不同，但不能把来源之外的未知正式需求推断为已完成。
+
+质量 run 的最小上下文示意如下；注册表及基线只展示必要片段，完整字段和节点结果布局见质量迭代 TRD：
 
 ```json
 {
-  "phase": "phase_2_full_product_audit",
-  "current_node": "phase_2:route_candidates",
+  "workflow": "product_quality",
+  "source_run_id": "<已完成来源-run-id>",
+  "phase": "product_quality_iteration",
+  "current_node": "quality:route",
+  "step": null,
+  "current_step": null,
   "applicable_repositories": ["root", "frontend", "backend"],
-  "requirement_registry": {
-    "source": {
-      "path": "docs/backlog/backlog.md",
-      "sha256": "<backlog-sha256>"
-    },
-    "requirements": [
-      {
-        "id": "REQ-001",
-        "status": "completed"
-      },
-      {
-        "id": "REQ-002",
-        "status": "completed"
-      }
-    ]
-  },
+  "active_requirement": null,
   "requirement_cycle": null,
-  "phase_two": {
-    "audit": {
-      "version_fingerprint": {
-        "root": "<root-main-sha>",
-        "frontend": "<frontend-main-sha>",
-        "backend": "<backend-main-sha>"
-      },
-      "session": "session-id",
-      "result": "<完整审计输出引用>",
-      "verified_candidates": "<经核验候选引用>",
-      "duplicates": "<重复或未纳入项引用>",
-      "coverage_gaps": "<覆盖缺口引用>",
-      "high_impact_boundaries": "<高影响边界引用>"
-    },
-    "candidate_routing": null,
-    "pooling_evidence": null
+  "quality": {
+    "round": 1,
+    "max_rounds": 3,
+    "baseline_requirement_ids": ["REQ-001", "REQ-002"],
+    "batch_requirement_ids": [],
+    "entry_versions": {
+      "root": "<当前-root-main-sha>",
+      "frontend": "<当前-frontend-main-sha>",
+      "backend": "<当前-backend-main-sha>"
+    }
   }
 }
 ```
 
-上例是全项目审计已成功并原子推进到候选分流节点的阶段二快照；为简洁只展示注册表项的 ID 和生命周期，实际静态字段继续保留。需求注册表保存全部既有动态状态，审计结果已经存在，而 `candidate_routing` 和 `pooling_evidence` 仍为 `null`；它们只在各自节点成功后写入并推进到下一节点。
+审计、分流、入池与增量登记分别保存在当前 run 的 `quality/rounds/<轮次>/` 节点结果中，不把原文和候选正文重复塞进 state。Backlog 表达当前承诺，Git 保存文档变化，来源 run 保存历史执行，当前质量 run 保存本周期状态；不建设两份当前 Backlog 或注册表双向同步。
 
-不适用的交付单元不进入 `applicable_repositories`，并在对应步骤结果中显式记录 `not-applicable`；后续版本指纹、分支、验证和工作树检查只遍历该列表。阶段二处理已入池需求时临时使用 `phase: phase_2_requirement_remediation` 和 `requirement_cycle`，并将 `return_node_after_completion` 记录为 `phase_2:regress_and_reaudit`；第 18 步完成后返回阶段二，而不是重新进入阶段一选取普通需求。
+产品工作区、持久 owner、端口租约与 `.pcm/runtime.json` 保持不变；新 run 取得自己的 run 锁和容量名额，并取得同一产品排他锁。当前执行身份不再等同于持久创建 owner；附着使用独立只读校验，不放宽阶段一认领合同。
+
+不适用的交付单元不进入 `applicable_repositories`。质量 run 处理正式需求时继续采用第 13～18 步和既有 requirement 节点名称，phase 保持 `product_quality_iteration`，`return_node_after_completion` 为 `quality:select_requirement`；第 18 步完成后继续本批选择，批次结束才开始完整复审。原发现回归已经在第 15 步内完成，不在 completed 后另设回归节点。
 
 恢复与幂等规则：
 
@@ -554,135 +543,94 @@ Demo 从第 1 步开始，通过 `--product-draft` 接收 UTF-8 文本文件路�
 - **清理与完成**：每仓合并后原子保存 `merged:true`；全部仓均到达保存 tip 且通过核验后，才按同一顺序安全执行 `git branch -d`，支持部分清理恢复。最终各仓须在 main、clean 且需求分支已删除，先写 scoped `18.json`，再把注册表项更新为 `completed`、`completion:{"step":18}`，清空 active requirement/cycle，返回 `phase_1:select_requirement` / step 13。result 已写而 state 未推进时，只读核验最终 Git 事实并补状态。
 - **使用与验证入口**：Git 边界、恢复合同和定向测试命令见 [第 18 步说明](../../pcm-demo/steps/step_18_merge/README.md)。
 
-## 七、阶段二：全项目级集成产品体验审计与迭代
+## 七、阶段二：独立产品质量迭代工作流
 
-### 1. 进入条件、范围和运行条件
+本节是已确认、尚未实现的目标流程。它可以紧随阶段一自动启动，也可以在产品完成后独立运行；隔离运行记录，复用当前产品和需求开发能力。命令、数据合同、恢复与验收细节统一见[产品质量迭代工作流 TRD](../../pcm-demo/docs/trd/20260922-PCM%20Demo%20产品质量迭代工作流%20TRD.md)，不在本节重复字段清单。
 
-阶段一完成第 12 步需求注册表初始化，且当前已知正式范围内全部需求均完成第 13～18 步循环后，才可进入阶段二。进入前重新核验所有 `applicable_repositories`（其中包含 root）均处于清楚的 `main` 事实，且产品是完整可集成运行的版本。
+### 1. 接入当前产品与准备现场
 
-外层编排器从产品定义、正式 Backlog、已完成 TRD、当前代码、路由、测试和可运行行为建立审计范围，至少包含：当前正式范围内全部主要用户任务、主要用户角色和跨页面闭环；多个真实产品表面或模块；可访问环境、项目专用且真实可登录的开发账号、可复位开发数据和清理方式；代表性桌面及窄屏和适用辅助技术路径；允许写入及禁止资金、外发、生产数据和其它高影响副作用；已有验收、UI/UX 框架和限制。
+来源必须是已完成的阶段一 run，或已成功收口的质量 run，且没有活动需求。创建独立 run，只读承接来源；新 run 附着同一产品，保留原 owner、端口和资源，取得产品排他执行权。各适用仓库在当前 clean main 上建立本周期基线，允许 main 在来源完成后正常前进；未知未提交变更不自动清理、暂存或提交。
 
-范围以用户任务、状态和风险表达，不以单页清单代替。单页面、单需求、首条验证切片或局部改动不满足阶段二入口，不能触发审计。缺少主要任务不可替代的环境、角色、数据、真实浏览器能力或安全边界时，先在当前节点补齐；无法取得时返回 `blocked`，不降级成静态审查。
+新注册表以稳定 ID 承接来源完成状态，静态标题、顺序和显式依赖从当前 canonical Backlog 读取。旧文件指纹或标题变化不等于历史失效；未知新增 ID、缺失 ID 或身份冲突不得直接标记完成。当前 Backlog 是唯一正式范围入口，不另建阶段二 Backlog，不向来源回写。
 
-### 2. 独立 SDK session 执行完整审计
+通用 Agent 依据当前产品定义、Backlog、实际工程、相关设计和历史交付建立主要任务、角色与状态范围，并核实环境、测试身份、可复位数据、目标视口及允许操作。准备仅补齐本轮实际缺口，不重跑初始化、资源选型或基础工程。桌面产品的窄窗口检查不扩大为移动端交付；测试不能越过资金、真实外发、生产数据或不可逆操作边界。
 
-外层在独立的 Claude Agent SDK session 中显式调用一次 `product-experience-audit`，输入上述完整范围、运行条件、`applicable_repositories` 中各仓库的 `main` 版本事实和现有证据。每次审计轮次只针对一个清楚的完整集成版本；这些适用仓库的 `main` commit SHA 共同构成 `version_fingerprint`。
+### 2. 独立会话执行完整审计
 
-Skill 从真实任务出发执行声明范围内的动态审计，实际读取代表性截图并收集相称的交互、状态、网络或可访问性证据。它只返回经核验候选、重复或未纳入项、覆盖缺口和高影响边界；不修改业务代码、产品定义、TRD 或 canonical Backlog，不创建正式需求或 ID，不暂存、提交或自动串联其它能力。PCM 将原始输出引用、审计 session、版本指纹及四类结果保存到阶段二状态；这是外层运行证据，不要求 Skill 创建过程文档。
+每轮在独立 session 显式调用 `product-experience-audit`，输入本轮各仓 main 版本、完整任务范围、运行条件，以及以前候选处置与本批变化的必要背景。Agent 实际完成跨需求任务，读取代表性截图并收集适用动态证据；不修改代码、Backlog、设计或 Git。
 
-完整审计的完成条件是：实际覆盖当前正式范围内全部主要任务和多个产品表面/模块，且能明确区分已覆盖范围、候选、重复项、覆盖缺口和高影响边界。只浏览入口、只看截图、只走 happy path，或仅依据单需求证据均不算完成。
+审计面向当前正式承诺，不把历史标题当作仍需实现的功能，也不以当前实现倒推承诺可以删减。范围按用户结果、状态与风险组织，不以页面清单代替，不要求所有产品机械具备多个界面。
 
-### 3. 外层分流、需求化和入池
+审计原文与会话保存在质量 run；程序用既有 Responses/Pydantic 路径忠实提取任务覆盖、经核验候选、重复项、覆盖缺口和高影响事项，并分配本轮局部候选标识。Python 不解析 Markdown 格式或裁决体验质量。环境、身份或证据能力缺口在当前节点补齐，外部不可替代条件缺失为 blocked，其它不可继续错误为 failed。已复现产品缺陷阻断后续任务时，记录候选、受阻范围及因果关系，完成其余可执行覆盖后可以交接分流；修复后必须补齐这些任务，不能以带有此类缺口的审计直接收口。
 
-审计 Skill 结束后，外层调度会话基于审计证据、已有 Backlog 和产品事实逐项分流，并保存 `candidate_routing`：
+### 3. 分流、需求化与入池
 
-- 已有需求、同一用户障碍或共同根因已有归属的，记录重复或向已有活动项补充证据，不新建需求；
-- 误判、没有用户影响依据、纯主观偏好、价值或时机不足的，记录不纳入及理由；
-- 证据不足或有覆盖缺口的，先补齐环境、身份、数据或动态证据后再判断，不把疑点写入正式 Backlog；
-- 能以删除、合并、减少步骤、调整默认值或复用现有模式解决的，优先需求化最小可验证改动；
-- 证据充分、用户结果和验收方向清楚的 Bug、可用性缺陷、适配性/可访问性问题和边界明确的改进，进入正式需求化；
-- 改变产品目标、核心任务、品牌方向、安全、隐私、不可逆兼容或外部副作用的高影响边界，由 AI 决策模型基于事实决定范围、处理路径或不纳入理由并记录。AI 不能安全决定或资源不足时，只有不可替代外部资源缺失才返回 `blocked`；不新增人工审批节点。
+通用 Agent 读取审计证据、当前产品事实和以前处置，判断真实性及当前处理价值。AI 负责人处理其准确交接的取舍，不代替执行 Agent 调查工程或重新验收。每个候选最终明确纳入、已有活动归属或不纳入，并保留依据；需要补证时留在当前节点，不把疑点直接变成正式需求。
 
-需求化由外层完成，不由审计 Skill完成。单个内聚候选可按既有 Backlog 结构形成正式需求；需要合并、拆分、排序或重算依赖时，外层显式调用 `requirement-breakdown`；需要更新权威产品定义时，外层显式调用 `project-intake`。候选在用户结果、范围、证据、依赖和验收方向齐全前不得获得正式 ID。
+- 当前仍存在的缺陷，不能因历史需求曾经描述过预期结果而当作重复；建立关联的新修复项。
+- 优先采用删除、合并、减少步骤、合理默认值或复用现有模式的最小可验证改进。
+- 纯偏好、证据不足的建议、收益或时机不足的机会不自动开发；同一建议换一种表达不能绕过已有处置，只有新证据或前提变化才重议。
+- 高影响取舍由 AI 负责人按当前事实与授权决定，不新增人工逐项审批；真正需要外部授权时不能用模型批准代替。
+- 新产品目标或全新正式能力保留为后续产品工作，不在质量循环内自动重启产品定义；当前范围内必要的行为、体验或架构修正可明确纳入。
 
-符合准入条件的候选在根仓库最新 `main` 上通过一次短期入池分支写入正式 Backlog：创建分支，新增具有稳定 ID、标题、范围、依赖和验收方向的正式需求内容，检查依赖和顺序，调用 `commit-changes` 精确提交，再显式合并回根 `main`。外层保存入池分支、提交、合并和工作树检查，并持久化“正式需求 ID → 原审计候选”映射作为 `pooling_evidence`。入池仅创建后续可选择的需求，不创建活动 TRD、代码分支或完成状态。
+有纳入项时，由外层在根 main 上建立短期入池分支，显式调用 `requirement-breakdown` 的局部增量、充分资料直接生成路径。只新增本批正式需求，保留已完成条目与历史 TRD；必要的当前设计校正单独限定领域与文件范围。调用 `commit-changes` 精确提交，Python 显式 ff-only 合并并清理分支。
 
-### 4. 复用需求循环、针对原发现回归和完整复审
+入池结果记录正式 ID 与候选的多对多关联，以及每个候选完整原场景回归的承接需求。候选拆成多个需求时，最后承接完整回归的一项必须具有真实前置依赖。入池不创建活动 TRD、代码分支或完成状态；无纳入项不制造空分支与空提交。
 
-一批已入池的正式需求先按第 12 步同样的静态解析、哈希和 Python 动态状态语义原子增量加入既有需求注册表，保留所有既有需求的动态状态。随后需求循环不接收调用方指定的需求参数，而是每次由第 13 步从注册表确定性选择下一条可开发需求；第 18 步完成后，外层依据实际完成的正式需求 ID 查询 `pooling_evidence` 中的候选映射，再执行对应原发现回归。该增量协调和映射边界在阶段二实现时落实；当前不提前建立公共协调器。修复期间仍不调用 `product-experience-audit`，也不回写已归档的历史需求。
+### 4. 增量登记、开发与原问题回归
 
-每个修复完成后，外层针对原候选执行回归：重走原复现任务、受影响状态及相邻跨页面路径，核验原障碍已消失且未引入新的任务断点。该回归证据保存至对应候选分流记录；已有单元测试、单需求验收或实现者结论不能替代它。
+入池成功后，从当前 Backlog 进行静态提取，校验新增 ID 精确对应本批、既有项保留、依赖合法且无环。只把新项加入当前质量 run 的注册表并置为 pending，历史动态状态不变；不重跑第 12 步初始化，不修改来源注册表。
 
-一批已入池需求完成及其原发现回归后，使用修复后 `applicable_repositories` 中各仓库的 `main` 版本指纹开启下一审计轮，在新的独立 SDK session 再次执行完整产品审计，覆盖最初全部主要任务和本轮受影响任务。新出现且符合政策的候选继续分流、入池和开发；重复项、不纳入项或不阻断完成的设计机会不触发无穷循环。新发现关键覆盖缺口必须补验，不能复用旧版本证据。
+随后复用第 13～18 步，由 Python 按依赖和顺序选择需求。第 14 步只接收与本需求相关的原发现，形成新活动 TRD；第 15 步完成实现，并实际重走原复现任务、相关状态及相邻路径。原问题回归属于当前开发完成条件：失败时在原开发任务内继续，需求保持 active；不先完成合并再倒回历史。
 
-### 5. 阶段二完成条件
+一候选拆分时，各项验证自己的交付，最后承接需求证明完整原场景。独立验证按实际风险使用现有能力，不在每个修复后调用全项目审计，也不增加 Python 对 Agent 证据逐项复述的门禁。
 
-阶段二只有同时满足以下条件才成功结束：
+第 16～18 步完成复盘、提交和 ff-only 合并后，返回 `quality:select_requirement`。同一验证版本经快进合并不因分支名改变重跑全部局部测试。批次所有需求完成后，使用修复后的各仓 main 版本开启新的独立完整审计，而不是只复查修复页面。
 
-1. 最新完整审计版本来自 `applicable_repositories` 中各仓库清楚的 `main` 事实，并已覆盖当前正式范围内全部主要用户任务以及多个产品表面/模块；
-2. 适用动态任务已在真实浏览器和真实开发/测试服务执行，主要界面和关键状态有实际读取的代表性截图和相称动态证据；
-3. 经核验候选、重复项、未纳入项、覆盖缺口和高影响边界均已保存并完成分流；
-4. 所有自动入池的正式需求均已增量加入需求注册表并完成第 13～18 步，并通过针对原发现的体验回归；
-5. 最后一轮完整复审没有新增符合需求化政策的候选，也没有未处理的高信心阻断或高优先级问题；
-6. 与主要任务有关的环境、角色、数据、视口、辅助技术和动态证据覆盖缺口已经关闭；
-7. `applicable_repositories` 中各仓库均位于预期 `main`，工作树无意外变更，最终结果和仍适用的限制已经汇总。
+### 5. 收口与有限迭代
 
-阶段二完成只表示当前正式范围内的完整集成体验已按当前事实收束，不代表产品永远没有新的改进机会，也不以未来人工反馈降低本阶段标准。
+最新完整审计覆盖全部主要任务、必要动态证据缺口关闭、候选准确分流、没有尚需纳入的问题，且本周期正式需求及原场景回归均完成后，才可成功收口。各仓应在预期 main，产品运行、交付说明与适用数据初始化、重置及文件恢复合同保持有效；已有仍有效证据直接复用。
+
+首轮已满足条件时可以无修改完成，不制造需求。最新审计必须反映修复后的集成版本；完整复审出现真实复发时建立新的修复项，不改写已完成历史。
+
+完整审计轮次默认上限为 3，可在新 run 中指定；它只限制成本和执行规模，不降低质量标准。同轮补证或恢复不增加轮次。本批修复结束而预算不足以开始下一轮复审时，保存准确位置并 failed；可显式增加预算后恢复，不能把预算耗尽或“以后还有人工反馈”解释为完成。
 
 ## 八、循环、结束和运行方式
 
-PCM 先执行一次第 12 步初始化需求注册表，再以第 13～18 步完成阶段一，随后运行阶段二；阶段二新入池需求先增量协调进注册表，再复用第 13～18 步，而非在审计 Skill 中直接修复：
+当前可运行入口仍只覆盖初始化与阶段一。以下质量入口与串联参数均待实现；原 `run_all.py` 的默认行为和旧 run 的恢复合同保持不变。
 
-```python
-class StopRun(Exception):
-    def __init__(self, result):
-        self.result = result
+目标调度顺序如下：
 
-
-def require_success(result):
-    persist_node_result(result)
-    if result.status != "success":
-        raise StopRun(result)
-    return result.output
-
-
-def run_all():
-    try:
-        require_success(run_phase_one_until_no_known_formal_requirement())
-        require_success(enter_phase_two())
-
-        while True:
-            audit = require_success(run_full_product_audit_in_independent_session())
-            routed = require_success(route_audit_candidates(audit))
-            require_success(resolve_required_coverage_gaps(routed))
-            pooling = require_success(
-                productize_and_pool_eligible_candidates(routed)
-            )
-            require_success(
-                reconcile_pooled_requirements_into_registry(pooling)
-            )
-
-            while has_pending_pooled_requirement(pooling):
-                completed_requirement_id = require_success(
-                    run_next_requirement_cycle_steps_13_to_18()
-                )
-                require_success(
-                    regress_original_audit_finding(
-                        pooling.candidate_for(completed_requirement_id)
-                    )
-                )
-
-            if phase_two_completion_conditions_met(
-                audit, routed, pooling
-            ):
-                return success_result()
-
-    except StopRun as stopped:
-        return stopped.result
+```text
+已完成来源 run（只读）
+  → 创建或恢复独立质量 run
+  → 准备当前产品和审计范围
+  → 完整审计 → 分流
+      无纳入项且满足完成条件 → 成功收口
+      有纳入项 → 根仓入池 → 当前 run 增量登记
+        → 逐需求设计、开发与原发现回归、复盘、提交、合并
+        → 本批全部完成 → 下一轮完整审计
 ```
 
-所有节点统一返回 `success`、`blocked` 或 `failed`。单步入口按第 3 节结果合同，只对 Claude Agent SDK 执行通道的显式可恢复失败在 6 小时窗口内退避重入；完整编排等待单步的最终结果，不叠加第二层重试，也不把重试意图或窗口写入持久化 state。业务 `blocked`、普通 `failed`、AI-compatible 裁决失败、本地合同错误和取消直接停止。恢复窗口耗尽时保留最终 `failed` 并停止，不继续候选分流、Backlog 入池、需求开发或回归；重试不放宽任何节点完成条件。
-
-项目最终结束的最低条件是阶段一和阶段二均完成：不存在仍应开发的正式需求；所有纳入范围的需求状态与代码事实一致；`applicable_repositories` 中各仓库均在预期 `main` 且工作树清楚；适用的最终安装、构建、测试、启动和真实联调通过；关键用户流程浏览器验收及阶段二最终完整审计通过；适用数据基线与当前版本一致，接手者能按说明单入口初始化、逐角色登录并完成主要任务，明确重置可恢复完整起点，所需文件与对象存储共同可用，审计修复已同步受影响的恢复证据；最终结果和未解决限制已汇总。项目最终检查属于总流程收口，不新增复杂业务步骤编号。
-
-PCM Demo 支持一键、单步、区间和恢复运行，并复用同一批节点函数：
+新命令目标：
 
 ```bash
-# 单独验证步骤节点
-python -m steps.step_02_project_intake --run-id <run-id>
+# 单独启动质量周期，来源已经完成
+python run_quality.py --source-run <completed-run-id> --run-id <quality-run-id>
 
-# 从产品初稿完整执行阶段一和阶段二
-python run_all.py \
-  --product-draft "../docs/prd/修迹-产品需求文档-v1.md" \
-  --workspace-root "/path/to/products"
+# 恢复本周期，或只执行当前一个质量节点
+python run_quality.py --resume <quality-run-id>
+python run_quality.py --resume <quality-run-id> --node quality:audit
 
-# 从阻塞或失败的 phase/current_node 恢复
-python run_all.py --resume <run-id>
-
-# 调试阶段一步骤区间，或指定阶段二节点
-python run_all.py --run-id <run-id> --from-step 11 --to-step 15
-python run_all.py --run-id <run-id> --from-node phase_2:audit
+# 保留阶段一默认行为；显式选择一键串联独立质量 run
+python run_all.py --product-draft <draft-file> --with-quality
 ```
+
+一键串联采用独立的 `<来源 run-id>-quality`，已有且来源一致时恢复，不重复建立质量周期；来源的完成记录不追加第二阶段状态。质量完整入口与命名节点单步共同使用现有锁、会话、有限重试和诊断能力，数值步骤入口只继续负责原第 1～18 步。具体 CLI 组合与预算恢复见质量迭代 TRD。
+
+所有节点统一返回 `success`、`blocked` 或 `failed`。只对执行通道明确请求的可恢复错误使用现有 6 小时退避窗口；业务阻塞、本地冲突、裁决失败或质量预算耗尽不进入通道重试。完整编排不再叠加无限重启。
+
+项目最终完成要求阶段一和质量迭代分别完成：正式范围已交付，质量周期已在当前集成版本收口，适用仓库、运行入口、数据及文件恢复、账号交接与最终说明一致。两个 run 的成功各自代表实际完成的职责，不修改旧记录来补造质量审计历史。
 
 ### 步骤耗时观测
 
