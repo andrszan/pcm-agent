@@ -253,7 +253,7 @@ async def parse_response(
         client = AsyncOpenAI(
             api_key=known_secrets[0],
             base_url=config.base_url,
-            timeout=120.0,
+            timeout=None,
             max_retries=max_retries,
             http_client=DefaultAsyncHttpxClient(trust_env=False),
         )

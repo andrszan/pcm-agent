@@ -104,6 +104,16 @@ class OpenAIResponsesTests(unittest.TestCase):
             "test-model",
         )
 
+    def test_client_has_no_request_timeout(self) -> None:
+        responses = Responses('{"value":"ok"}')
+        client = Client(responses)
+        with patch("common.openai_responses.AsyncOpenAI", return_value=client) as constructor:
+            asyncio.run(parse_response(
+                self.config, system_prompt="返回结果。", input_model=InputModel(text="input"),
+                output_model=OutputModel,
+            ))
+        self.assertIsNone(constructor.call_args.kwargs["timeout"])
+
     def test_validator_exception_context_is_not_serialized_in_repair(self) -> None:
         class CheckedOutput(BaseModel):
             value: str
