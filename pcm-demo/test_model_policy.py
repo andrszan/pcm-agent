@@ -40,7 +40,6 @@ routine = { model = "routine-model", effort = "medium" }
 "17" = "routine"
 "quality_prepare" = "planning"
 "quality_audit" = "planning"
-"quality_route" = "planning"
 "quality_pool" = "building"
 """
 
@@ -74,7 +73,6 @@ class ModelPolicyTest(unittest.TestCase):
         expected = {
             "quality_prepare": ("planning", "planning-model", "high"),
             "quality_audit": ("planning", "planning-model", "high"),
-            "quality_route": ("planning", "planning-model", "high"),
             "quality_pool": ("building", "building-model", "high"),
             "project_intake": ("planning", "planning-model", "high"),
             "project_readiness": ("planning", "planning-model", "high"),
@@ -112,7 +110,7 @@ class ModelPolicyTest(unittest.TestCase):
                 self.assertEqual(policy, model_policy._read_model_policy_snapshot(
                     model_policy._model_policy_snapshot(policy)
                 ))
-                for task in ("quality_prepare", "quality_audit", "quality_route", "quality_pool"):
+                for task in ("quality_prepare", "quality_audit", "quality_pool"):
                     incomplete = tomllib.loads(path.read_text())
                     del incomplete["steps"][task]
                     with self.assertRaises(ValueError):

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -69,19 +70,47 @@ class QualityAgentHandoffTests(unittest.IsolatedAsyncioTestCase):
             "findings": [], "duplicates": [], "high_impact": [], "limitations": [],
         })
 
+    async def test_incremental_reply_keeps_full_audit_and_corrections(self) -> None:
+        self.agent.side_effect = [
+            self.result("完整审计：保存失败丢失输入；另有权限误判待核实", skill="product-experience-audit"),
+            self.result("补充：运行版本已核对；撤销权限误判，其余发现不变", skill="product-experience-audit"),
+        ]
+        follow_up = AgentDecision(verdict="continue", answer="只补运行版本并核实权限误判", reason="补证", required_inputs=[])
+        completed = AgentDecision(verdict="completed", answer="", reason="完整审计及补证已交接", required_inputs=[])
+        self.decision.side_effect = [
+            (value.model_dump(), 1, value.model_dump_json()) for value in (follow_up, completed)
+        ]
+        self.parse.return_value = self.report()
+        raw, _ = await self.audit()
+        extracted = self.parse.await_args.kwargs["input_model"].report
+        for text in ("保存失败丢失输入", "撤销权限误判", "只补运行版本并核实权限误判"):
+            self.assertIn(text, extracted)
+            self.assertIn(text, raw)
+        self.assertEqual(self.agent.await_count, 2)
+        self.assertEqual(self.parse.await_count, 1)
+
     async def test_plain_task_completes_without_skill_and_returns_saved_reply(self) -> None:
         self.agent.return_value = self.result("准备完成\n保留完整交接")
         raw, parsed = await workflow._task(
             self.run_dir, self.state, "quality_prepare", "quality_prepare",
             "准备审计条件", "交接可访问运行条件",
         )
-        self.assertEqual(raw, "准备完成\n保留完整交接")
+        self.assertIn("准备完成\n保留完整交接", [m["content"] for m in json.loads(raw)])
         self.assertIsNone(parsed)
         self.assertIsNone(self.specs[0].skill_name)
-        self.assertEqual(loop.latest_agent_reply(self.run_dir, self.state, self.specs[0]), raw)
+        self.assertEqual(loop.agent_conversation_report(self.run_dir, self.state, self.specs[0]), raw)
         self.agent.assert_awaited_once()
         self.decision.assert_awaited_once()
         self.parse.assert_not_awaited()
+
+    async def test_conversation_report_is_read_only(self) -> None:
+        self.agent.return_value = self.result("准备完成")
+        await workflow._task(self.run_dir, self.state, "quality_prepare", "quality_prepare", "准备", "交接")
+        before = {p.relative_to(self.run_dir): p.read_bytes() for p in self.run_dir.rglob("*.json")}
+        state_before = json.dumps(self.state, sort_keys=True)
+        loop.agent_conversation_report(self.run_dir, self.state, self.specs[0])
+        self.assertEqual(state_before, json.dumps(self.state, sort_keys=True))
+        self.assertEqual(before, {p.relative_to(self.run_dir): p.read_bytes() for p in self.run_dir.rglob("*.json")})
 
     async def test_audit_requires_loaded_skill_before_decision_and_extraction(self) -> None:
         self.agent.return_value = self.result("审计回复但未加载 Skill")
@@ -98,13 +127,13 @@ class QualityAgentHandoffTests(unittest.IsolatedAsyncioTestCase):
             await self.audit()
         self.state = read_state(self.run_dir)
         raw, parsed = await self.audit()
-        self.assertEqual(raw, original)
+        self.assertIn(original, [m["content"] for m in json.loads(raw)])
         self.assertEqual(parsed, self.report())
         self.agent.assert_awaited_once()
         self.decision.assert_awaited_once()
         self.assertEqual(self.parse.await_count, 2)
         for call in self.parse.await_args_list:
-            self.assertEqual(call.kwargs["input_model"].report, original)
+            self.assertEqual(call.kwargs["input_model"].report, raw)
             self.assertEqual(call.kwargs["input_model"].context, "当前用户任务及运行边界")
             self.assertIs(call.kwargs["output_model"], AuditReport)
         self.assertEqual(loop.latest_agent_reply(self.run_dir, self.state, self.specs[-1]), original)
@@ -156,7 +185,7 @@ class QualityAgentHandoffTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(first.kwargs.get("resume_session_id"))
         self.assertEqual(repaired.kwargs["resume_session_id"], "quality-session")
         self.assertEqual(self.state["claude_sessions"], {"quality_pool_r0001": "quality-session"})
-        self.assertEqual(raw, "已补齐回归依赖")
+        self.assertIn("已补齐回归依赖", raw)
         self.assertEqual(parsed, plan)
         self.assertEqual(catalog[1]["depends_on"], ["BR-001"])
         workflow._validate_increment(self.state, catalog, parsed)
@@ -168,7 +197,8 @@ class QualityAgentHandoffTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.parse.side_effect = [ValueError("保存任务缺少观察证据"), self.report()]
         raw, parsed = await self.audit()
-        self.assertEqual(raw, "补齐证据后的审计回复")
+        self.assertIn("首次审计回复", raw)
+        self.assertIn("补齐证据后的审计回复", raw)
         self.assertEqual(parsed, self.report())
         self.assertEqual(self.agent.await_count, 2)
         self.assertEqual(self.decision.await_count, 2)
@@ -176,8 +206,8 @@ class QualityAgentHandoffTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(first.kwargs.get("resume_session_id"))
         self.assertEqual(repaired.kwargs["resume_session_id"], "quality-session")
         self.assertNotEqual(first.args[0], repaired.args[0])
-        self.assertEqual([call.kwargs["input_model"].report for call in self.parse.await_args_list],
-                         ["首次审计回复", "补齐证据后的审计回复"])
+        self.assertIn("首次审计回复", self.parse.await_args_list[0].kwargs["input_model"].report)
+        self.assertEqual(self.parse.await_args_list[1].kwargs["input_model"].report, raw)
         self.assertEqual(self.state["claude_sessions"], {"quality_audit_r0001": "quality-session"})
 
 

@@ -10,7 +10,7 @@ from typing import Any, Awaitable, Callable
 from pydantic import BaseModel, ValidationError
 
 from common.agent_decision_loop import (
-    AgentDecisionLoopSpec, ResumeMessage, latest_agent_reply, run_agent_decision_loop,
+    AgentDecisionLoopSpec, ResumeMessage, agent_conversation_report, run_agent_decision_loop,
 )
 from common.decision import render_decision_system_prompt
 from common.error_diagnostics import redact_text
@@ -157,7 +157,7 @@ def node_resume_keys(state: dict[str, Any]) -> tuple[str, ...]:
     if node == "prepare":
         return ("quality_prepare",)
     suffix = f"r{_round(state):04d}"
-    if node in {"audit", "route"}:
+    if node == "audit":
         return (f"quality_{node}_{suffix}",)
     if node == "pool":
         return (f"quality_pool_{suffix}", f"quality_pool_design_{suffix}", f"quality_pool_commit_{suffix}")
@@ -266,16 +266,19 @@ async def _task(
             repair = completion_verifier()
             if repair:
                 return repair
-        raw = latest_agent_reply(run_dir, state, spec)
+        raw = agent_conversation_report(run_dir, state, spec)
         if output_model:
             try:
                 parsed = await parse_response(
                     LLMConfig.load(),
-                    system_prompt=("忠实提取已完成任务的最终回复，返回严格 JSON。不得补造事实或替执行者决策。"
+                    system_prompt=("依据完整有序对话提取当前有效的完整成果，返回严格 JSON。不得补造事实或替执行者决策。"
+                                   "report 是对话消息：user 是执行 Agent，assistant 是负责人指令或决定，system 是任务约束。"
+                                   "后续明确纠正替代对应旧事实；局部补充不删除其它有效发现、覆盖和限制。"
+                                   "不要把最后一条补证当成整份报告，也不要把历史已撤销的误判重新纳入。"
+                                   "任务明确要求但完整对话中没有执行证据的主要任务记 gap；运行版本核验不代替业务任务覆盖。"
                                    "保留明确的证据、限制和归属。coverage.blocking_findings 使用本次 findings 数组的从零开始索引。"
                                    "coverage只记录当前正式范围内的主要用户任务；明确不适用的能力与非阻断观察限制分别保留，不要升级为必要gap。"
-                                   "只有明确尚未完成的必要任务或必要证据才记gap，不得为满足结构而补造覆盖或证据。"
-                                   "ready_to_complete 仅在回复明确说明本轮无应处理问题且覆盖完整时为 true。"),
+                                   "只有明确尚未完成的必要任务或必要证据才记gap，不得为满足结构而补造覆盖或证据。"),
                     input_model=ExtractionInput(report=raw, context=prompt), output_model=output_model,
                 )
                 if validate:
@@ -362,7 +365,7 @@ async def _audit(run_dir: Path, state: dict[str, Any], message: ResumeMessage | 
         + json.dumps(context, ensure_ascii=False)
     )
     raw, report = await _task(run_dir, state, f"quality_audit_r{_round(state):04d}", "quality_audit", prompt,
-                             "当前范围已经调查并交接真实发现时完成。已核验产品缺陷造成的受阻任务可以随候选交接，不等同于环境缺失；必要环境或证据能力缺失不能假装通过。",
+                             "基于完整多轮对话判断调查与交接是否完成，局部补证不撤销原报告。可在现有授权内补齐的必要任务，明确具体任务后继续；不可替代外部资源缺失且无法推进时如实 blocked。已核验产品缺陷可以带覆盖限制交接修复，调查完成不等于产品通过，不索取重复完成声明。",
                              skill="product-experience-audit", output_model=AuditReport, validate=validate_audit, resume_message=message)
     if main_versions(state) != versions:
         raise RuntimeError("审计期间产品版本或 Git 状态发生变化")
@@ -377,29 +380,40 @@ async def _audit(run_dir: Path, state: dict[str, Any], message: ResumeMessage | 
     return _success(run_dir, state, data, "完整产品审计已交接，尚不代表产品通过")
 
 
-async def _route(run_dir: Path, state: dict[str, Any], message: ResumeMessage | None) -> dict[str, Any]:
+async def _route(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
     audit = _prior(run_dir, state, "audit")
     requirements = state["requirement_registry"]["requirements"]
     prompt = (
-        "对本次完整产品审计逐项分流。按当前产品事实核实真实性、用户影响、当前价值、最小解决方向和必要取舍。"
-        "允许读取项目，必要时按既定操作边界补充动态证据，不修改代码、产品文档、Backlog 或 Git。"
-        "每个候选使用原候选 ID，明确 include、covered 或 exclude 及具体理由；covered 只指同轮另一候选或尚未完成的正式修复项，"
-        "不能指历史 completed 来消除仍复现的缺陷。阻断任务的已核验缺陷必须有实际修复归属。"
-        "优先删除、合并、调整默认值或复用；纯偏好、时机不足或新增产品目标保留为后续机会，不自动重定义产品。"
-        "高影响取舍在事实和授权内交接负责人决定，不伪造外部授权。"
-        "最终列出每个候选的处置与covered_by（不适用为null）；若确需同步现有设计，列出docs内具体Markdown路径及理由，"
-        "不得修改历史TRD或已完成Backlog条目。明确本轮是否已无应处理问题且足以收口，不以轮次预算代替质量。\n"
-        + json.dumps({"审计": audit, "已有需求": requirements, "以前处置": _history(run_dir, state)}, ensure_ascii=False)
+        "你是产品质量负责人，只依据已完成的完整审计材料决定处理范围，不执行新的产品调查。"
+        "审计 report 是多轮交接：后续明确纠正覆盖对应旧事实，局部补证不删除其它有效发现。"
+        "对 candidates 中每个 ID 恰好给出一个 include、covered 或 exclude；不得新增候选或伪造补证。"
+        "include 用于当前值得修复的真实障碍；covered 只指同轮候选或未完成正式需求，不能指已完成历史；"
+        "exclude 必须说明误判、非阻断偏好或范围外机会的具体依据，不得掩盖已复现阻断缺陷。"
+        "优先合并、删除、调整默认值或复用，不将优化机会自动变成新产品目标。"
+        "证据存在无法据此决定的矛盾时不要猜测；summary 说明缺失事实，不能宣称完成调查。"
+        "确需校正当前设计时仅列 docs 内 Markdown 路径及理由，不修改历史 TRD。"
+        "有 include 时继续正式修复；必要覆盖缺口仍须保留并在复审处理，不能最终收口。"
+        "没有 include 且主要任务覆盖充分、没有必要缺口或活动需求时 ready_to_complete 才为 true。"
+        "无可推进修复且必要缺口确需不可替代的外部资源时，required_inputs 列出具体资源和解除条件；"
+        "不得把普通取舍、本地错误、范围外观察或没有自述完成当成外部阻塞。"
+        "材料不足而又不属于外部资源缺失时令 ready_to_complete=false，并在 summary 准确说明原因。"
     )
+    report = await parse_response(
+        LLMConfig.load(), system_prompt=prompt,
+        input_model=ExtractionInput(
+            report=audit["report"],
+            context=json.dumps({"审计": {k: v for k, v in audit.items() if k != "report"},
+                                "已有需求": requirements, "以前处置": _history(run_dir, state)}, ensure_ascii=False),
+        ),
+        output_model=RoutingReport,
+    )
+    validate_routing(report, audit, requirements)
+    for change in report.document_changes:
+        validate_document_path(change.path)
+    if not any(row.action == "include" for row in report.decisions) and report.required_inputs:
+        raise QualityBlocked(report.summary, report.required_inputs)
+    raw = report.model_dump_json()
 
-    def validate(report: RoutingReport) -> None:
-        validate_routing(report, audit, requirements)
-        for change in report.document_changes:
-            validate_document_path(change.path)
-
-    raw, report = await _task(run_dir, state, f"quality_route_r{_round(state):04d}", "quality_route", prompt,
-                             "逐项分流已经有依据，必要补证和取舍已解决即可完成。普通机会不自动变需求，不把已复现阻断缺陷当偏好排除。",
-                             output_model=RoutingReport, validate=validate, resume_message=message)
     if main_versions(state) != audit["versions"]:
         raise RuntimeError("分流期间产品版本发生变化")
     return _success(run_dir, state, {**report.model_dump(), "report": raw}, "候选分流完成")
@@ -634,10 +648,12 @@ async def run_node(run_dir: Path, state: dict[str, Any], *, resume_message: Resu
         updated = copy.deepcopy(state)
         updated.update({"status": "running", "error": None, "blocked": None})
         _replace_state(run_dir, state, updated)
-    if node in {"prepare", "audit", "route", "pool"}:
-        return await {"prepare": _prepare, "audit": _audit, "route": _route, "pool": _pool}[node](run_dir, state, resume_message)
+    if node in {"prepare", "audit", "pool"}:
+        return await {"prepare": _prepare, "audit": _audit, "pool": _pool}[node](run_dir, state, resume_message)
     if resume_message:
-        raise RuntimeError("确定性节点不能投递 Agent 恢复消息")
+        raise RuntimeError("当前节点没有 Agent 会话，不能投递恢复消息")
+    if node == "route":
+        return await _route(run_dir, state)
     return {"register": _register, "select_requirement": _select, "complete": _complete}[node](run_dir, state)
 
 

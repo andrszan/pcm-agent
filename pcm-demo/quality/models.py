@@ -12,6 +12,8 @@ class Document(BaseModel):
 
 
 class ExtractionInput(Document):
+    """report 保留完整交接材料，而非最后一条补证。"""
+
     report: str
     context: str
 
@@ -56,18 +58,16 @@ def validate_audit(report: AuditReport) -> None:
     if len(tasks) != len(set(tasks)):
         raise ValueError("用户任务覆盖不能重复")
     for row in report.coverage:
-        if row.outcome == "gap":
-            raise ValueError("必要运行条件或证据缺口仍未关闭，请在当前任务补齐或报告真实阻塞")
         if row.outcome == "covered" and not row.evidence:
             raise ValueError("已覆盖任务缺少观察证据")
         if row.outcome == "blocked_by_defect" and not row.blocking_findings:
             raise ValueError("缺陷阻断任务必须关联本次经核验发现")
         if row.outcome != "blocked_by_defect" and row.blocking_findings:
-            raise ValueError("非阻断任务不能携带阻断发现")
+            raise ValueError(f"任务 {row.user_task} 的状态为 {row.outcome}，不能携带阻断发现 {row.blocking_findings}")
         if len(row.blocking_findings) != len(set(row.blocking_findings)):
             raise ValueError("任务阻断发现重复")
         if any(type(i) is not int or not 0 <= i < len(report.findings) for i in row.blocking_findings):
-            raise ValueError("任务阻断发现索引越界")
+            raise ValueError(f"任务 {row.user_task} 的阻断发现索引越界：{row.blocking_findings}；发现数={len(report.findings)}")
 
 
 class Disposition(Document):
@@ -87,13 +87,15 @@ class RoutingReport(Document):
     decisions: list[Disposition]
     document_changes: list[DocumentChange]
     ready_to_complete: bool
+    required_inputs: list[Text] = Field(default_factory=list)
 
 
 def validate_routing(report: RoutingReport, audit: dict, requirements: list[dict]) -> None:
     candidates = {row["id"] for row in audit["candidates"]}
     decisions = {row.candidate_id: row for row in report.decisions}
     if len(decisions) != len(report.decisions) or set(decisions) != candidates:
-        raise ValueError("每个审计候选必须恰有一个处置，不得遗漏或新增候选")
+        raise ValueError(f"候选处置集合不一致：输入={sorted(candidates)}；缺失={sorted(candidates - set(decisions))}；"
+                         f"多出={sorted(set(decisions) - candidates)}；重复={len(decisions) != len(report.decisions)}")
     active = {row["id"] for row in requirements if row["status"] in {"pending", "active"}}
     for row in report.decisions:
         if row.action != "covered" and row.covered_by is not None:
@@ -105,7 +107,7 @@ def validate_routing(report: RoutingReport, audit: dict, requirements: list[dict
         if identifier in active:
             return "include"
         if identifier not in decisions or identifier in seen:
-            raise ValueError("候选归属不存在、指向已完成历史或形成循环")
+            raise ValueError(f"候选归属 {identifier} 不存在、指向已完成历史或形成循环；已访问={sorted(seen)}")
         row = decisions[identifier]
         if row.action != "covered":
             return row.action
@@ -119,11 +121,11 @@ def validate_routing(report: RoutingReport, audit: dict, requirements: list[dict
                 if terminal(identifier, set()) != "include":
                     raise ValueError("已复现且阻断任务的缺陷没有修复归属，不能排除后收口")
     has_work = any(row.action == "include" for row in report.decisions)
-    gaps = any(row["outcome"] == "blocked_by_defect" for row in audit["coverage"])
-    if report.ready_to_complete and (has_work or gaps or active):
+    gaps = any(row["outcome"] in {"blocked_by_defect", "gap"} for row in audit["coverage"])
+    if report.ready_to_complete and (has_work or gaps or active or report.required_inputs):
         raise ValueError("存在应开发项、受阻任务或未完成正式项，不能收口")
-    if not has_work and not report.ready_to_complete:
-        raise ValueError("没有纳入项但仍未满足收口，请补齐具体缺口或明确真实阻塞")
+    if not has_work and not report.ready_to_complete and not report.required_inputs:
+        raise ValueError(f"没有可推进的修复且未满足收口，材料或本地现场需纠正：{report.summary}")
 
 
 class RequirementBinding(Document):

@@ -88,8 +88,6 @@ class QualityWorkflowTests(unittest.TestCase):
                 return "全部任务、开发身份和端口已准备，数据可复位", None
             if key.startswith("quality_audit_"):
                 return "已执行审计", audit_report(self.defect, self.blocked)
-            if key.startswith("quality_route_"):
-                return "已分流", route_report(self.defect)
             if key.startswith("quality_pool_commit_"):
                 git(self.root, "add", "docs/backlog/backlog.md")
                 git(self.root, "commit", "-m", "docs: 新增修复需求")
@@ -104,6 +102,8 @@ class QualityWorkflowTests(unittest.TestCase):
         self.addCleanup(patch.stopall)
         patch.object(flow, "_catalog", side_effect=catalog).start()
         patch.object(flow, "_task", side_effect=task).start()
+        self.routing = patch.object(flow, "parse_response", side_effect=lambda *a, **kw: route_report(self.defect)).start()
+        patch.object(flow.LLMConfig, "load", return_value=object()).start()
 
     def execute(self):
         return asyncio.run(flow.run_node(self.run, self.state))
@@ -114,6 +114,43 @@ class QualityWorkflowTests(unittest.TestCase):
                 return
             self.execute()
         self.fail(f"未到达 {node}")
+
+    def test_route_uses_one_decision_and_no_agent_session(self):
+        self.defect = True
+        self.reach("quality:route")
+        before = self.calls.copy()
+        self.execute()
+        self.assertEqual(self.calls, before)
+        self.routing.assert_awaited_once()
+        self.assertEqual(self.state["current_node"], "quality:pool")
+        self.assertEqual(flow.node_resume_keys({**self.state, "current_node": "quality:route"}), ())
+
+    def test_route_invalid_candidates_fails_without_agent_loop(self):
+        self.reach("quality:route")
+        self.routing.side_effect = None
+        self.routing.return_value = route_report(True)
+        before = self.calls.copy()
+        with self.assertRaisesRegex(ValueError, "多出=.*Q001-C001"):
+            self.execute()
+        self.assertEqual(before, self.calls)
+        self.routing.assert_awaited_once()
+
+    def test_route_records_real_external_block_without_false_completion(self):
+        self.reach("quality:route")
+        self.routing.side_effect = None
+        report = route_report()
+        report.ready_to_complete = False
+        report.required_inputs = ["提供隔离恢复环境及可验证备份"]
+        report.summary = "必要恢复任务缺少隔离环境，没有当前可推进修复"
+        self.routing.return_value = report
+        with self.assertRaises(flow.QualityBlocked) as caught:
+            self.execute()
+        result = flow.record_failure(self.run, self.state, caught.exception)
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(self.state["current_node"], "quality:route")
+        self.routing.return_value = route_report()
+        self.execute()
+        self.assertEqual(self.state["current_node"], "quality:complete")
 
     def test_first_prepare_has_a_known_timing_start(self):
         from common.timing import StepTiming
@@ -303,13 +340,27 @@ class QualityModelTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_audit(AuditReport.model_validate(data))
 
-    def test_coverage_gap_is_domain_repair_not_json_format_repair(self):
+    def test_coverage_gap_is_retained_but_prevents_completion(self):
         data = audit_report().model_dump()
         data["coverage"][0].update(outcome="gap", evidence=[], reason="必要身份缺失")
         parsed = AuditReport.model_validate(data)
         self.assertEqual(parsed.coverage[0].outcome, "gap")
-        with self.assertRaisesRegex(ValueError, "缺口"):
-            validate_audit(parsed)
+        validate_audit(parsed)
+        with self.assertRaisesRegex(ValueError, "不能收口"):
+            validate_routing(route_report(), {"candidates": [], "coverage": data["coverage"]}, [])
+
+    def test_gap_with_real_fixes_can_proceed_but_cannot_complete(self):
+        data = audit_report(True).model_dump()
+        data["coverage"].append({"user_task": "恢复备份", "outcome": "gap", "reason": "缺少隔离环境",
+                                 "evidence": [], "blocking_findings": []})
+        validate_audit(AuditReport.model_validate(data))
+        audit = {"candidates": [{"id": "Q001-C001"}], "coverage": data["coverage"]}
+        report = route_report(True)
+        report.required_inputs = ["提供隔离恢复环境"]
+        validate_routing(report, audit, [])
+        report.ready_to_complete = True
+        with self.assertRaisesRegex(ValueError, "不能收口"):
+            validate_routing(report, audit, [])
 
     def test_completed_history_cannot_absorb_current_defect(self):
         audit = {"candidates": [{"id": "Q001-C001"}], "coverage": []}

@@ -23,5 +23,4 @@ routine = { model = "glm-5.3-flash[1m]", effort = "medium" }
 
 "quality_prepare" = "planning"
 "quality_audit" = "planning"
-"quality_route" = "planning"
 "quality_pool" = "building"

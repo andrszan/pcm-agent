@@ -99,9 +99,10 @@ async def probe(run_dir: Path, *, resume: bool = False, message_file: Path | Non
                 timing.finish(returned=True)
         after = subprocess.check_output(["git", "-C", state["workspace"]["final_path"], "rev-parse", "HEAD"])
         audit = json.loads((run_dir / "quality/rounds/0001/audit.json").read_text())["data"]
-        checks = {"real_agent_sessions": len(state.get("claude_sessions", {})) >= 3,
+        checks = {"real_agent_sessions": len(state.get("claude_sessions", {})) >= 2,
                   "real_task_coverage": bool(audit["coverage"]), "no_product_commit": before == after,
-                  "routed": "quality:route" in nodes}
+                  "routed": (run_dir / "quality/rounds/0001/route.json").is_file(),
+                  "no_route_agent": not any(key.startswith("quality_route_") for key in state.get("claude_sessions", {}))}
         passed = all(checks.values())
         write_json(run_dir / "probe-result.json", {"status": "passed" if passed else "failed", "checks": checks,
             "nodes": nodes, "final_node": state["current_node"], "candidate_count": len(audit["candidates"]),

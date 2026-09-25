@@ -29,5 +29,4 @@ routine = { model = "claude-haiku-4-5", effort = "medium" }
 
 "quality_prepare" = "planning"
 "quality_audit" = "planning"
-"quality_route" = "planning"
 "quality_pool" = "building"

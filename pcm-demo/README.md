@@ -2,7 +2,7 @@
 
 PCM Demo 是正式 PCM 开发前的本地流程验证工具。它用 Python 串联确定性操作、AI-compatible 负责人决策和 Claude Agent SDK，在仓库外的独立产品工作区中执行真实产品开发流程。
 
-当前已实现第 1～18 步、阶段一需求循环和独立的产品质量迭代工作流：产品初稿经初始化、设计和 Backlog 进入逐需求开发、验证、复盘、提交与 ff-only 合并；完整产品可由新的质量 run 接入，完成审计、候选分流、正式入池、增量登记、修复与完整复审。第 6 步在适用时完成项目风格定制和基础品牌资产准备。`run_all.py` 默认只执行阶段一，显式 `--with-quality` 才串联独立质量运行。
+当前已实现第 1～18 步、阶段一需求循环和独立的产品质量迭代工作流：产品初稿经初始化、设计和 Backlog 进入逐需求开发、验证、复盘、提交与 ff-only 合并；完整产品可由新的质量 run 接入：完整审计、负责人处置、增量 Backlog 与登记后，复用原需求开发循环并完整复审。第 6 步在适用时完成项目风格定制和基础品牌资产准备。`run_all.py` 默认只执行阶段一，显式 `--with-quality` 才串联独立质量运行。
 
 Demo 只验证流程可行性，不建设正式 PCM 的 Web 管理界面、数据库、分布式调度、部署或生产运维能力。当前支持同一 Demo checkout 在容量限制内并发执行不同产品；同一产品始终互斥。
 
@@ -90,9 +90,11 @@ uv run python run_quality.py --resume <quality-run-id> --node quality:audit
 uv run python run_step.py --step <13-18> --run-id <quality-run-id>
 ```
 
+审计与入池从完整有序对话提取当前有效成果，后续局部补证不替代整份报告。分流只依据已保存审计材料作负责人处置；有必要覆盖缺口时不能最终收口。公共 Responses API 请求使用 `timeout=None`，允许长时间推理。
+
 当前 Backlog 的正式 ID 必须能与来源完成记录对应；标题、旧指纹和当前 main 的正常变化不要求回写历史。新增正式需求在本周期单独登记，原发现回归属于提交合并前的开发完成条件；一批需求全部完成后独立复审。
 
-完整审计默认最多 3 轮，新运行可通过 `--max-rounds` 指定。预算耗尽返回 `failed/iteration_limit`，不表示产品通过；在这一失败位置，可使用 `run_quality.py --resume <quality-run-id> --max-rounds <更大上限>` 继续尚未执行的轮次。同轮恢复不重复消耗轮次。Agent 恢复消息同样通过 `--resume-message-file` 传入，适用边界与下节一致。
+完整审计默认最多 3 轮，新运行可通过 `--max-rounds` 指定。预算耗尽返回 `failed/iteration_limit`，不表示产品通过；在这一失败位置，可使用 `run_quality.py --resume <quality-run-id> --max-rounds <更大上限>` 继续尚未执行的轮次。同轮恢复不重复消耗轮次。准备、审计和入池的 Agent 恢复消息通过 `--resume-message-file` 传入，适用边界与下节一致。分流直接调用负责人 Responses API，使用 `--resume` 重试请求。
 
 在新建或恢复阶段一的命令中追加 `--with-quality`，即可在阶段一成功后自动启动独立的 `<阶段一-run-id>-quality`；同源质量 run 已存在时恢复，不重复创建。后续另一个质量周期以最近完成的质量 run 为来源。质量运行有自己的 run 锁，与前序共用产品互斥边界，不重新认领产品或重新分配端口。
 
