@@ -32,10 +32,6 @@ NODES = ("prepare", "audit", "route", "pool", "register", "select_requirement", 
 _ROUND_NODES = {"audit", "route", "pool", "register", "select_requirement"}
 
 
-class IterationLimit(RuntimeError):
-    pass
-
-
 class QualityBlocked(RuntimeError):
     def __init__(self, reason: str, required_inputs: list[str]):
         self.required_inputs = required_inputs
@@ -116,14 +112,12 @@ def is_completed(state: dict[str, Any]) -> bool:
     )
 
 
-def new_state(source_state: dict[str, Any], source_run_id: str, run_id: str, max_rounds: int = 3) -> dict[str, Any]:
+def new_state(source_state: dict[str, Any], source_run_id: str, run_id: str) -> dict[str, Any]:
     from run_all import phase_one_completed
     if not (phase_one_completed(source_state) or is_completed(source_state)):
         raise RuntimeError("来源运行尚未完成或仍有活动需求")
     if source_run_id == run_id or any(not value or Path(value).name != value or value in {".", ".."} for value in (source_run_id, run_id)):
         raise ValueError("来源与新的运行标识必须是不同的安全名称")
-    if type(max_rounds) is not int or max_rounds < 1:
-        raise ValueError("max-rounds 必须是正整数")
     repositories(source_state)
     return {
         "run_id": run_id, "workflow": WORKFLOW, "source_run_id": source_run_id,
@@ -135,21 +129,11 @@ def new_state(source_state: dict[str, Any], source_run_id: str, run_id: str, max
         "requirement_registry": copy.deepcopy(source_state["requirement_registry"]),
         "active_requirement": None, "requirement_cycle": None,
         "quality": {
-            "round": 1, "max_rounds": max_rounds, "entry_versions": {},
+            "round": 1, "entry_versions": {},
             "baseline_requirement_ids": [row["id"] for row in source_state["requirement_registry"]["requirements"]],
             "batch_requirement_ids": [],
         },
     }
-
-
-def increase_round_limit(state: dict[str, Any], new_limit: int) -> None:
-    if (
-        _node(state) != "audit" or state.get("status") != "failed"
-        or state.get("error", {}).get("type") != "iteration_limit"
-        or type(new_limit) is not int or new_limit <= state["quality"]["max_rounds"]
-    ):
-        raise ValueError("只能在轮次预算耗尽的失败位置显式提高 max-rounds")
-    state["quality"]["max_rounds"] = new_limit
 
 
 def node_resume_keys(state: dict[str, Any]) -> tuple[str, ...]:
@@ -185,9 +169,6 @@ def _advance(run_dir: Path, state: dict[str, Any], saved: dict[str, Any]) -> dic
         updated["quality"]["batch_requirement_ids"] = data["new_ids"]
     elif node == "select_requirement":
         following[node] = data["next_node"]
-        if data["next_node"] == "audit":
-            updated["quality"]["round"] = data["next_round"]
-            updated["quality"]["batch_requirement_ids"] = []
     updated.update({"status": "success", "blocked": None, "error": None,
                     "current_node": f"quality:{following[node]}", "step": None, "current_step": None})
     if node == "select_requirement" and data["next_node"] == "select_requirement":
@@ -211,7 +192,7 @@ def record_failure(run_dir: Path, state: dict[str, Any], error: Exception) -> di
             return previous
     message = redact_text(str(error))
     blocked = {"reason": message, "required_inputs": error.required_inputs} if isinstance(error, QualityBlocked) else None
-    details = error.as_error() if hasattr(error, "as_error") else {"type": "iteration_limit" if isinstance(error, IterationLimit) else type(error).__name__, "message": message}
+    details = error.as_error() if hasattr(error, "as_error") else {"type": type(error).__name__, "message": message}
     status = "blocked" if blocked else "failed"
     value = {"phase": PHASE, "node": state["current_node"], "round": _round(state), "status": status,
              "summary": message, "outputs": [], "blocked": blocked, "error": None if blocked else details}
@@ -332,18 +313,7 @@ async def _prepare(run_dir: Path, state: dict[str, Any], message: ResumeMessage 
                                     "registry": state["requirement_registry"]}, "已接入当前产品并准备审计范围")
 
 
-def _history(run_dir: Path, state: dict[str, Any]) -> list[dict[str, Any]]:
-    history = []
-    for number in range(1, _round(state)):
-        route = _read(_path(run_dir, f"quality/rounds/{number:04d}/route.json"))
-        audit = _read(_path(run_dir, f"quality/rounds/{number:04d}/audit.json"))
-        history.append({"round": number, "candidates": audit["data"]["candidates"], "routing": route["data"]})
-    return history
-
-
 async def _audit(run_dir: Path, state: dict[str, Any], message: ResumeMessage | None) -> dict[str, Any]:
-    if _round(state) > state["quality"]["max_rounds"]:
-        raise IterationLimit("完整审计轮次预算耗尽；已完成修复不等于质量收口，可提高 max-rounds 后恢复本轮")
     intent_path = _round_path(run_dir, state, "audit-intent")
     versions = main_versions(state)
     if intent_path.exists():
@@ -352,14 +322,14 @@ async def _audit(run_dir: Path, state: dict[str, Any], message: ResumeMessage | 
     else:
         _write(intent_path, {"versions": versions})
     prepared = _read(_path(run_dir, "quality/prepare.json"))["data"]
-    context = {"运行条件和任务": prepared["report"], "版本": versions, "以前处置": _history(run_dir, state)}
+    context = {"运行条件和任务": prepared["report"], "版本": versions}
     prompt = (
         "/product-experience-audit\n对当前完整产品执行全部主要用户任务的独立审计，按真实交付面完成动态验证。"
         "具有图形界面时实际读取代表性截图；纯CLI使用实际命令、输出、退出码和持久化结果，不能机械要求桌面截图或屏幕采集权限。"
         "不改产品代码、配置、文档、Backlog 或 Git，不直接修复。当前定义与历史标题不同时查明当前承诺。"
         "已复现缺陷阻断后续任务时，保留具体受阻任务与阻断发现的对应关系，完成其余可执行覆盖后交接修复；"
         "环境、身份或必要证据缺口先在授权内补齐，无法补齐如实报告，不假装覆盖。"
-        "以前不纳入项只在新证据或前提变化时重议；历史需求 completed 不能证明当前缺陷已解决。"
+        "历史需求 completed 不能证明当前缺陷已解决。"
         "最终直接返回完整任务覆盖（包括实际证据、不适用与缺陷阻断）、每个经核验发现的用户任务、触发条件、当前事实、"
         "预期结果及依据、影响、证据、优先级、信心，以及重复项、高影响事项和限制。不给正式需求 ID。\n"
         + json.dumps(context, ensure_ascii=False)
@@ -392,7 +362,7 @@ async def _route(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
         "优先合并、删除、调整默认值或复用，不将优化机会自动变成新产品目标。"
         "证据存在无法据此决定的矛盾时不要猜测；summary 说明缺失事实，不能宣称完成调查。"
         "确需校正当前设计时仅列 docs 内 Markdown 路径及理由，不修改历史 TRD。"
-        "有 include 时继续正式修复；必要覆盖缺口仍须保留并在复审处理，不能最终收口。"
+        "有 include 时进入正式修复，相关原场景验证由修复需求完成；本次范围外限制如实保留。"
         "没有 include 且主要任务覆盖充分、没有必要缺口或活动需求时 ready_to_complete 才为 true。"
         "无可推进修复且必要缺口确需不可替代的外部资源时，required_inputs 列出具体资源和解除条件；"
         "不得把普通取舍、本地错误、范围外观察或没有自述完成当成外部阻塞。"
@@ -403,7 +373,7 @@ async def _route(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
         input_model=ExtractionInput(
             report=audit["report"],
             context=json.dumps({"审计": {k: v for k, v in audit.items() if k != "report"},
-                                "已有需求": requirements, "以前处置": _history(run_dir, state)}, ensure_ascii=False),
+                                "已有需求": requirements}, ensure_ascii=False),
         ),
         output_model=RoutingReport,
     )
@@ -605,7 +575,7 @@ def _select(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
         return _success(run_dir, state, {"next_node": "select_requirement"}, "继续确定性选择本批需求")
     if not batch or not batch <= {row["id"] for row in requirements if row["status"] == "completed"}:
         raise RuntimeError("质量批次没有完整的需求完成事实")
-    return _success(run_dir, state, {"next_node": "audit", "next_round": _round(state) + 1}, "本批已完成，进入新的完整审计轮")
+    return _success(run_dir, state, {"next_node": "complete"}, "本次纳入需求已全部完成")
 
 
 def _complete(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
@@ -613,16 +583,46 @@ def _complete(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
     routed = _prior(run_dir, state, "route")
     report = RoutingReport.model_validate({key: routed[key] for key in RoutingReport.model_fields})
     validate_routing(report, audit, state["requirement_registry"]["requirements"])
-    if not report.ready_to_complete or state.get("active_requirement") or state.get("requirement_cycle"):
-        raise RuntimeError("质量周期尚未满足收口条件")
+    if state.get("active_requirement") or state.get("requirement_cycle"):
+        raise RuntimeError("仍有活动需求，不能完成质量运行")
     if any(row["status"] != "completed" for row in state["requirement_registry"]["requirements"]):
         raise RuntimeError("仍有正式需求未完成")
     versions = main_versions(state)
-    if versions != audit["versions"]:
-        raise RuntimeError("最新完整审计未覆盖当前集成版本")
+    included = any(row.action == "include" for row in report.decisions)
+    batch = state["quality"]["batch_requirement_ids"]
+    if included:
+        pooled = _prior(run_dir, state, "pool")
+        registered = _prior(run_dir, state, "register")
+        plan = PoolPlan.model_validate(pooled["plan"])
+        validate_pool_plan(plan, routed, set(state["quality"]["baseline_requirement_ids"]))
+        if set(batch) != {row.requirement_id for row in plan.requirements} or batch != registered["new_ids"]:
+            raise RuntimeError("本次完成需求与入池登记不一致")
+        merged_tips: dict[str, set[str]] = {name: set() for name in versions}
+        for row in state["requirement_registry"]["requirements"]:
+            if row["id"] not in batch:
+                continue
+            merged = _read(_path(run_dir, f"steps/requirements/{row['id']}/18.json"))
+            if merged.get("status") != "success" or merged.get("requirement_id") != row["id"]:
+                raise RuntimeError(f"需求 {row['id']} 缺少成功合并结果")
+            tips = {repo["name"]: repo["tip_sha"] for repo in merged["repositories"]}
+            if set(tips) != set(versions):
+                raise RuntimeError("需求合并仓库与当前仓库不一致")
+            for name, tip in tips.items():
+                merged_tips[name].add(tip)
+        for name, path in repositories(state):
+            if versions[name] not in merged_tips[name] or any(
+                not ancestor(path, tip, versions[name]) for tip in merged_tips[name]
+            ):
+                raise RuntimeError("最终版本与本批需求合并结果不一致")
+    elif not report.ready_to_complete or batch:
+        raise RuntimeError("本次审计尚未满足直接完成条件")
+    elif versions != audit["versions"]:
+        raise RuntimeError("本次审计未覆盖当前版本")
     return _success(run_dir, state, {"versions": versions, "audit_round": _round(state),
-                                    "summary": routed["summary"], "limitations": audit["limitations"],
-                                    "dispositions": routed["decisions"]}, "产品质量周期已经在当前集成版本收口")
+                                    "completed_requirement_ids": batch,
+                                    "summary": "本次完整审计及纳入需求处理完成",
+                                    "limitations": audit["limitations"],
+                                    "dispositions": routed["decisions"]}, "一次审计及本批修复已完成")
 
 
 async def run_node(run_dir: Path, state: dict[str, Any], *, resume_message: ResumeMessage | None = None) -> dict[str, Any]:
@@ -642,8 +642,6 @@ async def run_node(run_dir: Path, state: dict[str, Any], *, resume_message: Resu
             if resume_message:
                 raise RuntimeError("已完成节点不能投递恢复消息")
             return _advance(run_dir, state, saved)
-    if node == "audit" and _round(state) > state["quality"]["max_rounds"]:
-        raise IterationLimit("完整审计轮次预算耗尽，可提高 max-rounds 后恢复本轮；当前不能宣称质量收口")
     if state.get("status") != "blocked":
         updated = copy.deepcopy(state)
         updated.update({"status": "running", "error": None, "blocked": None})

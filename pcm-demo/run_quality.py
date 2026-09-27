@@ -37,7 +37,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     source.add_argument("--source-run")
     source.add_argument("--resume")
     parser.add_argument("--run-id")
-    parser.add_argument("--max-rounds", type=int)
     parser.add_argument("--node", choices=QUALITY_NODES)
     parser.add_argument("--resume-message-file", type=Path)
     parser.add_argument("--coordination-locks", help=argparse.SUPPRESS)
@@ -48,8 +47,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--resume 不能与 --run-id 同时使用")
     if (args.node or args.resume_message_file) and not args.resume:
         parser.error("--node 和 --resume-message-file 只能用于 --resume")
-    if args.max_rounds is not None and args.max_rounds < 1:
-        parser.error("--max-rounds 必须为正整数")
     return args
 
 
@@ -164,7 +161,7 @@ def _locked(args, run_id, run_dir, locks, snapshot) -> int:
         source = read_state(run_all.run_dir_for(args.source_run))
         if source.get("run_id") != args.source_run:
             raise ValueError("来源运行身份与运行目录不一致")
-        state = workflow.new_state(source, args.source_run, run_id, max_rounds=args.max_rounds or 3)
+        state = workflow.new_state(source, args.source_run, run_id)
         source_coordination = source.get("coordination")
         if not isinstance(source_coordination, dict):
             raise ValueError("质量来源缺少产品协调身份")
@@ -190,9 +187,6 @@ def _locked(args, run_id, run_dir, locks, snapshot) -> int:
         if args.node is not None and state.get("current_node") != args.node:
             raise ValueError("--node 只能执行当前质量节点")
         attach_product(run_all.COORDINATION_ROOT, run_id, state, locks)
-        if args.max_rounds is not None:
-            workflow.increase_round_limit(state, args.max_rounds)
-            write_state(run_dir, state)
     if args.resume_message_file is not None:
         step = _numeric_step(state)
         if step is not None:

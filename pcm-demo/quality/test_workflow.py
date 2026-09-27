@@ -294,27 +294,60 @@ class QualityWorkflowTests(unittest.TestCase):
         self.assertEqual(self.calls, calls)
         self.assertEqual(self.state["current_node"], "quality:register")
 
-    def test_new_round_budget_and_final_reaudit(self):
+    def finish_repair_batch(self):
         self.defect = True
-        self.state["quality"]["max_rounds"] = 1
         self.reach("quality:select_requirement")
+        (self.root / "fix.txt").write_text("修复结果")
+        git(self.root, "add", "fix.txt")
+        git(self.root, "commit", "-m", "fix: 修复任务")
         for row in self.state["requirement_registry"]["requirements"]:
             row.update(status="completed", completion={"step": 18})
-        self.execute()
-        self.assertEqual(self.state["quality"]["round"], 2)
-        self.assertEqual(self.state["current_node"], "quality:audit")
-        with self.assertRaises(flow.IterationLimit) as raised:
-            self.execute()
-        flow.record_failure(self.run, self.state, raised.exception)
-        self.assertFalse(flow.is_completed(self.state))
-        self.assertEqual(self.state["error"]["type"], "iteration_limit")
-        with self.assertRaises(ValueError):
-            flow.increase_round_limit(self.state, 1)
-        flow.increase_round_limit(self.state, 2)
-        self.defect = False
+        (self.run / "steps/requirements/BR-002").mkdir(parents=True)
+        write_json(self.run / "steps/requirements/BR-002/18.json", {
+            "status": "success", "requirement_id": "BR-002",
+            "repositories": [{"name": "root", "tip_sha": git(self.root, "rev-parse", "HEAD")}],
+        })
+
+    def test_repaired_batch_completes_after_one_audit(self):
+        self.finish_repair_batch()
         self.reach("quality:completed")
-        self.assertIn("quality_audit_r0002", self.calls)
+        self.assertEqual([key for key in self.calls if key.startswith("quality_audit_")], ["quality_audit_r0001"])
+        self.assertNotIn("max_rounds", self.state["quality"])
         self.assertTrue(flow.is_completed(self.state))
+
+    def test_repair_completion_rejects_missing_merge_result(self):
+        self.finish_repair_batch()
+        (self.run / "steps/requirements/BR-002/18.json").unlink()
+        self.reach("quality:complete")
+        with self.assertRaises(RuntimeError):
+            self.execute()
+
+    def test_repair_completion_rejects_unknown_version(self):
+        self.finish_repair_batch()
+        (self.root / "other.txt").write_text("外部变更")
+        git(self.root, "add", "other.txt")
+        git(self.root, "commit", "-m", "docs: 外部变化")
+        self.reach("quality:complete")
+        with self.assertRaisesRegex(RuntimeError, "版本"):
+            self.execute()
+
+    def test_completion_resume_does_not_restart_audit(self):
+        self.finish_repair_batch()
+        self.reach("quality:complete")
+        with patch.object(flow, "_replace_state", side_effect=OSError("状态写入中断")):
+            with self.assertRaises(OSError):
+                self.execute()
+        self.state = read_state(self.run)
+        before = self.calls.copy()
+        self.execute()
+        self.assertTrue(flow.is_completed(self.state))
+        self.assertEqual(before, self.calls)
+
+    def test_pending_repair_cannot_complete(self):
+        self.defect = True
+        self.reach("quality:select_requirement")
+        with self.assertRaisesRegex(RuntimeError, "未完成"):
+            flow._complete(self.run, self.state)
 
     def test_current_version_must_match_audited_version_at_completion(self):
         self.reach("quality:complete")

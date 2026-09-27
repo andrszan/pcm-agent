@@ -53,7 +53,6 @@ class QualityCLITests(unittest.TestCase):
             node_result_path=lambda path, state: path / "quality" / "prepare.json",
             record_failure=Mock(side_effect=self.fail),
             run_node=self.complete,
-            increase_round_limit=Mock(side_effect=self.increase),
         )
         for item in (
             patch.object(run_all, "RUNS_DIR", self.runs),
@@ -74,12 +73,12 @@ class QualityCLITests(unittest.TestCase):
         paths += [self.coordination / "products.json", self.product / ".pcm/runtime.json", self.product / ".gitignore"]
         return {str(path): path.read_bytes() for path in paths if path.is_file()}
 
-    def new_state(self, source, source_run_id, run_id, max_rounds=3):
+    def new_state(self, source, source_run_id, run_id):
         return {"run_id": run_id, "workflow": "product_quality", "source_run_id": source_run_id,
                 "phase": "product_quality_iteration", "current_node": "quality:prepare",
                 "step": None, "current_step": None, "status": "running",
                 "workspace": copy.deepcopy(source["workspace"]),
-                "quality": {"round": 1, "max_rounds": max_rounds, "batch_requirement_ids": []}}
+                "quality": {"round": 1, "batch_requirement_ids": []}}
 
     def fail(self, path, state, error):
         state.update(status="failed", error={"type": type(error).__name__, "message": str(error)})
@@ -90,11 +89,6 @@ class QualityCLITests(unittest.TestCase):
         state.update(status="success", current_node="quality:completed")
         write_state(path, state)
         return {"status": "success"}
-
-    def increase(self, state, limit):
-        if state.get("status") != "failed" or state.get("error") != {"type": "iteration_limit"} or limit <= state["quality"]["max_rounds"]:
-            raise ValueError("不允许修改预算")
-        state["quality"]["max_rounds"] = limit
 
     def create(self):
         with patch.object(run_quality, "_drive", return_value=0):
@@ -164,15 +158,9 @@ class QualityCLITests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 attach_product(self.coordination, "quality", read_state(path), locks)
 
-    def test_round_budget_is_explicit_and_persisted_only_when_allowed(self):
-        path = self.create()
-        self.assertEqual(run_quality.main(["--resume", "quality", "--max-rounds", "4"]), 2)
-        state = read_state(path)
-        state.update(status="failed", current_node="quality:audit", error={"type": "iteration_limit"})
-        write_state(path, state)
-        with patch.object(run_quality, "_drive", return_value=1):
-            self.assertEqual(run_quality.main(["--resume", "quality", "--max-rounds", "4"]), 1)
-        self.assertEqual(read_state(path)["quality"]["max_rounds"], 4)
+    def test_round_budget_option_is_rejected(self):
+        with self.assertRaises(SystemExit):
+            run_quality.parse_args(["--resume", "quality", "--max-rounds", "4"])
 
     def test_same_run_and_product_execution_are_exclusive(self):
         self.create()
@@ -215,6 +203,16 @@ with adopt_execution_locks(root, 'source-quality', sys.argv[3], 1) as locks:
             self.assertTrue(lock_status(parent.product.path)[0])
             self.assertTrue(lock_status(parent.capacity.path)[0])
             self.assertFalse(lock_status(run_lock_path(self.coordination, "source-quality"))[0])
+        self.assertEqual(self.snapshot(), self.before)
+
+    def test_run_all_only_chains_quality_when_explicit(self):
+        for enabled in (False, True):
+            with self.subTest(with_quality=enabled):
+                args = run_all.parse_args(["--resume", "source"] + (["--with-quality"] if enabled else []))
+                with patch.object(run_all, "phase_one_completed", return_value=True), \
+                     patch.object(run_all, "_chain_quality", return_value=0) as chain:
+                    self.assertEqual(run_all._run_steps(args, "source", self.runs / "source", None, "{}"), 0)
+                self.assertEqual(chain.call_count, int(enabled))
         self.assertEqual(self.snapshot(), self.before)
 
     def test_chain_reuses_same_run_and_rejects_foreign_source(self):
@@ -298,7 +296,7 @@ with adopt_execution_locks(root, 'source-quality', sys.argv[3], 1) as locks:
         sleep.assert_not_called()
         self.assertEqual(read_state(path)["status"], "failed")
 
-    def test_real_workflow_new_state_and_round_limit_contract(self):
+    def test_real_workflow_new_state_has_no_round_budget(self):
         from quality import workflow
         source = copy.deepcopy(self.source)
         source.update(phase="phase_1_requirement_development", step=13, current_step=13,
@@ -315,15 +313,7 @@ with adopt_execution_locks(root, 'source-quality', sys.argv[3], 1) as locks:
             path = self.runs / "quality"
             state = read_state(path)
             self.assertEqual(state["quality"]["baseline_requirement_ids"], ["BR-001"])
-            state.update(current_node="quality:audit", status="running")
-            state["quality"]["round"] = 4
-            write_state(path, state)
-            with patch.object(run_step.time, "sleep") as sleep:
-                self.assertEqual(run_quality.main(["--resume", "quality", "--node", "quality:audit"]), 1)
-            sleep.assert_not_called()
-            self.assertEqual(read_state(path)["error"]["type"], "iteration_limit")
-            self.assertEqual(run_quality.main(["--resume", "quality", "--max-rounds", "4"]), 0)
-            self.assertEqual(read_state(path)["quality"]["max_rounds"], 4)
+            self.assertNotIn("max_rounds", state["quality"])
         self.assertEqual(self.snapshot(), before)
 
     def test_real_workflow_protects_saved_success_but_cli_reports_advance_failure(self):
