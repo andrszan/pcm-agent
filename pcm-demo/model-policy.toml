@@ -24,3 +24,8 @@ routine = { model = "gpt-6-luna[1m]", effort = "medium" }
 "quality_prepare" = "planning"
 "quality_audit" = "planning"
 "quality_pool" = "building"
+
+"feedback_prepare" = "planning"
+"feedback_triage" = "planning"
+"feedback_route" = "planning"
+"feedback_pool" = "building"

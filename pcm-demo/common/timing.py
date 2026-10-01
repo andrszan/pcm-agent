@@ -135,6 +135,8 @@ def _update_totals(record: dict[str, Any]) -> None:
 
 
 def _valid_node(node: Any, round_number: Any) -> bool:
+    if isinstance(node, str) and node.startswith("feedback:") and len(node) > len("feedback:"):
+        return round_number is None
     return (
         isinstance(node, str) and node.startswith("quality:") and len(node) > len("quality:")
         and (round_number is None or (type(round_number) is int and round_number > 0))

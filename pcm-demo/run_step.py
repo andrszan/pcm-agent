@@ -1102,9 +1102,9 @@ def _prepare_execution_locks(args: argparse.Namespace) -> ExecutionLocks:
                 state = read_state(run_dir)
             except Exception:  # 由步骤现有错误路径保存损坏状态诊断。
                 return locks
-            if state.get("workflow") == "product_quality":
+            if state.get("workflow") in {"product_quality", "product_feedback"}:
                 if args.step not in range(13, 19):
-                    raise RuntimeError("质量运行仅支持需求步骤 13～18")
+                    raise RuntimeError("产品迭代运行仅支持需求步骤 13～18")
                 attach_product(root, run_id, state, locks)
                 return locks
             coordination = state.get("coordination")

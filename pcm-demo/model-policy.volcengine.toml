@@ -24,3 +24,8 @@ routine = { model = "glm-5.3-flash[1m]", effort = "medium" }
 "quality_prepare" = "planning"
 "quality_audit" = "planning"
 "quality_pool" = "building"
+
+"feedback_prepare" = "planning"
+"feedback_triage" = "planning"
+"feedback_route" = "planning"
+"feedback_pool" = "building"

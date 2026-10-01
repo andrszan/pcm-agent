@@ -592,8 +592,8 @@ def _advance(run_dir: Path, state: dict[str, Any], context: dict[str, Any], save
         {
             "status": "success",
             "phase": phase_for(state),
-            "step": None if state.get("workflow") == "product_quality" else 13,
-            "current_step": None if state.get("workflow") == "product_quality" else 13,
+            "step": None if state.get("workflow") in {"product_quality", "product_feedback"} else 13,
+            "current_step": None if state.get("workflow") in {"product_quality", "product_feedback"} else 13,
             "current_node": selection_node_for(state),
             "active_requirement": None,
             "requirement_cycle": None,

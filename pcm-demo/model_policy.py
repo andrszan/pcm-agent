@@ -31,6 +31,10 @@ _STEP_TASKS = {
     "quality_prepare": "quality_prepare",
     "quality_audit": "quality_audit",
     "quality_pool": "quality_pool",
+    "feedback_prepare": "feedback_prepare",
+    "feedback_triage": "feedback_triage",
+    "feedback_route": "feedback_route",
+    "feedback_pool": "feedback_pool",
 }
 _VALID_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
 
@@ -60,7 +64,7 @@ def _require_exact_keys(value: dict[str, Any], expected: set[str], label: str) -
         raise ValueError(f"{label} 缺少键：{', '.join(missing)}")
 
 
-def _parse_model_policy(data: Any) -> _ModelPolicy:
+def _parse_model_policy(data: Any, *, legacy_snapshot: bool = False) -> _ModelPolicy:
     if not isinstance(data, dict):
         raise ValueError("模型策略顶层必须是 TOML 表")
     _require_exact_keys(data, {"profiles", "steps"}, "模型策略")
@@ -88,7 +92,12 @@ def _parse_model_policy(data: Any) -> _ModelPolicy:
     raw_steps = data["steps"]
     if not isinstance(raw_steps, dict):
         raise ValueError("模型策略 steps 必须是表")
-    _require_exact_keys(raw_steps, set(_STEP_TASKS), "模型策略 steps")
+    expected = set(_STEP_TASKS)
+    # 已启动的旧主管继续使用原 snapshot；不从磁盘补任务或隐式选模型。
+    legacy_tasks = expected - {task for task in expected if task.startswith("feedback_")}
+    if legacy_snapshot and set(raw_steps) == legacy_tasks:
+        expected = legacy_tasks
+    _require_exact_keys(raw_steps, expected, "模型策略 steps")
     steps: dict[str, str] = {}
     for step, profile in raw_steps.items():
         if not isinstance(profile, str) or profile not in profiles:
@@ -124,7 +133,7 @@ def _read_model_policy_file() -> _ModelPolicy:
 
 def _read_model_policy_snapshot(snapshot: str) -> _ModelPolicy:
     try:
-        return _parse_model_policy(json.loads(snapshot))
+        return _parse_model_policy(json.loads(snapshot), legacy_snapshot=True)
     except json.JSONDecodeError as error:
         raise ValueError(f"内部模型策略 snapshot JSON 无效：{error}") from error
 
@@ -163,7 +172,7 @@ def _model_policy_snapshot(policy: _ModelPolicy) -> str:
 def _model_policy_table(policy: _ModelPolicy) -> str:
     rows = [
         (step, policy.steps[step], *policy.profiles[policy.steps[step]])
-        for step in _STEP_TASKS
+        for step in _STEP_TASKS if step in policy.steps
     ]
     widths = [
         max(len(heading), *(len(row[index]) for row in rows))
@@ -185,6 +194,8 @@ def get_agent_profile(task: str) -> AgentProfile:
     step = next((step for step, known_task in _STEP_TASKS.items() if known_task == task), None)
     if step is None:
         raise ValueError(f"未知 Agent 任务：{task}")
+    if step not in policy.steps:
+        raise ValueError(f"当前模型策略 snapshot 不包含任务 {task}，请使用完整策略启动新运行")
     profile = policy.steps[step]
     model, effort = policy.profiles[profile]
     return AgentProfile(profile=profile, model=model, effort=effort)

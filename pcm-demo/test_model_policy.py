@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import shutil
 import subprocess
@@ -41,6 +42,10 @@ routine = { model = "routine-model", effort = "medium" }
 "quality_prepare" = "planning"
 "quality_audit" = "planning"
 "quality_pool" = "building"
+"feedback_prepare" = "planning"
+"feedback_triage" = "planning"
+"feedback_route" = "planning"
+"feedback_pool" = "building"
 """
 
 
@@ -71,6 +76,10 @@ class ModelPolicyTest(unittest.TestCase):
 
     def test_resolves_all_stable_tasks_and_returns_frozen_profile(self) -> None:
         expected = {
+            "feedback_prepare": ("planning", "planning-model", "high"),
+            "feedback_triage": ("planning", "planning-model", "high"),
+            "feedback_route": ("planning", "planning-model", "high"),
+            "feedback_pool": ("building", "building-model", "high"),
             "quality_prepare": ("planning", "planning-model", "high"),
             "quality_audit": ("planning", "planning-model", "high"),
             "quality_pool": ("building", "building-model", "high"),
@@ -115,6 +124,40 @@ class ModelPolicyTest(unittest.TestCase):
                     del incomplete["steps"][task]
                     with self.assertRaises(ValueError):
                         model_policy._parse_model_policy(incomplete)
+
+    def test_legacy_snapshot_keeps_old_profiles_without_feedback_fallback(self) -> None:
+        data = tomllib.loads(VALID_POLICY)
+        for task in tuple(data["steps"]):
+            if task.startswith("feedback_"):
+                del data["steps"][task]
+        snapshot = json.dumps(data)
+        with self.assertRaises(ValueError):
+            model_policy._parse_model_policy(data)
+        with patch.dict(os.environ, {model_policy._MODEL_POLICY_SNAPSHOT_ENV: snapshot}):
+            policy = model_policy.load_model_policy()
+            self.assertEqual(model_policy.get_agent_profile("development").model, "building-model")
+            self.assertEqual(model_policy.get_agent_profile("quality_audit").model, "planning-model")
+            self.assertEqual(policy.steps, data["steps"])
+            self.assertEqual(model_policy._read_model_policy_snapshot(model_policy._model_policy_snapshot(policy)), policy)
+            self.assertIn("planning-model", model_policy._model_policy_table(policy))
+            for task in ("feedback_prepare", "feedback_triage", "feedback_route", "feedback_pool"):
+                with self.assertRaises(ValueError):
+                    model_policy.get_agent_profile(task)
+        child = subprocess.run(
+            [sys.executable, "-c", "from model_policy import get_agent_profile; print(get_agent_profile('development').model)"],
+            cwd=Path(model_policy.__file__).parent,
+            env={**os.environ, model_policy._MODEL_POLICY_SNAPSHOT_ENV: snapshot},
+            capture_output=True, text=True, timeout=15,
+        )
+        self.assertEqual(child.returncode, 0, child.stderr)
+        self.assertEqual(child.stdout.strip(), "building-model")
+        data["steps"]["feedback_prepare"] = "planning"
+        with self.assertRaises(ValueError):
+            model_policy._read_model_policy_snapshot(json.dumps(data))
+        del data["steps"]["feedback_prepare"]
+        del data["steps"]["quality_audit"]
+        with self.assertRaises(ValueError):
+            model_policy._read_model_policy_snapshot(json.dumps(data))
 
     def test_loaded_policy_does_not_change_when_file_changes(self) -> None:
         with patch.dict(os.environ, {"PCM_MODEL_POLICY_SNAPSHOT": ""}):

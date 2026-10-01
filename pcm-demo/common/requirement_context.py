@@ -9,12 +9,15 @@ def phase_for(state: dict[str, Any]) -> str:
         return "phase_1_requirement_development"
     if state["workflow"] == "product_quality":
         return "product_quality_iteration"
+    if state["workflow"] == "product_feedback":
+        return "product_feedback_iteration"
     raise RuntimeError("未知需求工作流")
 
 
 def selection_node_for(state: dict[str, Any]) -> str:
-    return (
-        "quality:select_requirement"
-        if phase_for(state) == "product_quality_iteration"
-        else "phase_1:select_requirement"
-    )
+    phase = phase_for(state)
+    if phase == "product_quality_iteration":
+        return "quality:select_requirement"
+    if phase == "product_feedback_iteration":
+        return "feedback:select_requirement"
+    return "phase_1:select_requirement"

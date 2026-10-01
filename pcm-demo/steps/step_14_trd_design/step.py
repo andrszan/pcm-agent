@@ -413,6 +413,11 @@ async def run(
         quality_input = requirement_evidence(run_dir, state)
         if quality_input:
             quality_input += "\n各需求验证自己的交付结果；regression owner 在必要前置项完成后，由开发 Agent 完成完整原场景回归并报告真实证据。"
+    feedback_input = ""
+    if state.get("workflow") == "product_feedback":
+        from feedback.workflow import requirement_evidence
+
+        feedback_input = requirement_evidence(run_dir, state)
     decision_spec = AgentDecisionLoopSpec(
         key=context["key"],
         state_key=context["key"],
@@ -424,6 +429,7 @@ async def run(
             TRD_DESIGN_DECISION_RULES,
             {
                 **({"质量原发现与回归归属": quality_input} if quality_input else {}),
+                **({"当前需求相关原反馈与采纳目标": feedback_input} if feedback_input else {}),
                 "当前需求": {
                     "id": context["requirement_id"],
                     "title": context["title"],
@@ -447,7 +453,8 @@ async def run(
         state,
         context["workspace"],
         decision_spec,
-        initial_prompt(context, trd_path) + ("\n\n" + quality_input if quality_input else ""),
+        initial_prompt(context, trd_path) + ("\n\n" + quality_input if quality_input else "")
+        + ("\n\n" + feedback_input if feedback_input else ""),
         completion_verifier,
         agent_runner=agent_runner,
         decision_runner=decision_runner,

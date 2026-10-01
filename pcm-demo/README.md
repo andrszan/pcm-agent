@@ -2,7 +2,7 @@
 
 PCM Demo 是正式 PCM 开发前的本地流程验证工具。它用 Python 串联确定性操作、AI-compatible 负责人决策和 Claude Agent SDK，在仓库外的独立产品工作区中执行真实产品开发流程。
 
-当前已实现第 1～18 步、阶段一需求循环和独立的产品质量迭代工作流：产品初稿经初始化、设计和 Backlog 进入逐需求开发、验证、复盘、提交与 ff-only 合并；完整产品可由新的质量 run 接入：完整审计、负责人处置、增量 Backlog 与登记后，复用原需求开发循环，完成本次修复后结束。第 6 步在适用时完成项目风格定制和基础品牌资产准备。`run_all.py` 默认只执行阶段一，显式 `--with-quality` 才串联独立质量运行。
+当前已实现第 1～18 步、阶段一需求循环、独立产品质量迭代和可选的人工反馈迭代：产品初稿经初始化、设计和 Backlog 进入逐需求开发、验证、复盘、提交与 ff-only 合并；完整产品可由新的质量 run 接入：完整审计、负责人处置、增量 Backlog 与登记后，复用原需求开发循环，完成本次修复后结束。质量阶段完成后，可提交一批人工反馈，由独立反馈 run 完成核验、取舍、文档收尾及必要的增量开发。第 6 步在适用时完成项目风格定制和基础品牌资产准备。`run_all.py` 默认只执行阶段一，显式 `--with-quality` 才串联独立质量运行。
 
 Demo 只验证流程可行性，不建设正式 PCM 的 Web 管理界面、数据库、分布式调度、部署或生产运维能力。当前支持同一 Demo checkout 在容量限制内并发执行不同产品；同一产品始终互斥。
 
@@ -98,6 +98,31 @@ uv run python run_step.py --step <13-18> --run-id <quality-run-id>
 
 在新建或恢复阶段一的命令中追加 `--with-quality`，即可在阶段一成功后自动启动独立的 `<阶段一-run-id>-quality`；同源质量 run 已存在时恢复，不重复创建。后续另一个质量周期以最近完成的质量 run 为来源。质量运行有自己的 run 锁，与前序共用产品互斥边界，不重新认领产品或重新分配端口。
 
+### 独立人工反馈迭代
+
+来源必须是已成功结束、没有活动或待开发需求的质量 run 或反馈 run。新批次附着同一产品，原记录只读；当前适用仓库须位于 clean main。没有反馈时无需启动，不影响前两阶段完成。
+
+```bash
+uv run python run_feedback.py --source-run <completed-quality-or-feedback-run> \
+  --run-id <feedback-run-id> --feedback-file /absolute/path/to/feedback.md
+
+# 可选：重复传入附件，以及本批目标或授权说明
+uv run python run_feedback.py --source-run <completed-quality-or-feedback-run> \
+  --run-id <feedback-run-id> --feedback-file /absolute/path/to/feedback.md \
+  --attachment /absolute/path/to/screenshot.png \
+  --intent-file /absolute/path/to/batch-intent.md
+
+uv run python run_feedback.py --resume <feedback-run-id>
+uv run python run_feedback.py --resume <feedback-run-id> --node feedback:triage
+uv run python run_step.py --step <13-18> --run-id <feedback-run-id>
+```
+
+反馈正文必须是可读、非空白的 UTF-8 普通文本。新建时保存本批正文、来源路径、附件路径和可选意图，原始文件不改动；附件保持可访问。恢复不重新读取后来编辑的原正文，也不接受替换初始材料的参数。新诉求使用下一批；本批澄清或解除条件可按下节合同向当前原会话传入 `--resume-message-file`。
+
+分诊在独立会话核验整批材料，负责人在已有授权内确定处理目标。缺陷、体验改进和已授权新增能力均可进入增量 Backlog，复用原需求开发链，并在提交合并前验证原场景或采纳的目标结果。无纳入项时仍提交实际产生的反馈处置文档，但不创建空需求或空提交。
+
+“本批处理完成”不表示所有反馈均已解决：结果保留未纳入、待补证或待决的依据；本批明确必达事项不能被静默延期。完成后不常驻等待人再次确认满意。输入及附件会交给模型处理，凭据只引用受保护配置，不直接写入材料。实现与验证边界见[人工反馈迭代工作流 TRD](docs/trd/20261001-PCM%20Demo%20人工反馈迭代工作流%20TRD.md)。
+
 ### 单独运行当前步骤
 
 ```bash
@@ -161,6 +186,7 @@ runs/<run-id>/
 ├── timings.json                       # 步骤与 Agent/AI 调用计时和用量
 ├── steps/                             # 第 1～12 步及按需求隔离的第 13～18 步结果
 ├── quality/                           # 质量 run 的准备、按轮审计/分流/入池/登记和收口结果
+├── feedback/                          # 反馈 run 的本批输入、核验、范围决定、入池与收尾结果
 ├── conversations/<domain-key>.json   # Agent 回复、负责人决定和人工恢复指令
 └── logs/*.json                        # 最近一次结构化故障诊断快照
 ```
@@ -183,17 +209,18 @@ runs/<run-id>/
 
 ```bash
 uv run python -m unittest discover -s . -t . -p 'test*.py' -v
-uv run python -m compileall common steps quality run_step.py run_all.py run_quality.py
+uv run python -m compileall common steps quality feedback run_step.py run_all.py run_quality.py run_feedback.py
 ```
 
 涉及真实步骤时，还需按对应步骤说明完成适用的外部服务、Git、构建、测试、联调和浏览器验证。
 
 ## 导航
 
-- [流程主文档](../docs/pcm/PCM版AI%20Agent自动化流程设计.md)：流程语义、步骤职责、阶段一与阶段二、停止条件。
+- [流程主文档](../docs/pcm/PCM版AI%20Agent自动化流程设计.md)：流程语义、步骤职责、三个阶段与停止条件。
 - [`steps/step_xx_*/README.md`](steps/)：各步骤当前输入、输出、完成条件和恢复边界。
 - [通用 Agent 决策对话循环 TRD](docs/trd/20260822-PCM%20Demo%20通用%20Agent%20决策对话循环%20TRD.md)：conversation、session、人工恢复和诊断合同。
 - [单机多产品并发执行 TRD](docs/trd/20260903-PCM%20Demo%20单机多产品并发执行%20TRD.md)：锁、产品登记、端口和 `.pcm/runtime.json` 合同。
 - [基础品牌资产准备 TRD](docs/trd/20260910-PCM%20Demo%20基础品牌资产准备%20TRD.md)：第 6 步品牌资产任务合同。
 - [产品质量迭代工作流 TRD](docs/trd/20260922-PCM%20Demo%20产品质量迭代工作流%20TRD.md)：独立 run、候选到需求、原场景回归、一次性完成条件与真实验证边界。
+- [人工反馈迭代工作流 TRD](docs/trd/20261001-PCM%20Demo%20人工反馈迭代工作流%20TRD.md)：批次输入、反馈取舍、文档收尾、原开发链复用与真实验证边界。
 - [`AGENTS.md`](AGENTS.md)：Demo 开发与运行约束。
