@@ -1,8 +1,8 @@
 [profiles]
 # model: gpt-6-astra / gpt-5.6-sol / gpt-5.6-terra / gpt-5.6-luna / gpt-6-sol / gpt-6-luna
 # effort: low / medium / high / xhigh / max
-planning = { model = "gpt-6-sol[1m]", effort = "high" }
-building = { model = "gpt-6-sol[1m]", effort = "medium" }
+planning = { model = "gpt-6-astra[1m]", effort = "medium" }
+building = { model = "gpt-6.1-sol[1m]", effort = "medium" }
 routine = { model = "gpt-6-luna[1m]", effort = "medium" }
 
 [steps]
