@@ -188,6 +188,7 @@ async def _task(
     *, skill: str | None = None, output_model: type[BaseModel] | None = None,
     validate: Callable[[Any], Awaitable[None] | None] | None = None, resume_message: ResumeMessage | None = None,
     completion_verifier: Callable[[], str | None] | None = None,
+    completion_repair: str | None = None,
 ) -> tuple[str, Any]:
     spec = AgentDecisionLoopSpec(
         key=key, state_key=key, skill_name=skill, max_decision_rounds=32, max_turns=9999, task=task,
@@ -196,12 +197,17 @@ async def _task(
     raw, parsed = "", None
 
     async def verify() -> str | None:
-        nonlocal raw, parsed
+        nonlocal raw, parsed, completion_repair
         if completion_verifier:
             repair = completion_verifier()
             if repair:
                 return repair
         raw = agent_conversation_report(run_dir, state, spec)
+        if completion_repair:
+            repair, completion_repair = completion_repair, None
+            # 公共循环会保存修正并投递原 session；中断恢复复用这条消息，不重复纠正。
+            if json.dumps(repair, ensure_ascii=False) not in raw:
+                return repair
         if output_model:
             try:
                 parsed = await parse_response(
@@ -397,8 +403,38 @@ async def _route(run_dir: Path, state: dict[str, Any], message: ResumeMessage | 
             _document_path(state, change.path)
         _protect_inputs(run_dir, state, {change.path for change in report.document_changes})
 
+    completion = (
+        "本节点只完成候选采用决定和逐文件调整计划，全程只读，包括反馈文档在内的任何文件及Git均不得写入。"
+        "候选处置、必要决定与逐文件计划足够时即AgentDecision.completed；"
+        "有include且尚待文档调整、开发或验证，同样可以completed，不把整批实现或文档落地当成本步完成条件。"
+        "RoutingReport.ready_to_complete只表示整批无纳入需求且可直接收尾，不是本节点完成开关；"
+        "有include时应为false，不妨碍本节点completed。"
+        "事实与建议充分且可接受时，负责人直接在completed.reason记录采纳决定，供完整对话提取，"
+        "无需先continue批准或要求Agent再作完成声明。"
+        "continue只补具体范围决策或候选、逐文件计划的交接缺口，仅在回复中补充，"
+        "不得授权写文件、调用设计能力或执行任何后续阶段动作。"
+        "实际文档调整留给后续入池节点，开发与验证留给正式需求流程，不要求本节点补交开发证据。"
+    )
+    error = state.get("error") or {}
+    error_message = error.get("message", "").removeprefix("完成核验失败：")
+    completion_repair = None
+    if state.get("status") == "failed" and error.get("type") == "RuntimeError" and error_message in {
+        "入池存在范围外变更，保留现场",
+        "分流不能改写反馈文档，保留现场",
+        "分诊不能创建 Git 提交，保留现场",
+        "入池改变了代码仓库",
+    }:
+        # 旧 completed 未通过只读核验，不能在现场恢复后直接提取旧的越界成果。
+        completion_repair = (
+            "此前completed未通过只读边界核验，不能作为有效交接。现明确纠正原会话中的后续执行指令："
+            + completion
+            + "保留已决定的采用范围和原核验事实，不重做分诊、不新增候选。"
+            "旧回复中‘文档已修改’及相关落地声明不再作为当前成果；"
+            "请仅在回复中重新交接候选处置、逐文件路径、任务与理由，文档调整均作为待执行计划。"
+        )
     prompt = (
-        "只依据已提供的完整核验交接和本批原意图整理采用选项、事实依据、影响与推荐，交由负责人决定本批范围。"
+        completion
+        + "只依据已提供的完整核验交接和本批原意图整理采用选项、事实依据、影响与推荐，交由负责人决定本批范围。"
         "不调用领域能力、不重复调查、不写产品文件或Git。每个候选恰好一个include、covered、exclude、defer或satisfied，不新增候选。"
         "当前承诺内缺陷、有依据改进和当前授权内明确的新能力均可纳入；反馈提交不产生外部授权。"
         "区分建议与有决定权者已明确目标；普通取舍由负责人自主决定，不向人逐项审批。"
@@ -414,11 +450,12 @@ async def _route(run_dir: Path, state: dict[str, Any], message: ResumeMessage | 
     )
     raw, report = await _task(
         run_dir, state, "feedback_route", "feedback_route", prompt,
-        "依据完整核验和原意图自主决定普通产品取舍，收敛采用范围与必要设计影响，不重新调查，不向人逐项索取批准。"
+        completion + "依据完整核验和原意图自主决定普通产品取舍，收敛采用范围与必要设计影响，不重新调查，不向人逐项索取批准。"
         "本批必达事项不能被延期。缺少不可替代的必要外部资源或授权时，准确给出blocked及required_inputs，"
         "不能先completed再留下必要外部缺口；非必达独立事项可据实暂不纳入，本地错误不当作外部阻塞。"
         "恢复澄清仅用于解除本批条件或纠正原判断，不把新的独立诉求加入本批。",
         output_model=RoutingReport, validate=check_report, resume_message=message, completion_verifier=check_read_only,
+        completion_repair=completion_repair,
     )
     check_report(report)
     check_read_only()

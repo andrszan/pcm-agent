@@ -13,7 +13,7 @@ from common.decision import AgentDecision
 from common.files import write_json
 from common.state import read_state
 from feedback import workflow
-from feedback.models import PoolPlan, TriageReport
+from feedback.models import DocumentChange, PoolPlan, TriageReport
 from feedback.test_workflow import git, routing_report, triage_report
 from model_policy import AgentProfile
 
@@ -182,7 +182,7 @@ class FeedbackAgentHandoffTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.agent.await_args.kwargs["resume_session_id"], "feedback-session")
         self.assertEqual(self.agent.await_args.args[0], "继续使用现有隔离数据核验")
 
-    async def test_route_external_authorization_blocks_and_resumes_same_session_through_public_api(self):
+    def route_scene(self):
         backlog = self.root / "docs/backlog/backlog.md"
         backlog.parent.mkdir(parents=True)
         backlog.write_text("BR-001 保存材料\n", encoding="utf-8")
@@ -223,6 +223,198 @@ class FeedbackAgentHandoffTests(unittest.IsolatedAsyncioTestCase):
             "report": full_triage, "candidates": [{"id": "F-C001", **candidate}], "limitations": [],
             "document_path": document_relative, "versions": {"root": base},
         }})
+        return document, document_before, input_before, base, branch
+
+    async def failed_readonly_route(self):
+        scene = self.route_scene()
+        backlog = self.root / "docs/backlog/backlog.md"
+        before = backlog.read_bytes()
+
+        async def old_agent(prompt, **kwargs):
+            backlog.write_text("越界文档调整\n", encoding="utf-8")
+            return self.result("已批准采用范围，已提前修改产品文档，后续仍需实现", skill=None)
+
+        self.agent.side_effect = old_agent
+        # 保留旧 system 快照和尾部 completed，真实触发公共循环的完成核验失败。
+        with patch.object(workflow, "render_decision_system_prompt", return_value="旧负责人职责：决定采用范围及设计影响"):
+            with self.assertRaises(RuntimeError) as caught:
+                await workflow.run_node(self.run, self.state)
+        workflow.record_failure(self.run, self.state, caught.exception)
+        self.state = read_state(self.run)
+        self.assertEqual(self.state["status"], "failed")
+        self.assertEqual(self.state["error"]["type"], "RuntimeError")
+        self.parse.assert_not_awaited()
+        history = json.loads((self.run / "conversations/feedback_route.json").read_text())["messages"]
+        self.assertEqual(json.loads(history[-1]["content"])["verdict"], "completed")
+        # 模拟主会话精确恢复越界现场，不改 run 的任何状态和会话。
+        backlog.write_bytes(before)
+        return scene, history
+
+    async def test_failed_readonly_route_rehands_off_in_same_session_before_extraction(self):
+        (document, document_before, input_before, base, branch), old_history = await self.failed_readonly_route()
+        input_path = self.run / "feedback/input.json"
+        triage_before = (self.run / "feedback/triage.json").read_bytes()
+        files_before = {path: path.read_bytes() for path in (self.root / "docs").rglob("*.md")}
+        allowed_before = list(self.state["feedback"]["document_intent"]["allowed_paths"])
+        continued = AgentDecision(verdict="continue", answer="仅在回复中补齐既定采用目标的逐文件计划理由",
+                                  reason="逐文件交接缺少具体理由", required_inputs=[])
+        completed = AgentDecision(verdict="completed", answer="", reason="采用范围和调整计划已齐备", required_inputs=[])
+        self.decision.side_effect = [(row.model_dump(), 1, row.model_dump_json()) for row in (continued, completed)]
+        calls = []
+
+        async def readonly_agent(prompt, **kwargs):
+            self.parse.assert_not_awaited()
+            self.assertEqual(kwargs["resume_session_id"], "feedback-session")
+            self.assertEqual(kwargs["task"], "feedback_route")
+            calls.append(prompt)
+            self.assertLessEqual(len(calls), 2)
+            reports = ("纠正交接：保留既定采用范围，文件调整仅为后续计划，尚未落实",
+                       "补齐计划理由：既定目标影响现有产品定义，后续入池调整对应文档")
+            return self.result(reports[len(calls) - 1], skill=None)
+
+        self.agent.side_effect = readonly_agent
+        self.parse.return_value = routing_report(True)
+        result = await workflow.run_node(self.run, self.state)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[1], continued.answer)
+        self.assertEqual(self.state["current_node"], "feedback:pool")
+        self.assertEqual(self.state["status"], "success")
+        self.assertIsNone(self.state["error"])
+        self.assertEqual(result["data"]["decisions"][0]["action"], "include")
+        extracted = json.loads(self.parse.await_args.kwargs["input_model"].report)
+        self.assertEqual(extracted[:len(old_history)], old_history)
+        self.assertEqual(extracted[len(old_history)]["role"], "assistant")
+        self.assertEqual(extracted[len(old_history)]["content"], calls[0])
+        self.assertEqual(self.decision.await_args.args[0][len(old_history)]["content"], calls[0])
+        self.assertEqual(self.decision.await_args.kwargs["system_prompt"], old_history[0]["content"])
+        self.parse.assert_awaited_once()
+        self.assertEqual(files_before, {path: path.read_bytes() for path in (self.root / "docs").rglob("*.md")})
+        self.assertEqual(document.read_bytes(), document_before)
+        self.assertEqual(input_path.read_bytes(), input_before)
+        self.assertEqual((self.run / "feedback/triage.json").read_bytes(), triage_before)
+        self.assertEqual(self.state["feedback"]["document_intent"]["allowed_paths"], allowed_before)
+        self.assertEqual(git(self.root, "rev-parse", "HEAD"), base)
+        self.assertEqual(git(self.root, "branch", "--show-current"), branch)
+
+    async def test_readonly_route_repair_requires_restored_boundary(self):
+        _, old_history = await self.failed_readonly_route()
+        backlog = self.root / "docs/backlog/backlog.md"
+        original = backlog.read_bytes()
+        backlog.write_text("仍有越界变化\n", encoding="utf-8")
+        before = {path: path.read_bytes() for path in self.run.rglob("*.json")}
+        with self.assertRaises(RuntimeError) as caught:
+            await workflow.run_node(self.run, self.state)
+        self.agent.assert_awaited_once()
+        self.parse.assert_not_awaited()
+        self.assertEqual(before, {path: path.read_bytes() for path in self.run.rglob("*.json")})
+        self.assertEqual(backlog.read_text(), "仍有越界变化\n")
+        with self.assertRaises(ValueError):
+            loop.validate_node_resume_target(self.run, self.state, "feedback:route", ("feedback_route",))
+        # 入口检查失败也会覆盖原错误；持久化并重新读取，不能依赖旧核验错误前缀。
+        workflow.record_failure(self.run, self.state, caught.exception)
+        self.state = read_state(self.run)
+        self.assertEqual(self.state["error"], {"type": "RuntimeError", "message": str(caught.exception)})
+        backlog.write_bytes(original)
+
+        async def corrected_agent(prompt, **kwargs):
+            self.parse.assert_not_awaited()
+            self.assertEqual(kwargs["resume_session_id"], "feedback-session")
+            return self.result("重新交接既定范围与待执行文档计划", skill=None)
+
+        self.agent.side_effect = corrected_agent
+        self.parse.return_value = routing_report(True)
+        result = await workflow.run_node(self.run, self.state)
+        self.assertEqual(self.agent.await_count, 2)
+        self.parse.assert_awaited_once()
+        history = json.loads(result["data"]["report"])
+        self.assertEqual(history[:len(old_history)], old_history)
+        self.assertEqual(history[len(old_history)]["content"], self.agent.await_args.args[0])
+        self.assertEqual(self.state["status"], "success")
+        self.assertEqual(self.state["current_node"], "feedback:pool")
+        self.assertEqual(backlog.read_bytes(), original)
+
+    async def test_readonly_route_repair_interruption_replays_saved_message_in_same_session(self):
+        _, old_history = await self.failed_readonly_route()
+        self.agent.side_effect = asyncio.CancelledError()
+        with self.assertRaises(asyncio.CancelledError):
+            await workflow.run_node(self.run, self.state)
+        repair = self.agent.await_args.args[0]
+        self.parse.assert_not_awaited()
+        history = json.loads((self.run / "conversations/feedback_route.json").read_text())["messages"]
+        self.assertEqual(history[:len(old_history)], old_history)
+        self.assertEqual(history[-1]["content"], repair)
+        self.state = read_state(self.run)
+        self.agent.side_effect = None
+        self.agent.return_value = self.result("重新交接既定范围与待执行文档计划", skill=None)
+        self.parse.return_value = routing_report(True)
+        result = await workflow.run_node(self.run, self.state)
+        self.assertEqual(self.agent.await_args.args[0], repair)
+        self.assertEqual(self.agent.await_args.kwargs["resume_session_id"], "feedback-session")
+        final = json.loads(result["data"]["report"])
+        self.assertEqual(sum(row["content"] == repair for row in final), 1)
+        self.assertEqual(self.state["status"], "success")
+        self.parse.assert_awaited_once()
+
+    async def test_readonly_route_corrected_completion_does_not_repeat_repair_on_retry(self):
+        await self.failed_readonly_route()
+        original_error = dict(self.state["error"])
+        self.agent.side_effect = None
+        self.agent.return_value = self.result("重新交接既定范围与待执行文档计划", skill=None)
+        self.parse.side_effect = [asyncio.CancelledError(), routing_report(True)]
+        with self.assertRaises(asyncio.CancelledError):
+            await workflow.run_node(self.run, self.state)
+        repair = self.agent.await_args.args[0]
+        self.state = read_state(self.run)
+        self.assertEqual(self.state["status"], "failed")
+        self.assertEqual(self.state["error"], original_error)
+        result = await workflow.run_node(self.run, self.state)
+        self.assertEqual(self.agent.await_count, 2)
+        self.assertEqual(self.decision.await_count, 2)
+        final = json.loads(result["data"]["report"])
+        self.assertEqual(sum(row["content"] == repair for row in final), 1)
+        self.assertEqual(self.parse.await_count, 2)
+        self.assertEqual(self.parse.await_args_list[0].kwargs["input_model"].report,
+                         self.parse.await_args_list[1].kwargs["input_model"].report)
+
+    async def test_route_completed_can_adopt_pending_work_without_executing_plan(self):
+        self.route_scene()
+        self.agent.return_value = self.result("候选与逐文件计划已交接，建议纳入；整批仍需开发，ready_to_complete=false", skill=None)
+        adopted = AgentDecision(verdict="completed", answer="", reason="采纳建议的保存修复与逐文件计划", required_inputs=[])
+        self.decision.return_value = (adopted.model_dump(), 1, adopted.model_dump_json())
+        planned = routing_report(True)
+        planned.document_changes = [DocumentChange(path="docs/design/solution.md", task="solution_design", reason="承接保存修复")]
+        self.parse.return_value = planned
+        files_before = {path: path.read_bytes() for path in (self.root / "docs").rglob("*.md")}
+        result = await workflow.run_node(self.run, self.state)
+        self.agent.assert_awaited_once()
+        self.decision.assert_awaited_once()
+        self.parse.assert_awaited_once()
+        extracted = json.loads(self.parse.await_args.kwargs["input_model"].report)
+        self.assertEqual(json.loads(extracted[-1]["content"]), adopted.model_dump())
+        self.assertFalse(result["data"]["ready_to_complete"])
+        self.assertEqual(result["data"]["document_changes"], [row.model_dump() for row in planned.document_changes])
+        self.assertEqual(self.state["current_node"], "feedback:pool")
+        self.assertEqual(files_before, {path: path.read_bytes() for path in (self.root / "docs").rglob("*.md")})
+        self.assertIsNone(self.specs[-1].skill_name)
+
+    async def test_route_extraction_failure_retries_without_boundary_repair(self):
+        self.route_scene()
+        self.agent.return_value = self.result("采用范围与逐文件计划已交接", skill=None)
+        self.parse.side_effect = [RuntimeError("提取服务临时失败"), routing_report(True)]
+        with self.assertRaises(RuntimeError) as caught:
+            await workflow.run_node(self.run, self.state)
+        workflow.record_failure(self.run, self.state, caught.exception)
+        self.state = read_state(self.run)
+        await workflow.run_node(self.run, self.state)
+        self.agent.assert_awaited_once()
+        self.decision.assert_awaited_once()
+        self.assertEqual(self.parse.await_count, 2)
+        self.assertEqual(self.parse.await_args_list[0].kwargs["input_model"].report,
+                         self.parse.await_args_list[1].kwargs["input_model"].report)
+        self.assertEqual(self.state["status"], "success")
+
+    async def test_route_external_authorization_blocks_and_resumes_same_session_through_public_api(self):
+        document, document_before, input_before, base, branch = self.route_scene()
         incomplete = routing_report()
         incomplete.ready_to_complete = False
         incomplete.decisions[0].action = "defer"
