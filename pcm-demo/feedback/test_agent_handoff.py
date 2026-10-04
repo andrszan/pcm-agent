@@ -14,7 +14,7 @@ from common.files import write_json
 from common.state import read_state
 from feedback import workflow
 from feedback.models import DocumentChange, PoolPlan, TriageReport
-from feedback.test_workflow import git, routing_report, triage_report
+from feedback.test_workflow import git, pool_plan, routing_report, save_conversation, triage_report
 from model_policy import AgentProfile
 
 
@@ -37,10 +37,11 @@ class FeedbackAgentHandoffTests(unittest.IsolatedAsyncioTestCase):
         async def run_loop(*args, **kwargs):
             self.specs.append(args[3])
             return await loop.run_agent_decision_loop(*args, **kwargs, agent_runner=self.agent,
-                                                     decision_runner=self.decision, config_loader=lambda: object())
+                                                     config_loader=lambda: object())
 
         for patcher in (
             patch.object(workflow, "run_agent_decision_loop", side_effect=run_loop),
+            patch.object(workflow, "request_decision", self.decision),
             patch.object(workflow, "parse_response", self.parse),
             patch.object(workflow.LLMConfig, "load", return_value=object()),
             patch.object(loop, "get_agent_profile", return_value=AgentProfile("planning", "test-model", "high")),
@@ -75,6 +76,8 @@ class FeedbackAgentHandoffTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(parsed, triage_report())
         self.assertEqual(self.agent.await_count, 2)
         self.parse.assert_awaited_once()
+        self.assertTrue(all(call.kwargs["include_initial_context"] is False for call in self.decision.await_args_list))
+        self.assertEqual(json.loads(raw)[0]["content"], "完整报告：保存失败丢失输入；另有权限误判待核实")
         self.assertEqual(self.agent.await_args.kwargs["resume_session_id"], "feedback-session")
 
     async def test_structural_repair_continues_same_session_and_preserves_report(self):
@@ -99,6 +102,135 @@ class FeedbackAgentHandoffTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.parse.await_count, 2)
         for call in self.parse.await_args_list:
             self.assertEqual(call.kwargs["input_model"].report, raw)
+
+    async def test_large_completed_snapshot_retries_only_extraction_without_rewriting_history(self):
+        old_prompt = json.dumps({"triage": {"report": "历史包装" * 100000},
+                                 "route": {"report": "历史包装" * 400000}}, ensure_ascii=False)
+        self.agent.return_value = self.result("完整映射：BR-002承接F-C001；限制：隔离数据；来源：反馈第一段")
+        self.parse.side_effect = [RuntimeError("context_too_large"), triage_report()]
+        with self.assertRaisesRegex(RuntimeError, "context_too_large"):
+            await workflow._task(self.run, self.state, "feedback_triage", "feedback_triage", old_prompt,
+                                 "采用本批既定目标", skill="product-feedback-triage", output_model=TriageReport)
+        self.state = read_state(self.run)
+        before = {path: path.read_bytes() for path in self.run.rglob("*.json")}
+        raw, _ = await self.triage()
+        self.agent.assert_awaited_once()
+        self.decision.assert_awaited_once()
+        self.assertEqual(before, {path: path.read_bytes() for path in self.run.rglob("*.json")})
+        extraction = self.parse.await_args.kwargs["input_model"]
+        self.assertLess(len(extraction.model_dump_json()), 3000)
+        self.assertNotIn("历史包装", raw)
+        self.assertIn("完整映射：BR-002承接F-C001", raw)
+        self.assertIn("限制：隔离数据", raw)
+        self.assertIn("来源：反馈第一段", raw)
+        self.assertIn("本批核验完成", raw)
+
+    async def test_triage_extraction_reads_generated_document_after_each_repair(self):
+        document, _, _, _, _ = self.route_scene()
+        self.state.update(current_node="feedback:triage")
+        del self.state["decision_conversations"]["feedback_triage"]
+        (self.run / "conversations/feedback_triage.json").unlink()
+        bodies = ["# 产物正文独有事实\n保存失败丢输入；来源反馈第一段；仅核验隔离数据。",
+                  "# 产物正文独有事实\n保存失败丢输入；来源反馈第一段；仅核验隔离数据。\n补齐触发：保存被拒绝。"]
+        calls = []
+
+        async def agent(prompt, **kwargs):
+            document.write_text(bodies[len(calls)], encoding="utf-8")
+            calls.append(prompt)
+            return self.result("反馈文档已写")
+
+        async def parse(config, **kwargs):
+            extraction = kwargs["input_model"]
+            self.assertIn(bodies[len(calls) - 1], extraction.context)
+            self.assertEqual(extraction.context.count("产物正文独有事实"), 1)
+            self.assertIn("原反馈正文", extraction.context)
+            self.assertIn("禁止真实外发", extraction.context)
+            self.assertNotIn("产物正文独有事实", extraction.report)
+            if len(calls) == 1:
+                raise ValueError("补齐触发条件")
+            return triage_report()
+
+        self.agent.side_effect = agent
+        self.parse.side_effect = parse
+        result = await workflow._triage(self.run, self.state, None)
+        self.assertEqual(result["data"]["candidates"][0]["id"], "F-C001")
+        self.assertEqual(self.parse.await_count, 2)
+        self.assertEqual(self.agent.await_args.kwargs["resume_session_id"], "feedback-session")
+
+    async def test_completed_designs_and_pool_recover_from_large_snapshots_without_agent_calls(self):
+        self.route_scene()
+        self.state.update(current_node="feedback:pool", status="failed", error={
+            "type": "RuntimeError", "message": "context_too_large",
+        })
+        self.state["feedback"]["baseline_requirement_ids"] = ["BR-001"]
+        routed = routing_report(True)
+        routed.document_changes = [
+            DocumentChange(path=f"docs/design/{task}.md", task=task, reason="承接保存目标")
+            for task in workflow.DESIGN_TASKS
+        ]
+        completed = AgentDecision(verdict="completed", answer="", reason="采用保存目标及完整回归映射", required_inputs=[])
+        legacy = "旧历史包装" * 100000
+        for name in ("prepare", "triage", "route"):
+            path = self.run / f"feedback/{name}.json"
+            saved = json.loads(path.read_text()) if path.exists() else {
+                "phase": workflow.PHASE, "node": "feedback:route", "status": "success", "data": routed.model_dump(),
+            }
+            saved["data"]["report"] = legacy
+            write_json(path, saved)
+            if name == "route":
+                save_conversation(self.run, self.state, "feedback_route", [
+                    {"role": "user", "content": "完整处置：纳入F-C001，保留来源与隔离数据限制"},
+                    {"role": "assistant", "content": completed.model_dump_json()},
+                ], initial=legacy)
+        (self.root / "docs/backlog/backlog.md").write_text("BR-001 保存材料\nBR-002 修复保存\n")
+        for task in workflow.DESIGN_TASKS:
+            path = self.root / f"docs/design/{task}.md"
+            path.parent.mkdir(exist_ok=True)
+            path.write_text("# 已完成局部设计\n")
+        for task in (*workflow.DESIGN_TASKS, "pool"):
+            key = f"feedback_{task}"
+            self.state[key] = {}
+            self.state.setdefault("claude_sessions", {})[key] = f"{key}-original"
+            save_conversation(self.run, self.state, key, [
+                {"role": "user", "content": "完整映射BR-002承接F-C001及完整回归" if task == "pool" else "设计已完成"},
+                {"role": "assistant", "content": completed.model_dump_json()},
+            ], initial=json.dumps({"triage": legacy, "route": legacy}))
+        self.state = read_state(self.run)
+        before = {path: path.read_bytes() for path in self.run.rglob("*.json")}
+        products_before = {path: path.read_bytes() for path in (self.root / "docs").rglob("*.md")}
+        self.parse.side_effect = [RuntimeError("context_too_large"), pool_plan()]
+        catalog = [{"id": "BR-001", "title": "保存材料", "order": 1, "depends_on": []},
+                   {"id": "BR-002", "title": "修复保存", "order": 2, "depends_on": []}]
+        source = workflow._backlog(self.state)[2]
+        actual_write = workflow._write
+
+        def stop_after_plan(path, value):
+            actual_write(path, value)
+            if path.name == "pool-plan.json":
+                raise OSError("测试在新结果写入后停止，避免执行后续文档任务")
+
+        with patch.object(workflow, "_catalog", new=AsyncMock(return_value=(source, catalog))) as catalog_mock:
+            with self.assertRaisesRegex(RuntimeError, "context_too_large"):
+                await workflow._pool(self.run, self.state, None)
+            self.assertEqual(before, {path: path.read_bytes() for path in before})
+            self.state = read_state(self.run)
+            with patch.object(workflow, "_write", side_effect=stop_after_plan), self.assertRaises(OSError):
+                await workflow._pool(self.run, self.state, None)
+            catalog_mock.assert_awaited_once()
+        self.agent.assert_not_awaited()
+        self.decision.assert_not_awaited()
+        self.assertEqual(self.parse.await_count, 2)
+        for call in self.parse.await_args_list:
+            extraction = call.kwargs["input_model"]
+            self.assertLess(len(extraction.model_dump_json()), 20000)
+            self.assertNotIn("旧历史包装", extraction.model_dump_json())
+            self.assertIn("完整映射BR-002承接F-C001及完整回归", extraction.report)
+            self.assertIn("采用保存目标及完整回归映射", extraction.report)
+            for text in ("F-C001", "反馈第一段", "权限疑点已撤销", "本批必须解决保存问题", "禁止真实外发"):
+                self.assertIn(text, extraction.context)
+        self.assertEqual(before, {path: path.read_bytes() for path in before})
+        self.assertEqual(products_before, {path: path.read_bytes() for path in products_before})
+        self.assertEqual(json.loads((self.run / "feedback/pool-plan.json").read_text())["plan"], pool_plan().model_dump())
 
     async def test_skill_must_be_loaded_before_decision_or_extraction(self):
         self.agent.return_value = self.result("回复却未加载能力", skill=None)
@@ -223,6 +355,12 @@ class FeedbackAgentHandoffTests(unittest.IsolatedAsyncioTestCase):
             "report": full_triage, "candidates": [{"id": "F-C001", **candidate}], "limitations": [],
             "document_path": document_relative, "versions": {"root": base},
         }})
+        write_json(self.run / "feedback/prepare.json", {"phase": workflow.PHASE, "node": "feedback:prepare",
+                                                       "status": "success", "data": {"report": "旧准备交接"}})
+        save_conversation(self.run, self.state, "feedback_prepare", [
+            {"role": "user", "content": "隔离数据与既有运行条件可用；禁止真实外发"},
+        ])
+        save_conversation(self.run, self.state, "feedback_triage", json.loads(full_triage))
         return document, document_before, input_before, base, branch
 
     async def failed_readonly_route(self):
@@ -282,9 +420,9 @@ class FeedbackAgentHandoffTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.state["error"])
         self.assertEqual(result["data"]["decisions"][0]["action"], "include")
         extracted = json.loads(self.parse.await_args.kwargs["input_model"].report)
-        self.assertEqual(extracted[:len(old_history)], old_history)
-        self.assertEqual(extracted[len(old_history)]["role"], "assistant")
-        self.assertEqual(extracted[len(old_history)]["content"], calls[0])
+        self.assertEqual(extracted[:len(old_history) - 2], old_history[2:])
+        self.assertEqual(extracted[len(old_history) - 2]["role"], "assistant")
+        self.assertEqual(extracted[len(old_history) - 2]["content"], calls[0])
         self.assertEqual(self.decision.await_args.args[0][len(old_history)]["content"], calls[0])
         self.assertEqual(self.decision.await_args.kwargs["system_prompt"], old_history[0]["content"])
         self.parse.assert_awaited_once()
@@ -327,8 +465,8 @@ class FeedbackAgentHandoffTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.agent.await_count, 2)
         self.parse.assert_awaited_once()
         history = json.loads(result["data"]["report"])
-        self.assertEqual(history[:len(old_history)], old_history)
-        self.assertEqual(history[len(old_history)]["content"], self.agent.await_args.args[0])
+        self.assertEqual(history[:len(old_history) - 2], old_history[2:])
+        self.assertEqual(history[len(old_history) - 2]["content"], self.agent.await_args.args[0])
         self.assertEqual(self.state["status"], "success")
         self.assertEqual(self.state["current_node"], "feedback:pool")
         self.assertEqual(backlog.read_bytes(), original)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import inspect
 import json
+from functools import partial
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
@@ -11,7 +12,7 @@ from pydantic import BaseModel, ValidationError
 from common.agent_decision_loop import (
     AgentDecisionLoopSpec, ResumeMessage, agent_conversation_report, run_agent_decision_loop,
 )
-from common.decision import render_decision_system_prompt
+from common.decision import render_decision_system_prompt, request_decision
 from common.error_diagnostics import redact_text
 from common.files import resolve_workspace_output, write_json
 from common.openai_responses import parse_response
@@ -85,6 +86,23 @@ def _prior(run_dir: Path, name: str) -> dict[str, Any]:
     if saved.get("status") != "success" or saved.get("node") != f"feedback:{name}" or saved.get("phase") != PHASE:
         raise RuntimeError(f"缺少成功的 {name} 反馈交接")
     return saved["data"]
+
+
+def _handoff(run_dir: Path, state: dict[str, Any], name: str) -> dict[str, Any]:
+    """结构化结果保持权威；旧 report 的任务包装只在请求中替换，不改保存记录。"""
+    saved = _prior(run_dir, name)
+    key = f"feedback_{name}"
+    spec = AgentDecisionLoopSpec(
+        key=key, state_key=key, skill_name=None, max_decision_rounds=32, max_turns=9999,
+        task=key, decision_system_prompt="读取本步已保存的实质交接",
+    )
+    report = agent_conversation_report(run_dir, state, spec, include_initial_context=False)
+    return {**saved, "report": report}
+
+
+def _batch_context(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
+    return {"本批输入": _input(run_dir).model_dump(),
+            "运行条件": _handoff(run_dir, state, "prepare")["report"]}
 
 
 def is_completed(state: dict[str, Any]) -> bool:
@@ -189,6 +207,7 @@ async def _task(
     validate: Callable[[Any], Awaitable[None] | None] | None = None, resume_message: ResumeMessage | None = None,
     completion_verifier: Callable[[], str | None] | None = None,
     completion_repair: str | None = None,
+    extraction_context: Callable[[], str] | None = None,
 ) -> tuple[str, Any]:
     spec = AgentDecisionLoopSpec(
         key=key, state_key=key, skill_name=skill, max_decision_rounds=32, max_turns=9999, task=task,
@@ -202,7 +221,7 @@ async def _task(
             repair = completion_verifier()
             if repair:
                 return repair
-        raw = agent_conversation_report(run_dir, state, spec)
+        raw = agent_conversation_report(run_dir, state, spec, include_initial_context=False)
         if completion_repair:
             repair, completion_repair = completion_repair, None
             # 公共循环会保存修正并投递原 session；中断恢复复用这条消息，不重复纠正。
@@ -213,11 +232,13 @@ async def _task(
                 parsed = await parse_response(
                     LLMConfig.load(),
                     system_prompt=("依据完整有序对话提取当前有效成果，返回严格 JSON，不补造事实或代替负责人决定。"
-                                   "report中user是执行Agent，assistant是负责人决定，system是任务约束。"
+                                   "report保留本步Agent回复、负责人决定与后续补充纠正，初始任务及当前资料见context。"
+                                   "report中user是执行Agent，assistant是负责人决定或补充纠正。"
                                    "后续明确纠正替代对应旧事实；局部补证不删除其它有效问题、目标和限制。"
                                    "候选包含全部原始反馈的归属，包括已满足、待补证、待决和不采用项，不假装全产品审计。"
                                    "mandatory仅依据调用方本批明确必达目标，不能自行降级；证据不足保留事实及限制。"),
-                    input_model=ExtractionInput(report=raw, context=prompt), output_model=output_model,
+                    input_model=ExtractionInput(report=raw, context=extraction_context() if extraction_context else prompt),
+                    output_model=output_model,
                 )
                 if validate:
                     checked = validate(parsed)
@@ -227,7 +248,10 @@ async def _task(
                 return f"本步交接存在具体缺口：{redact_text(str(error))}。只补齐或纠正本步产物，保留其它有效成果，不重做上游。"
         return None
 
-    decision = await run_agent_decision_loop(run_dir, state, workspace(state), spec, prompt, verify, resume_message=resume_message)
+    decision = await run_agent_decision_loop(
+        run_dir, state, workspace(state), spec, prompt, verify, resume_message=resume_message,
+        decision_runner=partial(request_decision, include_initial_context=False),
+    )
     if decision.verdict == "blocked":
         raise FeedbackBlocked(decision.reason, decision.required_inputs)
     if decision.verdict != "completed":
@@ -352,7 +376,7 @@ def _triage_check(state: dict[str, Any], intent: dict[str, Any]) -> str | None:
 
 
 async def _triage(run_dir: Path, state: dict[str, Any], message: ResumeMessage | None) -> dict[str, Any]:
-    supplied = _input(run_dir)
+    context = _batch_context(run_dir, state)
     intent = _intent(run_dir, state)
     _open_branch(state, intent)
     prompt = (
@@ -363,13 +387,16 @@ async def _triage(run_dir: Path, state: dict[str, Any], message: ResumeMessage |
         "文档精简记录问题、影响、核验事实、期望结果、来源，以及待补证、待决、已有覆盖和不采用的必要理由。"
         "所有原始问题均有归属，明确本批必达事项；缺少必要信息如实保留，不伪造完整产品审计。"
         "不把秘密或非必要个人数据写入文档和输出，候选不自动变成正式需求。\n"
-        + json.dumps({"本批输入": supplied.model_dump(), "运行条件": _prior(run_dir, "prepare")["report"],
-                      "唯一反馈文档": state["feedback"]["document_path"], "版本": intent["versions"]}, ensure_ascii=False)
+        + json.dumps({**context, "唯一反馈文档": state["feedback"]["document_path"],
+                      "版本": intent["versions"]}, ensure_ascii=False)
     )
     raw, report = await _task(run_dir, state, "feedback_triage", "feedback_triage", prompt,
                               "依据完整对话收敛本批核验及文档交接，普通语义决定由负责人自主处理。局部补证不撤销其它有效结论。只补本步具体缺口，不重做上游。调查完成不代表所有问题已解决；本地错误不作为外部blocked。",
                               skill="product-feedback-triage", output_model=TriageReport, resume_message=message,
-                              completion_verifier=lambda: _triage_check(state, intent))
+                              completion_verifier=lambda: _triage_check(state, intent),
+                              extraction_context=lambda: prompt + "\n本步已生成的反馈文档正文：\n" + _document_path(
+                                  state, state["feedback"]["document_path"],
+                              ).read_text(encoding="utf-8"))
     if _triage_check(state, intent):
         raise RuntimeError("分诊没有生成反馈文档")
     data = {**report.model_dump(exclude={"findings"}), "report": raw, "versions": intent["versions"],
@@ -379,7 +406,7 @@ async def _triage(run_dir: Path, state: dict[str, Any], message: ResumeMessage |
 
 
 async def _route(run_dir: Path, state: dict[str, Any], message: ResumeMessage | None) -> dict[str, Any]:
-    triage = _prior(run_dir, "triage")
+    triage = _handoff(run_dir, state, "triage")
     intent = state["feedback"]["document_intent"]
     _boundary(state, intent)
     document = _document_path(state, triage["document_path"])
@@ -445,7 +472,7 @@ async def _route(run_dir: Path, state: dict[str, Any], message: ResumeMessage | 
         "无纳入且本批职责已处理完才ready_to_complete=true，暂不纳入不等于已解决，不要求全产品coverage。"
         "必要的权威产品定义调整指定project_intake；其它设计按实际影响指定solution_design、engineering_architecture或ui_ux_framework。"
         "document_changes逐文件列出docs内Markdown路径、任务与理由，不修改历史TRD、反馈文档、Backlog或原始输入文件，不默认重跑全部设计。\n"
-        + json.dumps({"本批原意图": _input(run_dir).intent, "完整分诊交接": triage,
+        + json.dumps({**_batch_context(run_dir, state), "完整分诊交接": triage,
                       "已有需求": state["requirement_registry"]["requirements"]}, ensure_ascii=False)
     )
     raw, report = await _task(
@@ -464,7 +491,8 @@ async def _route(run_dir: Path, state: dict[str, Any], message: ResumeMessage | 
 
 async def _pool(run_dir: Path, state: dict[str, Any], message: ResumeMessage | None) -> dict[str, Any]:
     root = workspace(state)
-    routed, triage = _prior(run_dir, "route"), _prior(run_dir, "triage")
+    routed, triage = (_handoff(run_dir, state, name) for name in ("route", "triage"))
+    context = _batch_context(run_dir, state)
     included = any(row["action"] == "include" for row in routed["decisions"])
     intent = copy.deepcopy(state["feedback"]["document_intent"])
     allowed = {state["feedback"]["document_path"]}
@@ -483,7 +511,7 @@ async def _pool(run_dir: Path, state: dict[str, Any], message: ResumeMessage | N
                 skill = task.replace("_", "-")
                 prompt = (f"/{skill}\n按已采纳目标局部调整指定文件，只处理本次实际影响，不重跑其它设计。"
                           "保留既有无关范围与历史条目，不改Backlog、TRD、代码、配置或Git，不以文档调整消除必达承诺。\n"
-                          + json.dumps({"文件范围": changes, "采纳决定": routed, "核验反馈": triage}, ensure_ascii=False))
+                          + json.dumps({**context, "文件范围": changes, "采纳决定": routed, "核验反馈": triage}, ensure_ascii=False))
                 await _task(run_dir, state, f"feedback_{task}", task, prompt,
                             "本次授权的局部调整已完成或现有内容已满足即可交接，不扩张范围。",
                             skill=skill, resume_message=message, completion_verifier=lambda: _document_check(state, intent))
@@ -503,7 +531,8 @@ async def _pool(run_dir: Path, state: dict[str, Any], message: ResumeMessage | N
                 "缺陷回归原复现任务；改进和新能力验证采纳的可观察结果。拆分后指定负责完整回归的最后需求，"
                 "设置对其它必要承接项的真实前置依赖。返回正式ID到candidate_ids的多对多关联及regression_owners。"
                 "不创建TRD、代码或Git变更，不采用反馈者方案作为唯一实现。\n"
-                + json.dumps({"核验": triage, "已采用范围": routed, "历史需求": state["requirement_registry"]["requirements"]}, ensure_ascii=False)
+                + json.dumps({**context, "核验": triage, "已采用范围": routed,
+                              "历史需求": state["requirement_registry"]["requirements"]}, ensure_ascii=False)
             )
             raw, plan = await _task(run_dir, state, "feedback_pool", "feedback_pool", prompt,
                                     "已纳入目标完整承接且静态条目、回归归属和依赖有效时完成；只修本步产物缺口。",
@@ -524,8 +553,8 @@ async def _pool(run_dir: Path, state: dict[str, Any], message: ResumeMessage | N
                       "保留原问题、来源、核验事实与限制，说明已纳入目标及正式需求归属、合并处理、"
                       "未纳入、待补证、待决的理由与后续条件。纳入项此时尚待开发，不能声称已经解决。"
                       "如已有对应内容则局部校正，不重复追加。只改反馈文档，不改其它文档、代码、配置或Git。\n"
-                      + json.dumps({"唯一反馈文档": state["feedback"]["document_path"], "已确定处置": routed,
-                                    "正式需求归属": planned["plan"], "核验限制": triage["limitations"]}, ensure_ascii=False))
+                      + json.dumps({**context, "唯一反馈文档": state["feedback"]["document_path"], "已确定处置": routed,
+                                    "正式需求归属": planned["plan"], "核验反馈": triage}, ensure_ascii=False))
             await _task(run_dir, state, "feedback_document", "feedback_pool", prompt,
                         "本批既定处置已准确写回唯一文档即完成，不重做上游语义决定或调查。",
                         resume_message=message, completion_verifier=lambda: _document_check(state, intent))

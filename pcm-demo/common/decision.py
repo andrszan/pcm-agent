@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from typing import Any, Literal
 from xml.sax.saxutils import escape
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, ValidationInfo, field_validator, model_validator
 
 from common.openai_responses import parse_response
 from config import LLMConfig
@@ -36,8 +36,9 @@ class DecisionInput(BaseModel):
     messages: list[DecisionMessage] = Field(min_length=1)
 
     @model_validator(mode="after")
-    def validate_system_message(self) -> "DecisionInput":
-        if self.messages[0].role != "system":
+    def validate_system_message(self, info: ValidationInfo) -> "DecisionInput":
+        projected = info.context and info.context.get("include_initial_context") is False
+        if not projected and self.messages[0].role != "system":
             raise ValueError("决策对话首条消息必须是 system")
         return self
 
@@ -184,14 +185,40 @@ def count_decisions(messages: list[dict[str, Any]]) -> int:
     return count
 
 
+def project_conversation_messages(
+    messages: list[dict[str, Any]], *, include_initial_context: bool = True
+) -> list[dict[str, Any]]:
+    """仅排除已识别的初始协议，保留其后全部消息原字段和顺序。"""
+    if include_initial_context:
+        return messages[:]
+    if not isinstance(messages, list) or len(messages) < 2:
+        raise ValueError("决策历史缺少初始 system 和负责人任务指令")
+    for message, role in zip(messages[:2], ("system", "assistant")):
+        if (
+            not isinstance(message, dict)
+            or message.get("role") != role
+            or not isinstance(message.get("content"), str)
+            or not message["content"].strip()
+        ):
+            raise ValueError("决策历史必须以非空 system 和初始 assistant 任务指令开头")
+    return messages[2:]
+
+
 async def request_decision(
     messages: list[dict[str, Any]],
     config: LLMConfig,
     *,
     system_prompt: str,
     output_model: type[BaseModel] = AgentDecision,
+    include_initial_context: bool = True,
 ) -> tuple[dict[str, Any], int, str]:
+    # 先校验完整历史，不能因投影而跳过初始消息的格式检查。
     input_model = DecisionInput.model_validate({"messages": messages})
+    if not include_initial_context:
+        input_model = DecisionInput.model_validate(
+            {"messages": project_conversation_messages(messages, include_initial_context=False)},
+            context={"include_initial_context": False},
+        )
     decision = await parse_response(
         config,
         system_prompt=system_prompt,

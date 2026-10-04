@@ -15,6 +15,17 @@ from feedback.models import PoolPlan, RoutingReport, TriageReport
 from quality.test_workflow import git
 
 
+def save_conversation(run, state, key, messages, initial="本批初始任务"):
+    path = f"conversations/{key}.json"
+    (run / "conversations").mkdir(exist_ok=True)
+    write_json(run / path, {"messages": [
+        {"role": "system", "content": "本批负责人职责：" + initial},
+        {"role": "assistant", "content": initial}, *messages,
+    ]})
+    state.setdefault("decision_conversations", {})[key] = {"path": path}
+    write_json(run / "state.json", state)
+
+
 def triage_report() -> TriageReport:
     return TriageReport.model_validate({"summary": "已核验保存反馈", "findings": [{
         "title": "保存时保留输入", "kind": "defect", "user_task": "保存材料", "trigger": "保存被拒绝",
@@ -131,9 +142,14 @@ class FeedbackWorkflowTests(unittest.TestCase):
                 return "局部调整完成", None
             raise AssertionError(key)
 
+        async def recorded_task(*args, **kwargs):
+            raw, parsed = await task(*args, **kwargs)
+            save_conversation(args[0], args[1], args[2], [{"role": "user", "content": raw}], args[4])
+            return raw, parsed
+
         for patcher in (
             patch.object(flow, "_catalog", side_effect=catalog),
-            patch.object(flow, "_task", side_effect=task),
+            patch.object(flow, "_task", side_effect=recorded_task),
             patch.object(flow.LLMConfig, "load", return_value=object()),
         ):
             mocked = patcher.start()
@@ -249,6 +265,53 @@ class FeedbackWorkflowTests(unittest.TestCase):
         self.reach("feedback:select_requirement")
         self.assertEqual([row[1] for row in self.calls], ["feedback_prepare", "feedback_triage", "feedback_route", "project_intake", "ui_ux_framework", "feedback_pool", "feedback_pool", "requirement_commit"])
         self.assertEqual([row[2] for row in self.calls][1:6], ["product-feedback-triage", None, "project-intake", "ui-ux-framework", "requirement-breakdown"])
+
+    def test_entire_downstream_chain_projects_large_legacy_reports_without_losing_inputs(self):
+        from feedback.models import DocumentChange
+        self.include = True
+        self.routing = routing_report(True)
+        self.routing.document_changes = [
+            DocumentChange(path=f"docs/design/{task}.md", task=task, reason="承接保存目标")
+            for task in flow.DESIGN_TASKS
+        ]
+        upstream_before = {}
+        for name in ("prepare", "triage", "route"):
+            self.execute()
+            path = self.run / f"feedback/{name}.json"
+            saved = json.loads(path.read_text())
+            key = f"feedback_{name}"
+            messages = json.loads((self.run / f"conversations/{key}.json").read_text())["messages"][2:]
+            messages += [{"role": "assistant", "content": f"{name}后续纠正：仅使用隔离数据；原目标不变"}]
+            lengths = []
+            for size in (1000, 100000):
+                old = json.dumps({"report": "旧历史包装" * size}, ensure_ascii=False)
+                saved["data"]["report"] = old
+                write_json(path, saved)
+                save_conversation(self.run, self.state, key, messages, initial=old)
+                projected = flow._handoff(self.run, self.state, name)
+                lengths.append(len(json.dumps(projected, ensure_ascii=False)))
+                self.assertNotIn("旧历史包装", projected["report"])
+                self.assertIn(f"{name}后续纠正", projected["report"])
+            self.assertEqual(lengths[0], lengths[1])
+            upstream_before[path] = path.read_bytes()
+            conversation = self.run / f"conversations/{key}.json"
+            upstream_before[conversation] = conversation.read_bytes()
+        self.execute()
+        prompts = {call.args[2]: call.args[4] for call in self.task_mock.await_args_list}
+        for key, prompt in prompts.items():
+            self.assertNotIn("旧历史包装", prompt)
+            self.assertLess(len(prompt), 20000, key)
+        for key in ("feedback_triage", "feedback_route", *(f"feedback_{task}" for task in flow.DESIGN_TASKS),
+                    "feedback_pool", "feedback_document"):
+            self.assertIn("既有入口、端口与授权数据可访问", prompts[key])
+            self.assertIn("prepare后续纠正", prompts[key])
+            self.assertIn("保存反馈原文", prompts[key])
+            self.assertIn(str(self.original), prompts[key])
+            self.assertIn("核验保存", prompts[key])
+        for key in (*(f"feedback_{task}" for task in flow.DESIGN_TASKS), "feedback_pool", "feedback_document"):
+            for text in ("F-C001", "反馈第一段", "只核验提供的反馈", "triage后续纠正", "route后续纠正"):
+                self.assertIn(text, prompts[key])
+        self.assertEqual(upstream_before, {path: path.read_bytes() for path in upstream_before})
 
     def test_scope_outside_document_is_preserved_and_blocks_triage(self):
         self.reach("feedback:triage")

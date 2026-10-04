@@ -16,7 +16,14 @@ from common.claude_agent import (
     is_retryable_claude_sdk_error,
     run_claude,
 )
-from common.decision import AgentDecision, DecisionMessage, count_decisions, parse_agent_decision, request_decision
+from common.decision import (
+    AgentDecision,
+    DecisionMessage,
+    count_decisions,
+    parse_agent_decision,
+    project_conversation_messages,
+    request_decision,
+)
 from common.error_diagnostics import exception_diagnostics, redact_text, write_diagnostic
 from common.files import write_json
 from common.openai_responses import ResponsesFailure
@@ -559,12 +566,19 @@ def _load_conversation(
 
 
 def agent_conversation_report(
-    run_dir: Path, state: dict[str, Any], spec: AgentDecisionLoopSpec
+    run_dir: Path,
+    state: dict[str, Any],
+    spec: AgentDecisionLoopSpec,
+    *,
+    include_initial_context: bool = True,
 ) -> str:
-    """读取完整有序交接；局部补证和纠正不能替代整份成果。"""
+    """读取有序交接，可仅排除初始上下文；局部补证和纠正不能替代整份成果。"""
     if _conversation_reference(state, spec) is None:
         raise RuntimeError("当前任务缺少已保存的决策历史引用")
-    messages = _load_conversation(run_dir, state, spec)
+    messages = project_conversation_messages(
+        _load_conversation(run_dir, state, spec),
+        include_initial_context=include_initial_context,
+    )
     if not any(row["role"] == "user" and row["content"].strip() for row in messages):
         raise RuntimeError("决策历史没有已保存的 Agent 回复正文")
     return json.dumps(messages, ensure_ascii=False)
