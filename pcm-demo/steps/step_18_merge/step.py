@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -269,6 +270,7 @@ def _git(
     path: Path,
     *args: str,
     allowed_returncodes: tuple[int, ...] = (0,),
+    input: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     try:
         completed = subprocess.run(
@@ -278,6 +280,7 @@ def _git(
             capture_output=True,
             timeout=120,
             env={key: value for key, value in os.environ.items() if not key.startswith("GIT_")},
+            input=input,
         )
     except FileNotFoundError as error:
         raise RuntimeError("未安装 Git") from error
@@ -346,7 +349,7 @@ def _has_in_progress_operation(path: Path) -> bool:
         )
         if completed.returncode == 0:
             return True
-    for name in ("rebase-merge", "rebase-apply", "BISECT_START"):
+    for name in ("rebase-merge", "rebase-apply", "sequencer", "BISECT_START"):
         raw = _git_read(path, "rev-parse", "--git-path", name)
         progress = Path(raw)
         if not progress.is_absolute():
@@ -412,6 +415,31 @@ def _only_untracked(status: Any) -> bool:
     )
 
 
+def _untracked_ignored_at_tip(path: Path, tip: str) -> bool:
+    untracked = _git(path, "ls-files", "--others", "--exclude-standard", "-z").stdout
+    if not untracked:
+        return False
+    git_dir = _git_read(path, "rev-parse", "--absolute-git-dir")
+    # 只在临时目录还原 tip 的忽略文件，由 Git 匹配；不改真实 checkout 或索引。
+    with tempfile.TemporaryDirectory() as directory:
+        rules = Path(directory)
+        for entry in _git(path, "ls-tree", "-r", "-z", tip).stdout.split("\0"):
+            if not entry:
+                continue
+            metadata, name = entry.split("\t", 1)
+            if Path(name).name != ".gitignore" or metadata.split()[0] not in {"100644", "100755"}:
+                continue
+            destination = rules / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(_git(path, "show", f"{tip}:{name}").stdout, encoding="utf-8")
+        ignored = _git(
+            rules, f"--git-dir={git_dir}", f"--work-tree={rules}",
+            "check-ignore", "--no-index", "-z", "--stdin",
+            input=untracked, allowed_returncodes=(0, 1),
+        ).stdout
+    return set(ignored.split("\0")) == set(untracked.split("\0"))
+
+
 def _merge_facts(context: dict[str, Any], repository: dict[str, Any]) -> dict[str, Any]:
     name = repository["name"]
     facts = _facts(repository, context["branch"])
@@ -421,12 +449,20 @@ def _merge_facts(context: dict[str, Any], repository: dict[str, Any]) -> dict[st
     )
     _require(facts["main"] is not None, f"权威仓库 {name}: main 引用不存在")
     _require(facts["target"] == context["tips"][name], f"权威仓库 {name}: target 与 saved tip 不一致")
-    _require(facts["clean"], f"权威仓库 {name}: 工作区或暂存区不干净")
     if facts["current"] == "main":
         _require(facts["head"] == facts["main"], f"权威仓库 {name}: main 与 HEAD 不一致")
     else:
         _require(facts["head"] == context["tips"][name], f"权威仓库 {name}: 需求分支 HEAD 与 saved tip 不一致")
     _verify_ancestry(context, name, facts)
+    # 恢复切回旧 main 后的现场，先证明全部 untracked 都被 saved tip 忽略。
+    pre_merge_untracked = (
+        facts["current"] == "main"
+        and facts["main"] != context["tips"][name]
+        and context["merged"][name] is False
+        and _only_untracked(facts["status"])
+        and _untracked_ignored_at_tip(facts["path"], context["tips"][name])
+    )
+    _require(facts["clean"] or pre_merge_untracked, f"权威仓库 {name}: 工作区或暂存区不干净")
     return facts
 
 

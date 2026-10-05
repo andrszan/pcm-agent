@@ -326,7 +326,7 @@ def _has_in_progress_operation(path: Path) -> bool:
             allowed_returncodes=(0, 1),
         ) is not None:
             return True
-    for directory in ("rebase-merge", "rebase-apply"):
+    for directory in ("rebase-merge", "rebase-apply", "sequencer"):
         value = _git(path, "rev-parse", "--git-path", directory)
         if isinstance(value, str):
             progress = Path(value)

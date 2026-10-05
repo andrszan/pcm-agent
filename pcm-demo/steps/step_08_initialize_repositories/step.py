@@ -9,6 +9,7 @@ from common.agent_decision_loop import AgentDecisionLoopSpec, ResumeMessage, con
 from common.claude_agent import run_claude
 from common.decision import parse_agent_decision, render_decision_system_prompt, request_decision
 from common.files import write_json
+from common.git_environment import git_environment
 from common.git_identity import parse_git_identity
 from common.state import write_state, write_step_result
 from config import LLMConfig
@@ -122,6 +123,7 @@ def _git_read(path: Path, *args: str) -> str:
             text=True,
             capture_output=True,
             timeout=120,
+            env=git_environment(),
         )
     except FileNotFoundError as error:
         raise RuntimeError("未安装 Git") from error
@@ -178,6 +180,7 @@ def _configure_git_identity(state: dict[str, Any], repositories: list[dict[str, 
                     text=True,
                     capture_output=True,
                     timeout=120,
+                    env=git_environment(),
                 )
             except (OSError, subprocess.TimeoutExpired) as error:
                 raise RuntimeError("无法配置仓库本地 Git 提交身份") from error
@@ -376,7 +379,7 @@ async def run(
         raise RuntimeError("运行状态不位于仓库提交锚点")
 
     _configure_git_identity(state, repositories)
-    if _all_clean(repositories):
+    if _all_clean(repositories) and (resume_message is None or resume_message.consumed):
         return advance_success(run_dir, state, names, repositories)
 
     _require_resume_anchor(run_dir, state)

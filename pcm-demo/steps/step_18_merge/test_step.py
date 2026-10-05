@@ -14,6 +14,7 @@ DEMO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(DEMO_ROOT))
 
 from common.state import read_state, write_requirement_step_result, write_state
+from steps.step_13_select_requirement.test_step import pending_cherry_pick
 import steps.step_18_merge.step as merge_step
 from steps.step_18_merge.step import (
     CURRENT_NODE,
@@ -280,6 +281,112 @@ class RequirementMergeTests(unittest.TestCase):
 
         self.assert_final(repositories, tips)
         self.assertTrue(generated.exists())
+
+    def test_clean_pending_cherry_pick_is_rejected_before_merge(self) -> None:
+        run_dir, workspace, state, _repositories, _bases, _tips = self.make_run()
+        pending_cherry_pick(workspace)
+        self.update_recorded_repository(run_dir, state, "root", tip=command("rev-parse", "HEAD", cwd=workspace))
+        before = (run_dir / "state.json").read_bytes()
+        with patch.object(merge_step, "_git_write", wraps=merge_step._git_write) as writes:
+            with self.assertRaisesRegex(RuntimeError, "未完成"):
+                run(run_dir, state)
+        writes.assert_not_called()
+        self.assertEqual((run_dir / "state.json").read_bytes(), before)
+        self.assertFalse((run_dir / "steps/requirements/BR-001/18.json").exists())
+
+    def test_interrupted_switch_recovers_tip_ignored_artifacts(self) -> None:
+        run_dir, workspace, state, repositories, _bases, tips = self.make_run()
+        (workspace / ".gitignore").write_text("/.generated/\n", encoding="utf-8")
+        tips["root"] = commit_all(workspace, "ignore generated artifacts")
+        generated = workspace / ".generated/result.yml"
+        generated.parent.mkdir()
+        generated.write_text("retained\n", encoding="utf-8")
+        self.update_recorded_repository(run_dir, state, "root", tip=tips["root"])
+        original = merge_step._git_write
+
+        def interrupted(path, *args):
+            original(path, *args)
+            if args == ("switch", "main"):
+                raise RuntimeError("模拟切换后中断")
+
+        with patch.object(merge_step, "_git_write", side_effect=interrupted):
+            with self.assertRaisesRegex(RuntimeError, "模拟切换后中断"):
+                run(run_dir, state)
+        self.assertTrue(command("status", "--porcelain", cwd=workspace).startswith("?? "))
+        self.assertFalse(read_state(run_dir)["requirement_cycle"]["repositories"]["root"]["merged"])
+        self.assertEqual(run(run_dir, read_state(run_dir))["status"], "success")
+        self.assert_final(repositories, tips)
+        self.assertEqual(generated.read_text(), "retained\n")
+
+    def test_pre_merge_recovery_keeps_dirty_and_reference_guards(self) -> None:
+        cases = ("worktree", "index", "merged", "target", "ancestry", "main-at-tip", "requirement-branch")
+        for case in cases:
+            with self.subTest(case=case):
+                run_dir, workspace, state, _repositories, _bases, tips = self.make_run()
+                command("switch", "main", cwd=workspace)
+                (workspace / "artifact.txt").write_text("keep\n", encoding="utf-8")
+                if case in {"worktree", "index"}:
+                    (workspace / "base.txt").write_text("dirty\n", encoding="utf-8")
+                    if case == "index":
+                        command("add", "base.txt", cwd=workspace)
+                elif case == "merged":
+                    state["requirement_cycle"]["repositories"]["root"]["merged"] = True
+                elif case == "target":
+                    command("branch", "-f", "req/br-001", "main", cwd=workspace)
+                elif case == "ancestry":
+                    (workspace / "diverged.txt").write_text("main only\n", encoding="utf-8")
+                    command("add", "diverged.txt", cwd=workspace)
+                    command("-c", "user.name=PCM Test", "-c", "user.email=pcm@example.invalid", "commit", "-m", "diverge", cwd=workspace)
+                elif case == "main-at-tip":
+                    command("merge", "--ff-only", tips["root"], cwd=workspace)
+                elif case == "requirement-branch":
+                    command("switch", "req/br-001", cwd=workspace)
+                with patch.object(merge_step, "_git_write", wraps=merge_step._git_write) as writes:
+                    with self.assertRaises(RuntimeError):
+                        run(run_dir, state)
+                writes.assert_not_called()
+                self.assertEqual((workspace / "artifact.txt").read_text(), "keep\n")
+                self.assertFalse((run_dir / "steps/requirements/BR-001/18.json").exists())
+
+    def test_pre_merge_untracked_recovery_rejects_unignored_files_before_writes(self) -> None:
+        run_dir, workspace, state, _repositories, bases, _tips = self.make_run()
+        command("switch", "main", cwd=workspace)
+        artifact = workspace / "not-ignored.txt"
+        artifact.write_text("keep\n", encoding="utf-8")
+        with patch.object(merge_step, "_git_write", wraps=merge_step._git_write) as writes:
+            with self.assertRaisesRegex(RuntimeError, "不干净"):
+                run(run_dir, state)
+        writes.assert_not_called()
+        self.assertEqual(command("rev-parse", "main", cwd=workspace), bases["root"])
+        self.assertEqual(artifact.read_text(), "keep\n")
+        self.assertFalse(state["requirement_cycle"]["repositories"]["root"]["merged"])
+        self.assertFalse((run_dir / "steps/requirements/BR-001/18.json").exists())
+        self.assertEqual(command("branch", "--list", "req/br-001", cwd=workspace), "req/br-001")
+
+    def test_recovery_uses_tip_nested_ignore_rules_and_negation(self) -> None:
+        for extra in (None, "nested/keep.cache", "external.txt"):
+            with self.subTest(extra=extra):
+                run_dir, workspace, state, repositories, bases, tips = self.make_run()
+                nested = workspace / "nested"
+                nested.mkdir()
+                (nested / ".gitignore").write_text("*.cache\n!keep.cache\n", encoding="utf-8")
+                tips["root"] = commit_all(workspace, "nested ignore rules")
+                artifact = nested / "中文带空格 \nfile.cache"
+                artifact.write_text("retained\n", encoding="utf-8")
+                self.update_recorded_repository(run_dir, state, "root", tip=tips["root"])
+                command("switch", "main", cwd=workspace)
+                if extra is not None:
+                    (workspace / extra).write_text("external\n", encoding="utf-8")
+                    with patch.object(merge_step, "_git_write", wraps=merge_step._git_write) as writes:
+                        with self.assertRaisesRegex(RuntimeError, "不干净"):
+                            run(run_dir, state)
+                    writes.assert_not_called()
+                    self.assertEqual(command("rev-parse", "main", cwd=workspace), bases["root"])
+                    self.assertEqual((workspace / extra).read_text(), "external\n")
+                else:
+                    self.assertEqual(run(run_dir, state)["status"], "success")
+                    self.assert_final(repositories, tips)
+                self.assertEqual(artifact.read_text(), "retained\n")
 
     def test_intermediate_main_fast_forwards_to_saved_tip_sha(self) -> None:
         run_dir, _workspace, state, repositories, bases, tips = self.make_run()

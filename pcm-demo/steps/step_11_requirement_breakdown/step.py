@@ -10,6 +10,7 @@ from common.agent_decision_loop import AgentDecisionLoopSpec, ResumeMessage, run
 from common.claude_agent import run_claude
 from common.decision import render_decision_system_prompt, request_decision
 from common.files import resolve_workspace_output
+from common.git_environment import git_environment
 from common.state import step_result_status, write_state, write_step_result
 from config import LLMConfig
 from steps.step_02_project_intake.step import OUTPUTS as PRODUCT_OUTPUT_PATHS
@@ -281,6 +282,7 @@ def _git_run(
             text=True,
             capture_output=True,
             timeout=120,
+            env=git_environment(),
         )
     except FileNotFoundError as error:
         raise RuntimeError("未安装 Git") from error

@@ -15,7 +15,7 @@ from unittest.mock import patch
 DEMO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(DEMO_ROOT))
 
-from common.agent_decision_loop import BLOCKED_RESUME_PROMPT
+from common.agent_decision_loop import BLOCKED_RESUME_PROMPT, ResumeMessage
 from common.claude_agent import ClaudeRunResult
 from common.decision import render_decision_system_prompt
 from common.files import write_json
@@ -513,6 +513,37 @@ class InitializeRepositoriesTests(unittest.TestCase):
             self.assertEqual(saved["status"], "success")
             self.assertEqual(calls[1]["prompt"], BLOCKED_RESUME_PROMPT)
             self.assertEqual(calls[1]["resume_session_id"], "session-1")
+
+    def test_clean_blocked_resume_delivers_manual_message_to_original_session(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory), [])
+            self.dirty(workspace, ["root"])
+            calls = []
+
+            async def fake_agent(prompt, **kwargs):
+                calls.append({"prompt": prompt, **kwargs})
+                value = agent_result(cwd=workspace)
+                kwargs["on_update"](value)
+                return value
+
+            async def decide(*args, **kwargs):
+                return decision("blocked", reason="等待授权", required_inputs=["授权"]) if len(calls) == 1 else decision("completed")
+
+            with self.assertRaises(InitializeRepositoriesBlocked):
+                self.run_step(run_dir, state, agent_runner=fake_agent, decision_runner=decide, config_loader=lambda: object())
+            commit_all(workspace)
+            message = ResumeMessage("initialize_repositories", "补充核验作者身份后再继续")
+            saved = self.run_step(
+                run_dir, read_state(run_dir), agent_runner=fake_agent,
+                decision_runner=decide, config_loader=lambda: object(), resume_message=message,
+            )
+            self.assertEqual(saved["status"], "success")
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(calls[1]["resume_session_id"], "session-1")
+            self.assertEqual(calls[1]["prompt"], message.content)
+            self.assertTrue(message.consumed)
+            history = json.loads((run_dir / "conversations/initialize_repositories.json").read_text())
+            self.assertEqual(sum(item["content"] == message.content for item in history["messages"]), 1)
 
     def test_failed_state_with_dirty_workspace_resumes_existing_session(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

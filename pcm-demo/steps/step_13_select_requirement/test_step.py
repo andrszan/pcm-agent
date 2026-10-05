@@ -52,6 +52,29 @@ def commit(repository: Path, message: str = "test commit") -> None:
     )
 
 
+def pending_cherry_pick(repository: Path) -> None:
+    """真实多提交拣选：首项解冲突并 commit，第二项仍在 sequencer 中。"""
+    branch = git("branch", "--show-current", cwd=repository).stdout.strip()
+    git("switch", "-c", "sequence-source", cwd=repository)
+    (repository / "conflict.txt").write_text("source\n", encoding="utf-8")
+    commit(repository, "first pick")
+    first = git("rev-parse", "HEAD", cwd=repository).stdout.strip()
+    (repository / "second.txt").write_text("second\n", encoding="utf-8")
+    commit(repository, "second pick")
+    second = git("rev-parse", "HEAD", cwd=repository).stdout.strip()
+    git("switch", branch, cwd=repository)
+    (repository / "conflict.txt").write_text("target\n", encoding="utf-8")
+    commit(repository, "conflicting target")
+    picked = git("cherry-pick", first, second, cwd=repository, check=False)
+    assert picked.returncode != 0
+    (repository / "conflict.txt").write_text("resolved\n", encoding="utf-8")
+    commit(repository, "resolve first pick")
+    assert git("status", "--porcelain", cwd=repository).stdout == ""
+    assert git("rev-parse", "-q", "--verify", "CHERRY_PICK_HEAD", cwd=repository, check=False).returncode == 1
+    assert (repository / ".git/sequencer/todo").is_file()
+    assert not (repository / "second.txt").exists()
+
+
 class SelectRequirementTests(unittest.TestCase):
     @staticmethod
     def catalog() -> list[dict]:
@@ -488,6 +511,18 @@ class SelectRequirementTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "未完成"):
                 run(run_dir, state)
             self.assertEqual((run_dir / "state.json").read_bytes(), before)
+
+    def test_clean_pending_cherry_pick_is_rejected_before_intent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, repositories, state = self.make_run(Path(directory), names=["root"])
+            repository = Path(repositories[0]["path"])
+            pending_cherry_pick(repository)
+            before = (run_dir / "state.json").read_bytes()
+            with self.assertRaisesRegex(RuntimeError, "未完成"):
+                run(run_dir, state)
+            self.assertEqual((run_dir / "state.json").read_bytes(), before)
+            self.assertIsNone(state["requirement_cycle"])
+            self.assertEqual(git("branch", "--show-current", cwd=repository).stdout.strip(), "main")
 
     def test_partial_branch_creation_recovers_from_recorded_intent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -8,7 +8,7 @@
 
 ## Git 边界
 
-每次读取均过滤全部 `GIT_*` 环境变量，并核验仓库自身 top-level、当前分支、HEAD、local `main`、需求分支、完整 porcelain 工作树与进行中的 merge、rebase、cherry-pick、revert、bisect 操作。
+每次读取均过滤全部 `GIT_*` 环境变量，并核验仓库自身 top-level、当前分支、HEAD、local `main`、需求分支、完整 porcelain 工作树与进行中的 merge、rebase、cherry-pick、revert、bisect 操作，包括 HEAD clean 但 `sequencer` 仍有待执行项的现场。
 
 - 只接受当前 checkout 为 `main` 或活动需求分支；
 - 合并阶段要求需求分支存在且等于记录的 `tip_sha`；
@@ -16,7 +16,7 @@
 - `main == tip_sha` 表示已经合并；若 cycle 尚未标记，原子补写 `merged: true`，不重复 merge；
 - `base_sha == tip_sha` 是合法 no-op；
 - `merged == false` 且 main 尚未到达 tip 时允许切换到 main；切换后重读引用，要求 main/HEAD 仍为本次捕获的 main，target 仍为保存 tip，再执行 `git merge --ff-only <tip_sha>`；
-- 需求分支初始必须 clean；切回旧 `main` 后仅允许因需求分支新增忽略规则而暂时显现的纯 untracked 路径，合并完成后仍必须恢复为完全 clean；
+- 需求分支初始必须 clean；切回旧 `main` 后允许暂时显现的纯 untracked 路径，合并后仍由 Git 核验完全 clean。切换成功但合并前中断时，仅在 `merged == false`、main 尚未到达 tip 且引用、祖先边界均成立时，临时读取 saved tip 的 `.gitignore`，由 `git check-ignore` 证明全部 untracked 路径均被忽略后才恢复合并；外部新增且不被忽略的文件在任何 Git 写入前拒绝，tracked/index dirty 也立即失败，不清理现场文件；
 - main 分叉、领先 tip、未包含原始 base、已标记 merged 却未到达保存 tip，或任何 Git 事实不一致时失败并保留现场；
 - 所有仓库已合并后才清理分支。partial cleanup 恢复仅在所有仓库均已合并时允许某仓需求分支已不存在；
 - 写命令白名单仅包含 `git switch main`、`git merge --ff-only <tip_sha>` 与 `git branch -d <branch>`，不执行 reset、rebase、push、强制删除、自动解冲突或回滚。

@@ -213,7 +213,7 @@ def _has_in_progress_operation(path: Path) -> bool:
     for reference in ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"):
         if _git(path, "rev-parse", "-q", "--verify", reference, allowed=(0, 1)).returncode == 0:
             return True
-    for name in ("rebase-merge", "rebase-apply", "BISECT_START"):
+    for name in ("rebase-merge", "rebase-apply", "sequencer", "BISECT_START"):
         progress = Path(_git_read(path, "rev-parse", "--git-path", name))
         if not progress.is_absolute():
             progress = path / progress

@@ -17,6 +17,7 @@ from common.agent_decision_loop import BLOCKED_RESUME_PROMPT
 from common.claude_agent import ClaudeRunResult
 from common.state import read_state, write_requirement_step_result, write_state
 from model_policy import get_agent_profile
+from steps.step_13_select_requirement.test_step import pending_cherry_pick
 import steps.step_17_commit.step as commit_step
 from steps.step_17_commit.step import (
     COMMIT_MAX_TURNS,
@@ -186,6 +187,15 @@ class RequirementCommitTests(unittest.TestCase):
                 "base_sha": bases[name], "tip_sha": tips[name],
             } for name in bases],
         )
+
+    def test_clean_pending_cherry_pick_is_rejected_before_success(self) -> None:
+        run_dir, workspace, state, _bases = self.make_run()
+        pending_cherry_pick(workspace)
+        before = (run_dir / "state.json").read_bytes()
+        with self.assertRaisesRegex(RuntimeError, "未完成"):
+            self.execute(run_dir, state)
+        self.assertEqual((run_dir / "state.json").read_bytes(), before)
+        self.assertFalse((run_dir / "steps/requirements/BR-001/17.json").exists())
 
     def test_all_clean_skips_agent_decision_and_conversation(self) -> None:
         run_dir, _workspace, state, bases = self.make_run(["web"])
