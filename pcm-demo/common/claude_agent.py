@@ -266,13 +266,18 @@ def _agent_reply(texts: list[str], result: ResultMessage | None) -> str:
     if result is None or result.is_error or not result.result:
         return "\n".join(texts)
     final = result.result
-    notes = texts
+    process = "\n".join(texts)
     # 只移除由完整可见文本块组成的相同尾部，不删早期相同文字或块内子串。
-    for index in range(len(texts) - 1, -1, -1):
-        if "\n".join(texts[index:]) == final:
-            notes = texts[:index]
-            break
-    process = "\n".join(notes)
+    if process.endswith(final):
+        start = len(process) - len(final)
+        offset = 0
+        for text in texts:
+            if offset == start:
+                process = process[:max(0, start - 1)]
+                break
+            offset += len(text) + 1
+            if offset > start:
+                break
     if not process:
         return final
     return (

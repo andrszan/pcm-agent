@@ -693,6 +693,7 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
                         reason="决策交接不完整",
                     ).model_dump_json(),
                 },
+                {"role": "assistant", "content": "请重新读取相关资料并补齐自包含决策交接。"},
                 {"role": "user", "content": continued},
                 {
                     "role": "assistant",

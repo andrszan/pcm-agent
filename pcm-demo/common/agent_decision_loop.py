@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from common.claude_agent import (
     ClaudeRunResult,
+    _retry_requested,
     is_retryable_claude_sdk_error,
     run_claude,
 )
@@ -506,11 +507,11 @@ def validate_agent_decision_loop_scene(
     if not started:
         return False
 
-    if reference is None:
+    if reference is None and (reference_present or session_present):
         raise RuntimeError("Agent 决策恢复缺少原决策历史引用")
     if path.is_symlink() or not path.is_file():
         raise RuntimeError("Agent 决策恢复缺少原决策历史")
-    messages = _load_conversation(run_dir, state, spec)
+    messages = _load_conversation(run_dir, state, spec, restore_reference=False)
     if (
         len(messages) < 2
         or messages[1]["role"] != "assistant"
@@ -539,11 +540,14 @@ def validate_agent_decision_loop_scene(
             )
         ):
             raise RuntimeError("Agent 决策已有回复或 session 事实但缺少 session 别名")
+    if reference is None:
+        _load_conversation(run_dir, state, spec)
     return True
 
 
 def _load_conversation(
-    run_dir: Path, state: dict[str, Any], spec: AgentDecisionLoopSpec
+    run_dir: Path, state: dict[str, Any], spec: AgentDecisionLoopSpec,
+    *, restore_reference: bool = True,
 ) -> list[dict[str, str]]:
     reference = _conversation_reference(state, spec)
     path = run_dir / conversation_path(spec)
@@ -556,7 +560,7 @@ def _load_conversation(
     if not isinstance(data, dict) or set(data) != {"messages"}:
         raise RuntimeError("决策历史内容不符合约定")
     messages = _validate_messages(data["messages"])
-    if reference is None:
+    if reference is None and restore_reference:
         references = state.setdefault("decision_conversations", {})
         if not isinstance(references, dict):
             raise RuntimeError("决策历史引用不符合约定")
@@ -818,6 +822,10 @@ def _save_agent_update(
             for key in ("cwd", "model", "permissionMode", "claude_code_version")
             if key in value.init
         }
+    elif value.result_subtype is not None:
+        # 本次 Result 缺少 init 时，恢复不能沿用上一轮的执行身份。
+        for key in ("init", "skill_loaded", "slash_command_loaded"):
+            section.pop(key, None)
     if value.result_subtype is not None:
         section["last_agent_result"] = _safe_agent_result(value)
         if isinstance(value.text, str) and value.text.strip():
@@ -962,6 +970,8 @@ def _validate_agent_result(
         )
     if value.result_subtype not in {"success", *_RECOVERABLE_SUBTYPES}:
         fail("Agent SDK 返回了不支持的终止结果")
+    if value.exception_type in {"ModelMismatchError", "SessionMismatchError"}:
+        fail("Agent SDK 执行身份不一致")
     if value.exception and value.result_subtype not in _RECOVERABLE_SUBTYPES:
         fail("Agent SDK 执行异常", retry_requested=value.retry_requested)
     if value.is_error and value.result_subtype not in _RECOVERABLE_SUBTYPES:
@@ -983,6 +993,65 @@ def _validate_agent_result(
         fail("Agent SDK 未加载所需 slash command")
     if not _session(state, spec):
         fail("Agent 未返回可恢复的 session ID")
+    if value.session_id != _session(state, spec):
+        fail("恢复 session ID 不一致")
+
+
+def _validate_pending_agent_result(
+    run_dir: Path,
+    state: dict[str, Any],
+    workspace: Path,
+    spec: AgentDecisionLoopSpec,
+) -> None:
+    section = _state_section(state, spec)
+    pending = section.get("pending_agent_text")
+    result = section.get("last_agent_result")
+    # 旧历史可能只有 pending 正文；有 SDK 结果时必须补做回调后尚未完成的校验。
+    if not isinstance(pending, str) or not pending.strip() or not isinstance(result, dict):
+        return
+    init = section.get("init")
+    if isinstance(init, dict):
+        init = {
+            **init,
+            "skills": [spec.skill_name] if section.get("skill_loaded") is True else [],
+            "slash_commands": [spec.skill_name] if section.get("slash_command_loaded") is True else [],
+        }
+    exception_type = result.get("exception_type")
+    observed_model = init.get("model") if isinstance(init, dict) else None
+    if (
+        isinstance(observed_model, str)
+        and observed_model.casefold() != get_agent_profile(spec.task).model.casefold()
+    ):
+        exception_type = "ModelMismatchError"
+    value = ClaudeRunResult(
+        init=init,
+        text=pending,
+        result_subtype=result.get("subtype"),
+        is_error=result.get("is_error", False),
+        session_id=result.get("session_id"),
+        stop_reason=result.get("stop_reason"),
+        num_turns=result.get("num_turns"),
+        total_cost_usd=result.get("total_cost_usd"),
+        exception=exception_type,
+        exception_type=exception_type,
+        api_error_status=result.get("api_error_status"),
+        terminal_reason=result.get("terminal_reason"),
+        has_errors=result.get("has_errors", False),
+        usage=result.get("usage"),
+        model_usage=result.get("model_usage"),
+        assistant_error=result.get("assistant_error"),
+        context_window_exceeded=result.get("context_window_exceeded", False),
+        retry_requested=False
+        if exception_type in {"ModelMismatchError", "SessionMismatchError"}
+        else _retry_requested(
+            api_error_status=result.get("api_error_status"),
+            terminal_reason=result.get("terminal_reason"),
+            has_result=True,
+            context_window_exceeded=result.get("context_window_exceeded", False),
+            assistant_error=result.get("assistant_error"),
+        ),
+    )
+    _validate_agent_result(run_dir, state, workspace, spec, value)
 
 
 async def _run_agent(
@@ -993,7 +1062,12 @@ async def _run_agent(
     prompt: str,
     agent_runner: Callable[..., Any],
 ) -> list[dict[str, str]]:
-    _require_decision_capacity(_load_conversation(run_dir, state, spec), spec)
+    messages = _load_conversation(run_dir, state, spec)
+    _require_decision_capacity(messages, spec)
+    if _tail_decision(messages) is not None or _legacy_completion(messages, spec):
+        # 先确认额度再保存实际指令，区分新调用与同一 pending 回复的补写。
+        messages.append(conversation_message("assistant", prompt))
+        _save_conversation(run_dir, state, spec, messages)
     try:
         profile = get_agent_profile(spec.task)
         value = await run_timed_agent(
@@ -1144,6 +1218,7 @@ async def run_agent_decision_loop(
 
     _discard_legacy_pending_prompt(run_dir, state, spec)
     messages = _load_conversation(run_dir, state, spec)
+    _validate_pending_agent_result(run_dir, state, workspace, spec)
     messages = _append_pending_agent_text(run_dir, state, spec, messages)
     initial_tail_decision = _tail_decision(messages)
     blocked_resume_pending = (
@@ -1189,8 +1264,6 @@ async def run_agent_decision_loop(
                     reason="已识别既有完成记录并通过核验",
                     required_inputs=[],
                 )
-            messages.append(conversation_message("assistant", repair))
-            _save_conversation(run_dir, state, spec, messages)
             messages = await _run_agent(
                 run_dir, state, workspace, spec, repair, agent_runner
             )
@@ -1203,16 +1276,12 @@ async def run_agent_decision_loop(
                 if not blocked_resume_pending:
                     return decision
                 blocked_resume_pending = False
-                messages.append(conversation_message("assistant", BLOCKED_RESUME_PROMPT))
-                _save_conversation(run_dir, state, spec, messages)
                 messages = await _run_agent(
                     run_dir, state, workspace, spec, BLOCKED_RESUME_PROMPT, agent_runner
                 )
                 continue
             if decision.verdict == "completed":
                 if _last_agent_requires_normal_completion(state, spec):
-                    messages.append(conversation_message("assistant", RECOVERABLE_RESULT_PROMPT))
-                    _save_conversation(run_dir, state, spec, messages)
                     messages = await _run_agent(
                         run_dir, state, workspace, spec, RECOVERABLE_RESULT_PROMPT, agent_runner
                     )
@@ -1222,8 +1291,6 @@ async def run_agent_decision_loop(
                     if targeted_resume:
                         raise RuntimeError("负责人消息未能投递到目标原对话")
                     return decision
-                messages.append(conversation_message("assistant", repair))
-                _save_conversation(run_dir, state, spec, messages)
                 messages = await _run_agent(
                     run_dir, state, workspace, spec, repair, agent_runner
                 )

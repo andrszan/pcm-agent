@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from itertools import product
 from pathlib import Path
 from unittest.mock import patch
 from xml.etree import ElementTree
+from xml.sax.saxutils import escape
 
 from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock, ThinkingBlock, ToolUseBlock
 from pydantic import SecretStr, ValidationError
@@ -19,7 +21,7 @@ from common.agent_decision_loop import (
     _validate_messages,
     run_agent_decision_loop,
 )
-from common.claude_agent import run_claude
+from common.claude_agent import _agent_reply, run_claude
 from common.decision import AgentDecision, DecisionInput, count_decisions, request_decision
 from config import AgentConfig
 
@@ -112,6 +114,35 @@ class AgentHandoffTest(unittest.IsolatedAsyncioTestCase):
                     payload = ElementTree.fromstring(f"<reply>{result.text}</reply>")
                     self.assertEqual(payload.findtext("过程说明"), notes)
                     self.assertEqual(payload.findtext("最终回复"), final)
+
+    def test_reply_suffix_optimization_is_equivalent_for_whitespace_and_block_boundaries(self):
+        def original(texts, final):
+            if not final:
+                return "\n".join(texts)
+            notes = texts
+            for index in range(len(texts) - 1, -1, -1):
+                if "\n".join(texts[index:]) == final:
+                    notes = texts[:index]
+                    break
+            process = "\n".join(notes)
+            return (f"<过程说明>{escape(process)}</过程说明><最终回复>{escape(final)}</最终回复>"
+                    if process else final)
+
+        alphabet = ("", " ", "\n", "\r\n", "尾部", "<&>")
+        for size in range(5):
+            for blocks in product(alphabet, repeat=size):
+                texts = list(blocks)
+                finals = {*alphabet, "块内子串", *("\n".join(texts[i:]) for i in range(size))}
+                for final in finals:
+                    self.assertEqual(_agent_reply(texts, sdk_result(final)), original(texts, final),
+                                     (texts, final))
+
+    def test_reply_long_unmatched_and_matched_suffixes(self):
+        texts = ["x" * 1024] * 9999
+        process = "\n".join(texts)
+        for final, notes in (("新回复", process), ("\n".join(texts[-5000:]), "\n".join(texts[:-5000]))):
+            self.assertEqual(_agent_reply(texts, sdk_result(final)),
+                             f"<过程说明>{notes}</过程说明><最终回复>{final}</最终回复>")
 
     async def test_missing_or_failed_result_does_not_label_notes_as_final(self):
         for ending in [sdk_result(None), sdk_result("错误结果", is_error=True), RuntimeError("流中断")]:
