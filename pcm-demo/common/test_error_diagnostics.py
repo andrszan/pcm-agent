@@ -37,6 +37,67 @@ class ErrorDiagnosticsTests(unittest.TestCase):
         self.assertIn("token budget exhausted", redacted)
         self.assertIn("secret=[REDACTED]", redacted)
 
+    def test_authorization_schemes_are_redacted_without_losing_context(self) -> None:
+        for header in ("Authorization", "Proxy-Authorization", "proxy-authorization"):
+            for value in ("Basic dXNlcjpwYXNz", "Bearer header-secret", "Negotiate encoded-ticket"):
+                with self.subTest(header=header, value=value):
+                    text = f"407 {header}: {value}\nCookie: session=cookie-secret\ntoken budget exhausted; host=proxy.invalid"
+                    redacted = redact_text(text)
+                    self.assertNotIn(value.split()[1], redacted)
+                    self.assertNotIn("cookie-secret", redacted)
+                    self.assertIn(f"407 {header}: [REDACTED]", redacted)
+                    self.assertIn("token budget exhausted; host=proxy.invalid", redacted)
+                    with tempfile.TemporaryDirectory() as directory:
+                        root = Path(directory)
+                        path = write_diagnostic(root, "proxy-error.json", source="test", error=RuntimeError(text))
+                        saved = (root / path).read_text()
+                        self.assertNotIn(value.split()[1], saved)
+                        self.assertIn("proxy.invalid", saved)
+
+    def test_authorization_parameters_and_inline_context(self) -> None:
+        for header in ("Authorization", "Proxy-Authorization"):
+            for value in (
+                'Digest username="digest-user", nonce="digest-nonce", response="digest-response"',
+                "Custom credential=custom-secret, signature=custom-signature",
+            ):
+                with self.subTest(header=header, value=value):
+                    self.assertEqual(
+                        redact_text(f"{header}: {value}\nhost=proxy.invalid"),
+                        f"{header}: [REDACTED]\nhost=proxy.invalid",
+                    )
+            self.assertEqual(
+                redact_text(f"{header}=Basic dXNlcjpwYXNz; token budget exhausted"),
+                f"{header}=[REDACTED]; token budget exhausted",
+            )
+            self.assertEqual(
+                redact_text(f'{{"{header}": "Basic dXNlcjpwYXNz", "host": "proxy.invalid"}}'),
+                f'{{"{header}": "[REDACTED]", "host": "proxy.invalid"}}',
+            )
+
+    def test_authorization_quoted_pairs_are_redacted_in_text_and_diagnostics(self) -> None:
+        for header in ("Authorization", "Proxy-Authorization"):
+            for username in (r'alice\"smith', r'alice\\smith'):
+                text = (
+                    f'{header}: Digest username="{username}", '
+                    'nonce="synthetic-nonce", response="synthetic-response"; '
+                    'host=proxy.invalid\ntoken budget exhausted'
+                )
+                expected = f"{header}: [REDACTED]; host=proxy.invalid\ntoken budget exhausted"
+                with self.subTest(header=header, username=username, path="text"):
+                    self.assertEqual(redact_text(text), expected)
+                with self.subTest(header=header, username=username, path="diagnostic"):
+                    with tempfile.TemporaryDirectory() as directory:
+                        root = Path(directory)
+                        path = write_diagnostic(
+                            root, "proxy-error.json", source="test",
+                            error=RuntimeError(text), details={"stderr": text},
+                        )
+                        saved = json.loads((root / path).read_text(encoding="utf-8"))
+                    self.assertEqual(saved["exception"]["message"], expected)
+                    self.assertEqual(saved["details"]["stderr"], expected)
+                    self.assertNotIn("synthetic-nonce", json.dumps(saved))
+                    self.assertNotIn("synthetic-response", json.dumps(saved))
+
     def test_exception_chain_traceback_truncation_and_safe_log_path(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir = Path(directory) / "run"

@@ -135,5 +135,45 @@ class AgentProxyTest(unittest.TestCase):
                 self.assertNotIn(password, str(details))
 
 
+class AgentProxyDiagnosticsTest(unittest.IsolatedAsyncioTestCase):
+    async def test_synthetic_proxy_auth_error_is_redacted_in_updates_and_log(self):
+        from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
+        from common.claude_agent import run_claude
+        from common.error_diagnostics import write_diagnostic
+
+        credential = "dXNlcjpwYXNz"
+        message = f"API Error: 407 Proxy-Authorization: Basic {credential}\nhost=proxy.invalid"
+
+        async def query(**kwargs):
+            yield AssistantMessage(
+                model="<synthetic>", error="authentication_failed",
+                content=[TextBlock(message)],
+            )
+            yield ResultMessage(
+                subtype="error_during_execution", duration_ms=1, duration_api_ms=1,
+                is_error=True, num_turns=1, session_id="test-session",
+                errors=[message],
+            )
+
+        updates = []
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "common.claude_agent.query", new=query
+        ), patch("common.claude_agent.load_plugins", return_value=[]):
+            root = Path(directory)
+            result = await run_claude(
+                "测试代理错误", cwd=root, model="test-model", effort="low",
+                on_update=updates.append,
+                agent_config_loader=lambda: AgentConfig("http://agent.invalid", SecretStr("test-token")),
+            )
+            for value in (result, *updates):
+                self.assertTrue(value.sdk_errors)
+                self.assertNotIn(credential, str(value.sdk_errors))
+                self.assertIn("host=proxy.invalid", str(value.sdk_errors))
+            path = write_diagnostic(
+                root, "proxy-error.json", source="test", details={"sdk_errors": result.sdk_errors},
+            )
+            self.assertNotIn(credential, (root / path).read_text())
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -24,8 +24,10 @@ _PLAIN_VALUE = re.compile(
     rf"(?P<key>\b{_SENSITIVE_KEY}\b)(?P<separator>\s*[:=]\s*)(?P<value>[^\s,;}}&#]+)",
     re.IGNORECASE,
 )
+_AUTH_PARAMETER = r'[A-Za-z][A-Za-z0-9_-]*[ \t]*=[ \t]*(?:"(?:[^"\\\r\n]|\\[^\r\n])*"|[^\s,;}\]]+)'
 _AUTH_VALUE = re.compile(
-    r"(?P<key>\b(?:proxy-)?authorization\b)(?P<separator>\s*[:=]\s*)(?P<value>(?:Bearer\s+)?[^\s,;}\]]+)",
+    r"(?P<key>\b(?:proxy-)?authorization\b)(?P<separator>\s*[:=]\s*)"
+    rf"(?P<value>(?:[A-Za-z][A-Za-z0-9_-]*[ \t]+)?(?:{_AUTH_PARAMETER}(?:[ \t]*,[ \t]*{_AUTH_PARAMETER})*|[^\s,;}}\]]+))",
     re.IGNORECASE,
 )
 _COOKIE_VALUE = re.compile(
