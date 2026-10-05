@@ -32,6 +32,7 @@ def git(
             text=True,
             capture_output=True,
             timeout=120,
+            env={key: value for key, value in os.environ.items() if key.upper() != "PCM_GITLAB_TOKEN"},
         )
     except FileNotFoundError as error:
         raise RuntimeError("未安装 Git") from error
@@ -76,6 +77,7 @@ def git_path_is_ignored(root: Path, relative: str) -> bool:
             text=True,
             capture_output=True,
             timeout=120,
+            env={key: value for key, value in os.environ.items() if key.upper() != "PCM_GITLAB_TOKEN"},
         )
     except FileNotFoundError as error:
         raise RuntimeError("未安装 Git") from error
@@ -257,6 +259,7 @@ def inspect_repository(
             text=True,
             capture_output=True,
             timeout=120,
+            env={key: value for key, value in os.environ.items() if key.upper() != "PCM_GITLAB_TOKEN"},
         )
     except FileNotFoundError as error:
         raise RuntimeError("未安装 Git") from error

@@ -542,6 +542,126 @@ class QualityWorkflowTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "未覆盖当前"):
             self.execute()
 
+    def enable_remote(self):
+        self.state["remote_sync"] = {
+            "enabled": True, "project_name": "sample", "repositories": {
+                "root": {"url": "git@gitlab.com:baiyiyu/andrszan/pcm-projects/sample/sample.git", "project_id": 1},
+            },
+        }
+
+    def test_remote_contract_is_inherited_without_upstream_completion(self):
+        self.reach("quality:completed")
+        self.enable_remote()
+        source = copy.deepcopy(self.state)
+        source["phase_one_completion"] = {"push": "upstream-receipt"}
+        with patch.object(flow, "sync_repositories") as sync:
+            child = flow.new_state(source, self.run.name, "next-quality")
+        self.assertEqual(child["remote_sync"], source["remote_sync"])
+        child["remote_sync"]["repositories"]["root"]["project_id"] = 99
+        self.assertEqual(source["remote_sync"]["repositories"]["root"]["project_id"], 1)
+        self.assertNotIn("phase_one_completion", child)
+        self.assertEqual(child["quality"]["batch_requirement_ids"], [])
+        sync.assert_not_called()
+        self.assertNotIn("remote_sync", flow.new_state(self.source, "original", "legacy"))
+
+    def test_new_phase_one_source_requires_terminal_success_and_inherits_remote_identity(self):
+        self.enable_remote()
+        source = {**copy.deepcopy(self.source), "remote_sync": copy.deepcopy(self.state["remote_sync"])}
+        with self.assertRaises(RuntimeError):
+            flow.new_state(source, "original", "next-quality")
+        source.update(current_node="phase_1:completed", step=None, current_step=None)
+        child = flow.new_state(source, "original", "next-quality")
+        self.assertEqual(child["remote_sync"], source["remote_sync"])
+        child["remote_sync"]["repositories"]["root"]["project_id"] = 99
+        self.assertEqual(source["remote_sync"]["repositories"]["root"]["project_id"], 1)
+
+    def test_legacy_completion_does_not_push_or_create_remote_results(self):
+        with patch.object(flow, "sync_repositories") as sync:
+            self.reach("quality:completed")
+        sync.assert_not_called()
+        self.assertFalse((self.run / "quality/push.json").exists())
+        self.assertFalse((self.run / "quality/local-completion.json").exists())
+
+    def check_remote_completion(self, *, repair):
+        self.enable_remote()
+        if repair:
+            self.finish_repair_batch()
+        self.reach("quality:complete")
+        versions = flow.main_versions(self.state)
+        registry = copy.deepcopy(self.state["requirement_registry"])
+        calls = self.calls.copy()
+        with patch.object(flow, "sync_repositories", return_value=[]) as sync:
+            self.execute()
+        sync.assert_called_once_with(self.run, self.state, self.run / "quality/push.json", targets=versions)
+        self.assertTrue(flow.is_completed(self.state))
+        self.assertEqual(self.state["requirement_registry"], registry)
+        self.assertEqual(self.calls, calls)
+
+    def test_remote_completion_with_repairs(self):
+        self.check_remote_completion(repair=True)
+
+    def test_remote_completion_without_repairs(self):
+        self.check_remote_completion(repair=False)
+
+    def test_remote_failure_reuses_successful_coverage_repair_and_targets(self):
+        self.enable_remote()
+        self.finish_repair_batch()
+        path = self.run / "quality/rounds/0001/audit.json"
+        audit = json.loads(path.read_text())
+        audit["data"]["coverage"].append({"user_task": "恢复备份", "outcome": "gap",
+            "reason": "必要恢复证据未交接", "evidence": [], "blocking_candidates": []})
+        write_json(path, audit)
+        self.reach("quality:complete")
+        registry = copy.deepcopy(self.state["requirement_registry"])
+        versions = flow.main_versions(self.state)
+        with patch.object(flow, "_task", return_value=("已补齐恢复备份证据", None)) as task, \
+             patch.object(flow, "sync_repositories", side_effect=RuntimeError("root 网络失败")) as sync:
+            with self.assertRaises(RuntimeError) as caught:
+                self.execute()
+            result = flow.record_failure(self.run, self.state, caught.exception)
+            self.assertEqual(result["status"], "failed")
+            self.assertFalse(flow.is_completed(self.state))
+            self.assertEqual(self.state["current_node"], "quality:complete")
+            task.assert_awaited_once()
+            sync.assert_called_once()
+        self.state = read_state(self.run)
+        with patch.object(flow, "_task", side_effect=AssertionError("不能重跑补证")), \
+             patch.object(flow, "_local_completion", side_effect=AssertionError("应复用本地成功结果")), \
+             patch.object(flow, "sync_repositories", return_value=[]) as sync:
+            self.execute()
+        sync.assert_called_once_with(self.run, self.state, self.run / "quality/push.json", targets=versions)
+        self.assertTrue(flow.is_completed(self.state))
+        self.assertEqual(self.state["requirement_registry"], registry)
+
+    def test_remote_authentication_failure_is_blocked_and_recoverable(self):
+        self.enable_remote()
+        self.reach("quality:complete")
+        with patch.object(flow, "sync_repositories", side_effect=flow.RemoteBlocked("root 缺少 SSH 写权限")):
+            with self.assertRaises(flow.RemoteBlocked) as caught:
+                self.execute()
+        result = flow.record_failure(self.run, self.state, caught.exception)
+        self.assertEqual(result["status"], "blocked")
+        self.assertTrue(result["blocked"]["required_inputs"])
+        self.assertIsNone(result["error"])
+        with patch.object(flow, "sync_repositories", return_value=[]):
+            self.execute()
+        self.assertTrue(flow.is_completed(self.state))
+
+    def test_remote_success_result_recovers_without_another_push(self):
+        self.enable_remote()
+        self.reach("quality:complete")
+        with patch.object(flow, "sync_repositories", return_value=[]) as sync, \
+             patch.object(flow, "_advance", side_effect=OSError("推进中断")):
+            with self.assertRaises(OSError):
+                self.execute()
+        sync.assert_called_once()
+        self.state = read_state(self.run)
+        with patch.object(flow, "sync_repositories") as sync:
+            self.execute()
+            self.execute()
+        sync.assert_not_called()
+        self.assertTrue(flow.is_completed(self.state))
+
     def test_result_paths_reject_symbolic_links(self):
         external = self.base / "outside"
         external.mkdir()

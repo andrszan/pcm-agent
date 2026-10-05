@@ -281,6 +281,41 @@ with adopt_execution_locks(root, 'source-quality', sys.argv[3], 1) as locks:
         with self.assertRaises(RuntimeError):
             run_quality._numeric_step(state)
 
+    def test_remote_completion_uses_same_node_for_full_and_named_resume_without_sdk_retry(self):
+        from common.timing import StepTiming
+        from quality import workflow
+        path = self.create()
+        state = read_state(path)
+        state.update(current_node="quality:complete", blocked=None, error=None,
+                     active_requirement=None, requirement_cycle=None,
+                     requirement_registry={"requirements": [{"id": "BR-001", "status": "completed", "completion": {"step": 18}}]},
+                     remote_sync={"enabled": True, "project_name": "product", "repositories": {}})
+        write_state(path, state)
+        local = {"data": {"versions": {"root": "a" * 40}}, "summary": "本地核验完成"}
+        registry = copy.deepcopy(state["requirement_registry"])
+        seen = []
+        def child(command, *unused):
+            node = command[command.index("--node") + 1]
+            seen.append(node)
+            return run_quality._execute_node(SimpleNamespace(resume="quality", node=node), None, StepTiming())
+        with patch.object(run_quality, "_workflow", return_value=workflow), \
+             patch.object(workflow, "_prior", return_value={"coverage": [], "required_inputs": []}), \
+             patch.object(workflow, "_local_completion", return_value=local) as prepare, \
+             patch.object(workflow, "sync_repositories", side_effect=[RuntimeError("root 网络失败"), workflow.RemoteBlocked("root 缺少 SSH 权限"), []]) as sync, \
+             patch.object(run_step.time, "sleep") as sleep, \
+             patch.object(run_all, "run_child", side_effect=child):
+            self.assertEqual(run_quality.main(["--resume", "quality"]), 1)
+            self.assertEqual(read_state(path)["status"], "failed")
+            self.assertEqual(run_quality.main(["--resume", "quality", "--node", "quality:complete"]), 1)
+            self.assertEqual(read_state(path)["status"], "blocked")
+            self.assertEqual(read_state(path)["requirement_registry"], registry)
+            self.assertEqual(run_quality.main(["--resume", "quality"]), 0)
+            self.assertTrue(workflow.is_completed(read_state(path)))
+            self.assertEqual(sync.call_count, 3)
+            prepare.assert_called_once()
+            sleep.assert_not_called()
+        self.assertEqual(seen, ["quality:complete", "quality:complete"])
+
     def test_generic_failure_does_not_retry_and_invalid_message_does_not_execute(self):
         path = self.create()
         message = self.root / "message.txt"

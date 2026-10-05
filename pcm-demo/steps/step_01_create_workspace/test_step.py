@@ -208,7 +208,7 @@ class WorkspaceStepTests(unittest.TestCase):
                     {"name": "规则研发团队", "email": "team@example.com"}
                     if explicit else {"name": "rulefolio", "email": "rulefolio@example.com"}
                 )
-                with patch.object(run_step, "DEMO_ROOT", demo_root):
+                with patch.object(run_step, "DEMO_ROOT", demo_root), patch.object(run_step, "remote_preflight"):
                     run_dir, state, _ = run_step.load_or_create_step_one_run(args)
                     with (
                         patch.object(run_step.LLMConfig, "load", return_value=object()),

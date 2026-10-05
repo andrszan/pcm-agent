@@ -10,5 +10,5 @@ def git_environment() -> dict[str, str]:
     }
     return {
         key: value for key, value in os.environ.items()
-        if not key.startswith("GIT_") or key in preserved
+        if (not key.startswith("GIT_") or key in preserved) and key.upper() != "PCM_GITLAB_TOKEN"
     }

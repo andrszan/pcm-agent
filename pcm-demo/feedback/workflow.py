@@ -16,6 +16,8 @@ from common.decision import render_decision_system_prompt, request_decision
 from common.error_diagnostics import redact_text
 from common.files import resolve_workspace_output, write_json
 from common.openai_responses import parse_response
+from common.gitlab import RemoteBlocked
+from common.remote_sync import enabled as remote_sync_enabled, sync_repositories
 from common.state import write_state
 from common.timing import beijing_now
 from config import LLMConfig
@@ -131,6 +133,7 @@ def new_state(source_state: dict[str, Any], source_run_id: str, run_id: str) -> 
     )}
     return {
         **copied, "run_id": run_id, "source_run_id": source_run_id, "workflow": WORKFLOW,
+        **({"remote_sync": copy.deepcopy(source_state["remote_sync"])} if remote_sync_enabled(source_state) else {}),
         "phase": PHASE, "current_node": "feedback:prepare", "step": None, "current_step": None,
         "status": "success", "blocked": None, "error": None, "active_requirement": None, "requirement_cycle": None,
         "feedback": {"entry_versions": {}, "baseline_requirement_ids": [
@@ -190,7 +193,8 @@ def record_failure(run_dir: Path, state: dict[str, Any], error: Exception) -> di
         if previous.get("status") == "success" and _node(state) != "select_requirement":
             return previous
     message = redact_text(str(error))
-    blocked = {"reason": message, "required_inputs": [redact_text(value) for value in error.required_inputs]} if isinstance(error, FeedbackBlocked) else None
+    blocked = ({"reason": message, "required_inputs": [redact_text(value) for value in getattr(error, "required_inputs", [message])]}
+               if isinstance(error, (FeedbackBlocked, RemoteBlocked)) else None)
     saved = {"phase": PHASE, "node": state["current_node"], "status": "blocked" if blocked else "failed",
              "summary": message, "outputs": [], "blocked": blocked,
              "error": None if blocked else (error.as_error() if hasattr(error, "as_error") else {"type": type(error).__name__, "message": message})}
@@ -641,6 +645,20 @@ def _select(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
 
 
 def _complete(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
+    enabled = remote_sync_enabled(state)
+    prepared_path = _path(run_dir, "local-completion")
+    if enabled and prepared_path.exists():
+        prepared = _read(prepared_path)
+    else:
+        prepared = _local_completion(run_dir, state)
+        if enabled:
+            _write(prepared_path, prepared)
+    if enabled:
+        sync_repositories(run_dir, state, _path(run_dir, "push"), targets=prepared["data"]["versions"])
+    return _success(run_dir, state, prepared["data"], prepared["summary"])
+
+
+def _local_completion(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
     triage, routed, pooled = (_prior(run_dir, name) for name in ("triage", "route", "pool"))
     report = RoutingReport.model_validate({key: routed[key] for key in RoutingReport.model_fields})
     validate_routing(report, triage, state["requirement_registry"]["requirements"])
@@ -696,15 +714,15 @@ def _complete(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
     ) or "无候选") + "。")
     summary.append("未纳入与待补充事项按实际处置保留，不代表全部反馈已解决。")
     current_summary = "\n".join(summary)
-    return _success(run_dir, state, {"versions": versions, "completed_requirement_ids": batch,
-                                    "document_path": triage["document_path"],
-                                    "summary": current_summary + "\n分诊时摘要：" + triage["summary"]
-                                    + "\n范围决定时摘要：" + routed["summary"]
-                                    + "\n前期摘要与限制按阶段保留，不作为当前未完成清单，也不推定其它限制已解除。",
-                                    "candidates": triage["candidates"], "dispositions": routed["decisions"],
-                                    "requirement_bindings": pooled["plan"],
-                                    "limitations": ["分诊时：" + text for text in triage["limitations"]]},
-                    current_summary)
+    return {"data": {"versions": versions, "completed_requirement_ids": batch,
+                     "document_path": triage["document_path"],
+                     "summary": current_summary + "\n分诊时摘要：" + triage["summary"]
+                     + "\n范围决定时摘要：" + routed["summary"]
+                     + "\n前期摘要与限制按阶段保留，不作为当前未完成清单，也不推定其它限制已解除。",
+                     "candidates": triage["candidates"], "dispositions": routed["decisions"],
+                     "requirement_bindings": pooled["plan"],
+                     "limitations": ["分诊时：" + text for text in triage["limitations"]]},
+            "summary": current_summary}
 
 
 async def run_node(run_dir: Path, state: dict[str, Any], *, resume_message: ResumeMessage | None = None) -> dict[str, Any]:

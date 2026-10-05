@@ -16,6 +16,8 @@ from common.decision import render_decision_system_prompt
 from common.error_diagnostics import redact_text
 from common.files import resolve_workspace_output, write_json
 from common.openai_responses import parse_response
+from common.gitlab import RemoteBlocked
+from common.remote_sync import enabled as remote_sync_enabled, sync_repositories
 from common.state import write_state
 from config import LLMConfig
 from quality.git import (
@@ -150,6 +152,7 @@ def new_state(source_state: dict[str, Any], source_run_id: str, run_id: str) -> 
         "workspace": copy.deepcopy(source_state["workspace"]),
         "applicable_repositories": copy.deepcopy(source_state["applicable_repositories"]),
         "repositories": copy.deepcopy(source_state["repositories"]),
+        **({"remote_sync": copy.deepcopy(source_state["remote_sync"])} if remote_sync_enabled(source_state) else {}),
         "requirement_registry": copy.deepcopy(source_state["requirement_registry"]),
         "active_requirement": None, "requirement_cycle": None,
         "quality": {
@@ -215,7 +218,8 @@ def record_failure(run_dir: Path, state: dict[str, Any], error: Exception) -> di
         if previous.get("status") == "success" and _node(state) != "select_requirement":
             return previous
     message = redact_text(str(error))
-    blocked = {"reason": message, "required_inputs": error.required_inputs} if isinstance(error, QualityBlocked) else None
+    blocked = ({"reason": message, "required_inputs": [redact_text(value) for value in getattr(error, "required_inputs", [message])]}
+               if isinstance(error, (QualityBlocked, RemoteBlocked)) else None)
     details = error.as_error() if hasattr(error, "as_error") else {"type": type(error).__name__, "message": message}
     status = "blocked" if blocked else "failed"
     value = {"phase": PHASE, "node": state["current_node"], "round": _round(state), "status": status,
@@ -618,6 +622,21 @@ def _select(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
 
 
 def _complete(run_dir: Path, state: dict[str, Any], *, coverage_report: str | None = None) -> dict[str, Any]:
+    enabled = remote_sync_enabled(state)
+    prepared_path = _path(run_dir, "quality/local-completion.json")
+    if enabled and prepared_path.exists():
+        prepared = _read(prepared_path)
+    else:
+        prepared = _local_completion(run_dir, state, coverage_report=coverage_report)
+        if enabled:
+            # 推送失败只恢复同步，不重新开启已经成功的补证会话。
+            _write(prepared_path, prepared)
+    if enabled:
+        sync_repositories(run_dir, state, _path(run_dir, "quality/push.json"), targets=prepared["data"]["versions"])
+    return _success(run_dir, state, prepared["data"], prepared["summary"])
+
+
+def _local_completion(run_dir: Path, state: dict[str, Any], *, coverage_report: str | None = None) -> dict[str, Any]:
     audit = _prior(run_dir, state, "audit")
     routed = _prior(run_dir, state, "route")
     report = RoutingReport.model_validate({key: routed[key] for key in RoutingReport.model_fields})
@@ -663,14 +682,18 @@ def _complete(run_dir: Path, state: dict[str, Any], *, coverage_report: str | No
         raise RuntimeError("本次审计尚未满足直接完成条件")
     elif versions != audit["versions"]:
         raise RuntimeError("本次审计未覆盖当前版本")
-    return _success(run_dir, state, {"versions": versions, "audit_round": _round(state),
-                                    "completed_requirement_ids": batch,
-                                    "summary": "本次完整审计及纳入需求处理完成",
-                                    "limitations": audit["limitations"],
-                                    "dispositions": routed["decisions"]}, "一次审计及本批修复已完成")
+    return {"data": {"versions": versions, "audit_round": _round(state),
+                     "completed_requirement_ids": batch,
+                     "summary": "本次完整审计及纳入需求处理完成",
+                     "limitations": audit["limitations"],
+                     "dispositions": routed["decisions"]}, "summary": "一次审计及本批修复已完成"}
 
 
 async def _finish(run_dir: Path, state: dict[str, Any], message: ResumeMessage | None) -> dict[str, Any]:
+    if remote_sync_enabled(state) and _path(run_dir, "quality/local-completion.json").exists():
+        if message:
+            raise RuntimeError("本地质量核验已完成，当前只恢复远程同步，不能投递补证消息")
+        return _complete(run_dir, state)
     audit = _prior(run_dir, state, "audit")
     routed = _prior(run_dir, state, "route")
     gaps = [row for row in audit["coverage"] if row["outcome"] == "gap"]

@@ -21,7 +21,7 @@ PCM 自动化流程接收产品想法或初稿及可选的客户初始资料；�
 → 项目准备核验
 → 基础工程项目化、项目风格定制与基础品牌资产准备
 → 总体技术方案
-→ 首次提交适用仓库
+→ 首次提交适用仓库、建立远程仓库并首次推送
 → 必要的工程架构设计和按需 UI/UX 框架
 → Backlog 拆分
 → 解析 Backlog 并初始化需求注册表
@@ -135,9 +135,17 @@ PCM 为 Claude Agent SDK 显式配置独立 Anthropic Messages 网关与受保�
 
 发现这类问题时保存阻塞原因、所需输入和当前步骤，停止流程。人补齐资源后重新执行当前步骤，确认阻塞已经解除，再继续后续流程。
 
-### 7. 默认只操作本地环境
+### 7. 本地开发与显式远程同步
 
-Demo 和默认 PCM 流程只进行本地文件修改、测试、构建、服务运行、本地 Git 提交和本地分支合并，不自动 push、部署或操作生产环境。
+开发、验证、提交和合并仍在本地进行。后续新建产品启用远程同步合同：第 8 步本地首次提交完成后建立 private 远程仓库并首推，在阶段一、阶段二和阶段三每批收尾时同步已有 `main` 提交；不包含部署或生产环境操作。
+
+父 group 固定为 `https://gitlab.com/baiyiyu/andrszan/pcm-projects`，产品 subgroup 使用第 1 步稳定工程名。根仓名为 `<项目名>`，适用代码仓为 `<项目名>-frontend`、`<项目名>-backend`，不为不适用端创建空仓。通过 GitLab API 创建空 private 对象，SSH 绑定 `origin` 并推送；工具授权由受保护的 PCM 配置键 `PCM_GITLAB_TOKEN` 提供，SSH 身份另行具备对应分支写权限。令牌不进入产品配置、资源清单、模型、URL 或日志，新运行在昂贵开发前做只读认证准备核验；实际创建与写权限以初始化执行为准。
+
+`push-changes` 仅允许显式调用，通用脚本随该 Skill 分发。PCM 自动收尾和手动产品命令直接复用脚本，不启动推送 Agent。推送前整批核对独立仓库、clean main、唯一实际 push 地址和目标 SHA，代码仓先、根仓最后；不自动提交、切换分支、拉取、合并、强推、推送其它分支或标签。三仓没有原子发布语义，部分成功后保留现场，恢复查询远程事实，只补未完成项。
+
+第 8 步和各阶段收尾先保存已核验本地目标版本，远程失败不能重新选择后来新增的提交。阶段一通过 `phase_1:complete` 收尾，成功进入 `phase_1:completed`；只完成最后一条需求还不能作为质量来源。质量、反馈沿用各自 complete 节点，成功后才发布 completed；同步失败不撤销已完成需求，也不重新审计或提交文档。缺少不可替代授权返回 `blocked`，网络及 Git 冲突返回 `failed`，不套用 Agent SDK 的长时重试。
+
+新质量／反馈 run 显式继承来源的远程同步约定；缺少该约定的旧 run 保持原恢复行为，不因出现 token 或 origin 自动升级。旧产品由负责人自行绑定远程后可显式手动推送，不回退补跑初始化。完整设计及验证边界见 [GitLab 远程仓库与推送 TRD](../../pcm-demo/docs/trd/20261005-PCM%20Demo%20GitLab远程仓库与推送%20TRD.md)，命令入口见 [Demo 远程同步说明](../../pcm-demo/README.md#远程仓库与推送)。
 
 ## 三、最小步骤协议
 
@@ -429,10 +437,11 @@ Demo 从第 1 步开始，通过 `--product-draft` 接收 UTF-8 文本文件路�
 - 能力：这是第一次全仓提交检查和干净基线节点。Python 执行确定性输入、状态及 Git 核验，并为已登记提交身份的新产品配置仓库本地身份；存在未提交变更时，才在产品根创建一个 Claude Agent SDK session，显式调用 `commit-changes`。
 - 输入：权威有序仓库严格为 `['root', *steps/04.json.outputs]`；每个权威路径必须是自身 top-level、`main` 的独立 Git 仓库。不从固定前后端目录、历史状态或 Agent 回复扩充该清单。
 - 提交身份：仓库边界核验后，若本 run 有 `state.git_identity`，Python 在干净快速完成或调用 Agent 之前，对全部权威仓库执行 `git config --local --replace-all user.name`、`user.email`，并读取本地配置及 `git var GIT_AUTHOR_IDENT`、`GIT_COMMITTER_IDENT` 核验实际生效身份。身份记录未确定、无效、写入失败或被其它配置／环境覆盖时返回 `failed`，不调用提交 Agent。只修改产品仓库本地配置，不改全局配置、其它项目或提交历史；没有该字段的旧 run 保持原行为。
-- 执行动作：Python 用 `git rev-parse --show-toplevel`、`git branch --show-current`、`git status --porcelain` 读取每仓事实。完成适用的身份配置后，若全部干净且没有待投递的人工恢复消息，在创建 conversation/session 或写入 `running` 前零 Agent、零决策模型调用，直接成功并记录全仓干净基线。合法人工恢复消息仍须交给原会话，不能因现场已干净而丢弃。任一仓 dirty 时，初始 prompt 首行是 `/commit-changes`，只给仓库清单及边界；Agent 负责暂存与提交，Python 不逐仓派发、不 `add`、不 `commit`、不 `reset`、`amend` 或 `rebase`。Agent 不得切换分支、改写历史或 push。
+- 执行动作：Python 用 `git rev-parse --show-toplevel`、`git branch --show-current`、`git status --porcelain` 读取每仓事实。完成适用的身份配置后，若全部干净且没有待投递的人工恢复消息，零 Agent、零决策模型调用即可确认本地基线；未启用远程的旧 run 直接成功，新 run 还须完成本节远程收尾。合法人工恢复消息仍须交给原会话，不能因现场已干净而丢弃。任一仓 dirty 时，初始 prompt 首行是 `/commit-changes`，只给仓库清单及边界；Agent 负责暂存与提交，Python 不逐仓派发、不 `add`、不 `commit`、不 `reset`、`amend` 或 `rebase`。Agent 不得切换分支、改写历史或 push。
 - 输出：`steps/08.json` 的 `outputs` 固定为空，并保存 `applicable_repositories` 和 `repositories` 列表；每项为相对 `path`、`branch`、`worktree_clean`。状态保存同样事实但路径为绝对路径，成功推进到 `project:09_engineering_architecture`。
-- 完成条件：每仓自身 top-level、`main` 且 `status --porcelain` 为空。无需检查 HEAD、提交是否产生、提交数、父提交、SHA、marker、历史替换或根 tree。
-- 恢复：`completed` 后 Python 只读复验；仍 dirty 则以固定 repair prompt 继续同一 session。`blocked` 后重读，已全干净且没有待投递人工消息时直接成功，仍 dirty 则保留真实阻塞。恢复先读现场；有合法人工消息时恢复原 session、投递后再复验，其余全干净现场可直接成功。`failed` / `blocked` 的步骤结果不能当作成功；只有 `status=success` 可幂等复用。成功后的第 9 步状态若权威仓库变 dirty，拒绝复用，避免第 8 步替后续修改提交。
+- 完成条件：每仓自身 top-level、`main` 且 `status --porcelain` 为空。本地提交部分不要求提交数量、父提交或历史形状；启用远程的新 run 另外要求可推送的 HEAD、预期 private 绑定、首推成功、默认 main 与可解析的 upstream，远程 SHA 等于固定的本地完成版本。
+- 远程收尾：本地完成后先保存目标 SHA，再由程序创建 subgroup 和适用空项目、登记对象 ID 与预期地址、绑定 origin，复用通用脚本首推并核验默认分支和 upstream。已登记且身份一致的对象可恢复复用；未知同名对象、不同 origin、创建结果未确认或目标漂移均停止，不接管、覆盖或删除。远程失败后的 dirty 或新 HEAD 不进入提交修复，不把后来改动混入原首推。原 outputs 和仓库清单交接不变。
+- 恢复：本地提交尚未完成时，`completed` 后 Python 只读复验；仍 dirty 则以固定 repair prompt 继续同一 session。`blocked` 后重读，已全干净且没有待投递人工消息时可直接确认本地部分，仍 dirty 则保留真实阻塞。合法人工消息交给原提交会话；本地完成版本已经冻结后，只恢复远程准备与同步，不重新调用提交 Agent。`failed` / `blocked` 不能当作成功；新 run 的 success 必须包含远程完成结果，不能因全仓 clean 跳过。result 已写但 state 未推进时核对本步骤完成事实后补推进；成功后第 9 步若仓库变 dirty，拒绝复用，避免第 8 步替后续修改提交。旧 run 仍按原本地恢复合同执行。
 - 第 9 步更新后的 prompt 合同及第 9～11 步相关自动化已完成本轮验证：第 9 步定向 18 项通过（5.498 秒）；第 9～11 步本体合计 51 项（18+18+15）通过；公共循环加第 9～11 步本体及第 10/11 步 CLI 的相关回归 97 项通过（20.800 秒）；当前工作树全量 351 项 `unittest` 通过（61.878 秒）；`compileall common steps run_step.py run_all.py test_run_step_retry.py test_run_all.py` 与本次目标 `git diff --check` 通过。当前工作树还包含其它公共循环/CLI 的未提交修改，故全量结果是当前工作树验证，不能全部归因于第 9 步。第 9 步新版 prompt 合同尚未执行安全的 fresh 真实 Claude Agent、AI-compatible 负责人或 `/commit-changes` 集成；`step01-mendmark` 已推进到第 13 步并保留旧第 9 步 success/session/conversation，旧真实 run 仅为旧合同历史。
 - 真实验证：当前合同已在真实 run `pcm-demo/runs/step01-mendmark` 和产品工作区 `/Users/zhou/resource/fireworks/ANDRSZAN/pcm-products/mendmark` 完成验证；run 目录名与 state 内历史 `run_id` 不一致是既有已知事实。权威仓库为 `root/frontend/backend`，第 4 步 `outputs` 为 `frontend/backend`；首次执行前三仓均为自身 top-level、`main`、dirty 且 HEAD 不存在。
 - 环境恢复：首次执行只启动 `initialize_repositories` session `f6d42df8-13e5-437b-ada3-eef1015ecc87`。Agent 尝试内置 Explore 时遇到环境未识别模型 `gpt-5.6-sol[1m]`，无 Result、无 Git 变化，挂起进程停止后保存 session、conversation 和 init 证据；这是环境内部子代理问题，不是第 8 步业务或 Git 逻辑失败。仅在 Git 忽略的真实 run 历史中追加普通恢复指令“不要使用子代理/Explore，直接工具完成”，生产 prompt 和代码未改变，并恢复同一 session。
@@ -496,7 +505,7 @@ Demo 从第 1 步开始，通过 `--product-draft` 接收 UTF-8 文本文件路�
 ### 第 13 步：选择需求并建立统一需求分支
 
 - **已实现范围**：纯 Python 确定性节点，零 AI、Claude Agent、Skill、产品文件改动、提交、合并和 push；`run_step.py` 支持第 1～18 步；第 18 步已实现并真实验证。
-- **输入与选择**：直接消费 state 中的有序 `applicable_repositories`、精确对应 workspace 的仓库名称与路径，以及当前 `requirement_registry`；不回读历史 `steps/08.json`、`steps/12.json` 或复验 `source`。注册表是阶段一需求生命周期真源；第 12 步负责完整静态校验，第 13 步只检查选择与恢复所需字段、ID 唯一性、顺序类型、依赖引用和动态状态，不重跑连续顺序或依赖图校验。仓库描述允许附加字段，历史分支与 clean 标记不替代当前 Git 预检。只从 `pending` 中选择依赖均为 `completed` 且 `order` 最小的一项；没有 pending 时该步骤无副作用失败，完整编排器负责结束阶段一或显式串联独立质量 run；有 pending 而无候选是注册表状态错误。
+- **输入与选择**：直接消费 state 中的有序 `applicable_repositories`、精确对应 workspace 的仓库名称与路径，以及当前 `requirement_registry`；不回读历史 `steps/08.json`、`steps/12.json` 或复验 `source`。注册表是阶段一需求生命周期真源；第 12 步负责完整静态校验，第 13 步只检查选择与恢复所需字段、ID 唯一性、顺序类型、依赖引用和动态状态，不重跑连续顺序或依赖图校验。仓库描述允许附加字段，历史分支与 clean 标记不替代当前 Git 预检。只从 `pending` 中选择依赖均为 `completed` 且 `order` 最小的一项；没有 pending 时该步骤无副作用失败，完整编排器负责阶段一收尾：启用远程的新 run 进入 `phase_1:complete`，同步成功后才可结束或串联独立质量 run；旧 run 沿用本地完成判断；有 pending 而无候选是注册表状态错误。
 - **fresh 与 intent**：在任何 state/Git 写入前，全局核验全部适用仓为自身非符号链接 top-level、clean local `main`、HEAD/local `main` 相等、目标分支不存在且没有进行中的 merge、rebase、cherry-pick 或 revert。通过后先写 `active_requirement`（仅 ID）及 cycle：`branch: req/<lowercase-id>`、按仓名映射的 `base_sha`、`return_node_after_completion`，再以 `git switch -c <branch> <base>` 建立全部统一分支。第 13 步后续只校验自己拥有的活动需求、统一分支、仓库集合和每仓 `base_sha`；第 14、15、17 步可追加自身字段，但不得改变这些选择与基线证据。
 - **结果、恢复与 CLI**：success 仅写 `steps/requirements/<ID>/13.json`，仓库 path 为 `.` 或仓库名，随后推进 `requirement:14_trd_design`。partial 现场按记录 base 恢复；scoped success 已写但 state 未推进时先只读核验 target/base/clean 后补 state；已推进后续节点时不读 Git。CLI 只以当前 active/cycle 的第 13 步核心投影和完整 scoped success 保护当前需求，历史需求 result 不保护当前需求；只有 state 仍位于第 13 步自身锚点时，失败才可持久化，误调历史步骤不得覆盖已推进节点。
 - **真实验证**：初次 `step01-mendmark` 运行选择 `BR-001` 并建立三仓 `req/br-001`。第 14 步前用户将新 TRD 命名规则提交到产品 root，导致 root `main` 和旧需求分支从原记录 base 前进；经用户明确选择后，先完整归档 run，确认三仓旧需求分支均无独有提交并安全删除，只重置 BR-001 的第 13 步 cycle/result，再从最新 `main` 重跑。bases 为 root `a7d5509df6843a06315aa803d87285569b86e355`、frontend `dbab574dbe4d83a02323a750afd04de007565ac5`、backend `9682be837759c20f1a9ebbdf8fa2cfc09c2768d4`；第 14、15、17 步随后追加 TRD、development session 和提交证据而未改变这些基线。第 18 步已将三仓 local main ff-only 到记录 tip并删除 `req/br-001`，BR-001 已完成，state 返回 `phase_1:select_requirement` / step 13。
@@ -601,7 +610,7 @@ Demo 从第 1 步开始，通过 `--product-draft` 接收 UTF-8 文本文件路�
 
 有纳入和无纳入批次都先保存合法分流结果；仍有独立必要缺口时，在既有 `quality:complete` 节点续接原审计会话，仅补该缺口。缺少不可替代外部条件保持 `blocked`，本地或材料错误保持 `failed`；条件补齐后使用同一 run 的普通恢复或原会话恢复消息继续。已由正式需求完成的原场景回归继续有效，不重跑需求、不重复完整审计，也不修改原审计、分流或入池结果。
 
-修复验证由第 15 步负责，失败在当前需求内处理。完成结果保存本次审计、处置、已完成修复及限制，表示本次审计和处理任务已完成。
+修复验证由第 15 步负责，失败在当前需求内处理。完成结果保存本次审计、处置、已完成修复及限制；启用远程时先保存本地完成结果及目标版本，再同步适用仓库 main，全部成功后才进入 `quality:completed`。推送失败恢复复用该本地结果，只核对版本与远程同步，不重新执行已经成功的补证会话。
 
 ## 八、阶段三：人工反馈驱动迭代（可选）
 
@@ -662,6 +671,7 @@ AI 负责人依据本批意图、分诊结论和当前产品事实作出取舍�
 - 所有原始反馈均有明确归属或处置；已纳入目标全部由正式需求承接。
 - 本批需求完成原场景或目标结果验证、相关回归、提交与合并，没有活动或 pending 需求。
 - 各适用仓库位于 clean main，反馈文档与相关设计已提交，最终版本与本批合并结果一致。无纳入项时仅保留实际反馈文档变更，代码仓保持核验版本。
+- 来源启用远程时，本地完成结果及目标版本已经保存，适用仓库 main 已成功同步后才进入 `feedback:completed`；失败只恢复同步，不重开反馈分诊或文档提交。
 - 未纳入、待补证和待决项有真实依据及必要后续条件；不存在被静默延期的本批必达事项，也不存在以处置标签掩盖的执行失败或必要验证缺口。
 
 完成结果基于反馈文档、正式需求关联和当前 run 的完成事实，说明哪些反馈改了、改成什么、哪些合并处理、哪些未纳入及原因、哪些仍需信息或授权。前期分诊限制与范围决定摘要保留时明确标注所属阶段，不直接当作当前未完成结论，也不通过解析旧文案猜测限制已经解除。已显式启动且只有正向体验信号的批次可用简短处置摘要收口，推荐项为空，不制造需求。不另建长期反馈台账；“本批处理完成”不等于“所有反馈均已解决”，也不要求人再次回复满意才结束。

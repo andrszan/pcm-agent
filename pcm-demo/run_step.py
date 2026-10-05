@@ -34,6 +34,8 @@ from common.coordination import (
 from common.error_diagnostics import exception_projection, write_diagnostic
 from common.files import sha256
 from common.git_identity import parse_git_identity
+from common.gitlab import RemoteBlocked, preflight as remote_preflight
+from common.remote_sync import enabled as remote_sync_enabled
 from common.requirement_context import phase_for, selection_node_for
 from common.state import (
     create_run_dir,
@@ -567,6 +569,7 @@ def load_or_create_step_one_run(args: argparse.Namespace) -> tuple[Path, dict[st
         },
         "publication_phase": None,
         "git_identity": requested_identity,
+        "remote_sync": {"enabled": True},
         "blocked": None,
         "error": None,
     }
@@ -600,6 +603,12 @@ def complete_step_one(
     )
     write_state(run_dir, state)
 
+    if remote_sync_enabled(state):
+        try:
+            remote_preflight()
+        except RemoteBlocked as error:
+            raise WorkspaceBlocked(str(error)) from error
+
     if "project" not in state:
         identity, attempts = asyncio.run(
             extract_project_identity(state["input"]["content"], LLMConfig.load())
@@ -625,6 +634,12 @@ def complete_step_one(
     if not workspace_root.is_dir():
         raise RuntimeError(f"产品工作区根目录不存在：{workspace_root}")
     project_name = state["project"]["project_directory_name"]
+    if remote_sync_enabled(state):
+        existing = state["remote_sync"].get("project_name")
+        if existing is not None and existing != project_name:
+            raise RuntimeError("远程产品名与首次确定的项目名不一致")
+        state["remote_sync"]["project_name"] = project_name
+        write_state(run_dir, state)
     final_path = workspace_root / project_name
     staging_path = workspace_root / f"{project_name}.pcm-tmp-{run_id}"
     resources_record = state.get("initial_resources")
@@ -710,6 +725,13 @@ def complete_step_one(
         state["publication_phase"] = "clone_verified"
         write_state(run_dir, state)
         phase = "clone_verified"
+
+    if remote_sync_enabled(state):
+        capability_root = final_path if phase in {"published", "git_initialized"} else staging_path
+        for relative in (".claude/skills/push-changes/SKILL.md", ".claude/skills/push-changes/scripts/push.py"):
+            capability = capability_root / relative
+            if capability.is_symlink() or not capability.is_file() or capability.stat().st_size == 0:
+                raise RuntimeError("固定模板尚未包含完整 push-changes 能力；请先发布已确认的模板版本")
 
     if phase == "clone_verified":
         if not verify_clone(staging_path, state["template"]):

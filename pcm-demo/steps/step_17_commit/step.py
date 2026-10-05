@@ -189,7 +189,7 @@ def _context(run_dir: Path, state: dict[str, Any], *, advanced: bool) -> dict[st
 
 def _git(path: Path, *args: str, allowed: tuple[int, ...] = (0,)) -> subprocess.CompletedProcess[str]:
     try:
-        completed = subprocess.run(["git", *args], cwd=path, text=True, capture_output=True, timeout=120, env={key: value for key, value in os.environ.items() if not key.startswith("GIT_")})
+        completed = subprocess.run(["git", *args], cwd=path, text=True, capture_output=True, timeout=120, env={key: value for key, value in os.environ.items() if not key.startswith("GIT_") and key.upper() != "PCM_GITLAB_TOKEN"})
     except FileNotFoundError as error:
         raise RuntimeError("未安装 Git") from error
     except subprocess.TimeoutExpired as error:

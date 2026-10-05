@@ -80,11 +80,12 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 | 普通领域 Skill | 可以读取状态和 diff；留下待提交变更，不 stage、不 commit、不建分支、不合并、不 push |
 | `dev-workflow` | 完成实现与验证并报告受影响仓库；不 stage、不 commit、不建分支、不合并、不 push |
 | `session-rule-retrospective` | 只编辑 `.claude/rules/`，不提交 |
-| `commit-changes` | 唯一负责精确 stage/commit；按仓库分别显式调用，默认不 push |
+| `commit-changes` | 唯一负责精确 stage/commit；按仓库分别显式调用，不 push |
+| `push-changes` | 只在显式调用时检查并推送已有提交；不提交、合并、改写历史或创建远程仓库 |
 | `dev` Subagent | 不 stage、不 commit、不改 Git 历史 |
 | `reviewer` Subagent | 只读，不改变文件或 Git 状态 |
 
-建分支、切换分支和合并回 `main` 是人工流程中的显式 Git 操作，不属于 `commit-changes`。
+建分支、切换分支和合并回 `main` 是人工流程中的显式 Git 操作，不属于 `commit-changes`。远程建仓和自动推送时机由外层流程决定；`push-changes` 的确定性脚本可独立使用，程序直接调用同一实现，不需要启动 Agent。推送不是完整环境备份，被忽略配置和外部数据仍按各自交付方式管理。
 
 ## 5. 能力分类
 
@@ -105,6 +106,7 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 | `dev-workflow` | 实现功能、Bug 或重构，以自动化、真实运行、浏览器、实际渲染和独立审查证明功能与体验结果 |
 | `session-rule-retrospective` | 从一次真实执行中提炼可复用项目规则，只增量编辑 `.claude/rules/` |
 | `commit-changes` | 分析真实 Git 变更，按功能结果精确创建一个或多个本地提交 |
+| `push-changes` | 显式核对仓库、分支和唯一实际远程地址，只推送已有提交并报告逐仓结果 |
 
 ### 可选技术与工具适配 Skills
 
@@ -162,6 +164,10 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 │   └── reviewer.md
 ├── skills/
 │   ├── commit-changes/SKILL.md
+│   ├── push-changes/
+│   │   ├── SKILL.md
+│   │   ├── scripts/push.py
+│   │   └── tests/test_push.py
 │   ├── dev-workflow/
 │   │   ├── SKILL.md
 │   │   └── evals/evals.json

@@ -9,7 +9,7 @@ from typing import Any
 def git(path: Path, *args: str, optional: bool = False) -> str | None:
     process = subprocess.run(
         ["git", "-C", str(path), *args], capture_output=True, text=True, timeout=120,
-        env={key: value for key, value in os.environ.items() if not key.startswith("GIT_")},
+        env={key: value for key, value in os.environ.items() if not key.startswith("GIT_") and key.upper() != "PCM_GITLAB_TOKEN"},
     )
     if process.returncode:
         if optional and process.returncode == 1:

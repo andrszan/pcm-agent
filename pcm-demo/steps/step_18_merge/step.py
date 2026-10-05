@@ -279,7 +279,7 @@ def _git(
             text=True,
             capture_output=True,
             timeout=120,
-            env={key: value for key, value in os.environ.items() if not key.startswith("GIT_")},
+            env={key: value for key, value in os.environ.items() if not key.startswith("GIT_") and key.upper() != "PCM_GITLAB_TOKEN"},
             input=input,
         )
     except FileNotFoundError as error:
@@ -311,7 +311,7 @@ def _git_write(path: Path, *args: str) -> None:
             text=True,
             capture_output=True,
             timeout=120,
-            env={key: value for key, value in os.environ.items() if not key.startswith("GIT_")},
+            env={key: value for key, value in os.environ.items() if not key.startswith("GIT_") and key.upper() != "PCM_GITLAB_TOKEN"},
         )
     except FileNotFoundError as error:
         raise RuntimeError("未安装 Git") from error

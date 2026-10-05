@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -62,7 +63,8 @@ def prepare_fixture(run_dir: Path) -> dict:
                     root / ".claude/skills/product-experience-audit/SKILL.md")
     for args in (("init", "-b", "main"), ("config", "user.name", "质量探针"),
                  ("config", "user.email", "quality-probe@example.com"), ("add", "."), ("commit", "-m", "test: 隔离便签现场")):
-        subprocess.run(["git", "-C", str(root), *args], capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(root), *args], capture_output=True, check=True,
+                       env={key: value for key, value in os.environ.items() if key.upper() != "PCM_GITLAB_TOKEN"})
     source = {"status": "success", "phase": "phase_1_requirement_development", "step": 13, "current_step": 13,
               "current_node": "phase_1:select_requirement", "active_requirement": None, "requirement_cycle": None,
               "blocked": None, "error": None, "workspace": {"root": str(run_dir), "final_path": str(root)},

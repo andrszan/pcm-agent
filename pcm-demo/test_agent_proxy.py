@@ -26,6 +26,13 @@ class AgentProxyTest(unittest.TestCase):
             config = AgentConfig.load(path)
             return config, filtered_env(config, "test-model")
 
+    def test_gitlab_tool_token_is_cleared_from_agent_environment(self):
+        for key in ("PCM_GITLAB_TOKEN", "pcm_gitlab_token", "Pcm_Gitlab_Token"):
+            with self.subTest(key=key):
+                _, env = self.load(environment={key: "test-gitlab-only-secret"})
+                self.assertEqual(env[key], "")
+                self.assertNotIn("test-gitlab-only-secret", env.values())
+
     def test_file_proxy_reaches_sdk_without_parent_proxy(self):
         _, env = self.load(
             "HTTP_PROXY=http://proxy.invalid:7890\n"

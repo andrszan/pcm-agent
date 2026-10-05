@@ -29,6 +29,8 @@ from common.coordination import (
     share_product_execution_locks,
 )
 from common.git_identity import parse_git_identity
+from common.files import write_json
+from common.remote_sync import enabled as remote_sync_enabled, sync_repositories
 from common.state import read_state, step_result_status, write_state
 from common.timing import print_timing_summary
 from config import load_settings
@@ -262,12 +264,9 @@ def step_for_state(run_dir: Path, state: dict[str, Any]) -> int:
     return expected
 
 
-def phase_one_completed(state: dict[str, Any]) -> bool:
+def _requirements_completed(state: dict[str, Any]) -> bool:
     if (
-        state.get("status") != "success"
-        or state.get("phase") != "phase_1_requirement_development"
-        or (state.get("step"), state.get("current_step"), state.get("current_node"))
-        != (13, 13, "phase_1:select_requirement")
+        state.get("phase") != "phase_1_requirement_development"
         or state.get("active_requirement") is not None
         or state.get("requirement_cycle") is not None
     ):
@@ -276,14 +275,58 @@ def phase_one_completed(state: dict[str, Any]) -> bool:
         _catalog, requirements = registry_handoff(state)
     except RuntimeError:
         return False
-    if not requirements:
-        return False
-    return all(
+    return bool(requirements) and all(
         isinstance(requirement, dict)
         and requirement.get("status") == "completed"
         and requirement.get("completion") == {"step": 18}
         for requirement in requirements
     )
+
+
+def phase_one_completed(state: dict[str, Any]) -> bool:
+    expected = (None, None, "phase_1:completed") if remote_sync_enabled(state) else (13, 13, "phase_1:select_requirement")
+    return (
+        state.get("status") == "success"
+        and (state.get("step"), state.get("current_step"), state.get("current_node")) == expected
+        and _requirements_completed(state)
+    )
+
+
+def _needs_phase_one_completion(state: dict[str, Any]) -> bool:
+    if not remote_sync_enabled(state) or not _requirements_completed(state):
+        return False
+    position = (state.get("step"), state.get("current_step"), state.get("current_node"))
+    return (
+        position == (13, 13, "phase_1:select_requirement") and state.get("status") == "success"
+    ) or (
+        position == (None, None, "phase_1:complete") and state.get("status") in {"running", "failed", "blocked"}
+    )
+
+
+def complete_phase_one(run_dir: Path, state: dict[str, Any]) -> int:
+    from common.gitlab import RemoteBlocked
+
+    if not _needs_phase_one_completion(state):
+        raise RuntimeError("当前运行不属于阶段一远程收尾位置")
+    state.update(status="running", step=None, current_step=None, current_node="phase_1:complete", blocked=None, error=None)
+    write_state(run_dir, state)
+    try:
+        results = sync_repositories(run_dir, state, run_dir / "steps" / "phase_1_push.json")
+    except (OSError, RuntimeError, ValueError) as error:
+        blocked = isinstance(error, RemoteBlocked)
+        status = "blocked" if blocked else "failed"
+        detail = {"reason": str(error)} if blocked else {"type": type(error).__name__, "message": str(error)}
+        state.update(status=status, blocked=detail if blocked else None, error=None if blocked else detail)
+        write_state(run_dir, state)
+        print(f"本地需求已完成，阶段一远程同步{status}：{error}", file=sys.stderr)
+        return 2 if blocked else 1
+    write_json(run_dir / "steps" / "phase_1_complete.json", {
+        "status": "success", "current_node": "phase_1:complete", "repositories": results,
+        "blocked": None, "error": None,
+    })
+    state.update(status="success", current_node="phase_1:completed", blocked=None, error=None)
+    write_state(run_dir, state)
+    return 0
 
 
 def build_step_command(
@@ -438,7 +481,7 @@ def _orchestrate_locked(
     run_id: str,
     run_dir: Path,
     locks: ExecutionLocks,
-    model_policy_snapshot: str,
+    model_policy_snapshot: str | None,
 ) -> int:
     try:
         if args.resume:
@@ -461,7 +504,11 @@ def _orchestrate_locked(
         print_timing_summary(run_dir)
 
 
-def _chain_quality(run_id: str, state: dict[str, Any], locks: ExecutionLocks, snapshot: str) -> int:
+def _chain_quality(run_id: str, state: dict[str, Any], locks: ExecutionLocks, snapshot: str | None) -> int:
+    if snapshot is None:
+        policy = _load_model_policy_from_file()
+        snapshot = _model_policy_snapshot(policy)
+        print(_model_policy_table(policy))
     quality_id = f"{run_id}-quality"
     quality_dir = run_dir_for(quality_id)
     command = [sys.executable, str(DEMO_ROOT / "run_quality.py")]
@@ -488,9 +535,9 @@ def _run_steps(
     run_id: str,
     run_dir: Path,
     locks: ExecutionLocks,
-    model_policy_snapshot: str,
+    model_policy_snapshot: str | None,
 ) -> int:
-    child_env = _child_environment(model_policy_snapshot)
+    child_env = _child_environment(model_policy_snapshot) if model_policy_snapshot is not None else dict(os.environ)
     while True:
         try:
             state = read_state(run_dir) if run_dir.is_dir() else None
@@ -505,6 +552,12 @@ def _run_steps(
             return 0
         try:
             _attach_product_lock(locks, state, run_dir, run_id)
+            if state is not None and _needs_phase_one_completion(state):
+                return_code = complete_phase_one(run_dir, state)
+                if return_code:
+                    _print_stop(run_id, run_dir, args)
+                    return return_code
+                continue
             step = 1 if state is None else step_for_state(run_dir, state)
             command = build_step_command(step, run_id, args, state, locks)
         except Exception as error:  # noqa: BLE001 - 编排器必须给出稳定停止摘要。
@@ -540,9 +593,18 @@ def orchestrate(args: argparse.Namespace) -> int:
     run_id = args.resume or args.run_id or new_run_id()
     run_dir = run_dir_for(run_id)
     try:
-        model_policy = _load_model_policy_from_file()
-        model_policy_snapshot = _model_policy_snapshot(model_policy)
-        print(_model_policy_table(model_policy))
+        try:
+            state = read_state(run_dir) if args.resume and run_dir.is_dir() else None
+        except (OSError, ValueError):
+            state = None
+        finalizing = state is not None and remote_sync_enabled(state) and (
+            _needs_phase_one_completion(state) or phase_one_completed(state)
+        )
+        model_policy_snapshot = None
+        if not finalizing:
+            model_policy = _load_model_policy_from_file()
+            model_policy_snapshot = _model_policy_snapshot(model_policy)
+            print(_model_policy_table(model_policy))
         maximum = load_settings().pcm_max_concurrent_projects
         with acquire_execution_locks(COORDINATION_ROOT, run_id, maximum) as locks:
             return _orchestrate_locked(

@@ -43,6 +43,32 @@ AI-compatible 与 Claude Agent SDK 使用独立配置，不相互回退。`PCM_A
 
 修改 `model-policy.toml` 前必须停止当前编排，再使用 `uv run python run_all.py --resume <run-id>` 从原节点恢复；`run_all.py` 每次启动或恢复只读取一次策略，运行中不会热加载。策略必须完整有效，程序不会用默认模型、环境变量或命令行覆盖兜底。
 
+## 远程仓库与推送
+
+后续新产品默认启用远程同步：第 8 步本地首次提交后建立 private 产品 subgroup 与适用空仓、配置 SSH `origin` 并首推；阶段一、阶段二和阶段三每批收尾再次同步各仓 `main`。固定父 group 为 `baiyiyu/andrszan/pcm-projects`，产品名沿用首次工程目录名，仓库分别为 `<项目名>`、适用的 `<项目名>-frontend` 和 `<项目名>-backend`。
+
+在受保护的 `pcm-demo/.env` 或进程环境提供 `PCM_GITLAB_TOKEN`，对应身份须有固定父 group 下的建组、建仓与必要设置权限；本机 SSH 身份另须能推送这些项目的 `main`。令牌只供 PCM API 使用，不写进产品配置、URL、命令参数或对话。新运行先核验配置与 API 身份；缺失真实授权会 blocked，不伪造凭据或跳过同步。能力代码可在本地安装，但真实 GitLab 建仓／SSH 链路的当前验收状态以 [远程仓库与推送 TRD](docs/trd/20261005-PCM%20Demo%20GitLab远程仓库与推送%20TRD.md) 为准。
+
+临时修改先完成本地提交和必要合并，再执行：
+
+```bash
+# 当前目录为 pcm-demo；读取产品已有登记与适用仓清单，取得产品锁。
+uv run python push_project.py --workspace /absolute/path/to/product
+```
+
+该命令不启动完整工作流、不加载模型、不创建 run、不修改业务完成状态。工作树不干净、分支不是 main、产品锁被占用或远程冲突时停止，不自动提交、切分支、拉取或强推。逐仓报告目标提交和成功、已一致、失败、尚未执行；三仓同步不是原子操作。被忽略配置、数据库和外部文件不属于 Git 备份。
+
+在产品工作区也可显式调用 `/push-changes`，或使用其中的标准库脚本推送明确指定的单仓分支：
+
+```bash
+python3 .claude/skills/push-changes/scripts/push.py \
+  --repo /absolute/path/to/repository --branch req/example
+```
+
+缺少远程同步约定的旧 run 保持原行为，不补建、不迁移。旧产品手工配置远程后可用上述手动入口；新的质量／反馈 run 仅继承来源已经启用的自动同步约定。当前工作区更新不会自动发布远程模板或刷新旧产品的 Skill。
+
+自动推送失败保留已完成需求、部分远程成功和固定目标 SHA，恢复只补当前收尾；目标版本漂移时停止，不把后来的提交纳入旧阶段。阶段一最后一条需求通过单步完成后，须用 `run_all.py --resume <run-id>` 进入 `phase_1:complete`；远程成功后才进入 `phase_1:completed` 并可串联质量阶段。阶段二、三分别用原 `run_quality.py --resume`、`run_feedback.py --resume` 恢复 complete 节点。手动补推成功后仍需恢复原 run，由它核验并发布自己的完成状态。Git 网络错误不进入 Agent SDK 的 6 小时重试。
+
 ## 启动与恢复
 
 ### 新建阶段一运行

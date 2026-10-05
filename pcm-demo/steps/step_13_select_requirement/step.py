@@ -287,7 +287,7 @@ def _git(path: Path, *args: str, allowed_returncodes: tuple[int, ...] = (0,)) ->
             capture_output=True,
             timeout=120,
             env={
-                key: value for key, value in os.environ.items() if not key.startswith("GIT_")
+                key: value for key, value in os.environ.items() if not key.startswith("GIT_") and key.upper() != "PCM_GITLAB_TOKEN"
             },
         )
     except FileNotFoundError as error:

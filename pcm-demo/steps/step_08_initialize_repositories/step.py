@@ -11,6 +11,7 @@ from common.decision import parse_agent_decision, render_decision_system_prompt,
 from common.files import write_json
 from common.git_environment import git_environment
 from common.git_identity import parse_git_identity
+from common.gitlab import RemoteBlocked, finalize_repositories, prepare_repositories
 from common.state import write_state, write_step_result
 from config import LLMConfig
 
@@ -123,7 +124,7 @@ def _git_read(path: Path, *args: str) -> str:
             text=True,
             capture_output=True,
             timeout=120,
-            env=git_environment(),
+            env={key: value for key, value in git_environment().items() if key != "PCM_GITLAB_TOKEN"},
         )
     except FileNotFoundError as error:
         raise RuntimeError("未安装 Git") from error
@@ -180,7 +181,7 @@ def _configure_git_identity(state: dict[str, Any], repositories: list[dict[str, 
                     text=True,
                     capture_output=True,
                     timeout=120,
-                    env=git_environment(),
+                    env={key: value for key, value in git_environment().items() if key != "PCM_GITLAB_TOKEN"},
                 )
             except (OSError, subprocess.TimeoutExpired) as error:
                 raise RuntimeError("无法配置仓库本地 Git 提交身份") from error
@@ -312,6 +313,66 @@ def _record_recovered_completion(run_dir: Path, state: dict[str, Any]) -> None:
         raise RuntimeError("仓库提交决策历史引用不符合约定")
 
 
+def _local_completion_versions(
+    run_dir: Path, state: dict[str, Any], names: list[str], repositories: list[dict[str, Any]],
+    *, save: bool = False,
+) -> dict[str, str] | None:
+    section = state.get("initialize_repositories", {})
+    if not isinstance(section, dict):
+        raise RuntimeError("仓库初始化恢复记录无效")
+    key = "local_completion_versions"
+    if key not in section and not save:
+        return None
+    from quality.git import main_versions
+
+    versions = main_versions({**state, "applicable_repositories": names, "repositories": repositories})
+    if key in section:
+        if section[key] != versions:
+            raise RuntimeError("首次提交完成版本已漂移，保留原目标，不重新启动提交会话")
+    else:
+        state.setdefault("initialize_repositories", {})[key] = versions
+        write_state(run_dir, state)
+    return versions
+
+
+def _initialize_remote(
+    run_dir: Path, state: dict[str, Any], names: list[str], repositories: list[dict[str, Any]],
+) -> None:
+    if "remote_sync" not in state:
+        return
+    from common.remote_sync import enabled, sync_repositories
+
+    enabled(state)
+    # 清单只是已核验的本地事实；远程成功前不发布第 8 步 success。
+    state.update({"applicable_repositories": names, "repositories": repositories})
+    write_state(run_dir, state)
+    try:
+        targets = _local_completion_versions(run_dir, state, names, repositories, save=True)
+        prepare_repositories(run_dir, state)
+        pushed = sync_repositories(run_dir, state, run_dir / "steps/08-push.json", targets=targets)
+        if any(item.get("status") == "blocked" for item in pushed):
+            raise RemoteBlocked("首次推送缺少 SSH 身份、主机信任或写权限；请补齐后恢复第 8 步")
+        if len(pushed) != len(names) or any(item.get("status") not in {"pushed", "unchanged"} for item in pushed):
+            raise RuntimeError("首次推送尚未全部完成，请查阅 steps/08-push.json 后恢复第 8 步")
+        verified = {item.get("name"): item.get("remote_sha") for item in pushed}
+        if verified != targets:
+            raise RuntimeError("首次推送的远程版本与原本地完成目标不一致")
+        finalize_repositories(state, verified_versions=verified)
+        _local_completion_versions(run_dir, state, names, repositories)
+    except RuntimeError as error:
+        is_blocked = isinstance(error, RemoteBlocked)
+        blocked = {"reason": str(error), "required_inputs": [str(error)], "applicable_repositories": names} if is_blocked else None
+        failure = None if is_blocked else {"type": type(error).__name__, "message": str(error)}
+        status = "blocked" if is_blocked else "failed"
+        write_step_result(run_dir, STEP, result(status, str(error), blocked=blocked, error=failure))
+        state.update({"status": status, "step": STEP, "current_step": STEP,
+                      "current_node": CURRENT_NODE, "blocked": blocked, "error": failure})
+        write_state(run_dir, state)
+        if is_blocked:
+            raise InitializeRepositoriesBlocked(str(error), [str(error)], names) from error
+        raise
+
+
 def advance_success(
     run_dir: Path,
     state: dict[str, Any],
@@ -319,9 +380,11 @@ def advance_success(
     repositories: list[dict[str, Any]],
 ) -> dict[str, Any]:
     _record_recovered_completion(run_dir, state)
+    _initialize_remote(run_dir, state, names, repositories)
     saved = result(
         "success",
-        "已完成首次全仓提交检查，权威仓库均位于 main 分支且工作树干净。",
+        ("已完成首次提交、GitLab private 建仓、main 首推及默认分支核验。"
+         if "remote_sync" in state else "已完成首次全仓提交检查，权威仓库均位于 main 分支且工作树干净。"),
         applicable_repositories=names,
         repositories=_result_repositories(repositories),
     )
@@ -368,8 +431,14 @@ async def run(
     resume_message: ResumeMessage | None = None,
 ) -> dict[str, Any]:
     workspace, names = validate_inputs(run_dir, state)
+    if "remote_sync" in state:
+        from common.remote_sync import enabled
+        enabled(state)
     position = (state.get("step"), state.get("current_step"), state.get("current_node"))
     repositories = _repository_facts(workspace, names)
+    local_completion = None
+    if "remote_sync" in state:
+        local_completion = _local_completion_versions(run_dir, state, names, repositories)
 
     if position == (STEP + 1, STEP + 1, NEXT_NODE) and state.get("status") == "success":
         if not _all_clean(repositories):
@@ -379,7 +448,7 @@ async def run(
         raise RuntimeError("运行状态不位于仓库提交锚点")
 
     _configure_git_identity(state, repositories)
-    if _all_clean(repositories) and (resume_message is None or resume_message.consumed):
+    if _all_clean(repositories) and (local_completion is not None or resume_message is None or resume_message.consumed):
         return advance_success(run_dir, state, names, repositories)
 
     _require_resume_anchor(run_dir, state)

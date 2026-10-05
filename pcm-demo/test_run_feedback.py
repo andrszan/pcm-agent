@@ -403,6 +403,34 @@ with adopt_execution_locks(Path(sys.argv[1]), 'feedback', sys.argv[3], 2) as loc
         sleep.assert_called_once_with(30)
         self.assertTrue((path / "logs/feedback-prepare-error.json").is_file())
 
+    def test_remote_completion_uses_same_node_for_full_and_named_resume_without_sdk_retry(self):
+        path = self.create()
+        state = read_state(path)
+        state.update(current_node="feedback:complete", remote_sync={"enabled": True, "project_name": "product", "repositories": {}})
+        write_state(path, state)
+        local = {"data": {"versions": {"root": "a" * 40}}, "summary": "反馈文档已提交"}
+        registry = copy.deepcopy(state["requirement_registry"])
+        seen = []
+        def child(command, *unused):
+            node = command[command.index("--node") + 1]
+            seen.append(node)
+            return run_feedback._execute_node(SimpleNamespace(resume="feedback", node=node), None, StepTiming())
+        with patch.object(workflow, "_local_completion", return_value=local) as prepare, \
+             patch.object(workflow, "sync_repositories", side_effect=[RuntimeError("root 网络失败"), workflow.RemoteBlocked("root 缺少 SSH 权限"), []]) as sync, \
+             patch.object(run_step.time, "sleep") as sleep, \
+             patch.object(run_all, "run_child", side_effect=child):
+            self.assertEqual(run_feedback.main(["--resume", "feedback"]), 1)
+            self.assertEqual(read_state(path)["status"], "failed")
+            self.assertEqual(run_feedback.main(["--resume", "feedback", "--node", "feedback:complete"]), 1)
+            self.assertEqual(read_state(path)["status"], "blocked")
+            self.assertEqual(read_state(path)["requirement_registry"], registry)
+            self.assertEqual(run_feedback.main(["--resume", "feedback"]), 0)
+            self.assertTrue(workflow.is_completed(read_state(path)))
+            self.assertEqual(sync.call_count, 3)
+            prepare.assert_called_once()
+            sleep.assert_not_called()
+        self.assertEqual(seen, ["feedback:complete", "feedback:complete"])
+
     def test_generic_error_does_not_retry_and_blocked_keeps_three_state_contract(self):
         path = self.create()
         for error, status in ((RuntimeError("本地错误"), "failed"),

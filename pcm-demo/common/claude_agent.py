@@ -64,7 +64,7 @@ class ClaudeRunResult:
 def filtered_env(config: AgentConfig, model: str) -> dict[str, str]:
     env = dict(os.environ)
     for name in env:
-        if name.startswith(("PCM_", "LLM_")):
+        if name.startswith(("PCM_", "LLM_")) or name.upper() == "PCM_GITLAB_TOKEN":
             env[name] = ""
         if name in {"ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_MODEL", "ANTHROPIC_SMALL_FAST_MODEL"} or name.startswith((
             "ANTHROPIC_DEFAULT_HAIKU_MODEL",
