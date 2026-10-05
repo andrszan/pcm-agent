@@ -315,7 +315,7 @@ Demo 和默认 PCM 流程只进行本地文件修改、测试、构建、服务�
 恢复与幂等规则：
 
 1. 每个节点开始前保存 `phase`、`current_node` 和已核验输入；节点成功后原子保存输出、事实证据和下一节点；阻塞或失败时保存原因并退出。
-2. 使用 `--resume <run-id>` 加载原工作区和状态；恢复时只重跑当前节点，并按该节点合同重新核验它自己拥有的 intent、session、输出和外部条件，不跨节点重复核验前序步骤已经完成的文件、Git 或其它交接事实，也不依据历史文字直接跳过当前节点。
+2. 使用 `--resume <run-id>` 加载原工作区和状态；恢复时只重跑当前节点，并按该节点合同重新核验它自己拥有的 intent、session、输出和外部条件，不跨节点重复核验前序步骤已经完成的文件、Git 或其它交接事实，也不依据历史文字直接跳过当前节点。错误单步调用不回退或跳过业务节点，也不覆盖其它步骤的既有结果。没有协调记录的旧 run 经直接单步入口恢复时，同样执行产品认领、owner／生命周期核验和稳定 runtime 接线。
 3. 已有 Claude Agent SDK session 时优先恢复：第 14 步恢复 TRD session，第 15、16 步恢复同一 `development_session_id`。第 16 步只负责原 session 复盘和结果推进，不比较工作树增量；实际变更由第 17 步统一读取并提交。
 4. 第 12 步以合法需求注册表和 Backlog 指纹为幂等锚点；第 13 步以活动需求、统一分支计划和各仓 `main` 基线为恢复锚点；第 17 步以各仓最终分支 tip SHA 为提交锚点。第 18 步按非 root 代码仓先、root 最后的固定顺序合并到保存的 tip；在祖先关系、工作树和引用等 Git 安全边界成立时，依据实际 main 确认已合并或继续 fast-forward，不要求 main 仍等于原始 base。全部仓库核验和分支清理成功后才写入 `completed`。
 5. 阶段二审计先记录 `applicable_repositories` 中各仓库 `main` 的版本指纹和独立 SDK session。相同且工作树清楚的指纹恢复原审计或读取已持久化结果，不重复制造候选；修复后以本批合并结果核对最终版本。
@@ -386,7 +386,7 @@ Demo 从第 1 步开始，通过 `--product-draft` 接收 UTF-8 文本文件路�
 - 输入：只读取第 3 步成功结果 `steps/03.json`，以既有 `FoundationSelectionResult` / `TemplateSelection` 校验 `template_selection`；不读取 catalog、产品文档，不调用模型、Skill 或 Agent。状态必须位于 `project:04_assemble_foundation`，`workspace.final_path`、state 的根 Git 证据和现场必须一致，产品根仍为零提交 `main`。
 - 执行动作：目标固定为 `frontend/`、`backend/`。每个目标只能不存在，或是非符号链接且唯一内容为普通 `.gitkeep` 的目录；空目录、额外内容、符号链接和既有工程一律拒绝。对唯一 `(git_url, default_branch)` 执行一次 `git clone --depth 1 --branch <branch> --single-branch`，核验 origin、分支和 HEAD SHA；选中的相对模板路径不得为空、绝对、含 `..`、逃出 clone 或指向符号链接，子树不得包含上游 `.git` 或任何符号链接。每个适用 payload 复制到同级 run-owned 临时根后，在 payload 内执行 `git init -b main`，核验 Git top-level 就是 payload 自身、分支为 `main`、HEAD 为 unborn、index 为空，并且至少存在一个不被自身 ignore 的可提交文件；所有 payload 均合格后才移除经核验的占位目录并以 `os.rename()` 发布。第 4 步不执行 `git add`、`git commit` 或 push。
 - Agent 配置：仅对新复制的适用前后端 payload，在初始化 Git 前由 Python 向各自 `.gitignore` 补充缺少的 `.agents/`、`.claude/`、`AGENTS.md`、`CLAUDE.md` 规则，覆盖仓库内各层级；保留原文件内容，重复执行不重复追加。配置文件原样保留供本地开发使用，模板源仓库和产品根受跟踪能力文件不改。初始化后使用不依赖用户全局 ignore 的 Git 候选文件列表核验实际效果；若现有反向规则等导致内部配置仍可提交，则发布前失败并保留现场，不覆盖其它忽略规则。实际前端同时符合 shadcn-vue schema、Vue 和 Reka UI 工程事实时，Python 在产品根被 Git 忽略的 `.claude/settings.local.json` 中合并关闭不兼容 React shadcn 能力及 CLI；读取并保留已有 local settings，React 模板无副作用。不迁移已组装产品，第 8 步及通用提交 Skill 不重复维护此策略。
-- 临时与恢复：临时根固定为产品目录同级 `<project>.pcm-assemble-<run-id>`，只以 run ID、产品路径和步骤号的 marker 证明归属。仅当路径、marker 完全匹配且两端仍是占位或不存在时，才删除失败残留并 fresh 重试；未知残留和部分发布现场均保留并 `failed`。`null` 端只删除严格占位目录，原本不存在则无副作用。成功后核验每个适用端自身 top-level、`main`、unborn HEAD、空 index，不适用端不存在，核验 marker 后清理临时根；已有成功结果且状态已到第 5 步时，最小现场核验来源记录、上述仓库边界、目标和临时根后幂等复用，不重新 clone。
+- 临时与恢复：临时根固定为产品目录同级 `<project>.pcm-assemble-<run-id>`，只以 run ID、产品路径和步骤号的 marker 证明归属。仅当路径、marker 完全匹配且两端仍是占位或不存在时，才删除失败残留并 fresh 重试；未知残留和部分发布现场均保留并 `failed`。`null` 端只删除严格占位目录，原本不存在则无副作用。成功后核验每个适用端自身 top-level、`main`、unborn HEAD、空 index，不适用端不存在，核验 marker 后清理临时根；已有成功结果且状态仍在第 4 步或已到第 5 步时，最小现场核验来源记录、上述仓库边界、目标和临时根后幂等复用；若状态尚未推进则补齐推进，不重新 clone，也不以失败覆盖成功结果。非本步骤锚点的误调用不修改后续状态或既有结果。
 - 输出：`steps/04.json` 记录 `applicable`、实际 `outputs` 和 `assembly.frontend/backend`；每个适用端保存 `target`、`id`、`git_url`、`default_branch`、`path`、实际 `origin`、`branch`、`commit_sha`，不适用端为 `null`。成功推进 `phase: project_initialization`、`current_node: project:05_verify_readiness`、`step/current_step: 5`。
 - 阻塞与失败：明确的模板仓库认证或读取权限缺失为 `blocked`；状态、目录、Git、来源、路径、复制、发布、清理和核验错误为 `failed`。步骤自行保存 result/state；入口只输出结果路径与退出码，不重复写第 4 步结果。
 - 已验证：修迹 run 使用 GitLab SSH 模板成功组装前端 `vite-react-shadcn-spa`（`main` SHA `a31db6deb85ab29f2d2253413dd362293a96325f`）和后端 `fastapi-sqlalchemy-postgresql-async-api`（`main` SHA `49ff842fcd330387f2fbdd1e9a43884e05894697`）；两端均为自身 top-level 的 `main`、unborn HEAD、空 index 独立仓，产品根仍为零提交 `main`。首次 HTTPS 来源错误按 `failed` 保存且未覆盖 `.gitkeep`、保留临时现场；修正为 SSH 后同 run 核验 marker、安全清理并 fresh clone 成功。重复执行在 0.809 秒内幂等复用。
@@ -429,10 +429,10 @@ Demo 从第 1 步开始，通过 `--product-draft` 接收 UTF-8 文本文件路�
 - 能力：这是第一次全仓提交检查和干净基线节点。Python 执行确定性输入、状态及 Git 核验，并为已登记提交身份的新产品配置仓库本地身份；存在未提交变更时，才在产品根创建一个 Claude Agent SDK session，显式调用 `commit-changes`。
 - 输入：权威有序仓库严格为 `['root', *steps/04.json.outputs]`；每个权威路径必须是自身 top-level、`main` 的独立 Git 仓库。不从固定前后端目录、历史状态或 Agent 回复扩充该清单。
 - 提交身份：仓库边界核验后，若本 run 有 `state.git_identity`，Python 在干净快速完成或调用 Agent 之前，对全部权威仓库执行 `git config --local --replace-all user.name`、`user.email`，并读取本地配置及 `git var GIT_AUTHOR_IDENT`、`GIT_COMMITTER_IDENT` 核验实际生效身份。身份记录未确定、无效、写入失败或被其它配置／环境覆盖时返回 `failed`，不调用提交 Agent。只修改产品仓库本地配置，不改全局配置、其它项目或提交历史；没有该字段的旧 run 保持原行为。
-- 执行动作：Python 用 `git rev-parse --show-toplevel`、`git branch --show-current`、`git status --porcelain` 读取每仓事实。完成适用的身份配置后，若全部干净，在创建 conversation/session 或写入 `running` 前零 Agent、零决策模型调用，直接成功并记录全仓干净基线。任一仓 dirty 时，初始 prompt 首行是 `/commit-changes`，只给仓库清单及边界；Agent 负责暂存与提交，Python 不逐仓派发、不 `add`、不 `commit`、不 `reset`、`amend` 或 `rebase`。Agent 不得切换分支、改写历史或 push。
+- 执行动作：Python 用 `git rev-parse --show-toplevel`、`git branch --show-current`、`git status --porcelain` 读取每仓事实。完成适用的身份配置后，若全部干净且没有待投递的人工恢复消息，在创建 conversation/session 或写入 `running` 前零 Agent、零决策模型调用，直接成功并记录全仓干净基线。合法人工恢复消息仍须交给原会话，不能因现场已干净而丢弃。任一仓 dirty 时，初始 prompt 首行是 `/commit-changes`，只给仓库清单及边界；Agent 负责暂存与提交，Python 不逐仓派发、不 `add`、不 `commit`、不 `reset`、`amend` 或 `rebase`。Agent 不得切换分支、改写历史或 push。
 - 输出：`steps/08.json` 的 `outputs` 固定为空，并保存 `applicable_repositories` 和 `repositories` 列表；每项为相对 `path`、`branch`、`worktree_clean`。状态保存同样事实但路径为绝对路径，成功推进到 `project:09_engineering_architecture`。
 - 完成条件：每仓自身 top-level、`main` 且 `status --porcelain` 为空。无需检查 HEAD、提交是否产生、提交数、父提交、SHA、marker、历史替换或根 tree。
-- 恢复：`completed` 后 Python 只读复验；仍 dirty 则以固定 repair prompt 继续同一 session。`blocked` 后重读，已全干净直接成功，仍 dirty 才保存 blocked。恢复也先读现场，已全干净直接成功，仍 dirty 才恢复原 session。`failed` / `blocked` 的步骤结果不能当作成功；只有 `status=success` 可幂等复用。成功后的第 9 步状态若权威仓库变 dirty，拒绝复用，避免第 8 步替后续修改提交。
+- 恢复：`completed` 后 Python 只读复验；仍 dirty 则以固定 repair prompt 继续同一 session。`blocked` 后重读，已全干净且没有待投递人工消息时直接成功，仍 dirty 则保留真实阻塞。恢复先读现场；有合法人工消息时恢复原 session、投递后再复验，其余全干净现场可直接成功。`failed` / `blocked` 的步骤结果不能当作成功；只有 `status=success` 可幂等复用。成功后的第 9 步状态若权威仓库变 dirty，拒绝复用，避免第 8 步替后续修改提交。
 - 第 9 步更新后的 prompt 合同及第 9～11 步相关自动化已完成本轮验证：第 9 步定向 18 项通过（5.498 秒）；第 9～11 步本体合计 51 项（18+18+15）通过；公共循环加第 9～11 步本体及第 10/11 步 CLI 的相关回归 97 项通过（20.800 秒）；当前工作树全量 351 项 `unittest` 通过（61.878 秒）；`compileall common steps run_step.py run_all.py test_run_step_retry.py test_run_all.py` 与本次目标 `git diff --check` 通过。当前工作树还包含其它公共循环/CLI 的未提交修改，故全量结果是当前工作树验证，不能全部归因于第 9 步。第 9 步新版 prompt 合同尚未执行安全的 fresh 真实 Claude Agent、AI-compatible 负责人或 `/commit-changes` 集成；`step01-mendmark` 已推进到第 13 步并保留旧第 9 步 success/session/conversation，旧真实 run 仅为旧合同历史。
 - 真实验证：当前合同已在真实 run `pcm-demo/runs/step01-mendmark` 和产品工作区 `/Users/zhou/resource/fireworks/ANDRSZAN/pcm-products/mendmark` 完成验证；run 目录名与 state 内历史 `run_id` 不一致是既有已知事实。权威仓库为 `root/frontend/backend`，第 4 步 `outputs` 为 `frontend/backend`；首次执行前三仓均为自身 top-level、`main`、dirty 且 HEAD 不存在。
 - 环境恢复：首次执行只启动 `initialize_repositories` session `f6d42df8-13e5-437b-ada3-eef1015ecc87`。Agent 尝试内置 Explore 时遇到环境未识别模型 `gpt-5.6-sol[1m]`，无 Result、无 Git 变化，挂起进程停止后保存 session、conversation 和 init 证据；这是环境内部子代理问题，不是第 8 步业务或 Git 逻辑失败。仅在 Git 忽略的真实 run 历史中追加普通恢复指令“不要使用子代理/Explore，直接工具完成”，生产 prompt 和代码未改变，并恢复同一 session。
@@ -568,7 +568,7 @@ Demo 从第 1 步开始，通过 `--product-draft` 接收 UTF-8 文本文件路�
 
 ### 3. 分流、需求化与入池
 
-AI 负责人通过一次结构化请求，依据完整审计材料、候选和需求完成事实，决定每个候选纳入、已有活动归属或不纳入，并保留依据。分流直接消费审计结果；有具体材料矛盾时准确失败，不另启工程调查循环，也不让新增发现冒充输入候选。格式修复复用公共 Responses 封装。
+审计与分流只读承接来源链中已有候选的稳定事实、处置理由、前提与版本，不递归传递历史会话包装。AI 负责人通过一次结构化请求，依据完整审计材料、候选、历史处置和需求完成事实，决定每个候选纳入、已有活动归属或不纳入，并保留依据。分流直接消费审计结果；有具体材料矛盾时准确失败，不另启工程调查循环，也不让新增发现冒充输入候选。格式修复复用公共 Responses 封装。
 
 有纳入项时进入增量 Backlog 与原需求开发流程；无纳入项且必要覆盖仍缺失时，不得收口。缺少不可替代外部条件则说明具体资源与解除条件并 blocked，其它材料或本地错误为 failed。
 
@@ -594,7 +594,9 @@ AI 负责人通过一次结构化请求，依据完整审计材料、候选和�
 
 ### 5. 一次性完成条件
 
-无纳入项时，依据本次完整审计与分流判断直接结束，仓库应保持审计版本。有纳入项时，本批需求全部完成原场景及相关回归、提交和合并，无活动或 pending 需求，适用仓库位于 clean main，最终版本与本批合并结果一致，即结束阶段二。
+无纳入项且必要覆盖充分时，依据本次完整审计与分流判断结束，仓库应保持审计版本。有纳入项时，本批需求全部完成原场景及相关回归、提交和合并，无活动或 pending 需求，适用仓库位于 clean main，最终版本与本批合并结果一致，且没有未承接的独立必要缺口，才结束阶段二。
+
+有纳入和无纳入批次都先保存合法分流结果；仍有独立必要缺口时，在既有 `quality:complete` 节点续接原审计会话，仅补该缺口。缺少不可替代外部条件保持 `blocked`，本地或材料错误保持 `failed`；条件补齐后使用同一 run 的普通恢复或原会话恢复消息继续。已由正式需求完成的原场景回归继续有效，不重跑需求、不重复完整审计，也不修改原审计、分流或入池结果。
 
 修复验证由第 15 步负责，失败在当前需求内处理。完成结果保存本次审计、处置、已完成修复及限制，表示本次审计和处理任务已完成。
 
@@ -659,7 +661,7 @@ AI 负责人依据本批意图、分诊结论和当前产品事实作出取舍�
 - 各适用仓库位于 clean main，反馈文档与相关设计已提交，最终版本与本批合并结果一致。无纳入项时仅保留实际反馈文档变更，代码仓保持核验版本。
 - 未纳入、待补证和待决项有真实依据及必要后续条件；不存在被静默延期的本批必达事项，也不存在以处置标签掩盖的执行失败或必要验证缺口。
 
-完成结果基于反馈文档、正式需求关联和当前 run 的完成事实，说明哪些反馈改了、改成什么、哪些合并处理、哪些未纳入及原因、哪些仍需信息或授权。不另建长期反馈台账；“本批处理完成”不等于“所有反馈均已解决”，也不要求人再次回复满意才结束。
+完成结果基于反馈文档、正式需求关联和当前 run 的完成事实，说明哪些反馈改了、改成什么、哪些合并处理、哪些未纳入及原因、哪些仍需信息或授权。前期分诊限制与范围决定摘要保留时明确标注所属阶段，不直接当作当前未完成结论，也不通过解析旧文案猜测限制已经解除。已显式启动且只有正向体验信号的批次可用简短处置摘要收口，推荐项为空，不制造需求。不另建长期反馈台账；“本批处理完成”不等于“所有反馈均已解决”，也不要求人再次回复满意才结束。
 
 在已纳入范围或本批必达事项上，缺少不可替代外部资源或授权时返回 `blocked`；本地现场、输入、执行或必要验证错误返回 `failed`，保持既有三态与重试语义。能够在当前会话继续解决的问题先继续处理；停机后复用当前 run、原 session、已完成入池事实和需求状态恢复，不重复需求化或重开已完成工作。被准确暂不纳入的独立反馈不会仅因仍有未知就自动变成本批阻塞。
 
