@@ -111,7 +111,7 @@ class FeedbackWorkflowTests(unittest.TestCase):
             if key == "feedback_triage":
                 document = self.root / state["feedback"]["document_path"]
                 document.parent.mkdir(parents=True, exist_ok=True)
-                document.write_text("# 保存反馈\n已核验原反馈，处置与依据详见交接。\n")
+                document.write_text("# 反馈核验\n" + self.triage.summary + "\n")
                 return "完整分诊对话：保存反馈已核验", self.triage
             if key == "feedback_route":
                 report = self.routing or routing_report(self.include)
@@ -242,6 +242,42 @@ class FeedbackWorkflowTests(unittest.TestCase):
         self.execute()
         self.assertEqual(self.calls, calls)
         self.assertEqual((self.source_dir / "state.json").read_bytes(), self.source_bytes)
+
+    def test_positive_feedback_archives_signal_without_candidates_or_requirements(self):
+        signal = "本次保存材料操作很顺畅，没有需要调整的地方。"
+        self.original.write_text(signal)
+        write_json(self.run / "feedback/input.json", {
+            "source": str(self.original), "content": signal, "attachments": [],
+        })
+        self.triage = TriageReport(summary=signal + "来源：反馈原文；无行动项，推荐为空。", findings=[],
+                                   limitations=["仅记录本次正向体验，不代表全产品审计"])
+        self.routing = RoutingReport(summary="无行动项，保留反馈信号并归档", decisions=[],
+                                     document_changes=[], ready_to_complete=True)
+        before = flow.main_versions(self.state)
+        backlog = self.backlog.read_bytes()
+        self.reach("feedback:completed")
+        result = self.execute()["data"]
+        document = self.root / self.state["feedback"]["document_path"]
+        self.assertIn(self.triage.summary, document.read_text())
+        self.assertIn(self.routing.summary, document.read_text())
+        self.assertEqual(result["candidates"], [])
+        self.assertEqual(result["dispositions"], [])
+        self.assertEqual(result["completed_requirement_ids"], [])
+        self.assertIsNone(result["requirement_bindings"])
+        self.assertEqual(self.backlog.read_bytes(), backlog)
+        self.assertEqual(self.original.read_text(), signal)
+        after = flow.main_versions(self.state)
+        self.assertEqual(before["backend"], after["backend"])
+        self.assertEqual(git(self.root, "-c", "core.quotepath=false", "diff", "--name-only", before["root"], after["root"]),
+                         self.state["feedback"]["document_path"])
+        self.assertEqual([row[0] for row in self.calls], [
+            "feedback_prepare", "feedback_triage", "feedback_route", "feedback_document", "feedback_commit",
+        ])
+        self.assertFalse((self.run / "feedback/register.json").exists())
+        for call in self.task_mock.await_args_list:
+            if call.args[2] in {"feedback_triage", "feedback_route", "feedback_document"}:
+                self.assertIn(signal, call.args[4])
+        self.assertTrue(flow.is_completed(self.state))
 
     def test_inclusion_registers_only_new_pending_and_preserves_history(self):
         self.include = True
@@ -432,6 +468,65 @@ class FeedbackWorkflowTests(unittest.TestCase):
         self.execute()
         self.assertTrue(flow.is_completed(self.state))
         self.assertEqual(sum(row[0] == "feedback_triage" for row in self.calls), 1)
+
+    def test_completion_reports_current_progress_and_preserves_phase_history(self):
+        self.triage.summary = "已核验保存问题，尚未开发和回归"
+        self.triage.limitations = ["尚未开发、回归、提交或合并", "仅核验隔离数据，未覆盖生产环境"]
+        self.routing = routing_report(True)
+        self.routing.summary = "已纳入保存修复，尚待开发、回归、提交和合并"
+        for action, title in (("defer", "其它角色的保存待补证"), ("covered", "详情页保存同批处理")):
+            self.triage.findings.append(self.triage.findings[0].model_copy(update={"title": title}))
+            self.routing.decisions.append(self.routing.decisions[0].model_copy(update={
+                "candidate_id": f"F-C00{len(self.triage.findings)}", "action": action,
+                "covered_by": "F-C001" if action == "covered" else None,
+                "follow_up": "取得其它角色隔离数据后另批核验" if action == "defer" else "",
+            }))
+        self.finish_batch()
+        self.reach("feedback:complete")
+        before = {path: path.read_bytes() for path in (self.run / "feedback").glob("*.json")}
+        versions, calls = flow.main_versions(self.state), self.calls.copy()
+        result = self.execute()
+        data = result["data"]
+        self.assertNotEqual(data["summary"], self.routing.summary)
+        self.assertIn("已完成开发、验证、提交与合并：BR-002", result["summary"])
+        self.assertIn("需求承接：BR-002 ← F-C001（已完成）", data["summary"])
+        self.assertIn("完整回归：F-C001 → BR-002（已完成）", data["summary"])
+        self.assertIn("F-C003=covered → F-C001", data["summary"])
+        self.assertIn("F-C002=defer", data["summary"])
+        self.assertIn("不代表全部反馈已解决", data["summary"])
+        self.assertIn("分诊时摘要：" + self.triage.summary, data["summary"])
+        self.assertIn("范围决定时摘要：" + self.routing.summary, data["summary"])
+        self.assertEqual(data["limitations"], ["分诊时：" + text for text in self.triage.limitations])
+        self.assertEqual(data["dispositions"], self.routing.model_dump()["decisions"])
+        self.assertEqual(data["requirement_bindings"], pool_plan().model_dump())
+        self.assertEqual(data["completed_requirement_ids"], ["BR-002"])
+        self.assertEqual(before, {path: path.read_bytes() for path in before})
+        self.assertEqual(flow.main_versions(self.state), versions)
+        self.assertEqual(self.calls, calls)
+
+    def test_no_inclusion_completion_distinguishes_archival_from_earlier_limitations(self):
+        self.triage.summary = "独立事项待补证"
+        self.triage.limitations = ["反馈文档尚未提交与合并", "缺少其它角色隔离数据"]
+        self.routing = routing_report()
+        self.routing.summary = "暂不纳入，反馈文档尚未提交与合并"
+        self.routing.decisions[0].action = "defer"
+        self.routing.decisions[0].follow_up = "取得其它角色隔离数据后另批核验"
+        self.reach("feedback:complete")
+        calls = self.calls.copy()
+        result = self.execute()
+        data = result["data"]
+        self.assertNotEqual(data["summary"], self.routing.summary)
+        self.assertIn("反馈文档已提交并合并", result["summary"])
+        self.assertIn("本批无纳入需求", data["summary"])
+        self.assertNotIn("已完成开发", data["summary"])
+        self.assertIn("F-C001=defer", data["summary"])
+        self.assertIn("分诊时摘要：" + self.triage.summary, data["summary"])
+        self.assertIn("范围决定时摘要：" + self.routing.summary, data["summary"])
+        self.assertEqual(data["limitations"], ["分诊时：" + text for text in self.triage.limitations])
+        self.assertEqual(data["dispositions"], self.routing.model_dump()["decisions"])
+        self.assertIsNone(data["requirement_bindings"])
+        self.assertEqual(data["completed_requirement_ids"], [])
+        self.assertEqual(self.calls, calls)
 
     def test_completion_rejects_unrecorded_versions(self):
         self.finish_batch()

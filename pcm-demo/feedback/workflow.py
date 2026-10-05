@@ -385,6 +385,9 @@ async def _triage(run_dir: Path, state: dict[str, Any], message: ResumeMessage |
         "在当前授权内自行补证和决定普通取舍，不向人逐项索取批准；独立问题继续核验，不能因个别未知放弃整批。"
         "原始材料保持不变、不复制附件；唯一可写文件为指定反馈文档，不改产品定义、Backlog、TRD、代码、配置或Git。"
         "文档精简记录问题、影响、核验事实、期望结果、来源，以及待补证、待决、已有覆盖和不采用的必要理由。"
+        "本批已显式启动；实际正向体验反馈也是反馈信号，不等于没有反馈。"
+        "若只有正向体验且无行动项，在指定文档中简短记载反馈信号、来源和无行动项处置，推荐为空，不制造候选或需求，"
+        "沿无纳入批次的文档归档流程交接；不能因无推荐项而省略文档。真正没有反馈时不启动批次。"
         "所有原始问题均有归属，明确本批必达事项；缺少必要信息如实保留，不伪造完整产品审计。"
         "不把秘密或非必要个人数据写入文档和输出，候选不自动变成正式需求。\n"
         + json.dumps({**context, "唯一反馈文档": state["feedback"]["document_path"],
@@ -678,11 +681,30 @@ def _complete(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
             raise RuntimeError("最终版本没有承接本批文档提交")
     elif not report.ready_to_complete or batch or versions != {**triage["versions"], "root": pooled["tip"]}:
         raise RuntimeError("无纳入批次的完成条件或最终版本不一致")
+    summary = ["本批处理完成；反馈文档已提交并合并。"]
+    if pooled["plan"]:
+        summary.append("本批需求已完成开发、验证、提交与合并：" + "、".join(batch) + "。")
+        summary.extend(f"需求承接：{row.requirement_id} ← {'、'.join(row.candidate_ids)}（已完成）。"
+                       for row in plan.requirements)
+        summary.extend(f"完整回归：{row.candidate_id} → {row.requirement_id}（已完成）。"
+                       for row in plan.regression_owners)
+    else:
+        summary.append("本批无纳入需求，已完成反馈处置与文档归档。")
+    summary.append("候选处置（范围决定时）：" + ("；".join(
+        f"{row.candidate_id}={row.action}" + (f" → {row.covered_by}" if row.covered_by else "")
+        for row in report.decisions
+    ) or "无候选") + "。")
+    summary.append("未纳入与待补充事项按实际处置保留，不代表全部反馈已解决。")
+    current_summary = "\n".join(summary)
     return _success(run_dir, state, {"versions": versions, "completed_requirement_ids": batch,
-                                    "document_path": triage["document_path"], "summary": routed["summary"],
+                                    "document_path": triage["document_path"],
+                                    "summary": current_summary + "\n分诊时摘要：" + triage["summary"]
+                                    + "\n范围决定时摘要：" + routed["summary"]
+                                    + "\n前期摘要与限制按阶段保留，不作为当前未完成清单，也不推定其它限制已解除。",
                                     "candidates": triage["candidates"], "dispositions": routed["decisions"],
-                                    "requirement_bindings": pooled["plan"], "limitations": triage["limitations"]},
-                    "本批处理完成；未纳入与待补充事项按实际处置保留，不代表全部反馈已解决")
+                                    "requirement_bindings": pooled["plan"],
+                                    "limitations": ["分诊时：" + text for text in triage["limitations"]]},
+                    current_summary)
 
 
 async def run_node(run_dir: Path, state: dict[str, Any], *, resume_message: ResumeMessage | None = None) -> dict[str, Any]:

@@ -157,6 +157,47 @@ class FeedbackAgentHandoffTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.parse.await_count, 2)
         self.assertEqual(self.agent.await_args.kwargs["resume_session_id"], "feedback-session")
 
+    async def test_positive_feedback_without_document_repairs_in_same_triage_session(self):
+        document, _, _, base, _ = self.route_scene()
+        self.state.update(current_node="feedback:triage")
+        del self.state["decision_conversations"]["feedback_triage"]
+        (self.run / "conversations/feedback_triage.json").unlink()
+        (self.run / "feedback/triage.json").unlink()
+        document.unlink()
+        signal = "本次保存材料操作很顺畅，没有需要调整的地方。"
+        write_json(self.run / "feedback/input.json", {
+            "source": str(self.base / "original.md"), "content": signal, "attachments": [],
+        })
+        original_input = (self.run / "feedback/input.json").read_bytes()
+        report = TriageReport(summary="正向体验已记载，无行动项", findings=[],
+                              limitations=["仅记录本次体验"])
+        self.parse.return_value = report
+        calls = []
+
+        async def agent(prompt, **kwargs):
+            calls.append(prompt)
+            if len(calls) == 1:
+                return self.result("正向反馈，无推荐项，未创建文档")
+            self.assertEqual(kwargs["resume_session_id"], "feedback-session")
+            self.parse.assert_not_awaited()
+            document.write_text("# 反馈核验\n来源：原反馈\n" + signal + "\n无行动项，推荐为空。")
+            return self.result("反馈信号与无行动项处置已记入指定文档")
+
+        self.agent.side_effect = agent
+        result = await workflow.run_node(self.run, self.state)
+        self.assertEqual(self.agent.await_count, 2)
+        self.assertEqual(self.decision.await_count, 2)
+        self.parse.assert_awaited_once()
+        self.assertIn(signal, calls[0])
+        self.assertIn(self.state["feedback"]["document_path"], calls[0])
+        self.assertIn(document.read_text(), self.parse.await_args.kwargs["input_model"].context)
+        self.assertEqual(result["data"]["candidates"], [])
+        self.assertEqual(result["data"]["summary"], report.summary)
+        self.assertEqual(result["data"]["limitations"], report.limitations)
+        self.assertEqual(self.state["current_node"], "feedback:route")
+        self.assertEqual((self.run / "feedback/input.json").read_bytes(), original_input)
+        self.assertEqual(git(self.root, "rev-parse", "HEAD"), base)
+
     async def test_completed_designs_and_pool_recover_from_large_snapshots_without_agent_calls(self):
         self.route_scene()
         self.state.update(current_node="feedback:pool", status="failed", error={
