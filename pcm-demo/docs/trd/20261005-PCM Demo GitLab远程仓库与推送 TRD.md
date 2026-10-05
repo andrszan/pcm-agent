@@ -1,7 +1,7 @@
 # PCM Demo GitLab 远程仓库与推送技术设计
 
 > 设计日期：2026-10-05
-> 状态：代码、本地整合验证与独立审查已完成；真实 GitLab 建仓与 SSH 推送验收因 API 凭据及测试对象授权缺失而未执行。
+> 状态：代码与本地验证已完成，授权隔离场景的真实 GitLab 建仓、推送和恢复验证已通过；未发布能力模板或迁移旧产品。
 > 范围：为后续新产品建立 GitLab 远程仓库，提供独立显式推送能力，并接入初始化与三个阶段的收尾。
 
 ## 一、目标与方案
@@ -82,7 +82,7 @@ baiyiyu/andrszan/pcm-projects/
 
 根仓绑定 `git@gitlab.com:baiyiyu/andrszan/pcm-projects/mealflow/mealflow.git`，代码仓分别绑定同 subgroup 下的 `mealflow-backend.git`、`mealflow-frontend.git`。API 返回的 namespace、项目路径和 SSH 地址必须与预期一致。不存在的交付端不创建空远程仓。
 
-产品 subgroup 和项目显式创建为 private；根仓包含内部能力与产品开发账号文档，不能默认为 public。创建空仓库，不生成 README、许可证模板或服务器端初始提交；首次推送后核验默认分支为 `main`，必要时通过 API 设置。不削弱既有分支保护来绕过推送拒绝。
+产品 subgroup 和项目显式创建为 private；根仓包含内部能力与产品开发账号文档，不能默认为 public。创建空仓库，不生成 README、许可证模板或服务器端初始提交；API 必须明确返回 `empty_repo: true`，预置的 `default_branch` 名称不代表仓库已有提交。首次推送后核验默认分支为 `main`，必要时通过 API 设置。不削弱既有分支保护来绕过推送拒绝。
 
 ### 配置与授权
 
@@ -206,8 +206,11 @@ PCM 使用 GitLab REST API 创建 subgroup 和 project，Git 数据传输使用 
 - 已实现独立显式 Skill 与标准库脚本、GitLab API 准备和建仓、第 8 步首推、阶段一命名收尾、质量／反馈完成节点同步、跨 run 继承及产品手动命令。旧 run 仍按原合同运行；新产品模板缺少推送 Skill 或脚本时停止，不静默交付缺失的手动入口。
 - 初始化在任何建仓 API 调用前保存本地完成 SHA；建仓部分失败后出现 dirty 或新提交，恢复在 Agent／API 调用前拒绝。首推响应丢失但远程已一致时，初始化补齐 tracking ref，并实际解析 upstream 验证。独立审查发现的这两项恢复缺陷已经修复，定向只读复审确认闭合。
 - Git 子进程、hook 与 Agent 环境均排除新工具令牌及其大小写变体；保留原有其它变量策略。实际 Git 子进程与 pre-push hook 的测试覆盖令牌隔离、SSH agent 环境保留及路径重定向防护。
-- 冻结版本 PCM 全量 `unittest` **871 项通过**（178.847 秒），独立推送脚本 **25 项通过**；Python 编译、差异格式、新 CLI help 和修改文档链接检查通过。临时真实 bare 仓覆盖三仓首推、快进、部分成功、重入、目标漂移、响应丢失、upstream 恢复和指定分支范围。API 使用受控响应，不能据此认定真实 GitLab 建仓已经通过。日志保存在根工作区 Git 忽略的 `.test-screenshots/git-remote-20261005/`。
-- 有效配置链及进程／工作区配置均未取得非空 `PCM_GITLAB_TOKEN`，本机也没有可复用的 `glab`。已用非交互、严格主机校验方式执行 GitLab SSH 只读认证，确认当前 SSH 身份能够认证；没有输出身份信息，这不证明目标 group 的创建权限或具体仓库写权限。
-- `.env.example` 已添加配置键，实际 `.env` 未写入虚构或占位令牌；尚需通过受保护配置补齐真实 GitLab API 授权。真实隔离测试产品的创建范围也尚未获准，因此未创建远程对象、未向现有产品或模板仓推送、未操作旧 run，也没有真实 GitLab 端到端验收结论。
+- 真实 API 暴露空仓兼容性问题：`empty_repo: true` 的新项目已返回 `default_branch: "main"`，但远程尚无 main 提交。先以回归测试复现原错误，再将空仓判定收敛为明确的 `empty_repo: true`；预置分支名可以是空值、main 或其它名称，非空仓与缺失空仓证明仍拒绝。首轮根测试仓已创建但未登记，核对本次成功 POST、精确对象 ID、namespace、private 属性和空远程后，仅补齐该隔离 run 的绑定，未放宽正式流程对未知同名对象的拒绝规则。
+- 修正后第 8 步相关 **43 项测试通过**，PCM 全量 `unittest` **873 项通过**（195.832 秒）；独立推送脚本此前 **25 项通过**，本轮还从真实 CLI 对三仓重复执行，全部返回 unchanged。Python 编译与差异格式检查通过。证据保存在根工作区 Git 忽略的 `.test-screenshots/git-remote-20261005/gitlab-live/`，其中 `results.json` 为真实结果，`api-calls.jsonl` 只记录 API 方法与路径，不保存认证头或令牌。
+- 负责人已通过受保护配置提供 `PCM_GITLAB_TOKEN`，并明确授权固定测试子组及三仓。API 认证、父 group 访问、真实建组建仓和 SSH 写权限均已验证；实际配置保持 Git 忽略且权限为 `0600`，未输出、复制或提交令牌。没有使用 `glab` 或新增外部 CLI。
+- 在 [pcm-remote-check-20261005](https://gitlab.com/groups/baiyiyu/andrszan/pcm-projects/pcm-remote-check-20261005) 下实际创建 1 个 private 子组及 3 个 private 项目，成功创建请求恰为 1 次 group POST、3 次 project POST，恢复没有重复创建。根仓 project ID 为 `87255458`，前端为 `87255641`，后端为 `87255644`，仅含隔离验收文字。最终默认分支均为 main，本地、远程与 upstream 的提交一致；根仓 SHA 为 `c09d31f6178ed15567d0d7f21c923005c4e849b3`，前端为 `d5c824005746caf6e4ab0906168cbbf3004089bd`，后端为 `597551ec724122c2482572737c741e09b9c4689d`。
+- 真实链路覆盖：在 backend 创建请求发出前注入中断，复用已创建对象并拒绝 dirty 恢复；用本次创建的 backend 本地 pre-push hook 拒绝推送，确认 frontend 已同步而根仓仍 pending，再续推剩余仓库；在成功 result 写入后、最终 state 写入前中断，恢复不重复推送；主动移除本次隔离仓的本地 tracking ref，确认在真实远程已一致时重建 upstream。故障注入只作用于隔离现场，未修改远程保护策略。
+- 阶段一收尾使用构造的已完成需求注册表，实际执行三仓 GitLab 快进推送并进入 completed；产品手动入口仅将登记与 run 目录定向到隔离现场，真实执行根仓新提交推送，重复执行全部 unchanged，原 owner state 字节未变。没有重新执行真实产品开发、模型会话或阶段二／三整批审计，它们的编排接线由自动化回归覆盖，不能把隔离输入称为真实产品交付。
 
-代码与本地验证完成不等于远程链路已交付。解除上述凭据与测试对象授权缺口后，仍须完成真实 private 建组建仓、SSH 首推和恢复核验；能力模板另按已有分支与发布权限发布，新建产品才能从配置的模板来源取得本次能力。
+授权范围内的远程同步链路已完成真实验证。测试子组与三仓保留，未删除任何远程对象，也未操作现有产品、旧 run 或发布能力模板。能力模板仍须按已有分支与发布权限另行发布，新建产品才能从配置的模板来源取得本次能力。

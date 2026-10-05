@@ -242,7 +242,7 @@ def prepare_repositories(run_dir: Path, state: dict[str, Any]) -> None:
             record = {"project_id": value.get("id"), "path_with_namespace": project_path,
                       "namespace_id": group["id"], "url": f"git@gitlab.com:{project_path}.git"}
             _verify_project(value, record, subgroup_path)
-            if value.get("empty_repo") is not True or value.get("default_branch") is not None:
+            if value.get("empty_repo") is not True:
                 raise RuntimeError("GitLab 新建项目不是空仓库，拒绝绑定")
             records[key] = record
             write_state(run_dir, state)

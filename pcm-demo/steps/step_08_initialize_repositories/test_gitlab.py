@@ -130,6 +130,50 @@ class GitLabTests(unittest.TestCase):
         handler = gitlab._NoRedirect()
         self.assertIsNone(handler.redirect_request(None, None, 302, "", {}, "https://other.invalid"))
 
+    def test_empty_project_accepts_preconfigured_default_branch(self):
+        for default_branch in (None, "main", "master"):
+            with self.subTest(default_branch=default_branch), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                with isolated_git_environment(root):
+                    run_dir, workspace, state = self.make_run(root)
+                    api = FakeGitLab()
+                    original_request = api.request
+
+                    def request(method, path, data=None, **kwargs):
+                        value = original_request(method, path, data, **kwargs)
+                        if method == "POST" and path == "projects":
+                            value["default_branch"] = default_branch
+                            api.projects[value["id"]]["default_branch"] = default_branch
+                        return value
+
+                    api.request = request
+                    with patch.object(gitlab, "_Client", return_value=api):
+                        gitlab.prepare_repositories(run_dir, state)
+                    binding = read_state(run_dir)["remote_sync"]["repositories"]["root"]
+                    self.assertEqual(binding["project_id"], 30)
+                    self.assertEqual(command("remote", "get-url", "origin", cwd=workspace), binding["url"])
+
+    def test_new_project_requires_explicit_empty_repository(self):
+        for empty_repo in (False, None):
+            with self.subTest(empty_repo=empty_repo), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                with isolated_git_environment(root):
+                    run_dir, workspace, state = self.make_run(root)
+                    api = FakeGitLab()
+                    original_request = api.request
+
+                    def request(method, path, data=None, **kwargs):
+                        value = original_request(method, path, data, **kwargs)
+                        if method == "POST" and path == "projects":
+                            value["empty_repo"] = empty_repo
+                        return value
+
+                    api.request = request
+                    with patch.object(gitlab, "_Client", return_value=api), self.assertRaisesRegex(RuntimeError, "不是空仓库"):
+                        gitlab.prepare_repositories(run_dir, state)
+                    self.assertEqual(command("remote", cwd=workspace), "")
+                    self.assertNotIn("root", read_state(run_dir)["remote_sync"]["repositories"])
+
     def test_create_only_applicable_private_projects_and_resume_without_post(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
