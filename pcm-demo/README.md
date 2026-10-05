@@ -157,6 +157,30 @@ uv run python run_step.py --step <13-18> --run-id <feedback-run-id>
 
 “本批处理完成”不表示所有反馈均已解决：结果保留未纳入、待补证或待决的依据；本批明确必达事项不能被静默延期。完成后不常驻等待人再次确认满意。输入及附件会交给模型处理，凭据只引用受保护配置，不直接写入材料。实现与验证边界见[人工反馈迭代工作流 TRD](docs/trd/20261001-PCM%20Demo%20人工反馈迭代工作流%20TRD.md)。
 
+### 独立代码注释维护
+
+主要功能和本轮修复稳定后，手动执行全量注释检查与必要整理。目标须是本 Demo 已登记且租约有效的产品，创建 run 的适用仓库清单完整，各仓位于 clean main；首次运行遇到已有未提交修改、未知仓库或产品锁占用时直接停止并保留现场。只涉及部分仓库的产品按真实清单执行，不强制同时存在前后端。
+
+```bash
+# 当前目录为 pcm-demo；--run-id 可省略，默认按时间生成。
+uv run python run_comments.py --workspace /absolute/path/to/product --run-id product-comments
+
+# 失败或中断后续接原任务，保留已有注释变更。
+uv run python run_comments.py --resume product-comments
+
+# 原 Agent 对话满足下文恢复条件时，补充说明或解除条件。
+uv run python run_comments.py --resume product-comments \
+  --resume-message-file /absolute/path/to/resume-message.md
+```
+
+入口从当前工具工作区读取 [code-comments](../.claude/skills/code-comments/SKILL.md) 及语言参考，作为本次任务直接交给 Agent，不安装或覆盖目标产品的 Skill。初始输入保存在该注释 run 中，恢复不会更换任务正文；模型与 effort 复用当前提供商策略的 development 分配，不因注释任务另行降档，不新增环境变量。
+
+Agent 全量检查授权的手写维护代码，统一标准后按内聚模块有限并发，补充或纠正代码本身不能清楚表达的约束；不要求每个文件新增注释，不改变产品行为或工具指令。脚本复用现有产品锁、run 锁、容量和负责人决策循环，不重启开发流程、不修改来源 run、产品租约或运行端口，不提交、合并或推送。目标项目资料只读，不创建需求、TRD 或注释规范文档。
+
+结果和原对话保存在 `runs/<注释-run-id>/state.json`、`conversations/code_comments.json`；完成时打印 Agent 交接，产品保留待提交变更，无必要修改也可成功。脚本对分支、HEAD、暂存区及文件结构进行核验；注释是否准确、是否只有说明变化、实际检查是否充分，由 Agent 编辑、复核和验证，不把 Git 检查当作语义证明。完成后按既有 Git 交接方式另行提交，下一次整理使用新的 run。
+
+失败或中断后不要混入其它开发修改，使用原 `--resume` 继续；分支、提交、暂存或文件结构已改变时停止，不自动还原。SDK 保留已有底层重试，但这个手动入口不增加外层自动重启，失败退出后显式恢复。已完成 run 的 `--resume` 只返回原结果，不重新检查当前版本，也不接受追加消息。退出码：`0` 完成、`1` 本地或执行失败、`2` 缺少不可替代外部条件的阻塞。普通编译或测试失败不等于外部阻塞。
+
 ### 单独运行当前步骤
 
 ```bash
@@ -243,7 +267,7 @@ runs/<run-id>/
 
 ```bash
 uv run python -m unittest discover -s . -t . -p 'test*.py' -v
-uv run python -m compileall common steps quality feedback run_step.py run_all.py run_quality.py run_feedback.py
+uv run python -m compileall common steps quality feedback run_step.py run_all.py run_quality.py run_feedback.py run_comments.py
 ```
 
 涉及真实步骤时，还需按对应步骤说明完成适用的外部服务、Git、构建、测试、联调和浏览器验证。

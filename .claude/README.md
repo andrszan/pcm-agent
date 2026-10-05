@@ -129,6 +129,14 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 
 ### 流程外辅助能力
 
+`code-comments` 在代码相对稳定、需要维护交接时手动执行全量注释检查，按真实约束补充、修正或精简说明，不追求注释率，不要求每个文件或方法新增注释。它按项目语言与工具消费方式工作，可按内聚模块有限并发；只改授权的普通说明，完成相称验证并留下待提交变更。日常开发仍同步维护当前改动涉及的必要注释，不必每次执行全项目整理。标准与边界见 [代码注释整理](skills/code-comments/SKILL.md)。
+
+```text
+/code-comments 全量检查当前项目前后端的手写维护代码，按真实实现和调用约束整理必要注释，保持行为不变并完成验证。
+```
+
+PCM 产品也可使用 [独立手动脚本](../pcm-demo/README.md#独立代码注释维护)。脚本直接提供当前能力正文，旧产品无需先同步模板；不接入编号步骤或创建业务需求。
+
 `project-data-baseline` 是项目主要业务已经开发并集成完成后的独立数据收尾能力。它直接完成必要设计、实现、真实初始化／重置、角色使用、文件恢复和交接验证，不限于产出 TRD，也不依赖 `dev-workflow` 或其它设计／开发 Skill。它不接入或修改原有编号步骤，不自动创建需求、提交或推送；已有数据基线则复用并收口，已经满足时实际核验后可以无代码变更结束。
 
 在目标项目准备交接时显式调用，例如：
@@ -163,6 +171,10 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 │   ├── dev.md
 │   └── reviewer.md
 ├── skills/
+│   ├── code-comments/
+│   │   ├── SKILL.md
+│   │   ├── references/language-conventions.md
+│   │   └── evals/evals.json
 │   ├── commit-changes/SKILL.md
 │   ├── push-changes/
 │   │   ├── SKILL.md

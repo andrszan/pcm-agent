@@ -25,6 +25,7 @@ PCM 是 Project Customization & Management（项目定制与管理）的缩写�
 - [人工调度的 AI Agent 产品开发流程](docs/pcm/AI%20Agent开发流程设计.md)
 - [PCM 程序化调度的 AI Agent 产品开发流程](docs/pcm/PCM版AI%20Agent自动化流程设计.md)
 - [PCM 自动化流程 Demo](pcm-demo/README.md)
+- [手动代码注释维护](pcm-demo/README.md#独立代码注释维护)
 
 ## 仓库与客户交付边界
 
