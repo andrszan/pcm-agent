@@ -15,7 +15,7 @@ def git(path: Path, *args: str, optional: bool = False) -> str | None:
         if optional and process.returncode == 1:
             return None
         raise RuntimeError(f"Git 操作失败：{' '.join(args[:2])}（{path.name}）")
-    return process.stdout.strip()
+    return process.stdout if "-z" in args else process.stdout.strip()
 
 
 def workspace(state: dict[str, Any]) -> Path:
@@ -63,10 +63,10 @@ def check_operations(path: Path) -> None:
     for reference in ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"):
         if git(path, "rev-parse", "-q", "--verify", reference, optional=True):
             raise RuntimeError("仓库有进行中的 Git 操作")
-    for name in ("rebase-merge", "rebase-apply"):
+    for name in ("rebase-merge", "rebase-apply", "BISECT_START", "sequencer"):
         value = Path(str(git(path, "rev-parse", "--git-path", name)))
         if (value if value.is_absolute() else path / value).exists():
-            raise RuntimeError("仓库有进行中的 rebase")
+            raise RuntimeError("仓库有进行中的 Git 操作")
 
 
 def main_versions(state: dict[str, Any]) -> dict[str, str]:

@@ -101,6 +101,30 @@ def _prior(run_dir: Path, state: dict[str, Any], name: str) -> dict[str, Any]:
     return value["data"]
 
 
+def _history(run_dir: Path, state: dict[str, Any]) -> list[dict[str, Any]]:
+    history = []
+    seen = {run_dir.name}
+    source_id = state.get("source_run_id")
+    while source_id is not None:
+        if (not isinstance(source_id, str) or not source_id or Path(source_id).name != source_id
+                or source_id in {".", ".."} or source_id in seen):
+            raise RuntimeError("质量来源运行标识无效或形成循环")
+        seen.add(source_id)
+        source_dir = _path(run_dir.parent, source_id)
+        source = _read(_path(source_dir, "state.json"))
+        if source.get("workflow") != WORKFLOW:
+            break
+        audit = _prior(source_dir, source, "audit")
+        routing = _prior(source_dir, source, "route")
+        history.append({
+            "run_id": source_id, "round": _round(source),
+            "audit": {key: audit[key] for key in ("versions", "candidates", "coverage", "limitations")},
+            "routing": {key: routing[key] for key in ("summary", "decisions", "document_changes")},
+        })
+        source_id = source.get("source_run_id")
+    return list(reversed(history))
+
+
 def is_completed(state: dict[str, Any]) -> bool:
     registry = state.get("requirement_registry", {}).get("requirements", [])
     return (
@@ -141,8 +165,8 @@ def node_resume_keys(state: dict[str, Any]) -> tuple[str, ...]:
     if node == "prepare":
         return ("quality_prepare",)
     suffix = f"r{_round(state):04d}"
-    if node == "audit":
-        return (f"quality_{node}_{suffix}",)
+    if node in {"audit", "complete"}:
+        return (f"quality_audit_{suffix}",)
     if node == "pool":
         return (f"quality_pool_{suffix}", f"quality_pool_design_{suffix}", f"quality_pool_commit_{suffix}")
     return ()
@@ -233,6 +257,7 @@ async def _task(
     *, skill: str | None = None, output_model: type[BaseModel] | None = None,
     validate: Callable[[Any], Awaitable[None] | None] | None = None, resume_message: ResumeMessage | None = None,
     completion_verifier: Callable[[], str | None] | None = None,
+    continue_from_report: str | None = None,
 ) -> tuple[str, Any]:
     spec = AgentDecisionLoopSpec(
         key=key, state_key=key, skill_name=skill, max_decision_rounds=32, max_turns=9999, task=task,
@@ -248,6 +273,8 @@ async def _task(
             if repair:
                 return repair
         raw = agent_conversation_report(run_dir, state, spec)
+        if raw == continue_from_report:
+            return prompt
         if output_model:
             try:
                 parsed = await parse_response(
@@ -322,14 +349,15 @@ async def _audit(run_dir: Path, state: dict[str, Any], message: ResumeMessage | 
     else:
         _write(intent_path, {"versions": versions})
     prepared = _read(_path(run_dir, "quality/prepare.json"))["data"]
-    context = {"运行条件和任务": prepared["report"], "版本": versions}
+    context = {"运行条件和任务": prepared["report"], "版本": versions, "历史候选处置": _history(run_dir, state)}
     prompt = (
         "/product-experience-audit\n对当前完整产品执行全部主要用户任务的独立审计，按真实交付面完成动态验证。"
         "具有图形界面时实际读取代表性截图；纯CLI使用实际命令、输出、退出码和持久化结果，不能机械要求桌面截图或屏幕采集权限。"
         "不改产品代码、配置、文档、Backlog 或 Git，不直接修复。当前定义与历史标题不同时查明当前承诺。"
         "已复现缺陷阻断后续任务时，保留具体受阻任务与阻断发现的对应关系，完成其余可执行覆盖后交接修复；"
         "环境、身份或必要证据缺口先在授权内补齐，无法补齐如实报告，不假装覆盖。"
-        "历史需求 completed 不能证明当前缺陷已解决。"
+        "历史需求 completed 不能证明当前缺陷已解决。历史候选按 run_id 和轮次区分；"
+        "已有处置及其理由、前提作为背景，无新证据或前提变化不重复提出相同建议；有变化时说明重议依据，不视为永久排除。"
         "最终直接返回完整任务覆盖（包括实际证据、不适用与缺陷阻断）、每个经核验发现的用户任务、触发条件、当前事实、"
         "预期结果及依据、影响、证据、优先级、信心，以及重复项、高影响事项和限制。不给正式需求 ID。\n"
         + json.dumps(context, ensure_ascii=False)
@@ -357,6 +385,8 @@ async def _route(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
         "你是产品质量负责人，只依据已完成的完整审计材料决定处理范围，不执行新的产品调查。"
         "审计 report 是多轮交接：后续明确纠正覆盖对应旧事实，局部补证不删除其它有效发现。"
         "对 candidates 中每个 ID 恰好给出一个 include、covered 或 exclude；不得新增候选或伪造补证。"
+        "历史候选按 run_id 和轮次区分，仅作为决定背景，不混入当前处置集合；"
+        "无新证据或前提变化不得绕过历史决定，有新证据时可重议并说明原前提如何变化，不把历史排除作为永久黑名单。"
         "include 用于当前值得修复的真实障碍；covered 只指同轮候选或未完成正式需求，不能指已完成历史；"
         "exclude 必须说明误判、非阻断偏好或范围外机会的具体依据，不得掩盖已复现阻断缺陷。"
         "优先合并、删除、调整默认值或复用，不将优化机会自动变成新产品目标。"
@@ -364,7 +394,7 @@ async def _route(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
         "确需校正当前设计时仅列 docs 内 Markdown 路径及理由，不修改历史 TRD。"
         "有 include 时进入正式修复，相关原场景验证由修复需求完成；本次范围外限制如实保留。"
         "没有 include 且主要任务覆盖充分、没有必要缺口或活动需求时 ready_to_complete 才为 true。"
-        "无可推进修复且必要缺口确需不可替代的外部资源时，required_inputs 列出具体资源和解除条件；"
+        "独立于本批修复仍缺失的必要外部资源，无论是否有 include，required_inputs 都须列出具体资源和解除条件；"
         "不得把普通取舍、本地错误、范围外观察或没有自述完成当成外部阻塞。"
         "材料不足而又不属于外部资源缺失时令 ready_to_complete=false，并在 summary 准确说明原因。"
     )
@@ -373,15 +403,13 @@ async def _route(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
         input_model=ExtractionInput(
             report=audit["report"],
             context=json.dumps({"审计": {k: v for k, v in audit.items() if k != "report"},
-                                "已有需求": requirements}, ensure_ascii=False),
+                                "已有需求": requirements, "历史候选处置": _history(run_dir, state)}, ensure_ascii=False),
         ),
         output_model=RoutingReport,
     )
     validate_routing(report, audit, requirements)
     for change in report.document_changes:
         validate_document_path(change.path)
-    if not any(row.action == "include" for row in report.decisions) and report.required_inputs:
-        raise QualityBlocked(report.summary, report.required_inputs)
     raw = report.model_dump_json()
 
     if main_versions(state) != audit["versions"]:
@@ -578,7 +606,7 @@ def _select(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
     return _success(run_dir, state, {"next_node": "complete"}, "本次纳入需求已全部完成")
 
 
-def _complete(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
+def _complete(run_dir: Path, state: dict[str, Any], *, coverage_report: str | None = None) -> dict[str, Any]:
     audit = _prior(run_dir, state, "audit")
     routed = _prior(run_dir, state, "route")
     report = RoutingReport.model_validate({key: routed[key] for key in RoutingReport.model_fields})
@@ -587,6 +615,12 @@ def _complete(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError("仍有活动需求，不能完成质量运行")
     if any(row["status"] != "completed" for row in state["requirement_registry"]["requirements"]):
         raise RuntimeError("仍有正式需求未完成")
+    if coverage_report is None:
+        if report.required_inputs:
+            raise QualityBlocked(report.summary, report.required_inputs)
+        gaps = [f"{row['user_task']}：{row['reason']}" for row in audit["coverage"] if row["outcome"] == "gap"]
+        if gaps:
+            raise RuntimeError("仍有未由本批修复承接的必要覆盖缺口：" + "；".join(gaps))
     versions = main_versions(state)
     included = any(row.action == "include" for row in report.decisions)
     batch = state["quality"]["batch_requirement_ids"]
@@ -614,7 +648,7 @@ def _complete(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
                 not ancestor(path, tip, versions[name]) for tip in merged_tips[name]
             ):
                 raise RuntimeError("最终版本与本批需求合并结果不一致")
-    elif not report.ready_to_complete or batch:
+    elif (not report.ready_to_complete and coverage_report is None) or batch:
         raise RuntimeError("本次审计尚未满足直接完成条件")
     elif versions != audit["versions"]:
         raise RuntimeError("本次审计未覆盖当前版本")
@@ -623,6 +657,35 @@ def _complete(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
                                     "summary": "本次完整审计及纳入需求处理完成",
                                     "limitations": audit["limitations"],
                                     "dispositions": routed["decisions"]}, "一次审计及本批修复已完成")
+
+
+async def _finish(run_dir: Path, state: dict[str, Any], message: ResumeMessage | None) -> dict[str, Any]:
+    audit = _prior(run_dir, state, "audit")
+    routed = _prior(run_dir, state, "route")
+    gaps = [row for row in audit["coverage"] if row["outcome"] == "gap"]
+    if not (gaps or routed["required_inputs"]):
+        if message:
+            raise RuntimeError("当前收口没有待补证的独立缺口")
+        return _complete(run_dir, state)
+    versions = main_versions(state)
+    prompt = (
+        "候选分流与本批需求处理已完成，保留既有候选处置、需求及原场景回归事实，不重新执行完整审计或复验已由修复需求承接的任务。"
+        "只为以下独立必要缺口补充当前证据，核实原缺失外部条件是否已补齐并完成对应任务；"
+        "不得改产品代码、文档、Backlog、Git 或已有审计产物。不可替代外部条件仍缺失时如实 blocked；"
+        "材料或执行错误不得伪装外部阻塞。只有这些必要缺口全部解决才完成本次补证，交接实际证据与剩余限制。\n"
+        + json.dumps({"必要覆盖缺口": gaps, "原缺失外部条件": routed["required_inputs"],
+                      "已完成修复需求": state["quality"]["batch_requirement_ids"], "当前版本": versions}, ensure_ascii=False)
+    )
+    raw, _ = await _task(
+        run_dir, state, f"quality_audit_r{_round(state):04d}", "quality_audit", prompt,
+        "仅补齐独立必要缺口，信任已完成修复交接；不可替代外部资源缺失才 blocked。",
+        skill="product-experience-audit", resume_message=message, continue_from_report=audit["report"],
+    )
+    if not raw or raw == audit["report"]:
+        return _complete(run_dir, state)
+    if main_versions(state) != versions:
+        raise RuntimeError("补证期间产品版本或 Git 状态发生变化")
+    return _complete(run_dir, state, coverage_report=raw)
 
 
 async def run_node(run_dir: Path, state: dict[str, Any], *, resume_message: ResumeMessage | None = None) -> dict[str, Any]:
@@ -648,11 +711,13 @@ async def run_node(run_dir: Path, state: dict[str, Any], *, resume_message: Resu
         _replace_state(run_dir, state, updated)
     if node in {"prepare", "audit", "pool"}:
         return await {"prepare": _prepare, "audit": _audit, "pool": _pool}[node](run_dir, state, resume_message)
+    if node == "complete":
+        return await _finish(run_dir, state, resume_message)
     if resume_message:
         raise RuntimeError("当前节点没有 Agent 会话，不能投递恢复消息")
     if node == "route":
         return await _route(run_dir, state)
-    return {"register": _register, "select_requirement": _select, "complete": _complete}[node](run_dir, state)
+    return {"register": _register, "select_requirement": _select}[node](run_dir, state)
 
 
 def requirement_evidence(run_dir: Path, state: dict[str, Any]) -> str:

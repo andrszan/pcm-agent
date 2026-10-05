@@ -143,14 +143,18 @@ class QualityWorkflowTests(unittest.TestCase):
         report.required_inputs = ["提供隔离恢复环境及可验证备份"]
         report.summary = "必要恢复任务缺少隔离环境，没有当前可推进修复"
         self.routing.return_value = report
+        self.execute()
+        self.assertEqual(self.state["current_node"], "quality:complete")
+        route_path = self.run / "quality/rounds/0001/route.json"
+        route_bytes = route_path.read_bytes()
         with self.assertRaises(flow.QualityBlocked) as caught:
             self.execute()
         result = flow.record_failure(self.run, self.state, caught.exception)
         self.assertEqual(result["status"], "blocked")
-        self.assertEqual(self.state["current_node"], "quality:route")
-        self.routing.return_value = route_report()
-        self.execute()
         self.assertEqual(self.state["current_node"], "quality:complete")
+        self.assertFalse(flow.is_completed(self.state))
+        self.assertEqual(route_path.read_bytes(), route_bytes)
+        self.routing.assert_awaited_once()
 
     def test_first_prepare_has_a_known_timing_start(self):
         from common.timing import StepTiming
@@ -314,6 +318,125 @@ class QualityWorkflowTests(unittest.TestCase):
         self.assertEqual([key for key in self.calls if key.startswith("quality_audit_")], ["quality_audit_r0001"])
         self.assertNotIn("max_rounds", self.state["quality"])
         self.assertTrue(flow.is_completed(self.state))
+
+    def test_repaired_batch_does_not_swallow_independent_gap(self):
+        self.finish_repair_batch()
+        path = self.run / "quality/rounds/0001/audit.json"
+        audit = json.loads(path.read_text())
+        audit["data"]["coverage"].append({
+            "user_task": "恢复备份", "outcome": "gap", "reason": "必要恢复证据未交接",
+            "evidence": [], "blocking_candidates": [],
+        })
+        write_json(path, audit)
+        self.reach("quality:complete")
+        with self.assertRaisesRegex(RuntimeError, "恢复备份") as caught:
+            self.execute()
+        result = flow.record_failure(self.run, self.state, caught.exception)
+        self.assertEqual(result["status"], "failed")
+        self.assertFalse(flow.is_completed(self.state))
+
+    def assert_repaired_batch_retains_external_inputs(self, *, has_gap):
+        self.finish_repair_batch()
+        path = self.run / "quality/rounds/0001/route.json"
+        route = json.loads(path.read_text())
+        route["data"]["required_inputs"] = ["提供隔离恢复环境及可验证备份"]
+        write_json(path, route)
+        if has_gap:
+            audit_path = self.run / "quality/rounds/0001/audit.json"
+            audit = json.loads(audit_path.read_text())
+            audit["data"]["coverage"].append({
+                "user_task": "恢复备份", "outcome": "gap", "reason": "缺少隔离恢复环境",
+                "evidence": [], "blocking_candidates": [],
+            })
+            write_json(audit_path, audit)
+        self.reach("quality:complete")
+        with self.assertRaises(flow.QualityBlocked) as caught:
+            self.execute()
+        result = flow.record_failure(self.run, self.state, caught.exception)
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["blocked"]["required_inputs"], route["data"]["required_inputs"])
+        self.assertFalse(flow.is_completed(self.state))
+
+    def test_repaired_batch_retains_external_inputs_with_gap(self):
+        self.assert_repaired_batch_retains_external_inputs(has_gap=True)
+
+    def test_repaired_batch_retains_external_inputs_without_gap(self):
+        self.assert_repaired_batch_retains_external_inputs(has_gap=False)
+
+    def test_repaired_defect_blocked_tasks_trust_completed_regression_owner(self):
+        self.blocked = True
+        self.finish_repair_batch()
+        self.reach("quality:completed")
+        self.assertTrue(flow.is_completed(self.state))
+        self.assertEqual([key for key in self.calls if key.startswith("quality_audit_")], ["quality_audit_r0001"])
+
+    def test_later_batches_handoff_structured_dispositions_without_conversation_wrappers(self):
+        self.defect = True
+        previous = route_report(True)
+        previous.decisions[0].action = "exclude"
+        previous.decisions[0].reason = "此现象只发生于明确范围外的离线模式；联网前提成立时无需新增能力"
+        previous.ready_to_complete = True
+        self.routing.side_effect = None
+        self.routing.return_value = previous
+        self.reach("quality:completed")
+        # 原对话不进入后续批次；候选、决定及其前提仍须可直接读取。
+        for name in ("audit", "route"):
+            path = self.run / f"quality/rounds/0001/{name}.json"
+            value = json.loads(path.read_text())
+            value["data"]["report"] = "不应递归传递的旧 system/conversation 包装"
+            write_json(path, value)
+        original = self.run
+        original_state = copy.deepcopy(self.state)
+        source_before = {p.relative_to(original): p.read_bytes() for p in original.rglob("*.json")}
+        task_mock = flow._task
+        for index in range(2):
+            self.defect = False
+            self.routing.return_value = route_report()
+            source_id = self.run.name
+            self.run = self.base / "runs" / f"later-{index}"
+            self.run.mkdir()
+            self.state = flow.new_state(self.state, source_id, self.run.name)
+            self.reach("quality:route")
+            audit_call = next(call for call in reversed(task_mock.call_args_list) if call.args[3] == "quality_audit")
+            self.execute()
+            for context in (audit_call.args[4], self.routing.await_args.kwargs["input_model"].context):
+                self.assertIn(previous.decisions[0].reason, context)
+                self.assertIn("保存失败丢失输入", context)
+                self.assertIn(original.name, context)
+                self.assertNotIn("不应递归传递的旧 system/conversation 包装", context)
+            self.reach("quality:completed")
+        self.assertEqual(source_before, {p.relative_to(original): p.read_bytes() for p in original.rglob("*.json")})
+        self.assertEqual(original_state, read_state(original))
+
+    def test_history_rejects_unsafe_cyclic_and_symlinked_sources(self):
+        for source_id in ("../original", self.run.name):
+            with self.subTest(source_id=source_id), self.assertRaisesRegex(RuntimeError, "来源运行标识"):
+                flow._history(self.run, {**self.state, "source_run_id": source_id})
+        linked = self.run.parent / "linked-source"
+        linked.symlink_to(self.source_dir, target_is_directory=True)
+        with self.assertRaisesRegex(RuntimeError, "符号链接"):
+            flow._history(self.run, {**self.state, "source_run_id": linked.name})
+        self.assertEqual((self.source_dir / "state.json").read_bytes(), self.source_bytes)
+
+    def test_historical_exclusion_does_not_veto_new_evidence(self):
+        self.defect = True
+        previous = route_report(True)
+        previous.decisions[0].action = "exclude"
+        previous.decisions[0].reason = "离线场景不在当前承诺内"
+        previous.ready_to_complete = True
+        self.routing.side_effect = None
+        self.routing.return_value = previous
+        self.reach("quality:completed")
+        source_id = self.run.name
+        self.run = self.base / "runs" / "new-evidence"
+        self.run.mkdir()
+        self.state = flow.new_state(self.state, source_id, self.run.name)
+        revised = route_report(True)
+        revised.decisions[0].reason = "新增证据：联网正常时同样丢失输入，原排除前提不成立"
+        self.routing.return_value = revised
+        self.reach("quality:pool")
+        route = flow._prior(self.run, self.state, "route")
+        self.assertEqual(route["decisions"], revised.model_dump()["decisions"])
 
     def test_repair_completion_rejects_missing_merge_result(self):
         self.finish_repair_batch()

@@ -12,7 +12,7 @@ from common.decision import AgentDecision
 from common.state import read_state
 from model_policy import AgentProfile
 from quality import workflow
-from quality.models import AuditReport, PoolPlan
+from quality.models import AuditReport, PoolPlan, RoutingReport
 
 
 class QualityAgentHandoffTests(unittest.IsolatedAsyncioTestCase):
@@ -189,6 +189,121 @@ class QualityAgentHandoffTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(parsed, plan)
         self.assertEqual(catalog[1]["depends_on"], ["BR-001"])
         workflow._validate_increment(self.state, catalog, parsed)
+
+    async def test_completion_gap_recovers_through_resume_cli(self) -> None:
+        await self.assert_completion_gap_recovers(with_message=False)
+
+    async def test_completion_gap_recovers_through_resume_message_cli(self) -> None:
+        await self.assert_completion_gap_recovers(with_message=True)
+
+    async def test_no_included_gap_recovers_through_resume_cli(self) -> None:
+        await self.assert_completion_gap_recovers(with_message=False, with_repairs=False)
+
+    async def test_no_included_gap_recovers_through_resume_message_cli(self) -> None:
+        await self.assert_completion_gap_recovers(with_message=True, with_repairs=False)
+
+    async def assert_completion_gap_recovers(self, *, with_message: bool, with_repairs: bool = True) -> None:
+        import asyncio
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
+        from types import SimpleNamespace
+
+        import run_all
+        import run_quality
+
+        self.agent.return_value = self.result("保存缺陷已核验；恢复备份因缺少隔离环境尚未执行", skill="product-experience-audit")
+        raw, _ = await workflow._task(
+            self.run_dir, self.state, "quality_audit_r0001", "quality_audit",
+            "审计保存与恢复备份", "完成可执行调查后交接修复", skill="product-experience-audit",
+        )
+        self.state.update({
+            "run_id": self.run_dir.name,
+            "workflow": workflow.WORKFLOW, "phase": workflow.PHASE, "current_node": "quality:complete",
+            "status": "success", "step": None, "current_step": None, "active_requirement": None,
+            "requirement_cycle": None, "blocked": None, "error": None,
+            "quality": {"round": 1, "baseline_requirement_ids": ["BR-001"], "batch_requirement_ids": ["BR-002"]},
+            "requirement_registry": {"requirements": [
+                {"id": "BR-001", "status": "completed", "completion": {"step": 18}},
+                {"id": "BR-002", "status": "completed", "completion": {"step": 18}},
+            ]},
+        })
+        route = {"summary": "修复保存并保留独立恢复缺口", "decisions": [
+            {"candidate_id": "C", "action": "include", "reason": "保存失败", "covered_by": None}],
+            "document_changes": [], "ready_to_complete": False, "required_inputs": ["隔离恢复环境"]}
+        audit = {"report": raw, "versions": {"root": "before"}, "candidates": [{"id": "C"}],
+                 "coverage": [
+                     {"user_task": "保存", "outcome": "blocked_by_defect", "reason": "保存失败", "blocking_candidates": ["C"]},
+                     {"user_task": "恢复备份", "outcome": "gap", "reason": "缺少隔离环境", "blocking_candidates": []},
+                 ], "limitations": []}
+        plan = {"summary": "保存修复", "requirements": [{"requirement_id": "BR-002", "candidate_ids": ["C"]}],
+                "regression_owners": [{"candidate_id": "C", "requirement_id": "BR-002"}]}
+        if not with_repairs:
+            self.state["current_node"] = "quality:route"
+            self.state["quality"]["batch_requirement_ids"] = []
+            self.state["requirement_registry"]["requirements"].pop()
+            audit["versions"] = {"root": "fixed"}
+            audit["coverage"][0].update(outcome="covered", reason="保存可用", blocking_candidates=[])
+            route["decisions"][0].update(action="exclude", reason="非阻断偏好")
+            self.parse.return_value = RoutingReport.model_validate(route)
+        prior_artifacts = (("audit", audit), ("route", route), ("pool", {"plan": plan}), ("register", {"new_ids": ["BR-002"]}))
+        for name, data in prior_artifacts if with_repairs else prior_artifacts[:1]:
+            workflow._write(self.run_dir / f"quality/rounds/0001/{name}.json", {
+                "node": f"quality:{name}", "round": 1, "status": "success", "data": data,
+            })
+        workflow._write(self.run_dir / "steps/requirements/BR-002/18.json", {
+            "status": "success", "requirement_id": "BR-002", "repositories": [{"name": "root", "tip_sha": "fixed"}],
+        })
+        artifacts = {p: p.read_bytes() for p in (self.run_dir / "quality/rounds/0001").glob("*.json")}
+        registry = json.dumps(self.state["requirement_registry"], sort_keys=True)
+        workflow._write(self.run_dir / "state.json", self.state)
+        blocked = AgentDecision(verdict="blocked", answer="", reason="恢复备份仍缺少隔离环境", required_inputs=["隔离恢复环境"])
+        self.decision.return_value = (blocked.model_dump(), 1, blocked.model_dump_json())
+        with patch.object(workflow, "main_versions", return_value={"root": "fixed"}), \
+             patch.object(workflow, "repositories", return_value=[("root", self.workspace)]), \
+             patch.object(workflow, "ancestor", return_value=True), \
+             patch.object(run_all, "RUNS_DIR", self.base), \
+             patch.object(run_quality, "acquire_execution_locks"), \
+             patch.object(run_quality, "attach_product"), \
+             patch.object(run_quality, "load_settings", return_value=SimpleNamespace(pcm_max_concurrent_projects=1)), \
+             patch.object(run_quality, "load_model_policy", return_value={}), \
+             patch.object(run_quality, "_model_policy_snapshot", return_value="test-policy"), \
+             patch.object(run_quality, "_model_policy_table", return_value="test-policy"), \
+             redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            if not with_repairs:
+                self.assertEqual(await asyncio.to_thread(run_quality.main, ["--resume", self.run_dir.name, "--node", "quality:route"]), 0)
+                self.assertEqual(read_state(self.run_dir)["current_node"], "quality:complete")
+                self.parse.assert_awaited_once()
+                artifacts = {p: p.read_bytes() for p in (self.run_dir / "quality/rounds/0001").glob("*.json")}
+            command = ["--resume", self.run_dir.name, "--node", "quality:complete"]
+            self.assertEqual(await asyncio.to_thread(run_quality.main, command), 1)
+            self.state = read_state(self.run_dir)
+            self.assertEqual(self.state["status"], "blocked")
+            self.assertEqual(self.agent.await_count, 2)
+            self.assertEqual(workflow.node_resume_keys(self.state), ("quality_audit_r0001",))
+            self.assertIn("恢复备份", self.agent.await_args.args[0])
+            self.assertIn("隔离恢复环境", self.agent.await_args.args[0])
+            self.agent.return_value = self.result("隔离环境已可用，仅补恢复备份：实际恢复与查询结果一致", skill="product-experience-audit")
+            completed = AgentDecision(verdict="completed", answer="", reason="独立必要缺口已补证", required_inputs=[])
+            self.decision.return_value = (completed.model_dump(), 1, completed.model_dump_json())
+            if with_message:
+                message = self.base / "resume.txt"
+                message.write_text("隔离恢复环境已就绪，请只补恢复备份任务证据", encoding="utf-8")
+                command += ["--resume-message-file", str(message)]
+            self.assertEqual(await asyncio.to_thread(run_quality.main, command), 0)
+        self.state = read_state(self.run_dir)
+        self.assertTrue(workflow.is_completed(self.state))
+        self.assertEqual(self.agent.await_count, 3)
+        followup = self.agent.await_args
+        self.assertEqual(followup.kwargs["resume_session_id"], "quality-session")
+        if with_message:
+            self.assertEqual(followup.args[0], message.read_text())
+        self.assertEqual(self.specs[-1].key, "quality_audit_r0001")
+        self.assertEqual(registry, json.dumps(self.state["requirement_registry"], sort_keys=True))
+        self.assertEqual(artifacts, {p: p.read_bytes() for p in artifacts})
+        if not with_repairs:
+            self.parse.assert_awaited_once()
+            completed_result = json.loads((self.run_dir / "quality/complete.json").read_text())
+            self.assertEqual(completed_result["data"]["dispositions"], route["decisions"])
 
     async def test_structural_gap_returns_to_original_session_and_extracts_repaired_reply(self) -> None:
         self.agent.side_effect = [
