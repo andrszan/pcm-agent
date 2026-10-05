@@ -519,6 +519,10 @@ class StepTimingIntegrationTests(unittest.TestCase):
                 "sha256": sha256(workspace / registry_step.BACKLOG_PATH),
             }
             registry_step._advance_success(run_dir, state, source, fixture.requirements())
+            # 先完成旧 run 的协调登记，再核验成功复用不改业务现场。
+            with patch.object(run_step, "run_dir_for", return_value=run_dir):
+                with run_step._prepare_execution_locks(Namespace(step=12, run_id="test-run")):
+                    pass
             result_path = run_dir / "steps" / "12.json"
             historical_result = json.loads(result_path.read_text(encoding="utf-8"))
             historical_result["summary"] = "已完成且应原样复用的历史摘要。"

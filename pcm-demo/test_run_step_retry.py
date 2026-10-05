@@ -246,6 +246,53 @@ class RunStepRetryTests(unittest.TestCase):
                     self.assertEqual(run_step.main(), expected)
                 self.assertIn("第 4 步执行失败", stderr.getvalue())
 
+    def test_decision_failure_before_resume_message_delivery_is_persisted(self) -> None:
+        run_dir = run_step.DEMO_ROOT / "runs/test-run"
+        (run_dir / "steps").mkdir(parents=True)
+        (run_dir / "state.json").write_text(json.dumps({
+            "run_id": "test-run", "status": "running",
+            "phase": "project_initialization", "step": 2, "current_step": 2,
+            "current_node": "project:02_intake", "blocked": None, "error": None,
+        }), encoding="utf-8")
+        message = ResumeMessage("project_intake", "负责人决定")
+        args = Mock(step=2, run_id="test-run", resume_message=message)
+        error = run_step.AIDecisionFailure(
+            {"kind": "transport", "message": "负责人连接失败"},
+            message="负责人连接失败",
+        )
+
+        async def fail_before_delivery(_args):
+            raise error
+
+        with (
+            patch.object(run_step, "run_step_two", new=fail_before_delivery),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(run_step._execute(args, Mock()), 1)
+
+        state = json.loads((run_dir / "state.json").read_text())
+        result = json.loads((run_dir / "steps/02.json").read_text())
+        self.assertEqual(state["status"], "failed")
+        self.assertEqual(state["error"]["type"], "AIDecisionFailure")
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["error"]["type"], "AIDecisionFailure")
+        self.assertIn("负责人连接失败", result["error"]["message"])
+        self.assertFalse(message.consumed)
+
+    def test_success_still_requires_resume_message_delivery(self) -> None:
+        run_dir = run_step.DEMO_ROOT / "runs/test-run"
+        message = ResumeMessage("project_intake", "负责人决定")
+        args = Mock(step=2, run_id="test-run", resume_message=message)
+
+        async def finish_without_delivery(_args):
+            return run_dir, run_step.project_intake_result("success", "已完成")
+
+        with (
+            patch.object(run_step, "run_step_two", new=finish_without_delivery),
+            self.assertRaisesRegex(RuntimeError, "负责人消息未被目标原对话消费"),
+        ):
+            run_step._execute(args, Mock())
+
     def test_sdk_retry_reuses_one_prepared_resume_message(self) -> None:
         root = run_step.DEMO_ROOT
         run_dir = root / "runs/test-run"

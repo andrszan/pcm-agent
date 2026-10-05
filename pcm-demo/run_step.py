@@ -115,7 +115,12 @@ from steps.step_11_requirement_breakdown import run as run_requirement_breakdown
 from steps.step_11_requirement_breakdown.step import CURRENT_NODE as REQUIREMENT_BREAKDOWN_NODE
 from steps.step_12_initialize_requirement_registry import result as requirement_registry_result
 from steps.step_12_initialize_requirement_registry import run as run_requirement_registry
-from steps.step_12_initialize_requirement_registry.step import has_complete_success as has_requirement_registry_success
+from steps.step_12_initialize_requirement_registry.step import (
+    CURRENT_NODE as REQUIREMENT_REGISTRY_NODE,
+    NEXT_NODE as REQUIREMENT_SELECTION_NODE,
+    PHASE as REQUIREMENT_REGISTRY_PHASE,
+    has_complete_success as has_requirement_registry_success,
+)
 from steps.step_13_select_requirement import result as requirement_selection_result
 from steps.step_13_select_requirement import run as run_requirement_selection
 from steps.step_13_select_requirement.step import (
@@ -172,16 +177,36 @@ _RETRY_REQUESTED_EXIT_CODE = 3
 
 
 def _at_early_failure_anchor(step: int, state: dict[str, Any]) -> bool:
-    node = CREATE_WORKSPACE_NODE if step == 1 else PROJECT_INTAKE_NODE
+    nodes = {
+        1: CREATE_WORKSPACE_NODE,
+        2: PROJECT_INTAKE_NODE,
+        5: PROJECT_READINESS_NODE,
+        6: PROJECT_BOOTSTRAP_NODE,
+        7: SOLUTION_DESIGN_NODE,
+        8: INITIALIZE_REPOSITORIES_NODE,
+        9: ENGINEERING_ARCHITECTURE_NODE,
+        10: UI_UX_FRAMEWORK_NODE,
+        11: REQUIREMENT_BREAKDOWN_NODE,
+        12: REQUIREMENT_REGISTRY_NODE,
+    }
+    phase = REQUIREMENT_REGISTRY_PHASE if step == 12 else PROJECT_INITIALIZATION_PHASE
+    if step == 12:
+        return state.get("phase") == phase and (
+            state.get("step"), state.get("current_step"), state.get("current_node")
+        ) in {
+            (12, 12, REQUIREMENT_REGISTRY_NODE),
+            (12, 12, REQUIREMENT_SELECTION_NODE),
+        }
     canonical = (
-        state.get("phase") == PROJECT_INITIALIZATION_PHASE
+        (state.get("phase") == phase or (5 <= step <= 11 and state.get("phase") is None))
         and (state.get("step"), state.get("current_step"), state.get("current_node"))
-        == (step, step, node)
+        == (step, step, nodes[step])
     )
     current_step = state.get("current_step")
     status = state.get("status")
     legacy = (
-        state.get("phase") is None
+        step in {1, 2}
+        and state.get("phase") is None
         and state.get("step") is None
         and state.get("current_node") is None
         and (
@@ -1120,10 +1145,13 @@ def _prepare_execution_locks(args: argparse.Namespace) -> ExecutionLocks:
             elif isinstance(state.get("workspace"), dict):
                 final_path = state["workspace"].get("final_path")
                 if isinstance(final_path, str) and final_path:
-                    key, canonical = product_key(Path(final_path))
-                    locks.product = locks.stack.enter_context(
-                        acquire_product_lock(root, run_id, key, canonical)
+                    record, _ = _ensure_product_claim(
+                        run_dir, state, run_id, Path(final_path), locks
                     )
+                    if Path(final_path).is_dir():
+                        ensure_runtime(
+                            Path(final_path), state["coordination"]["product_key"], run_id, record
+                        )
         return locks
     except BaseException:
         locks.close()
@@ -1522,7 +1550,7 @@ def _execute(
             error_message = str(error)
 
     resume_message = _resume_message(args)
-    if resume_message is not None and not resume_message.consumed:
+    if result["status"] == "success" and resume_message is not None and not resume_message.consumed:
         raise RuntimeError("负责人消息未被目标原对话消费")
 
     if result["status"] != "success" and not error_message:
@@ -1810,9 +1838,7 @@ def _execute(
                 state = read_state(run_dir)
             except Exception:  # noqa: BLE001 - 状态损坏时不能安全改写早期锚点。
                 state = None
-            if args.step in {1, 2} and (
-                state is None or not _at_early_failure_anchor(args.step, state)
-            ):
+            if state is None or not _at_early_failure_anchor(args.step, state):
                 persist_failure = False
         if persist_failure:
             if caught_error is not None:

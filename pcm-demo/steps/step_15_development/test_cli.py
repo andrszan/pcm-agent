@@ -55,7 +55,7 @@ class DevelopmentCLITests(unittest.TestCase):
     ) -> tuple[Path, dict]:
         run_dir = self.demo_root / "runs" / run_id
         workspace_root = self.demo_root / "workspace-root"
-        workspace = workspace_root / "project"
+        workspace = workspace_root / run_id
         trd_path = "docs/trd/BR-001.md"
         (workspace / "docs/trd").mkdir(parents=True, exist_ok=True)
         (workspace / trd_path).write_text("# TRD\n\n有效内容。\n", encoding="utf-8")
@@ -113,6 +113,9 @@ class DevelopmentCLITests(unittest.TestCase):
             },
         )
         write_state(run_dir, state)
+        # 快照前完成真实协调登记，后续严格核验业务现场保护。
+        with self.cli._prepare_execution_locks(self.args(run_dir.name)):
+            pass
         return run_dir, state
 
     def complete_result(self) -> dict:

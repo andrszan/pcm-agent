@@ -171,20 +171,20 @@ class StepElevenCLITests(unittest.TestCase):
                 self.assertEqual(read_state(run_dir), self.advanced_state())
                 shutil.rmtree(run_dir)
 
-    def test_incomplete_success_is_overwritten_and_rewinds_to_step_eleven(self) -> None:
+    def test_incomplete_success_preserves_result_and_advanced_state_after_error(self) -> None:
         run_dir = self.make_run(self.advanced_state())
-        write_json(run_dir / "steps/11.json", {"status": "success"})
+        result_path = run_dir / "steps/11.json"
+        state_path = run_dir / "state.json"
+        write_json(result_path, {"status": "success"})
+        original_result = result_path.read_bytes()
+        original_state = state_path.read_bytes()
         with (
             patch.object(self.cli, "parse_args", return_value=self.args(run_dir.name)),
             patch.object(self.cli, "run_step_eleven", AsyncMock(side_effect=OSError("模拟失败"))),
         ):
             self.assertEqual(self.cli.main(), 1)
-        result = json.loads((run_dir / "steps/11.json").read_text(encoding="utf-8"))
-        self.assertEqual(result["status"], "failed")
-        self.assertEqual(result["name"], "拆分 Backlog")
-        state = read_state(run_dir)
-        self.assertEqual(state["status"], "failed")
-        self.assertEqual((state["step"], state["current_step"], state["current_node"]), (11, 11, CURRENT_NODE))
+        self.assertEqual(result_path.read_bytes(), original_result)
+        self.assertEqual(state_path.read_bytes(), original_state)
 
 
 if __name__ == "__main__":

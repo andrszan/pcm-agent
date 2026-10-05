@@ -110,6 +110,9 @@ class TRDDesignCLITests(unittest.TestCase):
                 ),
             )
         write_state(run_dir, state)
+        # 快照前完成真实协调登记，后续严格核验业务现场保护。
+        with self.cli._prepare_execution_locks(self.args(run_dir.name)):
+            pass
         return run_dir, state
 
     def test_dispatches_step_fourteen_and_prints_scoped_result(self) -> None:

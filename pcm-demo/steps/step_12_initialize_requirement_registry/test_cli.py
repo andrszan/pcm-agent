@@ -199,26 +199,24 @@ class StepTwelveCLITests(unittest.TestCase):
         self.assertEqual(json.loads((run_dir / "steps/12.json").read_text(encoding="utf-8")), success)
         self.assertEqual(read_state(run_dir), self.advanced_state())
 
-    def test_advanced_state_with_incomplete_success_stays_failed_without_rollback(self) -> None:
+    def test_incomplete_success_preserves_result_and_advanced_state_after_repeated_error(self) -> None:
         run_dir = self.make_run(self.advanced_state())
-        write_json(run_dir / "steps/12.json", {"status": "success"})
+        result_path = run_dir / "steps/12.json"
+        state_path = run_dir / "state.json"
+        write_json(result_path, {"status": "success"})
+        original_result = result_path.read_bytes()
+        original_state = state_path.read_bytes()
         with (
             patch.object(self.cli, "parse_args", return_value=self.args(run_dir.name)),
             patch.object(self.cli, "run_step_twelve", AsyncMock(side_effect=OSError("simulated"))),
         ):
             self.assertEqual(self.cli.main(), 1)
-        self.assertEqual(json.loads((run_dir / "steps/12.json").read_text(encoding="utf-8"))["status"], "failed")
-        state = read_state(run_dir)
-        self.assertEqual((state["step"], state["current_step"], state["current_node"]), (13, 13, NEXT_NODE))
-        self.assertEqual(state["status"], "failed")
+        self.assertEqual(result_path.read_bytes(), original_result)
+        self.assertEqual(state_path.read_bytes(), original_state)
         with patch.object(self.cli, "parse_args", return_value=self.args(run_dir.name)):
             self.assertEqual(self.cli.main(), 1)
-        repeated = read_state(run_dir)
-        self.assertEqual(
-            (repeated["step"], repeated["current_step"], repeated["current_node"]),
-            (13, 13, NEXT_NODE),
-        )
-        self.assertEqual(repeated["status"], "failed")
+        self.assertEqual(result_path.read_bytes(), original_result)
+        self.assertEqual(state_path.read_bytes(), original_state)
 
 
 if __name__ == "__main__":

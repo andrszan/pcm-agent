@@ -95,6 +95,9 @@ class RuleRetrospectiveCLITests(unittest.TestCase):
             state["claude_sessions"]["rule_retrospective_BR-001"] = "development-session-1"
             write_requirement_step_result(run_dir, "BR-001", STEP, self.success_result())
         write_state(run_dir, state)
+        # 快照前完成真实协调登记，后续严格核验业务现场保护。
+        with self.cli._prepare_execution_locks(self.args(run_dir.name)):
+            pass
         return run_dir, state
 
     @staticmethod
