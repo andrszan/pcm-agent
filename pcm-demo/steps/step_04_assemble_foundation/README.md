@@ -14,9 +14,9 @@
 
 ## 结果和恢复
 
-成功结果写入 `steps/04.json`，其中记录适用端、产物目录和实际 origin、branch、commit SHA；状态推进到 `project:05_verify_readiness`、第 5 步。成功复用会重新核验来源记录、适用仓自身 top-level、`main`、unborn HEAD、空 index、非适用端不存在及临时目录，不重新 clone。
+成功结果写入 `steps/04.json`，其中记录适用端、产物目录和实际 origin、branch、commit SHA；状态推进到 `project:05_verify_readiness`、第 5 步。成功复用会重新核验来源记录、适用仓自身 top-level、`main`、unborn HEAD、空 index、非适用端不存在及临时目录，不重新 clone。若成功结果已写入而状态仍在第 4 步，重跑优先只读复验该结果和已发布工程，再补齐状态推进，保留结果文件和工程。
 
-Git 认证或读取权限缺失会写入 `blocked`，补齐模板仓库访问权限后用相同 run 重试。其他错误写入 `failed` 并停留在本步骤。仅当临时目录名称、父目录和 ownership marker 均与当前 run 完全匹配，且目标仍是占位或不存在时，才会删除失败残留并重新准备；未知残留和部分发布现场会保留且拒绝覆盖。
+失败仅在当前状态属于第 4 步且没有既有成功结果时持久化；误调用或既有成功复验失败会返回失败，保留原 state 和结果文件。Git 认证或读取权限缺失会写入 `blocked`，补齐模板仓库访问权限后用相同 run 重试。其他可归属错误写入 `failed` 并停留在本步骤。仅当临时目录名称、父目录和 ownership marker 均与当前 run 完全匹配，且目标仍是占位或不存在时，才会删除失败残留并重新准备；未知残留和部分发布现场会保留且拒绝覆盖。
 
 ## 运行
 

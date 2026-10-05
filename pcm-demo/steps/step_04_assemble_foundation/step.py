@@ -8,7 +8,7 @@ from typing import Any
 
 from common.error_diagnostics import exception_projection, write_diagnostic
 from common.files import write_json
-from common.state import write_state, write_step_result
+from common.state import step_result_status, write_state, write_step_result
 from steps.step_01_create_workspace.workspace import (
     WorkspaceBlocked,
     git,
@@ -506,6 +506,13 @@ def save_failure(
             applicable=applicable,
             error=exception_projection(error, diagnostic_path=diagnostic_path),
         )
+    if (state.get("step"), state.get("current_step"), state.get("current_node")) != (STEP, STEP, CURRENT_NODE):
+        return saved
+    try:
+        if step_result_status(run_dir, STEP) == "success":
+            return saved
+    except RuntimeError:
+        return saved
     write_step_result(run_dir, STEP, saved)
     state.update(
         {
@@ -521,19 +528,39 @@ def save_failure(
     return saved
 
 
+def advance_state(run_dir: Path, state: dict[str, Any]) -> None:
+    state.update(
+        {
+            "status": "success",
+            "phase": "project_initialization",
+            "current_node": NEXT_NODE,
+            "step": 5,
+            "current_step": 5,
+            "blocked": None,
+            "error": None,
+        }
+    )
+    write_state(run_dir, state)
+
+
 def run(run_dir: Path, state: dict[str, Any], *, git_runner=git) -> dict[str, Any]:
     selection: FoundationSelectionResult | None = None
     try:
+        position = (state.get("step"), state.get("current_step"), state.get("current_node"))
+        if position not in {(STEP, STEP, CURRENT_NODE), (5, 5, NEXT_NODE)}:
+            raise RuntimeError("运行状态不位于第 4 步组装锚点")
         selection = load_selection(run_dir)
         applicable = selection.frontend is not None or selection.backend is not None
         workspace = workspace_from_state(state)
         temporary = temporary_root(workspace, str(state.get("run_id", "")))
         result_path = run_dir / "steps" / "04.json"
-        if state.get("current_step") == 5 and state.get("current_node") == NEXT_NODE and result_path.is_file():
+        if result_path.is_file() and (position == (5, 5, NEXT_NODE) or step_result_status(run_dir, STEP) == "success"):
             existing = json.loads(result_path.read_text(encoding="utf-8"))
             verify_existing_success(workspace, selection, existing, temporary)
+            if position == (STEP, STEP, CURRENT_NODE):
+                advance_state(run_dir, state)
             return existing
-        if state.get("current_step") != STEP or state.get("current_node") != CURRENT_NODE:
+        if position != (STEP, STEP, CURRENT_NODE):
             raise RuntimeError("运行状态不位于第 4 步组装锚点")
         targets = inspect_targets(workspace)
         state.update({"status": "running", "blocked": None, "error": None})
@@ -556,19 +583,8 @@ def run(run_dir: Path, state: dict[str, Any], *, git_runner=git) -> dict[str, An
             "success", "基础工程已按已选模板组装。", applicable=applicable, outputs=outputs, assembly=assembly
         )
         write_step_result(run_dir, STEP, saved)
-        state.update(
-            {
-                "status": "success",
-                "phase": "project_initialization",
-                "current_node": NEXT_NODE,
-                "step": 5,
-                "current_step": 5,
-                "blocked": None,
-                "error": None,
-            }
-        )
-        write_state(run_dir, state)
+        advance_state(run_dir, state)
         return saved
-    except Exception as error:  # noqa: BLE001 - 步骤入口必须持久化所有失败结果。
+    except Exception as error:  # noqa: BLE001 - 步骤入口统一返回失败，确认归属后才持久化。
         applicable = selection is None or selection.frontend is not None or selection.backend is not None
         return save_failure(run_dir, state, error, applicable=applicable)

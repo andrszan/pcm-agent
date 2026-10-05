@@ -377,6 +377,77 @@ class AssembleFoundationTests(unittest.TestCase):
 
             self.assertEqual(run(run_dir, read_state(run_dir), git_runner=reject_clone), saved)
 
+    def test_wrong_anchor_preserves_state_and_existing_result(self) -> None:
+        for position in (
+            (6, 6, "project:06_bootstrap_foundation"),
+            (6, 4, CURRENT_NODE),
+            (4, 4, "project:06_bootstrap_foundation"),
+        ):
+            for existing in (False, True):
+                with self.subTest(position=position, existing=existing), tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    _, url = self.create_remote(root)
+                    run_dir, _, state = self.make_run(root, self.selection(url))
+                    if existing:
+                        self.assertEqual(run(run_dir, state)["status"], "success")
+                    state.update(zip(("step", "current_step", "current_node"), position))
+                    write_state(run_dir, state)
+                    before_state = (run_dir / "state.json").read_bytes()
+                    result_path = run_dir / "steps/04.json"
+                    before_result = result_path.read_bytes() if existing else None
+                    saved = run(run_dir, state)
+                    self.assertEqual(saved["status"], "failed")
+                    self.assertIn("锚点", saved["error"]["message"])
+                    self.assertEqual((run_dir / "state.json").read_bytes(), before_state)
+                    self.assertEqual(state, read_state(run_dir))
+                    if existing:
+                        self.assertEqual(result_path.read_bytes(), before_result)
+                    else:
+                        self.assertFalse(result_path.exists())
+
+    def test_success_result_recovers_interrupted_state_without_republishing(self) -> None:
+        for applicable in (True, False):
+            with self.subTest(applicable=applicable), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                _, url = self.create_remote(root)
+                selection = self.selection(url) if applicable else self.selection(url, frontend=None, backend=None)
+                run_dir, workspace, state = self.make_run(root, selection)
+
+                def interrupt_advance(run_dir, state):
+                    if state["current_step"] == 5:
+                        raise KeyboardInterrupt("模拟成功结果写入后中断")
+                    write_state(run_dir, state)
+
+                with patch("steps.step_04_assemble_foundation.step.write_state", side_effect=interrupt_advance):
+                    with self.assertRaises(KeyboardInterrupt):
+                        run(run_dir, state)
+                self.assertEqual(read_state(run_dir)["current_step"], 4)
+                result_path = run_dir / "steps/04.json"
+                before_result = result_path.read_bytes()
+                self.assertEqual(json.loads(before_result)["status"], "success")
+                before_files = {
+                    path.relative_to(workspace): (path.stat().st_ino, path.read_bytes())
+                    for path in workspace.rglob("*") if path.is_file()
+                }
+                with patch("steps.step_04_assemble_foundation.step.prepare_temporary_root") as prepare, patch(
+                    "steps.step_04_assemble_foundation.step.prepare_payloads"
+                ) as payloads, patch("steps.step_04_assemble_foundation.step.shutil.rmtree") as remove:
+                    saved = run(run_dir, read_state(run_dir))
+                    prepare.assert_not_called()
+                    payloads.assert_not_called()
+                    remove.assert_not_called()
+                self.assertEqual(saved, json.loads(before_result))
+                self.assertEqual(result_path.read_bytes(), before_result)
+                self.assertEqual({
+                    path.relative_to(workspace): (path.stat().st_ino, path.read_bytes())
+                    for path in workspace.rglob("*") if path.is_file()
+                }, before_files)
+                advanced = read_state(run_dir)
+                self.assertEqual((advanced["step"], advanced["current_step"], advanced["current_node"]), (5, 5, NEXT_NODE))
+                self.assertEqual(advanced["status"], "success")
+                self.assertIsNone(advanced["blocked"])
+                self.assertIsNone(advanced["error"])
+
     def test_null_combinations_remove_only_applicable_targets(self) -> None:
         for frontend, backend, outputs in [
             ("templates/frontend", None, ["frontend"]),
@@ -602,6 +673,16 @@ class AssembleFoundationTests(unittest.TestCase):
             completed = run_cli(demo_root, "--step", "4", "--run-id", run_dir.name)
             self.assertEqual(completed.returncode, 0, completed.stderr)
             self.assertIn("04.json", completed.stdout)
+            state = read_state(run_dir)
+            state.update({"step": 6, "current_step": 6, "current_node": "project:06_bootstrap_foundation"})
+            write_state(run_dir, state)
+            before_state = (run_dir / "state.json").read_bytes()
+            before_result = (run_dir / "steps/04.json").read_bytes()
+            rejected = run_cli(demo_root, "--step", "4", "--run-id", run_dir.name)
+            self.assertEqual(rejected.returncode, 1, rejected.stderr)
+            self.assertIn("步骤 4 failed", rejected.stderr)
+            self.assertEqual((run_dir / "state.json").read_bytes(), before_state)
+            self.assertEqual((run_dir / "steps/04.json").read_bytes(), before_result)
 
     def test_cli_reports_missing_or_unknown_run_id_with_step_four_schema(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -621,8 +702,17 @@ class AssembleFoundationTests(unittest.TestCase):
             saved = run(run_dir, state)
             saved["assembly"]["frontend"]["origin"] = "file:///different.git"
             write_json(run_dir / "steps" / "04.json", saved)
-            failed = run(run_dir, read_state(run_dir))
-            self.assertEqual(failed["status"], "failed")
+            for current_step, node in ((5, NEXT_NODE), (4, CURRENT_NODE)):
+                with self.subTest(current_step=current_step):
+                    state.update({"step": current_step, "current_step": current_step, "current_node": node})
+                    write_state(run_dir, state)
+                    before_state = (run_dir / "state.json").read_bytes()
+                    before_result = (run_dir / "steps/04.json").read_bytes()
+                    failed = run(run_dir, read_state(run_dir))
+                    self.assertEqual(failed["status"], "failed")
+                    self.assertIn("来源证据", failed["error"]["message"])
+                    self.assertEqual((run_dir / "state.json").read_bytes(), before_state)
+                    self.assertEqual((run_dir / "steps/04.json").read_bytes(), before_result)
 
     def test_git_errors_are_saved_without_remote_error_text(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
