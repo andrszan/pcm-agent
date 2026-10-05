@@ -30,10 +30,13 @@ from steps.step_08_initialize_repositories.test_step import (
 )
 
 
+TEST_PARENT_PATH = "test-team/pcm-projects"
+
+
 class FakeGitLab:
     """仅模拟 API 协议；本地仓库、origin 与 push 使用真实 Git。"""
-    def __init__(self):
-        self.parent = {"id": 10, "full_path": gitlab.PARENT_PATH}
+    def __init__(self, parent_path=TEST_PARENT_PATH, parent_id=10):
+        self.parent = {"id": parent_id, "full_path": parent_path}
         self.group = None
         self.projects = {}
         self.calls = []
@@ -44,14 +47,14 @@ class FakeGitLab:
         self.calls.append((method, path, data))
         if path == "user":
             return {"id": 7, "state": "active"}
-        if method == "GET" and path == f"groups/{gitlab.PARENT_PATH}":
+        if method == "GET" and path == f"groups/{self.parent['full_path']}":
             return self.parent.copy()
         if method == "GET" and path.startswith("groups/"):
             return copy.deepcopy(self.group)
         if method == "POST" and path == "groups":
-            assert data["visibility"] == "private" and data["parent_id"] == 10
-            self.group = {"id": 20, "full_path": f"{gitlab.PARENT_PATH}/{data['path']}",
-                          "parent_id": 10, "visibility": "private"}
+            assert data["visibility"] == "private" and data["parent_id"] == self.parent["id"]
+            self.group = {"id": 20, "full_path": f"{self.parent['full_path']}/{data['path']}",
+                          "parent_id": self.parent["id"], "visibility": "private"}
             return self.group.copy()
         if method == "POST" and path == "projects":
             if data["path"] == self.fail_project:
@@ -76,6 +79,15 @@ class FakeGitLab:
 
 
 class GitLabTests(unittest.TestCase):
+    def setUp(self):
+        self.settings = SimpleNamespace(
+            pcm_gitlab_token=SecretStr("test-token"),
+            pcm_gitlab_group_url=f"https://gitlab.com/{TEST_PARENT_PATH}",
+        )
+        settings = patch.object(gitlab, "load_settings", return_value=self.settings)
+        settings.start()
+        self.addCleanup(settings.stop)
+
     def make_run(self, root: Path, outputs: list[str] | None = None):
         run_dir, workspace, state = step_tests.InitializeRepositoriesTests().make_run(root, outputs or [])
         names = ["root", *(outputs or [])]
@@ -99,13 +111,139 @@ class GitLabTests(unittest.TestCase):
         self.assertNotIn("private-test-token", settings.model_dump_json())
 
     def test_preflight_needs_no_model_and_missing_token_is_blocked(self):
-        with patch.object(gitlab, "load_settings", return_value=SimpleNamespace(pcm_gitlab_token=None)):
+        with patch.object(self.settings, "pcm_gitlab_token", None):
             with self.assertRaises(gitlab.RemoteBlocked):
                 gitlab.preflight()
         api = FakeGitLab()
         with patch.object(gitlab, "_Client", return_value=api):
             self.assertEqual(gitlab.preflight(), api.parent)
         self.assertEqual([call[0] for call in api.calls], ["GET", "GET"])
+
+    def test_configured_parent_url_accepts_group_pages_and_rejects_unsafe_urls(self):
+        for url in (
+            "https://gitlab.com/team/nested-group",
+            "https://gitlab.com/team/nested-group/",
+            "https://gitlab.com/groups/team/nested-group/",
+        ):
+            with self.subTest(url=url):
+                self.settings.pcm_gitlab_group_url = url
+                self.assertEqual(gitlab.configured_parent_path(), "team/nested-group")
+        for url in (
+            None, "", "team/group", "http://gitlab.com/team/group",
+            "https://other.invalid/team/group", "https://gitlab.com.evil.invalid/team/group",
+            "https://user@gitlab.com/team/group", "https://user:password@gitlab.com/team/group",
+            "https://gitlab.com:443/team/group", "https://gitlab.com/team/group?tab=projects",
+            "https://gitlab.com/team/group#projects", "https://gitlab.com/", "https://gitlab.com/groups/",
+            "https://gitlab.com/team/../group", "https://gitlab.com/team/./group",
+            "https://gitlab.com/team//group", "https://gitlab.com/team/%2e%2e/group",
+            "https://gitlab.com/team%2fgroup", "https://gitlab.com/%74eam/group",
+        ):
+            with self.subTest(url=url), patch.object(gitlab, "_Client") as client:
+                self.settings.pcm_gitlab_group_url = url
+                with self.assertRaises(RuntimeError):
+                    gitlab.preflight()
+                client.assert_not_called()
+
+    def test_preflight_explicit_parent_does_not_consult_current_configuration(self):
+        api = FakeGitLab("historical/team", parent_id=42)
+        self.settings.pcm_gitlab_group_url = None
+        with patch.object(gitlab, "_Client", return_value=api):
+            self.assertEqual(gitlab.preflight("historical/team"), api.parent)
+        self.assertEqual(api.calls, [("GET", "user", None), ("GET", "groups/historical/team", None)])
+
+    def test_changed_configuration_controls_parent_id_subgroup_and_real_origin(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with isolated_git_environment(root):
+                run_dir, workspace, state = self.make_run(root, ["frontend"])
+                parent_path = "another-team/platform/products"
+                self.settings.pcm_gitlab_group_url = f"https://gitlab.com/groups/{parent_path}/"
+                api = FakeGitLab(parent_path, parent_id=42)
+                with patch.object(gitlab, "_Client", return_value=api):
+                    gitlab.prepare_repositories(run_dir, state)
+                saved = read_state(run_dir)["remote_sync"]
+                self.assertEqual(saved["parent_path"], parent_path)
+                self.assertEqual(saved["parent_group"], {"id": 42, "full_path": parent_path})
+                self.assertEqual(saved["subgroup"]["full_path"], f"{parent_path}/project")
+                self.assertIn(("POST", "groups", {
+                    "name": "project", "path": "project", "parent_id": 42, "visibility": "private",
+                }), api.calls)
+                for name in ("root", "frontend"):
+                    project = "project" if name == "root" else "project-frontend"
+                    expected = f"git@gitlab.com:{parent_path}/project/{project}.git"
+                    self.assertEqual(saved["repositories"][name]["url"], expected)
+                    local = workspace if name == "root" else workspace / name
+                    self.assertEqual(command("remote", "get-url", "origin", cwd=local), expected)
+
+    def test_parent_is_saved_before_api_failure_and_configuration_change_on_resume(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with isolated_git_environment(root):
+                run_dir, workspace, state = self.make_run(root)
+                api = FakeGitLab()
+
+                def fail_api(*args, **kwargs):
+                    saved = read_state(run_dir)["remote_sync"]
+                    self.assertEqual(saved["parent_path"], TEST_PARENT_PATH)
+                    self.assertNotIn("parent_group", saved)
+                    raise RuntimeError("模拟首次 API 中断")
+
+                with patch.object(gitlab, "_Client", return_value=api), patch.object(api, "request", side_effect=fail_api):
+                    with self.assertRaisesRegex(RuntimeError, "首次 API 中断"):
+                        gitlab.prepare_repositories(run_dir, state)
+                self.settings.pcm_gitlab_group_url = "https://gitlab.com/new-team/new-parent"
+                with patch.object(gitlab, "_Client", return_value=api):
+                    gitlab.prepare_repositories(run_dir, read_state(run_dir))
+                self.assertEqual(read_state(run_dir)["remote_sync"]["parent_path"], TEST_PARENT_PATH)
+                self.assertEqual(command("remote", "get-url", "origin", cwd=workspace),
+                                 f"git@gitlab.com:{TEST_PARENT_PATH}/project/project.git")
+
+    def test_legacy_registered_parent_is_preserved_after_configuration_change(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with isolated_git_environment(root):
+                run_dir, workspace, state = self.make_run(root)
+                api = FakeGitLab()
+                with patch.object(gitlab, "_Client", return_value=api):
+                    gitlab.prepare_repositories(run_dir, state)
+                    del state["remote_sync"]["parent_path"]
+                    write_state(run_dir, state)
+                    self.settings.pcm_gitlab_group_url = "https://gitlab.com/new-team/new-parent"
+                    api.calls.clear()
+                    recovered = read_state(run_dir)
+                    gitlab.prepare_repositories(run_dir, recovered)
+                    gitlab.finalize_repositories(recovered, verified_versions={
+                        "root": command("rev-parse", "HEAD", cwd=workspace),
+                    })
+                saved = read_state(run_dir)["remote_sync"]
+                self.assertEqual(saved["parent_group"], api.parent)
+                self.assertEqual(gitlab.remote_parent_path({"remote_sync": saved}), TEST_PARENT_PATH)
+                self.assertFalse(any(method == "POST" for method, _, _ in api.calls))
+                self.assertEqual(command("remote", "get-url", "origin", cwd=workspace),
+                                 f"git@gitlab.com:{TEST_PARENT_PATH}/project/project.git")
+
+    def test_invalid_or_conflicting_saved_parent_never_falls_back_to_configuration(self):
+        cases = (
+            {"parent_path": None}, {"parent_path": ""}, {"parent_path": "../team"},
+            {"parent_path": "https://gitlab.com/team/group"}, {"parent_path": "team%2fgroup"},
+            {"parent_group": None}, {"parent_group": {}},
+            {"parent_group": {"id": 10, "full_path": "../team"}},
+            {"parent_path": TEST_PARENT_PATH, "parent_group": {"id": 10, "full_path": "other/team"}},
+            {"parent_path": TEST_PARENT_PATH, "parent_group": None},
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with isolated_git_environment(root):
+                run_dir, _, state = self.make_run(root)
+                for fields in cases:
+                    with self.subTest(fields=fields), patch.object(gitlab, "_Client") as client:
+                        invalid = copy.deepcopy(state)
+                        invalid["remote_sync"].update(fields)
+                        with self.assertRaises(RuntimeError):
+                            gitlab.remote_parent_path(invalid)
+                        with self.assertRaises(RuntimeError):
+                            gitlab.prepare_repositories(run_dir, invalid)
+                        client.assert_not_called()
 
     def test_api_timeout_auth_classification_and_exact_secret_redaction(self):
         token = "test-secret-unique"
@@ -219,7 +357,7 @@ class GitLabTests(unittest.TestCase):
                     run_dir, workspace, state = self.make_run(root)
                     api = FakeGitLab()
                     if conflict in {"origin", "same-origin"}:
-                        url = "git@example.invalid:unknown.git" if conflict == "origin" else f"git@gitlab.com:{gitlab.PARENT_PATH}/project/project.git"
+                        url = "git@example.invalid:unknown.git" if conflict == "origin" else f"git@gitlab.com:{TEST_PARENT_PATH}/project/project.git"
                         command("remote", "add", "origin", url, cwd=workspace)
                     else:
                         with patch.object(gitlab, "_Client", return_value=api):

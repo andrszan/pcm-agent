@@ -139,7 +139,7 @@ PCM 为 Claude Agent SDK 显式配置独立 Anthropic Messages 网关与受保�
 
 开发、验证、提交和合并仍在本地进行。后续新建产品启用远程同步合同：第 8 步本地首次提交完成后建立 private 远程仓库并首推，在阶段一、阶段二和阶段三每批收尾时同步已有 `main` 提交；不包含部署或生产环境操作。
 
-父 group 固定为 `https://gitlab.com/baiyiyu/andrszan/pcm-projects`，产品 subgroup 使用第 1 步稳定工程名。根仓名为 `<项目名>`，适用代码仓为 `<项目名>-frontend`、`<项目名>-backend`，不为不适用端创建空仓。通过 GitLab API 创建空 private 对象，SSH 绑定 `origin` 并推送；工具授权由受保护的 PCM 配置键 `PCM_GITLAB_TOKEN` 提供，SSH 身份另行具备对应分支写权限。令牌不进入产品配置、资源清单、模型、URL 或日志，新运行在昂贵开发前做只读认证准备核验；实际创建与写权限以初始化执行为准。
+父 group 由 `PCM_GITLAB_GROUP_URL` 配置为完整的 GitLab.com HTTPS 地址，产品 subgroup 使用第 1 步稳定工程名。新 run 创建时固定 group 路径，恢复及质量／反馈 run 沿用已绑定目标；改配置不迁移已有产品。兼容旧记录中的 `parent_group.full_path`，尚未记录父组的旧运行首次准备时按当前配置绑定。根仓名为 `<项目名>`，适用代码仓为 `<项目名>-frontend`、`<项目名>-backend`，不为不适用端创建空仓。通过 GitLab API 创建空 private 对象，SSH 绑定 `origin` 并推送；工具授权由受保护的 PCM 配置键 `PCM_GITLAB_TOKEN` 提供，SSH 身份另行具备对应分支写权限。令牌不进入产品配置、资源清单、模型、URL 或日志，新运行在昂贵开发前做只读认证准备核验；实际创建与写权限以初始化执行为准。
 
 `push-changes` 仅允许显式调用，通用脚本随该 Skill 分发。PCM 自动收尾和手动产品命令直接复用脚本，不启动推送 Agent。推送前整批核对独立仓库、clean main、唯一实际 push 地址和目标 SHA，代码仓先、根仓最后；不自动提交、切换分支、拉取、合并、强推、推送其它分支或标签。三仓没有原子发布语义，部分成功后保留现场，恢复查询远程事实，只补未完成项。
 

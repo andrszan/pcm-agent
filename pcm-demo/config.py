@@ -43,6 +43,7 @@ class Settings(BaseSettings):
         default=None, validation_alias="PCM_AGENT_WORKSPACE_ENV_FILE"
     )
     pcm_dev_resource_list: Path | None = Field(default=None, validation_alias="PCM_DEV_RESOURCE_LIST")
+    pcm_gitlab_group_url: str | None = Field(default=None, validation_alias="PCM_GITLAB_GROUP_URL")
     pcm_gitlab_token: SecretStr | None = Field(
         default=None, validation_alias="PCM_GITLAB_TOKEN", repr=False
     )

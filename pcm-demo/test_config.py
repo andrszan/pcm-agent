@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from pydantic import SecretStr
 
-from config import AgentConfig, LLMConfig, load_settings
+from config import AgentConfig, LLMConfig, Settings, load_settings
 
 
 class ConfigTest(unittest.TestCase):
@@ -24,6 +24,14 @@ class ConfigTest(unittest.TestCase):
         path = Path(directory) / ".env"
         path.write_text(content, encoding="utf-8")
         return path
+
+    def test_gitlab_group_url_is_optional_and_environment_overrides_env_file(self) -> None:
+        self.assertIsNone(Settings(_env_file=None).pcm_gitlab_group_url)
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = self.write_env(directory, "PCM_GITLAB_GROUP_URL=https://gitlab.com/file-team/products\n")
+            self.assertEqual(load_settings(env_file).pcm_gitlab_group_url, "https://gitlab.com/file-team/products")
+            with patch.dict(os.environ, {"PCM_GITLAB_GROUP_URL": "https://gitlab.com/env-team/products"}):
+                self.assertEqual(load_settings(env_file).pcm_gitlab_group_url, "https://gitlab.com/env-team/products")
 
     def test_loads_agent_gateway_secret_without_model_tiers(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

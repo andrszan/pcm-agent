@@ -19,6 +19,7 @@ DEMO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(DEMO_ROOT))
 
 import run_step
+from common import gitlab
 from common.error_diagnostics import write_diagnostic
 from common.files import resolve_workspace_output, write_json
 from common.openai_responses import ResponsesAccessError, ResponsesFailure, parse_response
@@ -54,6 +55,13 @@ from steps.step_01_create_workspace.workspace import (
 
 class WorkspaceStepTests(unittest.TestCase):
     """第 1 步工作区发布测试。"""
+
+    def setUp(self):
+        settings = patch.object(gitlab, "load_settings", return_value=SimpleNamespace(
+            pcm_gitlab_token=None, pcm_gitlab_group_url="https://gitlab.com/test-team/pcm-projects",
+        ))
+        settings.start()
+        self.addCleanup(settings.stop)
 
     def test_json_write_replaces_complete_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

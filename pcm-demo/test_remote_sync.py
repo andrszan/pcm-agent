@@ -12,15 +12,25 @@ from unittest.mock import Mock, patch
 import push_project
 import run_all
 import run_step
-from common import remote_sync
+from common import gitlab, remote_sync
 from common.coordination import acquire_product_lock, product_key
 from common.files import write_json
 from common.gitlab import RemoteBlocked
 from common.state import read_state
 
 
+TEST_PARENT_PATH = "test-team/pcm-projects"
+
+
 class RemoteSyncTests(unittest.TestCase):
     def setUp(self):
+        self.settings = SimpleNamespace(
+            pcm_gitlab_token=None,
+            pcm_gitlab_group_url=f"https://gitlab.com/{TEST_PARENT_PATH}",
+        )
+        settings = patch.object(gitlab, "load_settings", return_value=self.settings)
+        settings.start()
+        self.addCleanup(settings.stop)
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name).resolve()
@@ -37,8 +47,8 @@ class RemoteSyncTests(unittest.TestCase):
             "workspace": {"root": str(self.root), "final_path": str(self.product)},
             "applicable_repositories": ["root"],
             "repositories": [{"name": "root", "path": str(self.product)}],
-            "remote_sync": {"enabled": True, "project_name": "product", "repositories": {
-                "root": {"project_id": 1, "url": "git@gitlab.com:baiyiyu/andrszan/pcm-projects/product/product.git"},
+            "remote_sync": {"enabled": True, "parent_path": TEST_PARENT_PATH, "project_name": "product", "repositories": {
+                "root": {"project_id": 1, "url": f"git@gitlab.com:{TEST_PARENT_PATH}/product/product.git"},
             }},
             "requirement_registry": {"schema_version": 1, "source": {}, "requirements": [
                 {"id": "BR-001", "title": "需求", "order": 1, "depends_on": [],
@@ -87,6 +97,33 @@ class RemoteSyncTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "登记地址"):
             remote_sync.push_inputs(self.state)
 
+    def test_push_inputs_keeps_bound_or_legacy_parent_when_configuration_changes(self):
+        binding = self.state["remote_sync"]
+        for legacy in (False, True):
+            with self.subTest(legacy=legacy):
+                if legacy:
+                    del binding["parent_path"]
+                    binding["parent_group"] = {"id": 10, "full_path": TEST_PARENT_PATH}
+                for configured in ("https://gitlab.com/new-team/products", None):
+                    with self.subTest(configured=configured):
+                        self.settings.pcm_gitlab_group_url = configured
+                        self.assertEqual(remote_sync.push_inputs(self.state), [{
+                            "name": "root", "path": str(self.product),
+                            "expected_url": f"git@gitlab.com:{TEST_PARENT_PATH}/product/product.git",
+                        }])
+
+    def test_push_inputs_rejects_invalid_or_conflicting_parent_binding(self):
+        binding = self.state["remote_sync"]
+        for value in (None, "", "../team", "other/team"):
+            with self.subTest(value=value):
+                binding["parent_path"] = value
+                with self.assertRaises(RuntimeError):
+                    remote_sync.push_inputs(self.state)
+        binding["parent_path"] = TEST_PARENT_PATH
+        binding["parent_group"] = {"id": 10, "full_path": "other/team"}
+        with self.assertRaises(RuntimeError):
+            remote_sync.push_inputs(self.state)
+
     def test_partial_receipt_or_symlink_cannot_be_reused(self):
         write_json(self.receipt, [])
         with self.assertRaisesRegex(RuntimeError, "记录无效"):
@@ -130,11 +167,18 @@ class RemoteSyncTests(unittest.TestCase):
         args = SimpleNamespace(product_draft=draft, run_id="fresh", initial_resources=None, git_user_name=None, git_user_email=None)
         with patch.object(run_step, "DEMO_ROOT", self.root):
             run_dir, state, source = run_step.load_or_create_step_one_run(args)
-        self.assertEqual(state["remote_sync"], {"enabled": True})
-        with patch.object(run_step, "remote_preflight", side_effect=RemoteBlocked("缺少 PCM_GITLAB_TOKEN")), \
+        expected = {"enabled": True, "parent_path": TEST_PARENT_PATH}
+        self.assertEqual(state["remote_sync"], expected)
+        self.assertEqual(read_state(run_dir)["remote_sync"], expected)
+        self.settings.pcm_gitlab_group_url = "https://gitlab.com/new-team/new-parent"
+        with patch.object(run_step, "DEMO_ROOT", self.root):
+            run_dir, state, source = run_step.load_or_create_step_one_run(args)
+        self.assertEqual(state["remote_sync"], expected)
+        with patch.object(run_step, "remote_preflight", wraps=gitlab.preflight) as preflight, \
              patch.object(run_step, "extract_project_identity", side_effect=AssertionError("不能调用模型")):
             with self.assertRaises(run_step.WorkspaceBlocked):
                 run_step.complete_step_one(args, run_dir, state, source)
+        preflight.assert_called_once_with(parent_path=TEST_PARENT_PATH)
 
     def test_new_product_rejects_template_without_push_capability(self):
         draft = self.root / "draft.md"

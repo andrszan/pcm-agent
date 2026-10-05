@@ -45,9 +45,17 @@ AI-compatible 与 Claude Agent SDK 使用独立配置，不相互回退。`PCM_A
 
 ## 远程仓库与推送
 
-后续新产品默认启用远程同步：第 8 步本地首次提交后建立 private 产品 subgroup 与适用空仓、配置 SSH `origin` 并首推；阶段一、阶段二和阶段三每批收尾再次同步各仓 `main`。固定父 group 为 `baiyiyu/andrszan/pcm-projects`，产品名沿用首次工程目录名，仓库分别为 `<项目名>`、适用的 `<项目名>-frontend` 和 `<项目名>-backend`。
+后续新产品默认启用远程同步：第 8 步本地首次提交后建立 private 产品 subgroup 与适用空仓、配置 SSH `origin` 并首推；阶段一、阶段二和阶段三每批收尾再次同步各仓 `main`。父 group 由 `PCM_GITLAB_GROUP_URL` 配置，产品名沿用首次工程目录名，仓库分别为 `<项目名>`、适用的 `<项目名>-frontend` 和 `<项目名>-backend`。
 
-在受保护的 `pcm-demo/.env` 或进程环境提供 `PCM_GITLAB_TOKEN`，对应身份须有固定父 group 下的建组、建仓与必要设置权限；本机 SSH 身份另须能推送这些项目的 `main`。令牌只供 PCM API 使用，不写进产品配置、URL、命令参数或对话。新运行先核验配置与 API 身份；缺失真实授权会 blocked，不伪造凭据或跳过同步。能力代码可在本地安装，但真实 GitLab 建仓／SSH 链路的当前验收状态以 [远程仓库与推送 TRD](docs/trd/20261005-PCM%20Demo%20GitLab远程仓库与推送%20TRD.md) 为准。
+在 `pcm-demo/.env` 中设置父 group 的完整 HTTPS 地址，例如：
+
+```dotenv
+PCM_GITLAB_GROUP_URL=https://gitlab.com/baiyiyu/andrszan/pcm-projects
+```
+
+支持 GitLab.com 的普通 group URL 和带 `/groups/` 前缀的浏览器地址，进程环境优先于 `.env`。新 run 创建时固定解析后的 group 路径，恢复及后续质量／反馈运行沿用该绑定；修改配置只影响之后的新产品，不迁移已有远程仓库。旧记录已有 `parent_group` 时继续使用其完整路径；尚未记录任何父组的旧运行在首次准备时按配置绑定。
+
+在受保护的 `pcm-demo/.env` 或进程环境提供 `PCM_GITLAB_TOKEN`，对应身份须有目标父 group 下的建组、建仓与必要设置权限；本机 SSH 身份另须能推送这些项目的 `main`。令牌只供 PCM API 使用，不写进产品配置、URL、命令参数或对话。新运行先核验配置与 API 身份；缺失真实授权会 blocked，不伪造凭据或跳过同步。能力代码可在本地安装，但真实 GitLab 建仓／SSH 链路的当前验收状态以 [远程仓库与推送 TRD](docs/trd/20261005-PCM%20Demo%20GitLab远程仓库与推送%20TRD.md) 为准。
 
 临时修改先完成本地提交和必要合并，再执行：
 

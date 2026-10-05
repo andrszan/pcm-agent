@@ -39,8 +39,9 @@ def push_inputs(state: dict[str, Any]) -> list[dict[str, str]]:
     paths = repositories(state)
     expected = {}
     if enabled(state):
-        from common.gitlab import PARENT_PATH
+        from common.gitlab import remote_parent_path
 
+        parent_path = remote_parent_path(state)
         binding = state["remote_sync"]
         name = binding.get("project_name")
         records = binding.get("repositories")
@@ -55,7 +56,7 @@ def push_inputs(state: dict[str, Any]) -> list[dict[str, str]]:
             if key not in {"root", "frontend", "backend"}:
                 raise RuntimeError("远程仓库名称不在产品交付范围内")
             project = name if key == "root" else f"{name}-{key}"
-            url = f"git@gitlab.com:{PARENT_PATH}/{name}/{project}.git"
+            url = f"git@gitlab.com:{parent_path}/{name}/{project}.git"
             if not isinstance(records[key], dict) or records[key].get("url") != url:
                 raise RuntimeError(f"仓库 {key} 的登记地址与产品身份不一致")
             expected[key] = url

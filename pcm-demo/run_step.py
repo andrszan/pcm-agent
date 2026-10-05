@@ -34,7 +34,7 @@ from common.coordination import (
 from common.error_diagnostics import exception_projection, write_diagnostic
 from common.files import sha256
 from common.git_identity import parse_git_identity
-from common.gitlab import RemoteBlocked, preflight as remote_preflight
+from common.gitlab import RemoteBlocked, configured_parent_path, preflight as remote_preflight, remote_parent_path
 from common.remote_sync import enabled as remote_sync_enabled
 from common.requirement_context import phase_for, selection_node_for
 from common.state import (
@@ -552,6 +552,7 @@ def load_or_create_step_one_run(args: argparse.Namespace) -> tuple[Path, dict[st
     if not draft_content.strip():
         raise ValueError("产品初稿不能为空白")
     run_id = args.run_id or new_run_id()
+    parent_path = configured_parent_path()
     run_dir = create_run_dir(DEMO_ROOT / "runs", run_id)
     state = {
         "run_id": run_id,
@@ -569,7 +570,7 @@ def load_or_create_step_one_run(args: argparse.Namespace) -> tuple[Path, dict[st
         },
         "publication_phase": None,
         "git_identity": requested_identity,
-        "remote_sync": {"enabled": True},
+        "remote_sync": {"enabled": True, "parent_path": parent_path},
         "blocked": None,
         "error": None,
     }
@@ -605,7 +606,10 @@ def complete_step_one(
 
     if remote_sync_enabled(state):
         try:
-            remote_preflight()
+            parent_path = remote_parent_path(state)
+            state["remote_sync"]["parent_path"] = parent_path
+            write_state(run_dir, state)
+            remote_preflight(parent_path=parent_path)
         except RemoteBlocked as error:
             raise WorkspaceBlocked(str(error)) from error
 

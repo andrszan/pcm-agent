@@ -7,7 +7,7 @@ from http.client import HTTPException
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from common.error_diagnostics import redact_text
@@ -15,13 +15,58 @@ from common.git_environment import git_environment
 from common.state import write_state
 from config import load_settings
 
-PARENT_PATH = "baiyiyu/andrszan/pcm-projects"
 API_URL = "https://gitlab.com/api/v4"
 API_TIMEOUT = 30
 
 
 class RemoteBlocked(RuntimeError):
     """缺少当前环境无法自行取得的 GitLab 或 SSH 授权。"""
+
+
+def _validate_parent_path(value: object) -> str:
+    if not isinstance(value, str) or not value or any(
+        re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", part) is None for part in value.split("/")
+    ):
+        raise RuntimeError("GitLab 父 group 路径无效")
+    return value
+
+
+def configured_parent_path() -> str:
+    value = load_settings().pcm_gitlab_group_url
+    if not value or not value.strip():
+        raise RemoteBlocked("缺少 PCM_GITLAB_GROUP_URL；请配置目标 GitLab group 地址")
+    value = value.strip()
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        raise RuntimeError("PCM_GITLAB_GROUP_URL 必须是有效的 GitLab.com group HTTPS 地址") from None
+    if (
+        parsed.scheme != "https" or parsed.netloc.lower() != "gitlab.com"
+        or any(char.isspace() or char in "?#%\\" for char in value)
+    ):
+        raise RuntimeError("PCM_GITLAB_GROUP_URL 仅接受无认证信息、端口、查询或片段的 GitLab.com group HTTPS 地址")
+    path = parsed.path.removeprefix("/").removeprefix("groups/").removesuffix("/")
+    return _validate_parent_path(path)
+
+
+def remote_parent_path(state: dict) -> str:
+    remote = state.get("remote_sync")
+    if not isinstance(remote, dict) or remote.get("enabled") is not True:
+        raise RuntimeError("remote_sync 启用事实无效")
+    parent = remote.get("parent_group")
+    if "parent_group" in remote and (not isinstance(parent, dict) or not _id(parent.get("id"))):
+        raise RuntimeError("remote_sync 父 group 归属记录无效")
+    recorded = _validate_parent_path(parent.get("full_path")) if parent is not None else None
+    if "parent_path" in remote:
+        path = _validate_parent_path(remote["parent_path"])
+        if recorded is not None and path != recorded:
+            raise RuntimeError("remote_sync 父 group 路径与已登记对象不一致")
+        return path
+    if recorded is not None:
+        return recorded
+    if "subgroup" in remote or remote.get("repositories"):
+        raise RuntimeError("已有远程对象缺少父 group 归属，不能使用当前配置接管")
+    return configured_parent_path()
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -35,7 +80,7 @@ class _Client:
         secret = load_settings().pcm_gitlab_token
         self.token = secret.get_secret_value().strip() if secret is not None else ""
         if not self.token:
-            raise RemoteBlocked("缺少 PCM_GITLAB_TOKEN；请提供固定父 group 下的 GitLab API 授权后恢复")
+            raise RemoteBlocked("缺少 PCM_GITLAB_TOKEN；请提供目标父 group 下的 GitLab API 授权后恢复")
         self.opener = build_opener(_NoRedirect())
 
     def request(self, method: str, path: str, data: dict | None = None, *, missing_ok: bool = False) -> dict | None:
@@ -75,22 +120,23 @@ def _id(value: object) -> bool:
     return type(value) is int and value > 0
 
 
-def _parent(client: _Client) -> dict:
-    parent = client.request("GET", f"groups/{quote(PARENT_PATH, safe='')}", missing_ok=True)
+def _parent(client: _Client, parent_path: str) -> dict:
+    parent = client.request("GET", f"groups/{quote(parent_path, safe='')}", missing_ok=True)
     if parent is None:
-        raise RemoteBlocked(f"无法读取 GitLab 父 group {PARENT_PATH}；请确认 PCM_GITLAB_TOKEN 的访问权限")
-    if not _id(parent.get("id")) or parent.get("full_path") != PARENT_PATH:
+        raise RemoteBlocked(f"无法读取 GitLab 父 group {parent_path}；请确认 PCM_GITLAB_TOKEN 的访问权限")
+    if not _id(parent.get("id")) or parent.get("full_path") != parent_path:
         raise RuntimeError("GitLab 父 group 的 ID 或完整路径不符合约定")
-    return {"id": parent["id"], "full_path": PARENT_PATH}
+    return {"id": parent["id"], "full_path": parent_path}
 
 
-def preflight() -> dict:
-    """仅核验配置、当前身份和固定父 group 可读性，不证明创建或 SSH 写权限。"""
+def preflight(parent_path: str | None = None) -> dict:
+    """仅核验配置、当前身份和目标父 group 可读性，不证明创建或 SSH 写权限。"""
+    parent_path = configured_parent_path() if parent_path is None else _validate_parent_path(parent_path)
     client = _Client()
     user = client.request("GET", "user")
     if not _id(user.get("id")) or user.get("state") not in {None, "active"}:
         raise RemoteBlocked("PCM_GITLAB_TOKEN 未对应可用 GitLab 用户；请补齐有效认证")
-    return _parent(client)
+    return _parent(client, parent_path)
 
 
 def _contract(state: dict) -> tuple[dict, str, list[dict]]:
@@ -117,10 +163,11 @@ def _contract(state: dict) -> tuple[dict, str, list[dict]]:
     records = remote.get("repositories", {})
     if not isinstance(records, dict) or set(records) - set(names):
         raise RuntimeError("remote_sync 仓库归属记录无效")
-    subgroup_path = f"{PARENT_PATH}/{name}"
+    parent_path = remote_parent_path(state)
+    subgroup_path = f"{parent_path}/{name}"
     if "parent_group" in remote:
         parent = remote["parent_group"]
-        if not isinstance(parent, dict) or not _id(parent.get("id")) or parent.get("full_path") != PARENT_PATH:
+        if not isinstance(parent, dict) or not _id(parent.get("id")) or parent.get("full_path") != parent_path:
             raise RuntimeError("remote_sync 父 group 归属记录无效")
     if "subgroup" in remote:
         group = remote["subgroup"]
@@ -208,13 +255,16 @@ def prepare_repositories(run_dir: Path, state: dict[str, Any]) -> None:
             raise RuntimeError("远程初始化要求所有仓库均为 clean main")
         _git(path, "rev-parse", "--verify", "HEAD")
         _check_origin(repository, records.get(repository["name"]))
+    parent_path = remote_parent_path(state)
+    remote["parent_path"] = parent_path
+    write_state(run_dir, state)
     client = _Client()
-    parent = _parent(client)
+    parent = _parent(client, parent_path)
     if "parent_group" in remote and remote["parent_group"] != parent:
         raise RuntimeError("GitLab 父 group 与已登记归属不一致")
     remote["parent_group"] = parent
     write_state(run_dir, state)
-    subgroup_path = f"{PARENT_PATH}/{name}"
+    subgroup_path = f"{parent_path}/{name}"
     group = remote.get("subgroup")
     if group is None:
         if client.request("GET", f"groups/{quote(subgroup_path, safe='')}", missing_ok=True) is not None:
@@ -268,16 +318,17 @@ def finalize_repositories(state: dict[str, Any], *, verified_versions: dict[str,
                for sha in verified_versions.values())
     ):
         raise RuntimeError("GitLab 首推核验缺少完整的已验证远程 SHA")
+    parent_path = remote_parent_path(state)
     client = _Client()
     for repository in repositories:
         record = records[repository["name"]]
         path = f"projects/{record['project_id']}"
         value = client.request("GET", path)
-        _verify_project(value, record, f"{PARENT_PATH}/{name}")
+        _verify_project(value, record, f"{parent_path}/{name}")
         if value.get("default_branch") != "main":
             client.request("PUT", path, {"default_branch": "main"})
             value = client.request("GET", path)
-            _verify_project(value, record, f"{PARENT_PATH}/{name}")
+            _verify_project(value, record, f"{parent_path}/{name}")
             if value.get("default_branch") != "main":
                 raise RuntimeError("GitLab 默认分支未设为 main")
         _check_origin(repository, record)
