@@ -353,7 +353,42 @@ class ProjectIntakeTests(unittest.TestCase):
 
         self.assertEqual(outcome["status"], "success")
 
-    def test_invalid_source_input_fails_before_agent(self) -> None:
+    def test_published_draft_is_authoritative_after_source_changes(self) -> None:
+        for change in ("deleted", "moved", "modified", "unrecorded"):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as directory:
+                run_dir, workspace, state = self.make_run(Path(directory))
+                source = Path(state["input"]["source_path"])
+                if change == "deleted":
+                    source.unlink()
+                elif change == "moved":
+                    source.rename(source.with_name("moved.md"))
+                elif change == "modified":
+                    source.write_text("源文件已另作他用", encoding="utf-8")
+                else:
+                    del state["input"]["source_path"]
+                calls = []
+
+                async def fake_agent(prompt, **kwargs):
+                    calls.append(prompt)
+                    self.write_outputs(workspace)
+                    current = agent_result(cwd=workspace)
+                    kwargs["on_update"](current)
+                    return current
+
+                async def completed(messages, config, *, system_prompt):
+                    current = decision("completed")
+                    return current.model_dump(), 1, current.model_dump_json()
+
+                with patch("steps.step_02_project_intake.step.trust_project"):
+                    outcome = asyncio.run(run(
+                        run_dir, state, agent_runner=fake_agent,
+                        decision_runner=completed, config_loader=lambda: object(),
+                    ))
+                self.assertEqual(outcome["status"], "success")
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(read_state(run_dir)["current_step"], 3)
+
+    def test_invalid_published_draft_fails_before_agent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))
             (workspace / "docs/产品初稿.md").write_text("changed", encoding="utf-8")

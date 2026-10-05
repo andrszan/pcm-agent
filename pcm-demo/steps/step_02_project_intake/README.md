@@ -6,7 +6,7 @@
 
 只使用：
 
-- `steps/01.json` 引用的 `docs/产品初稿.md`；
+- `steps/01.json` 引用的 `docs/产品初稿.md`，以工作区副本及第 1 步记录的哈希核验输入；外部源文件的不变检查由第 1 步完成；
 - 新运行可选的工作区副本 `initial-resources/<源 basename>`；
 - `CLAUDE.md`、`AGENTS.md`、`.claude/settings.json` 和锁定 plugins；
 - 当前 `project-intake` session 及该 Skill 生成的产物。

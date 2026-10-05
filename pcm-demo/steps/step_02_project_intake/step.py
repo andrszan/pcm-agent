@@ -158,10 +158,9 @@ def validate_inputs(run_dir: Path, state: dict[str, Any]) -> tuple[Path, Path]:
         raise RuntimeError("第 1 步产物与运行状态不一致")
     if not workspace.is_dir() or workspace.is_symlink() or draft.is_symlink() or not draft.is_file():
         raise RuntimeError("第 1 步发布的项目工作区或产品初稿不存在")
-    source = Path(state["input"]["source_path"])
     expected_hash = state["input"]["source_sha256"]
-    if not source.is_file() or sha256(source) != expected_hash or sha256(draft) != expected_hash:
-        raise RuntimeError("源产品初稿或项目内产品初稿与运行记录不一致")
+    if sha256(draft) != expected_hash:
+        raise RuntimeError("项目内产品初稿与运行记录不一致")
     published_path = state.get("input", {}).get("published_path")
     if (
         not isinstance(published_path, str)
