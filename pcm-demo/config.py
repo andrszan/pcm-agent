@@ -5,7 +5,7 @@ from pathlib import Path
 from stat import S_ISREG
 
 from pydantic import AliasChoices, Field, SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, DotEnvSettingsSource, SettingsConfigDict
 
 from provider import DEFAULT_ENV_FILE, resolve_env_files
 
@@ -43,6 +43,21 @@ class Settings(BaseSettings):
         default=None, validation_alias="PCM_AGENT_WORKSPACE_ENV_FILE"
     )
     pcm_dev_resource_list: Path | None = Field(default=None, validation_alias="PCM_DEV_RESOURCE_LIST")
+
+    @classmethod
+    def settings_customise_sources(
+        cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings,
+    ):
+        # 只有 effort 的显式空值表示清空；其它字段仍忽略空配置。
+        for source in (env_settings, dotenv_settings):
+            options = {"env_ignore_empty": False, "case_sensitive": source.case_sensitive}
+            if isinstance(source, DotEnvSettingsSource):
+                options.update(env_file=source.env_file, env_file_encoding=source.env_file_encoding)
+            unfiltered = type(source)(settings_cls, **options)
+            key = "LLM_MODEL_EFFORT" if source.case_sensitive else "llm_model_effort"
+            if key in unfiltered.env_vars:
+                source.env_vars[key] = unfiltered.env_vars[key]
+        return init_settings, env_settings, dotenv_settings, file_secret_settings
 
     model_config = SettingsConfigDict(
         env_file=DEFAULT_ENV_FILE,

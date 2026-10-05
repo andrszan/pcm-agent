@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from pydantic import SecretStr
 
-from config import AgentConfig, LLMConfig
+from config import AgentConfig, LLMConfig, load_settings
 
 
 class ConfigTest(unittest.TestCase):
@@ -219,6 +219,32 @@ class ConfigTest(unittest.TestCase):
         providers = Path(directory) / ".env.d"
         providers.mkdir(exist_ok=True)
         (providers / f"{name}.env").write_text(content, encoding="utf-8")
+
+    def test_empty_effort_overrides_only_effort_across_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = self.write_env(
+                directory,
+                "PCM_PROVIDER=other\nLLM_BASE_URL=http://llm.invalid\n"
+                "LLM_API_KEY=test-secret\nLLM_MODEL=base-model\nLLM_MODEL_EFFORT=high\n"
+                "CLAUDE_CODE_MAX_RETRIES=6\n",
+            )
+            for provider_effort, environment, expected in (
+                ("", {}, None),
+                ("medium", {"LLM_MODEL_EFFORT": ""}, None),
+                ("", {"LLM_MODEL_EFFORT": "low"}, "low"),
+                ("medium", {}, "medium"),
+            ):
+                with self.subTest(provider=provider_effort, environment=environment):
+                    self.write_provider_env(
+                        directory, "other",
+                        f"LLM_MODEL_EFFORT={provider_effort}\nLLM_MODEL=\nCLAUDE_CODE_MAX_RETRIES=\n",
+                    )
+                    with patch.dict(os.environ, environment, clear=True):
+                        config = LLMConfig.load(env_file)
+                        settings = load_settings(env_file)
+                    self.assertEqual(config.effort, expected)
+                    self.assertEqual(config.model, "base-model")
+                    self.assertEqual(settings.claude_code_max_retries, 6)
 
     def test_provider_env_file_overrides_base_configuration(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
