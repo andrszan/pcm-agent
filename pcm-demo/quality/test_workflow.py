@@ -219,6 +219,68 @@ class QualityWorkflowTests(unittest.TestCase):
         self.assertEqual(self.state["current_node"], "requirement:14_trd_design")
         self.assertEqual(self.state["requirement_cycle"]["return_node_after_completion"], "quality:select_requirement")
 
+    def test_nonblocking_visual_findings_reach_pool_and_regression_owner(self):
+        report = audit_report()
+        data = report.model_dump()
+        data["coverage"] = [{
+            "user_task": "扫描待办并进入处理", "outcome": "covered",
+            "reason": "工作台和项目详情的任务入口均可正常使用",
+            "evidence": ["桌面视口实际操作与截图"], "blocking_findings": [],
+        }]
+        data["findings"] = [{
+            "title": f"{surface}待办主次不清", "user_task": "扫描待办并进入处理",
+            "trigger": f"桌面视口在{surface}查看真实待办列表",
+            "observed": f"{surface}以同权重长卡片呈现待办，重复元信息占据主要空间",
+            "expected": "同等内容与视口下能辨认重要事项和下一步，保留必要事实与全部记录",
+            "basis": "当前产品工作台用于扫描待办；实际渲染支持层次改善，不依赖用户研究",
+            "impact": "任务可完成，但事项与主要行动难以扫描识别",
+            "evidence": [f"{surface}桌面截图已读取", "进入、处理和返回列表均成功"],
+            "priority": "low", "confidence": "high",
+        } for surface in ("工作台", "项目详情", "团队待办")]
+        report = AuditReport.model_validate(data)
+        validate_audit(report)
+        route = route_report(True)
+        route.decisions[0].reason = "已有渲染事实与产品价值，复用共享样式即可改善，纳入当前范围"
+        routed = route.model_dump()
+        routed["decisions"].extend({
+            "candidate_id": f"Q001-C00{index}", "action": "covered",
+            "reason": "共享待办展示模式，合并改善但保留相关表面回归",
+            "covered_by": f"Q001-C00{index - 1}",
+        } for index in (2, 3))
+        self.routing.side_effect = None
+        self.routing.return_value = RoutingReport.model_validate(routed)
+        with patch(f"{__name__}.audit_report", return_value=report):
+            self.reach("quality:select_requirement")
+
+        audit = flow._prior(self.run, self.state, "audit")
+        candidates = [{"id": f"Q001-C{index:03d}", **finding}
+                      for index, finding in enumerate(data["findings"], 1)]
+        self.assertEqual(audit["candidates"], candidates)
+        self.assertEqual(audit["coverage"][0]["outcome"], "covered")
+        self.assertEqual(audit["coverage"][0]["blocking_candidates"], [])
+        route_input = self.routing.await_args.kwargs["input_model"]
+        self.assertEqual(route_input.report, audit["report"])
+        self.assertEqual(json.loads(route_input.context)["审计"]["candidates"], candidates)
+        pool_call = next(call for call in flow._task.call_args_list if call.args[2] == "quality_pool_r0001")
+        pool_input = json.loads(pool_call.args[4].split("\n", 2)[2])
+        self.assertEqual(pool_input["审计"], audit)
+        self.assertEqual(pool_input["分流"]["decisions"], routed["decisions"])
+        pooled = flow._prior(self.run, self.state, "pool")
+        self.assertEqual(pooled["plan"]["requirements"], [
+            {"requirement_id": "BR-002", "candidate_ids": ["Q001-C001"]},
+        ])
+        self.assertEqual(pooled["plan"]["regression_owners"], [
+            {"candidate_id": "Q001-C001", "requirement_id": "BR-002"},
+        ])
+        self.execute()
+        from steps.step_13_select_requirement.step import run
+        run(self.run, self.state)
+        evidence = json.loads(flow.requirement_evidence(self.run, self.state).split("\n", 1)[1])
+        self.assertEqual(evidence["原发现"], candidates)
+        self.assertEqual(evidence["受阻任务"], [])
+        self.assertEqual(evidence["完整回归归属"], {candidate["id"]: "BR-002" for candidate in candidates})
+        self.assertEqual(self.state["current_node"], "requirement:14_trd_design")
+
     def test_covered_chain_preserves_all_original_tasks_for_regression(self):
         self.defect = True
         self.reach("quality:select_requirement")

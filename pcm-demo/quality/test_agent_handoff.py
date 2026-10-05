@@ -89,6 +89,52 @@ class QualityAgentHandoffTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.agent.await_count, 2)
         self.assertEqual(self.parse.await_count, 1)
 
+    async def test_nonblocking_visual_report_keeps_observations_and_corrections_for_extraction(self) -> None:
+        finding = {
+            "title": "待办缺少视觉层次", "user_task": "查看待办并处理",
+            "trigger": "桌面视口打开工作台与项目详情",
+            "observed": "同权重长卡片及重复说明占据主要空间，主要行动不突出",
+            "expected": "同等内容与视口下重要事项和主要行动清晰，保留必要说明与全部记录",
+            "basis": "工作台用于扫描待办；实际渲染说明识别价值，无量化效率证据",
+            "impact": "处理流程可完成，但阅读主次不清",
+            "evidence": ["工作台与项目详情截图已读取", "已实际完成处理及返回任务"],
+            "priority": "low", "confidence": "high",
+        }
+        initial = json.dumps(finding, ensure_ascii=False)
+        correction = "补充：两个表面使用同一待办组件；撤回所有说明移入 Tooltip 的建议，保留原问题和预期结果"
+        self.agent.side_effect = [
+            self.result(initial, skill="product-experience-audit"),
+            self.result(correction, skill="product-experience-audit"),
+        ]
+        follow_up = AgentDecision(verdict="continue", answer="只核实共享消费者与必要说明", reason="补齐影响范围", required_inputs=[])
+        completed = AgentDecision(verdict="completed", answer="", reason="观察事实和共享影响已交接", required_inputs=[])
+        self.decision.side_effect = [(value.model_dump(), 1, value.model_dump_json()) for value in (follow_up, completed)]
+        report = AuditReport.model_validate({
+            "summary": "任务正常完成，保留有依据的非阻断改善", "applicable": True,
+            "coverage": [{"user_task": finding["user_task"], "outcome": "covered", "reason": "处理和返回均成功",
+                          "evidence": [finding["evidence"][1]], "blocking_findings": []}],
+            "findings": [finding], "duplicates": [], "high_impact": [], "limitations": [],
+        })
+        self.parse.return_value = report
+        raw, parsed = await workflow._task(
+            self.run_dir, self.state, "quality_audit_r0001", "quality_audit",
+            "检查当前待办任务及代表性共享表面", "交接实际观察与改善价值",
+            skill="product-experience-audit", output_model=AuditReport, validate=workflow.validate_audit,
+        )
+        messages = [message["content"] for message in json.loads(raw)]
+        self.assertIn(initial, messages)
+        self.assertIn(correction, messages)
+        extraction = self.parse.await_args.kwargs["input_model"]
+        self.assertEqual(extraction.report, raw)
+        self.assertEqual(extraction.context, "检查当前待办任务及代表性共享表面")
+        self.assertIs(self.parse.await_args.kwargs["output_model"], AuditReport)
+        self.assertEqual(parsed.model_dump(), report.model_dump())
+        self.assertEqual(parsed.findings[0].model_dump(), finding)
+        self.assertEqual(parsed.coverage[0].blocking_findings, [])
+        self.assertEqual(parsed.coverage[0].outcome, "covered")
+        self.assertEqual(self.agent.await_count, 2)
+        self.parse.assert_awaited_once()
+
     async def test_plain_task_completes_without_skill_and_returns_saved_reply(self) -> None:
         self.agent.return_value = self.result("准备完成\n保留完整交接")
         raw, parsed = await workflow._task(
