@@ -761,6 +761,54 @@ class ProjectBootstrapTests(unittest.TestCase):
                 )
                 verify_tailwind_v4_frontend(workspace)
 
+    def test_tailwind_gate_accepts_import_options_url_and_inline_css(self) -> None:
+        for css in (
+            '@import "tailwindcss" source("../src");',
+            '@import "tailwindcss"; body { color: black; }',
+            '@layer theme, base, components, utilities; @import "tailwindcss";',
+            '@import url("tailwindcss");',
+            "@import url('tailwindcss') source(none);",
+            '@import url(tailwindcss); body { color: black; }',
+            '@import /* 入口 */ "tailwindcss" source("../src");',
+            '/* "仅为注释 {" */ @import "tailwindcss" source("../src");',
+            '@import "tailwindcss" layer(utilities) supports(display: grid) screen;',
+        ):
+            with self.subTest(css=css), tempfile.TemporaryDirectory() as directory:
+                _, workspace, _ = self.make_run(Path(directory))
+                (workspace / "frontend/src/index.css").write_text(css, encoding="utf-8")
+                verify_tailwind_v4_frontend(workspace)
+
+    def test_tailwind_gate_rejects_commented_or_malformed_imports(self) -> None:
+        for css in (
+            '/* @import "tailwindcss" source("../src"); */',
+            '/* @import url(tailwindcss); */ body { color: black; }',
+            '@import "tailwindcss/utilities";',
+            '@import url("tailwindcss);',
+            '@import "tailwindcss"invalid;',
+            '@import "tailwindcss" body { color: black; }',
+        ):
+            with self.subTest(css=css), tempfile.TemporaryDirectory() as directory:
+                _, workspace, _ = self.make_run(Path(directory))
+                (workspace / "frontend/src/index.css").write_text(css, encoding="utf-8")
+                with self.assertRaisesRegex(RuntimeError, "CSS-first"):
+                    verify_tailwind_v4_frontend(workspace)
+
+    def test_tailwind_gate_rejects_import_directives_inside_strings_or_blocks(self) -> None:
+        for css in (
+            ':root { --example: @import "tailwindcss"; }',
+            ':root { --brace: "}"; --example: @import "tailwindcss"; }',
+            """:root { --example: '; @import "tailwindcss";'; }""",
+            ''':root { --example: "; @import 'tailwindcss';"; }''',
+            r""":root { --example: 'escaped \'; @import "tailwindcss";'; }""",
+            ''':root { --example: "/*"; --other: "*/; @import 'tailwindcss';"; }''',
+            """:root { --example: '; @import url(tailwindcss);'; }""",
+        ):
+            with self.subTest(css=css), tempfile.TemporaryDirectory() as directory:
+                _, workspace, _ = self.make_run(Path(directory))
+                (workspace / "frontend/src/index.css").write_text(css, encoding="utf-8")
+                with self.assertRaisesRegex(RuntimeError, "CSS-first"):
+                    verify_tailwind_v4_frontend(workspace)
+
     def test_frontend_must_be_tailwind_v4_css_first_before_theme_session(self) -> None:
         for invalid in (
             "v3",
@@ -1248,13 +1296,24 @@ raise SystemExit(run_step.retrying_main())
 
             run_dir = demo_root / "runs" / "corrupt-step-six-test"
             (run_dir / "steps").mkdir(parents=True)
-            (run_dir / "state.json").write_text("{invalid", encoding="utf-8")
-            broken = execute("--step", "6", "--run-id", run_dir.name)
-            self.assertEqual(broken.returncode, 1)
-            self.assertNotIn("Traceback", broken.stderr)
-            saved = json.loads((run_dir / "steps/06.json").read_text(encoding="utf-8"))
-            self.assertEqual(saved["status"], "failed")
-            self.assertIs(saved["tailwind_theme"], False)
+            state_path = run_dir / "state.json"
+            state_path.write_text("{invalid", encoding="utf-8")
+            before_state = state_path.read_bytes()
+            result_path = run_dir / "steps/06.json"
+            for existing in (False, True):
+                with self.subTest(existing=existing):
+                    if existing:
+                        write_json(result_path, result("failed", "保留先前失败结果"))
+                        before_result = result_path.read_bytes()
+                    broken = execute("--step", "6", "--run-id", run_dir.name)
+                    self.assertEqual(broken.returncode, 1)
+                    self.assertIn("步骤 6 failed", broken.stderr)
+                    self.assertNotIn("Traceback", broken.stderr)
+                    self.assertEqual(state_path.read_bytes(), before_state)
+                    if existing:
+                        self.assertEqual(result_path.read_bytes(), before_result)
+                    else:
+                        self.assertFalse(result_path.exists())
 
 
 if __name__ == "__main__":

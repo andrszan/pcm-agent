@@ -94,11 +94,17 @@ COVERAGE_ARTIFACT_REPAIR_PROMPT = (
     "检测到未忽略的 .coverage 测试覆盖率数据库。请删除可确认的覆盖率临时产物，"
     "或将它加入所属仓库的 .gitignore；不得把覆盖率数据库作为项目文件保留，然后重新核验并报告。"
 )
+# 字符串里的 import 文本不能作为 CSS-first 入口证据。
 TAILWIND_CSS_IMPORT_PATTERN = re.compile(
-    r"^\s*@import\s+(?P<quote>['\"])tailwindcss(?P=quote)\s*;?\s*$",
-    re.MULTILINE,
+    r"/\*.*?\*/"
+    r"|\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'"
+    r"|(?P<block>[{}])"
+    r"|(?P<tailwind_import>(?<![\w-])@import(?:\s|/\*.*?\*/)+(?:"
+    r"(?P<quote>['\"])tailwindcss(?P=quote)"
+    r"|url\(\s*(?P<url_quote>['\"]?)tailwindcss(?P=url_quote)\s*\))"
+    r"(?:\s+[^;{}]*)?(?:;|\Z))",
+    re.DOTALL,
 )
-CSS_COMMENT_PATTERN = re.compile(r"/\*.*?\*/", re.DOTALL)
 TAILWIND_SIMPLE_V4_PATTERN = re.compile(
     r"^(?:workspace:)?[~^]?4(?:\.(?:\d+|x|\*)){0,2}(?:-[0-9A-Za-z.-]+)?$"
 )
@@ -236,10 +242,15 @@ def verify_tailwind_v4_frontend(workspace: Path) -> None:
             contents = css_path.read_text(encoding="utf-8")
         except (OSError, UnicodeError) as error:
             raise RuntimeError("frontend CSS 文件不可读取") from error
-        if TAILWIND_CSS_IMPORT_PATTERN.search(
-            CSS_COMMENT_PATTERN.sub(" ", contents)
-        ):
-            return
+        depth = 0
+        for match in TAILWIND_CSS_IMPORT_PATTERN.finditer(contents):
+            block = match.group("block")
+            if block == "{":
+                depth += 1
+            elif block == "}":
+                depth = max(0, depth - 1)
+            elif depth == 0 and match.group("tailwind_import"):
+                return
     raise RuntimeError("frontend 缺少 Tailwind CSS v4 CSS-first @import 入口")
 
 

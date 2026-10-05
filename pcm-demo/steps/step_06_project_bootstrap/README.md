@@ -34,7 +34,7 @@ Agent 负责项目身份、基础配置、README、模板测试迁移、经引�
 
 - `frontend/package.json` 是可读非符号链接普通 JSON；
 - `dependencies` 或 `devDependencies` 中存在唯一、可明确判断为 major 4 的直接 `tailwindcss` 声明；
-- frontend 自身 Git 可见且未忽略的 CSS 文件中至少一个包含单引号或双引号形式的 `@import "tailwindcss"` CSS-first 入口。
+- frontend 自身 Git 可见且未忽略的 CSS 文件中至少一个包含非注释的 `@import "tailwindcss"` CSS-first 入口；接受单引号、`url(...)` 形式、`source("../src")` 等导入选项和同一行后续 CSS。
 
 版本无法可靠判断、非 v4 或缺少 CSS-first 证据属于本地模板合同错误，返回 `failed`，不创建主题 session，也不映射为 `blocked`。Python 不实现完整 semver、CSS import graph、token parser 或工作树 fingerprint。
 
