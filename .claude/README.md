@@ -16,13 +16,13 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 
 ### 2.1 独立性原则
 
-- 每个 Skill 必须能在没有其它自定义 Skill 时可以完成自身职责。
-- Skill 不写死固定上游或下游，不明确说一定要调用其它某个 Skill，不强制依赖。
+- 核心领域 Skill 必须能在没有其它自定义 Skill 时完成自身职责。
+- 核心领域 Skill 不写死固定上游或下游，不强制依赖其它 Skill；插件适配能力可以显式声明所适配的插件与调用入口。
 - 能力之间通过调用方传入的资料和已有项目事实协作，例如产品文档、选模资料、活动 TRD、代码、Git diff 和验证结果；这些资料不要求由某个特定 Skill 生成或采用固定文件格式。
 - 每个 Skill 只保留完成自身职责所需的最小安全边界，不通过共享隐藏指令建立耦合。
 - 工具适配型 Skill 可以依赖对应运行工具，但必须是可选能力；核心领域 Skill 不得硬依赖它们。
 - 审计或反馈分诊只形成带证据的候选、重复项和覆盖缺口，不创建正式需求、不分配需求 ID、不修改 canonical Backlog；是否需求化、如何纳入以及如何进入后续开发，由调用方按项目事实显式调度。
-- 第三方 Skill 不属于核心流程隐藏依赖，不因“可能有用”自动安装。
+- 第三方 Skill 不属于核心流程隐藏依赖，不因“可能有用”自动安装。`frontend-ui-ux` 是显式依赖 `ui-ux-pro-max` 的可选插件适配能力；不因此让其它核心能力硬依赖该插件。
 - 最终产品范围表达当前产品承诺；首条验证切片只用于尽早验证关键假设，不表示缩减或完成最终范围。复杂度删减和条件式原型按风险决定；全项目级产品体验审计只在完整集成产品进入阶段二后执行，不构成单需求或验证切片的调用链。
 
 ## 3. 运行环境与使用准备
@@ -112,6 +112,7 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 
 | Skill | 依赖与边界 |
 |---|---|
+| `frontend-ui-ux` | 显式调用 `ui-ux-pro-max` 插件，完成 HTML 原型、正式前端和页面／组件精修，涵盖产品化内容、专业委派、导航滚动、真实预览及必要独立评审；使用与入口见 [Skill 正文](skills/frontend-ui-ux/SKILL.md)，不自动接入编号流程 |
 | `tailwind-theme` | 适用于 Tailwind CSS v4 CSS-first 前端；依据产品资料和实际前端完成风格定制，可自主选择保留默认、采用全部或部分 preset、适配或 custom，并按实际改动验证和诚实报告；具体规则以 [Skill 正文](skills/tailwind-theme/SKILL.md) 为唯一真源 |
 | `ui-component-patterns` | 适用于 React + shadcn/ui Base UI + Tailwind CSS v4 的具体 Chat、认证、业务卡片、结构化表单、真实趋势、区域加载反馈和 Markdown 内容阅读场景；从本地受控参考中选择少量候选并按真实业务、品牌、数据和状态二次设计，不安装或复制 registry，不决定 Shell、信息架构或主题；Radix 及其它不兼容栈无副作用跳过 |
 | `playwright-cli` | 依赖当前环境已具备的对应浏览器运行工具；用于真实浏览器操作与验证，核心 Skills 不得把它作为隐藏必需 Skill |
@@ -123,7 +124,7 @@ SDK 运行时不会扫描 `.agents/plugins/`，也不解析用户级 `~/.claude/
 
 - `find-skills`
 - `shadcn`
-- `ui-ux-pro-max` 系列：可选的设计、品牌和 UI 实现辅助，不是核心流程前置，也不能作为体验合格或开发完成的证据。
+- `ui-ux-pro-max` 系列：设计、品牌和 UI 实现辅助；是 `frontend-ui-ux` 的显式依赖，不是其它核心能力的隐藏前置，调用过插件不能作为体验合格或开发完成的证据。
 
 它们由外部来源维护，本仓库不直接重写其内容，也不把它们作为核心流程必经能力。
 
@@ -155,6 +156,8 @@ PCM 产品也可使用 [独立手动脚本](../pcm-demo/README.md#独立代码�
 |---|---|---|
 | `dev` | 在 Leader 给定的目标与边界内实现内聚修改，完成局部真实验证；用户可见范围同时提供可理解性、关键状态和实际渲染证据或明确缺口 | 实质扩大范围或重大迁移时返回 `needs-decision`；不提交、不维护 Backlog 或最终状态 |
 | `reviewer` | 独立、只读、基于证据检查正确性、安全、数据、回归和验证缺口；有 UI 证据时同时检查任务理解、关键状态和明显视觉退化 | 不修改文件，不运行会写状态的测试，不作最终裁决 |
+
+`dev` 提供 Skill 工具，执行调用方明确指定的能力；前端任务的专业委派示例见 [任务模板](skills/frontend-ui-ux/templates/subagent-task.md)。角色工具声明变更后使用新会话验证，旧会话可能仍保留缓存工具列表。
 
 `reviewer` 是本仓库内建的独立只读审查路径。调用方如因高风险变更另行引入外部审查结果，仍须确保审查者获得权威工作区中的完整变更、验收条件和验证证据，并由 Leader 结合项目事实作最终判断。
 
@@ -269,6 +272,12 @@ PCM 产品也可使用 [独立手动脚本](../pcm-demo/README.md#独立代码�
 │   │   │   ├── mode-rail-collection-workbench/
 │   │   │   └── sectioned-preferences-dialog/
 │   │   └── evals/evals.json
+│   ├── frontend-ui-ux/
+│   │   ├── SKILL.md
+│   │   ├── references/
+│   │   ├── templates/subagent-task.md
+│   │   ├── agents/experience-reviewer.md
+│   │   └── evals/
 │   ├── find-skills -> 第三方 Skill
 │   └── shadcn -> 第三方 Skill
 ├── settings.json
