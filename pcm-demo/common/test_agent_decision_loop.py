@@ -629,6 +629,42 @@ class AgentDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(message.target_key, "tailwind_theme")
 
+    def test_frontend_domains_resume_only_the_unfinished_conversation(self) -> None:
+        for step, node, keys in (
+            (2, "project:02_intake", ("project_intake", "product_prototype")),
+            (15, "requirement:15_development", ("frontend_ui_ux_BR-001", "development_BR-001")),
+        ):
+            with self.subTest(step=step):
+                conversations = self.run_dir / "conversations"
+                conversations.mkdir(exist_ok=True)
+                self.state.clear()
+                self.state.update({
+                    "status": "running", "step": step, "current_step": step,
+                    "current_node": node, "active_requirement": "BR-001",
+                    "claude_sessions": {key: "session-" + key for key in keys},
+                    "decision_conversations": {
+                        key: {"path": f"conversations/{key}.json"} for key in keys
+                    },
+                })
+                for key in keys:
+                    write_json(conversations / f"{key}.json", {"messages": [
+                        {"role": "system", "content": "system"},
+                        {"role": "assistant", "content": "当前任务"},
+                    ]})
+                message_path = self.run_dir.parent / "message"
+                message_path.write_text("继续当前未完成任务", encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    prepare_resume_message(message_path, self.run_dir, self.state, step)
+                write_json(conversations / f"{keys[0]}.json", {"messages": [
+                    {"role": "system", "content": "system"},
+                    {"role": "assistant", "content": "当前任务"},
+                    {"role": "user", "content": "任务完成"},
+                    {"role": "assistant", "content": decision("completed").model_dump_json()},
+                ]})
+                message = prepare_resume_message(message_path, self.run_dir, self.state, step)
+                self.assertEqual(message.target_key, keys[1])
+                self.assertEqual(message.content, "继续当前未完成任务")
+
     def test_prepare_resume_message_rejects_missing_session_without_reading_body(self) -> None:
         self.state.update(
             {

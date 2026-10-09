@@ -171,7 +171,7 @@ _RESUME_STEP_NODES = {
     17: "requirement:17_commit",
 }
 _RESUME_STATIC_KEYS = {
-    2: ("project_intake",),
+    2: ("project_intake", "product_prototype"),
     5: ("project_readiness",),
     6: ("project_bootstrap", "tailwind_theme", "brand_assets"),
     7: ("solution_design",),
@@ -293,6 +293,8 @@ def _resume_keys(step: int, state: dict[str, Any]) -> tuple[str, ...]:
     requirement_id = state.get("active_requirement")
     if prefix is None or not isinstance(requirement_id, str) or not requirement_id:
         return ()
+    if step == 15:
+        return (f"frontend_ui_ux_{requirement_id}", f"development_{requirement_id}")
     return (f"{prefix}_{requirement_id}",)
 
 

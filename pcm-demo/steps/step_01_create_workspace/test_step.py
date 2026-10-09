@@ -22,6 +22,7 @@ import run_step
 from common import gitlab
 from common.error_diagnostics import write_diagnostic
 from common.files import resolve_workspace_output, write_json
+from common.frontend_scope import FRONTEND_PLUGIN_FILES, FRONTEND_SKILL_FILES
 from common.openai_responses import ResponsesAccessError, ResponsesFailure, parse_response
 from config import (
     CAPABILITY_REPOSITORY_ROOT,
@@ -47,10 +48,32 @@ from steps.step_01_create_workspace.workspace import (
     remove_recorded_staging,
     validate_initial_resources,
     verify_clone,
+    verify_required_paths,
     verify_prepared,
     verify_workspace_env,
     workspace_env_is_ignored,
 )
+
+
+def install_frontend_capabilities(root: Path) -> None:
+    for name in FRONTEND_SKILL_FILES:
+        path = root / ".claude/skills/frontend-ui-ux" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("前端运行能力", encoding="utf-8")
+    role = root / ".claude/agents/dev.md"
+    role.parent.mkdir(parents=True, exist_ok=True)
+    role.write_text("---\nname: dev\ntools: Read, Bash, Skill\n---\n开发任务", encoding="utf-8")
+    plugin = root / ".agents/plugins/ui-ux-pro-max"
+    (plugin / ".claude-plugin").mkdir(parents=True)
+    write_json(plugin / ".claude-plugin/plugin.json", {"name": "ui-ux-pro-max", "skills": "./.claude/skills/"})
+    for name in FRONTEND_PLUGIN_FILES:
+        entry = plugin / ".claude/skills/ui-ux-pro-max" / name
+        entry.parent.mkdir(parents=True, exist_ok=True)
+        entry.write_text("插件运行文件", encoding="utf-8")
+    write_json(root / "plugins-lock.json", {
+        "version": 1,
+        "plugins": [{"id": "ui-ux-pro-max@test", "path": ".agents/plugins/ui-ux-pro-max"}],
+    })
 
 
 class WorkspaceStepTests(unittest.TestCase):
@@ -825,6 +848,7 @@ class WorkspaceStepTests(unittest.TestCase):
             (staging / ".claude/skills/project-intake/SKILL.md").write_text(
                 "skill\n", encoding="utf-8"
             )
+            install_frontend_capabilities(staging)
             (staging / ".gitignore").write_text(
                 ".env*\n!.env.example\n", encoding="utf-8"
             )
@@ -867,6 +891,35 @@ class WorkspaceStepTests(unittest.TestCase):
             (staging / ".env").unlink()
             (staging / ".gitignore").write_text("", encoding="utf-8")
             self.assertFalse(verify_clone(staging, template))
+
+    def test_template_gate_requires_runtime_plugin_and_skill_capable_role_not_evals(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ("frontend", "backend", ".claude/skills/project-intake"):
+                (root / name).mkdir(parents=True)
+            for name in ("CLAUDE.md", "AGENTS.md", ".claude/skills/project-intake/SKILL.md"):
+                (root / name).write_text("规则", encoding="utf-8")
+            self.assertFalse(verify_required_paths(root))
+            install_frontend_capabilities(root)
+            self.assertTrue(verify_required_paths(root))
+            self.assertFalse((root / ".claude/skills/frontend-ui-ux/evals").exists())
+            paths = [root / ".claude/skills/frontend-ui-ux" / name for name in FRONTEND_SKILL_FILES]
+            paths.extend([
+                root / "plugins-lock.json",
+                root / ".agents/plugins/ui-ux-pro-max/.claude/skills/ui-ux-pro-max/SKILL.md",
+                root / ".claude/agents/dev.md",
+            ])
+            for path in paths:
+                with self.subTest(path=path.relative_to(root)):
+                    original = path.read_bytes()
+                    path.unlink()
+                    self.assertFalse(verify_required_paths(root))
+                    path.write_bytes(original)
+            role = root / ".claude/agents/dev.md"
+            role.write_text("---\nname: dev\ntools: Read, Bash\n---\n开发", encoding="utf-8")
+            self.assertFalse(verify_required_paths(root))
+            role.write_text("---\nname: dev\n---\n继承工具的开发角色", encoding="utf-8")
+            self.assertTrue(verify_required_paths(root))
 
     def test_incomplete_staging_fails_and_is_preserved(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -945,6 +998,7 @@ class WorkspaceStepTests(unittest.TestCase):
             (staging / ".claude/skills/project-intake/SKILL.md").write_text(
                 "skill\n", encoding="utf-8"
             )
+            install_frontend_capabilities(staging)
             (staging / "docs/old.md").write_text("old\n", encoding="utf-8")
             draft = "初稿\n".encode()
             import hashlib

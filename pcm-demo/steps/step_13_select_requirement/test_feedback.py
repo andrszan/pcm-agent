@@ -91,6 +91,10 @@ class FeedbackRequirementLoopTests(unittest.TestCase):
                 with self.subTest(step=step.STEP, verdict=verdict), tempfile.TemporaryDirectory() as directory:
                     fixture = fixture_type()
                     run_dir, workspace, state = fixture.make_run(Path(directory))
+                    if step is development:
+                        state["development_BR-001"] = {
+                            "frontend_applicability": {"applicable": False, "reason": "当前用例为纯后端修复"}
+                        }
                     feedback_state(state)
                     # 无关历史项不必具备全量静态字段；当前步骤只消费活动需求。
                     historical = {"id": "OLD", "status": "completed", "completion": {"step": 18}}

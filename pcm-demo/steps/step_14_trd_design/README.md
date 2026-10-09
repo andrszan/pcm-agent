@@ -47,6 +47,10 @@ trd_design_<requirement-id>
 
 领域步骤不解析公共 conversation 的消息结构，不重复核验 session/reference 组合，也不增加步骤私有 tool hook 或 Git 监管逻辑。
 
+## 前端可实施的活动 TRD
+
+活动 TRD 承接已有 `docs/prototype/index.html`、`docs/ui-ux/framework.md` 和当前真实界面；既有产品没有早期原型时以当前实现为基线。当前需求范围内收敛用户路径、关键状态、展示／输入语义、权限呈现、同步或异步结果及主要失败恢复，使前端可以直接实施。保持自由格式，不新增机器必填字段；普通组件拆分与后端内部组织由实现决定。写入范围仍仅为指定活动 TRD。
+
 ## 完成、结果与状态
 
 负责人返回 `completed` 后，Python只核验指定 `trd_path` 是产品工作区内的非空文件。文档缺失或为空时，公共循环向原 session 发送固定补全提示；本步骤不调用 `/commit-changes`。

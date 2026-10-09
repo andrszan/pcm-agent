@@ -14,6 +14,12 @@ from common.agent_decision_loop import (
 )
 from common.claude_agent import run_claude
 from common.decision import render_decision_system_prompt, request_decision
+from common.frontend_scope import (
+    PROTOTYPE_ENTRY,
+    LegacyFrontendContractError,
+    ensure_frontend_capabilities,
+    validate_prototype,
+)
 from common.state import step_result_status, write_state, write_step_result
 from config import LLMConfig
 from steps.step_01_create_workspace.workspace import git, inspect_root_repository
@@ -38,9 +44,9 @@ NEXT_NODE = "project:07_solution_design"
 CONVERSATION_KEY = "project_bootstrap"
 SKILL_NAME = "project-bootstrap"
 TAILWIND_THEME_CONVERSATION_KEY = "tailwind_theme"
-TAILWIND_THEME_SKILL_NAME = "tailwind-theme"
+TAILWIND_THEME_SKILL_NAME = "frontend-ui-ux"
 BRAND_ASSETS_CONVERSATION_KEY = "brand_assets"
-BRAND_ASSETS_SKILL_NAME = "media-assets"
+BRAND_ASSETS_SKILL_NAME = "frontend-ui-ux"
 CHECKLIST = Path("docs/requirements/项目准备清单.md")
 MAX_DECISION_ROUNDS = 32
 PROJECT_BOOTSTRAP_MAX_TURNS = 9999
@@ -313,11 +319,11 @@ def advance_success(
     saved = result(
         "success",
         (
-            "project-bootstrap 已完成基础工程项目化和验证，tailwind-theme 已完成项目风格定制，基础品牌资产已完成适用接入。"
+            "project-bootstrap 已完成基础工程项目化和验证，共享主题已完成项目风格定制，基础品牌资产已完成适用接入。"
             if brand_assets
-            else "project-bootstrap 已完成基础工程项目化和验证，tailwind-theme 已完成项目风格定制。"
+            else "project-bootstrap 已完成基础工程项目化和验证，共享主题已完成项目风格定制。"
             if tailwind_theme
-            else "project-bootstrap 已完成基础工程项目化和验证；当前无 frontend，tailwind-theme 和品牌资产准备已跳过。"
+            else "project-bootstrap 已完成基础工程项目化和验证；当前无 frontend，共享主题和品牌资产准备已跳过。"
         ),
         applicable=bool(outputs),
         outputs=outputs,
@@ -383,10 +389,42 @@ def prompt_assembly(assembly: dict[str, Any]) -> dict[str, Any]:
     return visible
 
 
+def load_prototype(run_dir: Path, workspace: Path) -> dict[str, Any]:
+    """原型是独立交接，不扩展仅含两份产品定义的 outputs。"""
+    try:
+        previous = json.loads((run_dir / "steps/02.json").read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise RuntimeError("产品原型交接不可读取") from error
+    if not isinstance(previous, dict):
+        raise RuntimeError("产品原型交接必须是对象")
+    if "prototype" not in previous:
+        raise LegacyFrontendContractError("旧产品定义成功结果缺少原型交接，请使用新执行现场")
+    prototype = validate_prototype(previous["prototype"])
+    if prototype["applicable"]:
+        path = workspace
+        for part in PROTOTYPE_ENTRY.parts:
+            path /= part
+            if path.is_symlink():
+                raise RuntimeError("产品原型入口不能包含符号链接")
+        try:
+            if not path.is_file() or not path.read_text(encoding="utf-8").strip():
+                raise RuntimeError("产品原型入口必须是非空普通文件")
+        except (OSError, UnicodeError) as error:
+            raise RuntimeError("产品原型入口不可读取") from error
+    return prototype
+
+
+def prototype_reference(prototype: dict[str, Any]) -> str:
+    if prototype["applicable"]:
+        return f"- @./{prototype['entry']}\n- 适用原因：{prototype['reason']}"
+    return f"- 原型不适用：{prototype['reason']}"
+
+
 def initial_prompt(
     product_outputs: list[str],
     assembly: dict[str, Any],
     checklist: str,
+    prototype: dict[str, Any],
     runtime_path: str | None = None,
 ) -> str:
     product_references = "\n".join(f"- @./{output}" for output in product_outputs)
@@ -398,6 +436,8 @@ def initial_prompt(
 
 权威产品定义：
 {product_references}
+产品原型交接：
+{prototype_reference(prototype)}
 项目准备事实：
 - @./{checklist}
 实际工程：
@@ -409,35 +449,47 @@ def initial_prompt(
 {assembly_json}
 ```
 
-复用既有资源绑定，不重新选择、创建、派生、轮换或替换凭据。模板声明需按资源绑定保留唯一派生变体时，以项目准备事实的最终绑定为权威选择，同步收口未选变体的目录、依赖、配置、README 和适用本地 Agent 规则，并完成真实构建及运行验证。保持可替换的 Tailwind 基础视觉主题基础设施，但不选择项目专属主题。"""
+复用既有资源绑定，不重新选择、创建、派生、轮换或替换凭据。模板声明需按资源绑定保留唯一派生变体时，以项目准备事实的最终绑定为权威选择，同步收口未选变体的目录、依赖、配置、README 和适用本地 Agent 规则，并完成真实构建及运行验证。保持可替换的 Tailwind 基础视觉主题基础设施，但不选择项目专属主题。
+两份产品定义与 docs/prototype/ 全部只读，不得将其当作模板残留清理或回写。必要时在正常开发说明中引用原型入口；不开发业务页面。"""
 
 
-def tailwind_theme_initial_prompt(product_outputs: list[str]) -> str:
+def tailwind_theme_initial_prompt(
+    product_outputs: list[str], prototype: dict[str, Any]
+) -> str:
     product_references = "\n".join(f"- @./{output}" for output in product_outputs)
-    return f"""/tailwind-theme
-请依据以下权威产品定义和实际前端，完成项目风格定制：
+    return f"""/frontend-ui-ux
+请实际调用 /ui-ux-pro-max:ui-ux-pro-max，依据以下权威产品定义、原型和实际前端落实共享视觉基础：
 {product_references}
-- @./frontend"""
+- @./frontend
+产品原型交接：
+{prototype_reference(prototype)}
+
+任务仅限主题、字体、间距和共享视觉基础。原型已确定的设计优先，不重新选择 preset 或另起风格覆盖原型；允许技术性补齐和必要可读性修正。没有适用原型时依据产品定义与当前工程收敛。
+两份产品定义与 docs/prototype/ 全部只读，不开发业务页面，不回写原型或产品定义。可复用仍有效的验证证据，不重复检查整套原型；按实际改动执行相称验证并如实报告。"""
 
 
 def brand_assets_initial_prompt(
-    product_outputs: list[str], runtime_path: str | None = None
+    product_outputs: list[str], prototype: dict[str, Any], runtime_path: str | None = None
 ) -> str:
     product_references = "\n".join(f"- @./{output}" for output in product_outputs)
     runtime_reference = f"- @./{runtime_path}" if runtime_path else "- 未提供。"
-    return f"""/media-assets
+    return f"""/frontend-ui-ux
+请实际调用 /ui-ux-pro-max:ui-ux-pro-max，按需使用插件品牌能力及工作区已有媒体工具。
 为当前产品准备并接入一套一致的基础品牌资产，覆盖页面品牌标识和浏览器 favicon，其它资产按实际用途决定。
 
 权威产品定义：
 {product_references}
+产品原型交接：
+{prototype_reference(prototype)}
 实际前端：
 - @./frontend
 本机运行配置：
 {runtime_reference}
 
-优先复用已有正式资产；需要新制作时结合产品定义和当前前端主题，保持品牌文字可编辑。生成、选择、派生、实际查看、质量检查、前端接入及适用验证由你完成。
+优先复用原型品牌和已有正式资产，补齐同一身份的页面标识及 favicon，不另选风格覆盖原型；需要新制作时结合产品定义和当前前端主题，保持品牌文字可编辑。生成、选择、派生、实际查看、质量检查、前端接入及适用验证由你完成。
 整套资产共享最多 8 次生成调用，首次生成包含在内，满足用途即可停止；继续或恢复时沿用已有候选和已用次数，不重新分配额度。生成服务不可用或额度耗尽仍无合适结果时，采用合格的简洁 SVG 或文字标识兜底。
-最终资产进入目标前端的实际资产位置并完成必要引用，不重构无关页面或主题。报告采用方式、最终资产和接入结果，以及实际尚未解决的事项。"""
+媒体凭据只用于工作区工具，不进入产品运行配置、开发资源清单或客户端内容。
+最终资产进入目标前端的实际资产位置并完成必要引用，不重构无关页面或主题，不重做业务布局；不存在业务页面时不为展示品牌提前开发页面。两份产品定义与 docs/prototype/ 全部只读。可复用仍有效的验证证据，不重复检查整套原型。报告采用方式、最终资产和接入结果，以及实际尚未解决的事项。"""
 
 
 async def run(
@@ -514,6 +566,10 @@ async def run(
                 raise RuntimeError("第 6 步既有成功仍包含未处理的覆盖率数据库")
         return advance_success(run_dir, state, outputs)
 
+    prototype = load_prototype(run_dir, workspace)
+    if "frontend" in outputs:
+        ensure_frontend_capabilities(workspace)
+
     if state.get("status") != "blocked":
         state.update(
             {"current_step": STEP, "status": "running", "blocked": None, "error": None}
@@ -532,6 +588,8 @@ async def run(
         runtime_path = candidate
     bootstrap_context: dict[str, Any] = {
         "产品定义": product_output_contents(workspace, product_outputs),
+        "产品原型": prototype,
+        "只读边界": "两份产品定义和 docs/prototype/ 只读，不作为模板残留清理，不开发业务页面。",
         "已完成的项目准备基线": checklist_content,
         "配置迁移与既有资源边界": (
             "可以调整实际本地配置的变量名称和结构并同步公开示例，但必须复用同一既有资源绑定、endpoint、权限范围和秘密值；"
@@ -561,7 +619,7 @@ async def run(
         state,
         workspace,
         bootstrap_spec,
-        initial_prompt(product_outputs, assembly, checklist, runtime_path),
+        initial_prompt(product_outputs, assembly, checklist, prototype, runtime_path),
         bootstrap_completion_verifier,
         agent_runner=agent_runner,
         decision_runner=decision_runner,
@@ -589,6 +647,8 @@ async def run(
             {
                 "产品定义": product_output_contents(workspace, product_outputs),
                 "实际前端": ["frontend"],
+                "产品原型": prototype,
+                "设计继承": "原型设计优先，仅落实共享视觉基础；产品定义和原型只读，不开发业务页面。",
             },
         ),
     )
@@ -597,7 +657,7 @@ async def run(
         state,
         workspace,
         tailwind_theme_spec,
-        tailwind_theme_initial_prompt(product_outputs),
+        tailwind_theme_initial_prompt(product_outputs, prototype),
         tailwind_theme_completion_verifier,
         agent_runner=agent_runner,
         decision_runner=decision_runner,
@@ -620,6 +680,8 @@ async def run(
     brand_context: dict[str, Any] = {
         "产品定义": product_output_contents(workspace, product_outputs),
         "实际前端": ["frontend"],
+        "产品原型": prototype,
+        "设计继承": "优先复用原型品牌，补齐同一身份；产品定义和原型只读，不重做业务布局。",
     }
     if runtime_path is not None:
         brand_context["产品本机运行配置"] = {"path": runtime_path}
@@ -635,7 +697,7 @@ async def run(
         state,
         workspace,
         brand_assets_spec,
-        brand_assets_initial_prompt(product_outputs, runtime_path),
+        brand_assets_initial_prompt(product_outputs, prototype, runtime_path),
         brand_assets_completion_verifier,
         agent_runner=agent_runner,
         decision_runner=decision_runner,

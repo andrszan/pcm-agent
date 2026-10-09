@@ -86,7 +86,7 @@ uv run python run_step.py \
 1. 保存初稿源路径、完整 UTF-8 内容和 SHA-256；
 2. 计算最终路径和同级临时路径 `<project_directory_name>.pcm-tmp-<run-id>`；
 3. `git clone --depth 1` 克隆配置模板并记录 remote、默认分支、实际分支和 commit SHA；
-4. 拒绝模板中任何形态的 `.env`，并以实际 Git 规则确认模板根忽略 `.env`；
+4. 核验完整前端运行能力、锁定插件和开发角色；拒绝模板中任何形态的 `.env`，并以实际 Git 规则确认模板根忽略 `.env`；
 5. 删除临时 clone 的 `.git/`，清空并保留 `docs/`；
 6. 写入原始初稿字节到 `docs/产品初稿.md`，并将配置源原始字节独占写为根 `.env`、设置 `0600`；
 7. 如有初始资料，复制到 `initial-resources/<源 basename>` 并核验副本只含普通文件和目录；复制中断保留现场且不把半复制当成功；
@@ -131,6 +131,9 @@ uv run python run_step.py \
 - `git rev-parse --show-toplevel` 等于最终项目根，分支为 `main`，`HEAD` 不存在且没有 commit；
 - `docs/` 只包含 `产品初稿.md`；
 - `CLAUDE.md`、`AGENTS.md`、`project-intake` Skill、`frontend/`、`backend/` 存在；
+- `frontend-ui-ux` 的 Skill 入口、五份 references、子任务模板与独立评审角色均为工作区内非空、非符号链接文件；评估用例及 fixture 不属于运行门禁；
+- 工作区 `plugins-lock.json` 注册本地 `ui-ux-pro-max` 插件，插件 manifest 与实际 Skill 入口有效；不借用用户缓存代替模板能力；
+- `.claude/agents/dev.md` 使用受控 frontmatter 格式，显式 tools 包含 `Skill`，或省略 tools 继承工具；
 - 根 `.env` 与当前配置源原始字节一致、权限为 `0600`，且实际根 Git 忽略该文件；
 - 源初稿和项目内初稿 SHA-256 一致；
 - `template` 中的仓库、分支和 commit 证据与真实 Git 事实一致。

@@ -33,6 +33,7 @@ from common.coordination import (
 )
 from common.error_diagnostics import exception_projection, write_diagnostic
 from common.files import sha256
+from common.frontend_scope import LegacyFrontendContractError, validate_prototype
 from common.git_identity import parse_git_identity
 from common.gitlab import RemoteBlocked, configured_parent_path, preflight as remote_preflight, remote_parent_path
 from common.remote_sync import enabled as remote_sync_enabled
@@ -75,6 +76,7 @@ from steps.step_01_create_workspace import (
 from steps.step_01_create_workspace import (
     result as workspace_result,
 )
+from steps.step_02_project_intake import step as project_intake_step
 from steps.step_02_project_intake import ProjectIntakeBlocked
 from steps.step_02_project_intake import result as project_intake_result
 from steps.step_02_project_intake import run as run_project_intake
@@ -139,6 +141,7 @@ from steps.step_14_trd_design.step import (
     failure_scope as trd_design_failure_scope,
     has_complete_success as has_trd_design_success,
 )
+from steps.step_15_development import step as development_step
 from steps.step_15_development import DevelopmentBlocked
 from steps.step_15_development import result as development_result
 from steps.step_15_development import run as run_development
@@ -1124,6 +1127,35 @@ def _ensure_product_claim(
         raise
 
 
+def validate_frontend_contract(
+    run_dir: Path, state: dict[str, Any], step: int | None
+) -> None:
+    if step == 2:
+        project_intake_step.validate_existing_contract(run_dir, state)
+    elif step == 15:
+        development_step.validate_existing_contract(run_dir, state)
+    elif step in {6, 10} and (
+        state.get("step"), state.get("current_step")
+    ) == (step, step):
+        path = run_dir / "steps" / "02.json"
+        if path.is_file():
+            previous = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(previous, dict) and previous.get("status") == "success" and "prototype" not in previous:
+                raise LegacyFrontendContractError(
+                    "旧初始化缺少产品原型交接，请先使用原工具版本收口；原运行记录未修改"
+                )
+
+
+def _known_prototype(run_dir: Path | None) -> dict[str, Any] | None:
+    if run_dir is None:
+        return None
+    try:
+        value = read_state(run_dir).get("project_intake", {}).get("prototype")
+        return validate_prototype(value) if value is not None else None
+    except (OSError, RuntimeError, ValueError, TypeError, AttributeError):
+        return None
+
+
 def _prepare_execution_locks(args: argparse.Namespace) -> ExecutionLocks:
     run_id = args.run_id
     if not isinstance(run_id, str) or not run_id:
@@ -1138,6 +1170,14 @@ def _prepare_execution_locks(args: argparse.Namespace) -> ExecutionLocks:
         locks = acquire_execution_locks(root, run_id, maximum)
 
     try:
+        existing_run = run_dir_for(run_id)
+        if existing_run.is_dir():
+            try:
+                existing_state = read_state(existing_run)
+            except (OSError, RuntimeError, ValueError):
+                existing_state = None
+            if existing_state is not None:
+                validate_frontend_contract(existing_run, existing_state, args.step)
         message_file = getattr(args, "resume_message_file", None)
         if isinstance(message_file, Path):
             run_dir = run_dir_for(run_id)
@@ -1267,6 +1307,9 @@ def _execute(
                         run_dir, result = asyncio.run(run_step_seventeen(args))
                     else:
                         run_dir, result = run_step_eighteen(args)
+    except LegacyFrontendContractError as error:
+        print(f"旧运行合同不兼容：{error}", file=sys.stderr)
+        return 1
     except ProjectIntakeBlocked as error:
         result = project_intake_result(
             "blocked",
@@ -1276,6 +1319,7 @@ def _execute(
                 "required_inputs": error.required_inputs,
                 "resume_step": 2,
             },
+            prototype=_known_prototype(run_dir),
         )
         error_message = str(error)
     except WorkspaceBlocked as error:
@@ -1409,6 +1453,7 @@ def _execute(
             requirement_id=error.requirement_id,
             trd_path=error.trd_path,
             development_session_id=error.development_session_id,
+            frontend=error.frontend,
             blocked={
                 "reason": str(error),
                 "required_inputs": error.required_inputs,
@@ -1519,6 +1564,7 @@ def _execute(
                 requirement_id=scope["requirement_id"] if scope else None,
                 trd_path=scope["trd_path"] if scope else None,
                 development_session_id=scope["development_session_id"] if scope else None,
+                frontend=scope.get("frontend") if scope else None,
                 error=error_projection,
             )
             error_message = error_projection["message"]
@@ -1574,6 +1620,11 @@ def _execute(
         if isinstance(error, (AIDecisionFailure, AgentExecutionFailure)):
             result["error"] = error.as_error()
             error_message = str(error)
+
+    if args.step == 2 and result["status"] != "success":
+        prototype = _known_prototype(run_dir)
+        if prototype is not None:
+            result["prototype"] = prototype
 
     resume_message = _resume_message(args)
     if result["status"] == "success" and resume_message is not None and not resume_message.consumed:
@@ -1953,6 +2004,9 @@ def main(*, retry: bool = False) -> int:
             if retry:
                 return _retry_locked(args, locks)
             return _execute(args, locks)
+    except LegacyFrontendContractError as error:
+        print(f"旧运行合同不兼容：{error}", file=sys.stderr)
+        return 1
     except (OSError, RuntimeError, ValueError) as error:
         print(f"步骤协调失败：{error}", file=sys.stderr)
         return 2

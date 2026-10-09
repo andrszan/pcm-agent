@@ -15,6 +15,7 @@ sys.path.insert(0, str(DEMO_ROOT))
 from common.agent_decision_loop import BLOCKED_RESUME_PROMPT
 from common.claude_agent import ClaudeRunResult
 from common.files import write_json
+from common.frontend_scope import LegacyFrontendContractError
 from common.state import read_state, write_state
 from steps.step_01_create_workspace import initialize_root_repository
 from steps.step_05_project_readiness.step import (
@@ -76,6 +77,16 @@ class UIUXFrameworkTests(unittest.TestCase):
         (workspace / ARCHITECTURE_OUTPUT_PATH).write_text(
             "ARCHITECTURE-CONTEXT-MARKER\n", encoding="utf-8"
         )
+        prototype = {
+            "applicable": "frontend" in children,
+            "entry": "docs/prototype/index.html" if "frontend" in children else None,
+            "reason": "提供可交互产品界面" if "frontend" in children else "仅服务端交付",
+        }
+        if prototype["applicable"]:
+            (workspace / "docs/prototype").mkdir()
+            (workspace / prototype["entry"]).write_text(
+                "<!doctype html><title>产品原型</title><main>工作台</main>", encoding="utf-8"
+            )
         if existing:
             self.write_document(workspace)
         initialize_root_repository(workspace)
@@ -88,10 +99,12 @@ class UIUXFrameworkTests(unittest.TestCase):
             with (workspace / ".git/info/exclude").open("a", encoding="utf-8") as handle:
                 handle.write(f"{name}/\n")
         root_paths = [*outputs, checklist, design, ARCHITECTURE_OUTPUT_PATH.as_posix()]
+        if prototype["applicable"]:
+            root_paths.append(prototype["entry"])
         if existing:
             root_paths.append(FRAMEWORK_PATH.as_posix())
         commit_paths(workspace, *root_paths)
-        write_json(run_dir / "steps/02.json", {"step": 2, "status": "success", "outputs": outputs})
+        write_json(run_dir / "steps/02.json", {"step": 2, "status": "success", "outputs": outputs, "prototype": prototype})
         write_json(
             run_dir / "steps/05.json",
             readiness_result(
@@ -359,11 +372,15 @@ class UIUXFrameworkTests(unittest.TestCase):
                 ARCHITECTURE_OUTPUT_PATH.as_posix(),
                 FRAMEWORK_PATH.as_posix(),
                 "@./frontend",
+                "@./docs/prototype/index.html",
             ):
                 self.assertIn(required, prompt)
             self.assertTrue(decision_prompts)
             for system_prompt in decision_prompts:
                 self.assertIn("ARCHITECTURE-CONTEXT-MARKER", system_prompt)
+                self.assertIn("docs/prototype/index.html", system_prompt)
+                self.assertIn("主题", system_prompt)
+                self.assertIn("品牌", system_prompt)
                 self.assertIn(UI_UX_FRAMEWORK_DECISION_RULES, system_prompt)
 
         with tempfile.TemporaryDirectory() as directory:
@@ -378,8 +395,53 @@ class UIUXFrameworkTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 self.run_step(run_dir, state, agent_runner=unexpected)
 
+    def test_missing_prototype_contract_or_file_fails_before_agent(self) -> None:
+        for missing in ("contract", "entry"):
+            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as directory:
+                run_dir, workspace, state = self.make_run(Path(directory), ["frontend"])
+                if missing == "contract":
+                    intake_path = run_dir / "steps/02.json"
+                    intake = json.loads(intake_path.read_text(encoding="utf-8"))
+                    intake.pop("prototype")
+                    write_json(intake_path, intake)
+                else:
+                    (workspace / "docs/prototype/index.html").unlink()
+                before = (run_dir / "state.json").read_bytes()
+
+                async def unexpected(*args, **kwargs):
+                    raise AssertionError("缺少原型不得执行 Agent 或决策")
+
+                expected_error = LegacyFrontendContractError if missing == "contract" else RuntimeError
+                with self.assertRaises(expected_error):
+                    self.run_step(run_dir, state, agent_runner=unexpected, decision_runner=unexpected)
+                self.assertEqual((run_dir / "state.json").read_bytes(), before)
+                self.assertFalse((run_dir / "conversations").exists())
+
+    def test_historical_success_reuses_without_prototype_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory), ["frontend"], existing=True)
+            intake_path = run_dir / "steps/02.json"
+            intake = json.loads(intake_path.read_text(encoding="utf-8"))
+            intake.pop("prototype")
+            write_json(intake_path, intake)
+            saved = ui_ux_step.result("success", "历史框架已完成", outputs=[FRAMEWORK_PATH.as_posix()])
+            write_json(run_dir / "steps/10.json", saved)
+            state.update({"step": 11, "current_step": 11, "current_node": NEXT_NODE})
+            write_state(run_dir, state)
+            before = (run_dir / "state.json").read_bytes()
+            before_result = (run_dir / "steps/10.json").read_bytes()
+
+            async def unexpected(*args, **kwargs):
+                raise AssertionError("历史框架成功不重放 Agent")
+
+            with patch.object(ui_ux_step, "load_prototype", side_effect=AssertionError("历史不补原型合同")):
+                outcome = self.run_step(run_dir, state, agent_runner=unexpected, decision_runner=unexpected)
+            self.assertEqual(outcome["status"], "success")
+            self.assertEqual((run_dir / "state.json").read_bytes(), before)
+            self.assertEqual((run_dir / "steps/10.json").read_bytes(), before_result)
+
     def test_agent_out_of_scope_changes_fail_before_decision(self) -> None:
-        for mutation in ("root", "child"):
+        for mutation in ("root", "child", "prototype", "theme", "brand"):
             with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
                 run_dir, workspace, state = self.make_run(Path(directory), ["frontend"])
                 decision_called = False
@@ -387,7 +449,15 @@ class UIUXFrameworkTests(unittest.TestCase):
                 async def agent(_prompt: str, **kwargs: object) -> ClaudeRunResult:
                     self.write_document(workspace)
                     target = workspace if mutation == "root" else workspace / "frontend"
-                    (target / "unexpected.txt").write_text("dirty\n", encoding="utf-8")
+                    if mutation == "prototype":
+                        target = workspace / "docs/prototype/index.html"
+                    elif mutation == "theme":
+                        target = workspace / "frontend/theme.css"
+                    elif mutation == "brand":
+                        target = workspace / "frontend/favicon.svg"
+                    else:
+                        target /= "unexpected.txt"
+                    target.write_text("dirty\n", encoding="utf-8")
                     value = agent_result(kwargs["cwd"])  # type: ignore[index]
                     kwargs["on_update"](value)  # type: ignore[index,operator]
                     return value

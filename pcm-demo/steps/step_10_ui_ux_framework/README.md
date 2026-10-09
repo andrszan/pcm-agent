@@ -26,10 +26,10 @@ Demo v1 的适用性是确定性规则：仅当第 8 步严格 success 的空 `o
 
 适用时，输入还包括：
 
-- 第 2 步结果的两份产品定义输出；
+- 第 2 步结果的两份产品定义输出，及独立的顶层 `prototype` 交接；适用原型固定入口为 `docs/prototype/index.html`，不加入产品定义 `outputs`；
 - 第 5 步严格成功结果和项目准备清单，当前清单及两份产品定义与 `readiness_baseline` 指纹一致；
 - 第 7 步总体技术方案；
-- 第 8 步权威仓库和实际 `frontend/` 工程；
+- 第 8 步权威仓库和实际 `frontend/` 工程，含当前主题、字体、品牌资产及其实际引用；
 - 第 9 步固定工程架构设计文档。
 
 ## 不适用路径
@@ -48,6 +48,8 @@ Demo v1 的适用性是确定性规则：仅当第 8 步严格 success 的空 `o
 
 ## 适用路径、边界、提交与恢复
 
+原型表达已确定的体验方向，工程主题与品牌表达当前实现。框架只整理并补齐导航、Shell、页面模式、滚动、常驻关系、响应式和跨页面使用规则，不另起设计或重新选择风格；真实冲突沿当前对话处理，只回写框架文档。
+
 适用时只使用一个领域键和 Claude session：`ui_ux_framework`。初始提示首行固定为 `/ui-ux-framework`，明确授权 `bootstrap` 模式，只允许创建或更新唯一固定产物 `docs/ui-ux/framework.md`。适用范围必须闭合 App Shell Contract，明确产品表面、区域职责、导航层级、页面模式、常规滚动所有者、sticky 基准和窄屏转换；文档按实际需要区分实现事实、目标设计和未决事项；新项目记录目标与适用范围，不逐项填写状态或重议条件，既有框架调整时再补实际偏差与必要迁移。能由项目事实安全推导的低风险结构直接收敛为有依据的目标设计；仅实质高影响、会改变跨需求体验骨架、迁移成本或兼容性的具体分歧交由负责人决定，负责人可用 `continue` 作出决定并要求回写，不接受整份框架泛化待确认。Agent 按需读取本能力自带的 `references/` 或 `assets/` 辅助判断，但资源不是项目默认实现，不得将示例内容当作项目事实。
 
 每轮完整 Agent 回复均由公共 `run_agent_decision_loop` 保存、读取和解释，并交给 AI-compatible 负责人返回 `AgentDecision(completed/continue/blocked)`；领域步骤不解析 conversation 消息 schema、角色顺序、尾部 decision、session/reference 组合或完整 commit prompt，也不把 conversation 当长期成功证据。Agent 不得进行单项需求设计、页面/CSS/组件/主题设计或实现，不得修改代码、测试、配置、项目规则或其它文档，不得执行 Git 写操作。Python 只读 Git，并在当前现场核验权威仓库均为自身 top-level、`main`；子仓始终 clean，根仓只能出现固定文档变更。
@@ -56,7 +58,7 @@ Demo v1 的适用性是确定性规则：仅当第 8 步严格 success 的空 `o
 
 **证据边界：** Python 只核验当前 Git-visible 工作树和 index；这不是不可绕过的安全隔离，不证明整个 Agent 执行历史未发生 Git 写入，也不覆盖 ignored 文件。本地 Demo 信任项目权限配置和 Agent 遵守领域约束；未来若要求不可绕过隔离，应在项目级权限或沙箱统一实现，而非由领域步骤解析 conversation 或扩展 Git DSL。
 
-fresh 仅因本步骤 session、conversation reference、私有状态或 conversation 路径等执行产物已存在而拒绝；resume 由公共循环恢复原 session。run 目录是受控、Git 忽略的本地恢复状态，不建设防篡改日志。适用的完整 success result/state 写入中断，或完整 success 重跑时，只按严格 result schema、当前固定文档和 Git 事实补状态或确认成功；残缺 success 不受保护。
+fresh 仅因本步骤 session、conversation reference、私有状态或 conversation 路径等执行产物已存在而拒绝；resume 由公共循环恢复原 session。run 目录是受控、Git 忽略的本地恢复状态，不建设防篡改日志。适用的完整 success result/state 写入中断，或完整 success 重跑时，只按严格 result schema、当前固定文档和 Git 事实补状态或确认成功；残缺 success 不受保护。历史已成功执行仍按原合同只读复用，不以新原型交接反向要求重做；原型检查只在需要当前执行时进行。
 
 负责人返回 `blocked` 时始终保存 blocked 并停在第 10 步，不能因本地文档 tracked 且 clean 改判 success；补齐外部条件后由公共循环从原 session 恢复。第 8～10 步的 Git 与提交合同保持步骤私有，不扩展 `common/`、不抽取 Git DSL、commit 事件、持久布尔标记或旧 prompt 兼容列表。
 

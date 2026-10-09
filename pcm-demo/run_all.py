@@ -551,6 +551,12 @@ def _run_steps(
                 return _chain_quality(run_id, state, locks, model_policy_snapshot)
             return 0
         try:
+            if state is not None:
+                from run_step import validate_frontend_contract
+
+                validate_frontend_contract(
+                    run_dir, state, state["step"] if state.get("step") is not None else state.get("current_step")
+                )
             _attach_product_lock(locks, state, run_dir, run_id)
             if state is not None and _needs_phase_one_completion(state):
                 return_code = complete_phase_one(run_dir, state)

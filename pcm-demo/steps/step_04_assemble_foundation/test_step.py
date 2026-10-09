@@ -196,8 +196,13 @@ class AssembleFoundationTests(unittest.TestCase):
                 root, self.selection(url, "release"), run_directory_name="legacy-run-directory"
             )
 
+            prototype = workspace / "docs/prototype/index.html"
+            prototype.parent.mkdir(parents=True)
+            prototype.write_text("<!doctype html><title>产品原型</title>", encoding="utf-8")
+            prototype_bytes = prototype.read_bytes()
             saved = run(run_dir, state)
 
+            self.assertEqual(prototype.read_bytes(), prototype_bytes)
             self.assertEqual(saved["status"], "success")
             self.assertEqual(saved["outputs"], ["frontend", "backend"])
             self.assertEqual((workspace / "frontend" / "frontend.txt").read_text(), "frontend")

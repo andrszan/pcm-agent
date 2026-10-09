@@ -16,6 +16,7 @@ from common.agent_decision_loop import AgentExecutionFailure, ResumeMessage
 from common.claude_agent import ClaudeRunResult
 from common.decision import render_decision_system_prompt
 from common.files import write_json
+from common.frontend_scope import LegacyFrontendContractError
 from common.state import read_state, write_state
 from steps.step_01_create_workspace import initialize_root_repository
 from steps.step_03_foundation_selection.step import TemplateSelection
@@ -37,12 +38,10 @@ from steps.step_06_project_bootstrap.step import (
     TAILWIND_THEME_DECISION_RULES,
     TAILWIND_THEME_MAX_TURNS,
     ProjectBootstrapBlocked,
-    brand_assets_initial_prompt,
-    initial_prompt,
+    load_prototype,
     prompt_assembly,
     result,
     run,
-    tailwind_theme_initial_prompt,
     verify_existing_bootstrap_success,
     verify_tailwind_v4_frontend,
 )
@@ -75,10 +74,10 @@ def agent_result_for_prompt(
     cwd: Path,
     text: str | None = None,
 ) -> ClaudeRunResult:
-    if prompt.startswith("/tailwind-theme\n"):
-        session, skill, default_text = "session-theme", "tailwind-theme", "主题完整回复"
-    elif prompt.startswith("/media-assets\n"):
-        session, skill, default_text = "session-brand", "media-assets", "品牌资产完整回复"
+    if prompt.startswith("/frontend-ui-ux\n") and "页面品牌标识" in prompt:
+        session, skill, default_text = "session-brand", "frontend-ui-ux", "品牌资产完整回复"
+    elif prompt.startswith("/frontend-ui-ux\n"):
+        session, skill, default_text = "session-theme", "frontend-ui-ux", "主题完整回复"
     else:
         session, skill, default_text = "session-bootstrap", "project-bootstrap", "项目化完整回复"
     return agent_result(
@@ -106,6 +105,11 @@ def decision(
 
 
 class ProjectBootstrapTests(unittest.TestCase):
+    def setUp(self) -> None:
+        capabilities = patch("steps.step_06_project_bootstrap.step.ensure_frontend_capabilities")
+        self.capabilities = capabilities.start()
+        self.addCleanup(capabilities.stop)
+
     def make_run(
         self,
         root: Path,
@@ -167,9 +171,19 @@ class ProjectBootstrapTests(unittest.TestCase):
                 "commit_sha": "a" * 40,
             }
 
+        prototype = {
+            "applicable": applicable and frontend,
+            "entry": "docs/prototype/index.html" if applicable and frontend else None,
+            "reason": "提供可交互产品界面" if applicable and frontend else "仅服务端或无工程交付",
+        }
+        if prototype["applicable"]:
+            (workspace / "docs/prototype").mkdir()
+            (workspace / prototype["entry"]).write_text(
+                "<!doctype html><title>产品原型</title><main>工作台</main>", encoding="utf-8"
+            )
         write_json(
             run_dir / "steps/02.json",
-            {"step": 2, "status": "success", "outputs": [requirements, features]},
+            {"step": 2, "status": "success", "outputs": [requirements, features], "prototype": prototype},
         )
         write_json(
             run_dir / "steps/03.json",
@@ -283,17 +297,6 @@ class ProjectBootstrapTests(unittest.TestCase):
                 "docs/requirements/产品功能说明.md",
             ]
             bootstrap_prompt = calls[0]["prompt"]
-            self.assertEqual(
-                bootstrap_prompt,
-                initial_prompt(
-                    product_outputs,
-                    json.loads(
-                        (run_dir / "steps/04.json").read_text(encoding="utf-8")
-                    ),
-                    "docs/requirements/项目准备清单.md",
-                    ".pcm/runtime.json",
-                ),
-            )
             self.assertEqual(bootstrap_prompt.splitlines()[0], "/project-bootstrap")
             for reference in (
                 "@./docs/requirements/项目需求说明.md",
@@ -311,11 +314,7 @@ class ProjectBootstrapTests(unittest.TestCase):
             self.assertNotIn("max_budget_usd", calls[0])
 
             theme_prompt = calls[2]["prompt"]
-            self.assertEqual(
-                theme_prompt,
-                tailwind_theme_initial_prompt(product_outputs),
-            )
-            self.assertEqual(theme_prompt.splitlines()[0], "/tailwind-theme")
+            self.assertEqual(theme_prompt.splitlines()[0], "/frontend-ui-ux")
             for reference in (
                 "@./docs/requirements/项目需求说明.md",
                 "@./docs/requirements/产品功能说明.md",
@@ -324,11 +323,18 @@ class ProjectBootstrapTests(unittest.TestCase):
                 self.assertIn(reference, theme_prompt)
 
             brand_prompt = calls[3]["prompt"]
-            self.assertEqual(
-                brand_prompt,
-                brand_assets_initial_prompt(product_outputs, ".pcm/runtime.json"),
-            )
-            self.assertEqual(brand_prompt.splitlines()[0], "/media-assets")
+            self.assertEqual(brand_prompt.splitlines()[0], "/frontend-ui-ux")
+            for domain_prompt in (bootstrap_prompt, theme_prompt, brand_prompt):
+                self.assertIn("@./docs/prototype/index.html", domain_prompt)
+                self.assertIn("只读", domain_prompt)
+            for domain_prompt in (theme_prompt, brand_prompt):
+                self.assertIn("/ui-ux-pro-max:ui-ux-pro-max", domain_prompt)
+            self.assertIn("8 次", brand_prompt)
+            self.assertIn("SVG", brand_prompt)
+            self.assertEqual([call["task"] for call in calls], [
+                "project_bootstrap", "project_bootstrap", "tailwind_theme", "brand_assets",
+            ])
+            self.capabilities.assert_called_once_with(workspace.resolve())
             for reference in (
                 "@./docs/requirements/项目需求说明.md",
                 "@./docs/requirements/产品功能说明.md",
@@ -360,6 +366,9 @@ class ProjectBootstrapTests(unittest.TestCase):
             self.assertEqual(
                 bootstrap_context["组装白名单事实"], prompt_assembly(assembly)
             )
+            prototype = load_prototype(run_dir, workspace)
+            for context in (bootstrap_context, theme_context, brand_context):
+                self.assertEqual(context["产品原型"], prototype)
             self.assertEqual(theme_context["实际前端"], ["frontend"])
             self.assertEqual(brand_context["实际前端"], ["frontend"])
             self.assertEqual(
@@ -483,8 +492,8 @@ class ProjectBootstrapTests(unittest.TestCase):
             self.assertEqual(outcome["status"], "success")
             self.assertIs(outcome["tailwind_theme"], True)
             self.assertEqual(len(calls), 3)
-            self.assertTrue(calls[1].startswith("/tailwind-theme\n"))
-            self.assertTrue(calls[2].startswith("/media-assets\n"))
+            self.assertTrue(calls[1].startswith("/frontend-ui-ux\n"))
+            self.assertTrue(calls[2].startswith("/frontend-ui-ux\n"))
             for relative, contents in before.items():
                 self.assertEqual((frontend / relative).read_bytes(), contents)
 
@@ -521,8 +530,8 @@ class ProjectBootstrapTests(unittest.TestCase):
             self.assertEqual(len(calls), 4)
             self.assertEqual(calls[1]["resume_session_id"], "session-bootstrap")
             self.assertEqual(calls[1]["prompt"], COVERAGE_ARTIFACT_REPAIR_PROMPT)
-            self.assertTrue(calls[2]["prompt"].startswith("/tailwind-theme\n"))
-            self.assertTrue(calls[3]["prompt"].startswith("/media-assets\n"))
+            self.assertTrue(calls[2]["prompt"].startswith("/frontend-ui-ux\n"))
+            self.assertTrue(calls[3]["prompt"].startswith("/frontend-ui-ux\n"))
 
     def test_blocked_decision_preserves_domain_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -740,6 +749,7 @@ class ProjectBootstrapTests(unittest.TestCase):
             )
             self.assertEqual(outcome["outputs"], ["backend"])
             self.assertIs(outcome["tailwind_theme"], False)
+            self.capabilities.assert_not_called()
             self.assertEqual(len(calls), 1)
             self.assertTrue(calls[0]["prompt"].startswith("/project-bootstrap\n"))
             self.assertFalse((run_dir / "conversations/tailwind_theme.json").exists())
@@ -856,7 +866,7 @@ class ProjectBootstrapTests(unittest.TestCase):
                 calls: list[dict] = []
 
                 async def bootstrap_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
-                    if prompt.startswith("/tailwind-theme\n"):
+                    if prompt.startswith("/frontend-ui-ux\n"):
                         raise AssertionError("无效 Tailwind 合同不应调用 theme Agent")
                     calls.append({"prompt": prompt, **kwargs})
                     current = agent_result_for_prompt(
@@ -923,7 +933,7 @@ class ProjectBootstrapTests(unittest.TestCase):
             self.assertEqual(len(calls), 2)
             self.assertEqual(decision_calls, 2)
             self.assertTrue(calls[0]["prompt"].startswith("/project-bootstrap\n"))
-            self.assertTrue(calls[1]["prompt"].startswith("/tailwind-theme\n"))
+            self.assertTrue(calls[1]["prompt"].startswith("/frontend-ui-ux\n"))
 
             resumed_state = read_state(run_dir)
             resumed_state.update(
@@ -946,10 +956,10 @@ class ProjectBootstrapTests(unittest.TestCase):
                         cwd=kwargs["cwd"],  # type: ignore[arg-type, index]
                         session="session-theme",
                         text="主题恢复完成",
-                        skills=["tailwind-theme"],
+                        skills=["frontend-ui-ux"],
                     )
                 else:
-                    self.assertTrue(prompt.startswith("/media-assets\n"))
+                    self.assertTrue(prompt.startswith("/frontend-ui-ux\n"))
                     self.assertIsNone(kwargs["resume_session_id"])
                     current = agent_result_for_prompt(
                         prompt, cwd=kwargs["cwd"]  # type: ignore[arg-type, index]
@@ -973,7 +983,7 @@ class ProjectBootstrapTests(unittest.TestCase):
             self.assertTrue(resume_message.consumed)
             self.assertEqual(len(resumed_calls), 2)
             self.assertEqual(resumed_calls[0]["prompt"], "使用负责人提供的品牌决定")
-            self.assertTrue(resumed_calls[1]["prompt"].startswith("/media-assets\n"))
+            self.assertTrue(resumed_calls[1]["prompt"].startswith("/frontend-ui-ux\n"))
             self.assertFalse(resumed_calls[0]["prompt"].startswith("/project-bootstrap\n"))
 
     def test_brand_agent_failure_resumes_brand_session_without_rerunning_previous_agents(self) -> None:
@@ -987,7 +997,7 @@ class ProjectBootstrapTests(unittest.TestCase):
                 current = agent_result_for_prompt(
                     prompt, cwd=kwargs["cwd"]  # type: ignore[arg-type, index]
                 )
-                if prompt.startswith("/media-assets\n"):
+                if kwargs["task"] == "brand_assets":
                     current.result_subtype = "error"
                     current.is_error = True
                     current.has_errors = True
@@ -1007,14 +1017,14 @@ class ProjectBootstrapTests(unittest.TestCase):
                 )
             self.assertEqual(
                 [prompt.splitlines()[0] for prompt in calls],
-                ["/project-bootstrap", "/tailwind-theme", "/media-assets"],
+                ["/project-bootstrap", "/frontend-ui-ux", "/frontend-ui-ux"],
             )
 
             resumed_calls: list[dict] = []
 
             async def resumed_brand_agent(prompt: str, **kwargs: object) -> ClaudeRunResult:
                 resumed_calls.append({"prompt": prompt, **kwargs})
-                self.assertTrue(prompt.startswith("/media-assets\n"))
+                self.assertTrue(prompt.startswith("/frontend-ui-ux\n"))
                 self.assertEqual(kwargs["resume_session_id"], "session-brand")
                 current = agent_result_for_prompt(
                     prompt, cwd=kwargs["cwd"]  # type: ignore[arg-type, index]
@@ -1036,6 +1046,11 @@ class ProjectBootstrapTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))
             (workspace / "README.md").write_text("# 项目\n", encoding="utf-8")
+            intake_path = run_dir / "steps/02.json"
+            intake = json.loads(intake_path.read_text(encoding="utf-8"))
+            intake.pop("prototype")
+            write_json(intake_path, intake)
+            (workspace / "docs/prototype/index.html").unlink()
             historical = result(
                 "success",
                 "历史基础工程成功。",
@@ -1065,6 +1080,7 @@ class ProjectBootstrapTests(unittest.TestCase):
             )
             self.assertEqual(outcome["status"], "success")
             self.assertNotIn("品牌", outcome["summary"])
+            self.capabilities.assert_not_called()
             self.assertEqual((run_dir / "steps/06.json").read_bytes(), before)
             self.assertFalse((run_dir / "conversations/brand_assets.json").exists())
             saved = read_state(run_dir)
@@ -1108,7 +1124,7 @@ class ProjectBootstrapTests(unittest.TestCase):
                 )
             self.assertEqual(
                 [call["prompt"].splitlines()[0] for call in calls],
-                ["/project-bootstrap", "/tailwind-theme", "/media-assets"],
+                ["/project-bootstrap", "/frontend-ui-ux", "/frontend-ui-ux"],
             )
             self.assertEqual(decision_calls, 3)
 
@@ -1132,7 +1148,7 @@ class ProjectBootstrapTests(unittest.TestCase):
                     cwd=kwargs["cwd"],  # type: ignore[arg-type, index]
                     session="session-brand",
                     text="品牌资产恢复完成",
-                    skills=["media-assets"],
+                    skills=["frontend-ui-ux"],
                 )
                 kwargs["on_update"](current)  # type: ignore[index, operator]
                 return current
@@ -1219,8 +1235,72 @@ class ProjectBootstrapTests(unittest.TestCase):
             self.assertEqual(outcome["status"], "success")
             self.assertTrue(resume_message.consumed)
             self.assertEqual(calls[0], "负责人决定原文")
-            self.assertTrue(calls[1].startswith("/tailwind-theme\n"))
+            self.assertTrue(calls[1].startswith("/frontend-ui-ux\n"))
             self.assertEqual(calls.count("负责人决定原文"), 1)
+
+    def test_prototype_handoff_validation_precedes_agent_and_state_writes(self) -> None:
+        for invalid in ("missing", "wrong-entry", "empty-file", "missing-file", "symlink"):
+            with self.subTest(invalid=invalid), tempfile.TemporaryDirectory() as directory:
+                run_dir, workspace, state = self.make_run(Path(directory))
+                intake_path = run_dir / "steps/02.json"
+                intake = json.loads(intake_path.read_text(encoding="utf-8"))
+                entry = workspace / "docs/prototype/index.html"
+                if invalid == "missing":
+                    intake.pop("prototype")
+                elif invalid == "wrong-entry":
+                    intake["prototype"]["entry"] = "docs/other.html"
+                elif invalid == "empty-file":
+                    entry.write_text("  ", encoding="utf-8")
+                elif invalid == "missing-file":
+                    entry.unlink()
+                else:
+                    entry.unlink()
+                    entry.symlink_to(workspace / intake["outputs"][0])
+                write_json(intake_path, intake)
+                before = (run_dir / "state.json").read_bytes()
+
+                async def unexpected(*args, **kwargs):
+                    raise AssertionError("非法原型不得创建 Agent 或决策会话")
+
+                expected_error = LegacyFrontendContractError if invalid == "missing" else (RuntimeError, ValueError)
+                with self.assertRaises(expected_error):
+                    self.run_step(run_dir, state, agent_runner=unexpected, decision_runner=unexpected)
+                self.assertEqual((run_dir / "state.json").read_bytes(), before)
+                self.assertFalse((run_dir / "conversations").exists())
+                self.assertFalse((run_dir / "steps/06.json").exists())
+        self.capabilities.assert_not_called()
+
+    def test_inapplicable_prototype_uses_reason_not_html_presence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, _ = self.make_run(Path(directory))
+            intake_path = run_dir / "steps/02.json"
+            intake = json.loads(intake_path.read_text(encoding="utf-8"))
+            intake["prototype"] = {"applicable": False, "entry": None, "reason": "此产品无交互原型"}
+            write_json(intake_path, intake)
+            self.assertTrue((workspace / "docs/prototype/index.html").is_file())
+            self.assertEqual(load_prototype(run_dir, workspace), intake["prototype"])
+
+    def test_prototype_does_not_relax_two_document_loader(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory))
+            intake_path = run_dir / "steps/02.json"
+            intake = json.loads(intake_path.read_text(encoding="utf-8"))
+            intake["outputs"].append("docs/prototype/index.html")
+            write_json(intake_path, intake)
+            with self.assertRaisesRegex(RuntimeError, "两份"):
+                self.run_step(run_dir, state)
+            self.capabilities.assert_not_called()
+
+    def test_missing_frontend_capability_fails_before_agent_or_state_write(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, state = self.make_run(Path(directory))
+            before = (run_dir / "state.json").read_bytes()
+            self.capabilities.side_effect = RuntimeError("缺少 ui-ux-pro-max 插件")
+            with self.assertRaisesRegex(RuntimeError, "ui-ux-pro-max"):
+                self.run_step(run_dir, state)
+            self.capabilities.assert_called_once_with(workspace.resolve())
+            self.assertEqual((run_dir / "state.json").read_bytes(), before)
+            self.assertFalse((run_dir / "conversations").exists())
 
     def test_success_marker_is_strict_and_matches_frontend_applicability(self) -> None:
         cases = (
@@ -1270,6 +1350,7 @@ class ProjectBootstrapTests(unittest.TestCase):
             self.assertFalse(outcome["applicable"])
             self.assertEqual(outcome["outputs"], [])
             self.assertIs(outcome["tailwind_theme"], False)
+            self.capabilities.assert_not_called()
 
     def test_cli_requires_run_id_and_handles_corrupt_state(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

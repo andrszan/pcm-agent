@@ -20,6 +20,7 @@ from common.coordination import (
     inherited_lock_argument,
 )
 from common.error_diagnostics import write_diagnostic
+from common.frontend_scope import ensure_frontend_capabilities
 from common.state import create_run_dir, read_state, write_state
 from common.timing import print_timing_summary
 from config import load_settings
@@ -162,6 +163,12 @@ def _locked(args, run_id, run_dir, locks, snapshot) -> int:
         if source.get("run_id") != args.source_run:
             raise ValueError("来源运行身份与运行目录不一致")
         state = workflow.new_state(source, args.source_run, run_id)
+        if "frontend" in state["applicable_repositories"]:
+            try:
+                ensure_frontend_capabilities(Path(state["workspace"]["final_path"]))
+            except (OSError, RuntimeError, ValueError) as error:
+                print(f"质量运行 failed：{safe_error_projection(error)['message']}", file=sys.stderr)
+                return 1
         source_coordination = source.get("coordination")
         if not isinstance(source_coordination, dict):
             raise ValueError("质量来源缺少产品协调身份")
@@ -225,7 +232,7 @@ def orchestrate(args: argparse.Namespace) -> int:
         with locks:
             try:
                 code = _locked(args, run_id, run_dir, locks, snapshot)
-                if code:
+                if code and (run_dir / "state.json").is_file():
                     print(f"恢复命令：{shlex.join([sys.executable, str(Path(__file__).resolve()), '--resume', run_id])}", file=sys.stderr)
                 return code
             finally:

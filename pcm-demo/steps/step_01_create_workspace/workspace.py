@@ -8,6 +8,7 @@ from stat import S_IMODE, S_ISDIR, S_ISREG
 from typing import Any
 
 from common.files import sha256
+from common.frontend_scope import ensure_frontend_capabilities
 
 REQUIRED_PATHS = (
     Path("CLAUDE.md"),
@@ -57,7 +58,13 @@ def parse_default_branch(ls_remote_output: str) -> str:
 
 
 def verify_required_paths(root: Path) -> bool:
-    return all((root / path).exists() for path in REQUIRED_PATHS)
+    if not all((root / path).exists() for path in REQUIRED_PATHS):
+        return False
+    try:
+        ensure_frontend_capabilities(root)
+        return True
+    except (OSError, ValueError, RuntimeError):
+        return False
 
 
 def git_path_is_ignored(root: Path, relative: str) -> bool:

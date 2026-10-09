@@ -91,6 +91,9 @@ class DevelopmentCLITests(unittest.TestCase):
             "error": None,
         }
         if session:
+            state["development_BR-001"] = {
+                "frontend_applicability": {"applicable": False, "reason": "纯后端需求"},
+            }
             cycle["development_session_id"] = "development-session-1"
             state["claude_sessions"] = {"development_BR-001": "development-session-1"}
         write_requirement_step_result(
@@ -125,6 +128,7 @@ class DevelopmentCLITests(unittest.TestCase):
             requirement_id="BR-001",
             trd_path="docs/trd/BR-001.md",
             development_session_id="development-session-1",
+            frontend={"applicable": False, "reason": "纯后端需求", "session_id": None},
         )
 
     def test_dispatches_step_fifteen_and_prints_scoped_path(self) -> None:
@@ -159,7 +163,7 @@ class DevelopmentCLITests(unittest.TestCase):
         self.assertFalse((run_dir / "logs").exists())
 
     def test_incomplete_or_failed_scoped_result_is_not_protected(self) -> None:
-        for saved in ({"status": "success"}, {"status": "failed"}):
+        for saved in ({"status": "success", "frontend": None}, {"status": "failed"}):
             with self.subTest(saved=saved):
                 run_dir, _ = self.make_run(run_id=f"test-{saved['status']}")
                 write_requirement_step_result(run_dir, "BR-001", STEP, saved)
@@ -186,6 +190,7 @@ class DevelopmentCLITests(unittest.TestCase):
         saved = json.loads(
             (run_dir / "steps/requirements/BR-001/15.json").read_text(encoding="utf-8")
         )
+        self.assertNotIn("frontend", saved)
         self.assertEqual(saved["error"]["message"], "secret=[REDACTED]")
         self.assertEqual(saved["error"]["diagnostic_path"], "logs/step-15-error.json")
         self.assertNotIn("secret=hidden", json.dumps(saved, ensure_ascii=False))
@@ -200,6 +205,7 @@ class DevelopmentCLITests(unittest.TestCase):
             requirement_id="BR-001",
             trd_path="docs/trd/BR-001.md",
             development_session_id="development-session-1",
+            frontend={"applicable": False, "reason": "纯后端需求", "session_id": None},
         )
         with (
             patch.object(self.cli, "parse_args", return_value=self.args(run_dir.name)),
@@ -211,6 +217,40 @@ class DevelopmentCLITests(unittest.TestCase):
         )
         self.assertEqual(saved["status"], "blocked")
         self.assertEqual(saved["development_session_id"], "development-session-1")
+
+    def test_frontend_blocked_exception_preserves_frontend_without_backend_session(self) -> None:
+        run_dir, state = self.make_run()
+        frontend = {"applicable": True, "reason": "需要界面", "session_id": "frontend-session"}
+        state["development_BR-001"] = {"frontend_applicability": {"applicable": True, "reason": "需要界面"}}
+        state["claude_sessions"] = {"frontend_ui_ux_BR-001": "frontend-session"}
+        write_state(run_dir, state)
+        blocked = DevelopmentBlocked(
+            "缺少设计输入", ["设计输入"], requirement_id="BR-001",
+            trd_path="docs/trd/BR-001.md", development_session_id=None, frontend=frontend,
+        )
+        with (
+            patch.object(self.cli, "parse_args", return_value=self.args(run_dir.name)),
+            patch.object(self.cli, "run_step_fifteen", side_effect=blocked),
+        ):
+            self.assertEqual(self.cli.main(), 1)
+        saved = json.loads((run_dir / "steps/requirements/BR-001/15.json").read_text())
+        self.assertEqual(saved["frontend"], frontend)
+        self.assertIsNone(saved["development_session_id"])
+        self.assertNotIn("development_session_id", read_state(run_dir)["requirement_cycle"])
+
+    def test_frontend_exception_saves_known_scope(self) -> None:
+        run_dir, state = self.make_run()
+        state["development_BR-001"] = {"frontend_applicability": {"applicable": True, "reason": "需要界面"}}
+        state["claude_sessions"] = {"frontend_ui_ux_BR-001": "frontend-session"}
+        write_state(run_dir, state)
+        with (
+            patch.object(self.cli, "parse_args", return_value=self.args(run_dir.name)),
+            patch.object(self.cli, "run_step_fifteen", side_effect=RuntimeError("前端通道中断")),
+        ):
+            self.assertEqual(self.cli.main(), 1)
+        saved = json.loads((run_dir / "steps/requirements/BR-001/15.json").read_text())
+        self.assertEqual(saved["frontend"], {"applicable": True, "reason": "需要界面", "session_id": "frontend-session"})
+        self.assertIsNone(saved["development_session_id"])
 
 
 if __name__ == "__main__":

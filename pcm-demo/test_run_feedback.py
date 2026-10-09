@@ -132,6 +132,63 @@ class FeedbackCLITests(unittest.TestCase):
         self.assertEqual((timing["node"], timing["round"], timing["step"]), ("feedback:prepare", None, None))
         self.assertEqual(timing["status"], "success")
 
+    def test_new_frontend_batch_without_capabilities_has_no_side_effects(self):
+        self.source["applicable_repositories"].append("frontend")
+        self.source["repositories"].append({"name": "frontend", "path": str(self.product / "frontend")})
+        write_state(self.runs / "source", self.source)
+        before = self.snapshot()
+        with (
+            patch.object(run_feedback, "create_run_dir") as create,
+            patch.object(run_feedback, "attach_product") as attach,
+            patch.object(workflow, "run_node") as agent,
+            patch.object(run_all, "run_child") as child,
+        ):
+            code = run_feedback.main(self.arguments())
+        self.assertEqual(code, 1)
+        self.assertIn("failed", self.stderr.getvalue())
+        self.assertNotIn("恢复命令", self.stderr.getvalue())
+        self.assertFalse((self.runs / "feedback").exists())
+        self.assertEqual(self.snapshot(), before)
+        create.assert_not_called()
+        attach.assert_not_called()
+        agent.assert_not_called()
+        child.assert_not_called()
+
+    def test_frontend_gate_precedes_creation_and_completed_resume_skips_it(self):
+        self.source["applicable_repositories"].append("frontend")
+        self.source["repositories"].append({"name": "frontend", "path": str(self.product / "frontend")})
+        write_state(self.runs / "source", self.source)
+
+        def ready(workspace):
+            self.assertEqual(workspace, self.product)
+            self.assertFalse((self.runs / "feedback").exists())
+
+        with patch.object(run_feedback, "ensure_frontend_capabilities", side_effect=ready) as gate:
+            path = self.create()
+        gate.assert_called_once_with(self.product)
+        state = read_state(path)
+        state.update(status="success", current_node="feedback:completed")
+        write_state(path, state)
+        before = (path / "state.json").read_bytes()
+        with (
+            patch.object(run_feedback, "ensure_frontend_capabilities", side_effect=AssertionError("历史完成不补能力")) as gate,
+            patch.object(workflow, "run_node") as agent,
+            patch.object(run_all, "run_child") as child,
+        ):
+            self.assertEqual(run_feedback.main(["--resume", "feedback"]), 0)
+        gate.assert_not_called()
+        agent.assert_not_called()
+        child.assert_not_called()
+        self.assertEqual((path / "state.json").read_bytes(), before)
+
+    def test_backend_batch_does_not_require_frontend_capabilities(self):
+        self.source["applicable_repositories"].append("backend")
+        self.source["repositories"].append({"name": "backend", "path": str(self.product / "backend")})
+        write_state(self.runs / "source", self.source)
+        with patch.object(run_feedback, "ensure_frontend_capabilities", side_effect=AssertionError("后端不需前端能力")) as gate:
+            self.create()
+        gate.assert_not_called()
+
     def test_saved_input_accepts_legacy_intent_and_rejects_invalid_source_paths(self):
         path = self.create()
         saved = run_feedback._saved_input(path)

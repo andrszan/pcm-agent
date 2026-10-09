@@ -1,7 +1,7 @@
 # PCM Demo 原型设计与逐需求前端先行重构技术设计
 
 > 设计日期：2026-10-09
-> 状态：设计已收敛，待实现；本文不代表新流程已运行或验收通过。
+> 状态：代码已接入，全量 969 项自动化测试及独立审查通过；隔离代表性产品已完成真实第 1～18 步，含前端独立交付及后端同会话恢复。
 > 范围：产品定义中的 HTML 原型、风格与框架继承，以及三类需求开发入口共用的前端先行执行。
 
 ## 一、目标与确定的路线
@@ -29,7 +29,7 @@
 | 第 16 步恢复 `requirement_cycle.development_session_id`；第 17、18 步统一提交与合并 | 保留 development 域名称和 session 含义，前端不提前提交或结束需求 |
 | 质量和反馈的数值需求节点都调用同一 `run_step.py` | 统一改第 15 步并传递原发现证据，无需再造两套前端调度 |
 
-关键接点：`step_02_project_intake/step.py` 的 `OUTPUTS`、`run`；`step_06_project_bootstrap/step.py` 的三个 `AgentDecisionLoopSpec`；`step_14_trd_design/step.py` 的 `_context`、`initial_prompt`；`step_15_development/step.py` 的 `_context`、`run`、`_validate_success`；公共循环的 `_state_section`、`_resume_keys`、`agent_conversation_report`。这些是已核验的扩展位置，下面的新增字段和任务属于目标设计。
+关键接点：`step_02_project_intake/step.py` 的 `OUTPUTS`、`run`；`step_06_project_bootstrap/step.py` 的三个 `AgentDecisionLoopSpec`；`step_14_trd_design/step.py` 的 `_context`、`initial_prompt`；`step_15_development/step.py` 的 `_context`、`run`、`_validate_success`；公共循环的 `_state_section`、`_resume_keys`、`agent_conversation_report`。这些是已核验的扩展位置，下面的新增字段和任务已接入执行代码。
 
 ## 三、第 2 步：产品定义与 HTML 原型共同收敛
 
@@ -212,7 +212,7 @@ state["development_<ID>"]["frontend_applicability"]
 | 成功写入中断 | completed 对话、result→state 两个窗口均可续接；完整 success 复用不调用模型、不新增业务副作用 |
 | 旧现场及能力缺失 | 拒绝发生在分类和通用失败回写之前；原 state/result/conversation 字节不变且无 Agent 调用，不将旧 success/session 当新合同完成；新周期缺新能力准确失败 |
 
-复用现有第 2、6、15 步、公共 loop、`run_step.py`、质量与反馈入口测试。Prompt 测试检查资料和能力调用接线，不逐句锁死提示词。运行受影响测试、必要公共回归与语法检查；本文件编写阶段不运行产品服务或将未执行检查记为通过。
+复用现有第 2、6、15 步、公共 loop、`run_step.py`、质量与反馈入口测试。Prompt 测试检查资料和能力调用接线，不逐句锁死提示词。本轮全量 969 项自动化测试、语法与 diff 检查及独立审查通过；真实验证覆盖与限制见下文，不将未执行检查记为通过。
 
 ### 9.2 真实验证
 
@@ -227,3 +227,13 @@ state["development_<ID>"]["frontend_applicability"]
 纯后端与质量／反馈的路由、证据传递由自动化覆盖，并对受影响真实入口作相称补验。不为同一公共开发链重复建设三个完整产品。浏览器同时关注内容理解、导航滚动、宽窄与矮屏、关键状态及正式业务文案；复用仍有效证据，不用固定审美分数、截图数量或模型自评代替结果。
 
 完成实现后分别报告程序回归、真实通道、代表性产品交付的实际覆盖与限制。独立 Skill 的现有测试不代表本次 PCM 编排已通过；隔离切片也不能冒充全产品从 0 到 1 已完成。
+
+### 9.3 本轮实际覆盖
+
+2026-10-10，隔离单用户便签产品完成真实第 1～18 步。产品定义与可操作 HTML 原型独立完成，主题、品牌及体验框架继承原型；正式需求经过 TRD、独立前端和后端集成，最终统一提交并 ff-only 合并。原型与正式前端均观察到实际设计插件调用，原型、前端和完整开发使用不同 session；模型、effort、SDK 与提供商沿用当前配置。
+
+在前端完成后的后端会话中注入一次受控中断，真实失败落盘后恢复原后端 session；恢复时前端 session、conversation 及文件哈希保持不变，后续未重新启动前端域。独立核对隔离产品的 root/frontend/backend 三仓均在 main、工作区干净且没有远程。普通模型流中断由既有重试机制恢复，不作为产品实现成功证据。
+
+隔离产品完成后的独立复验通过后端 22 项测试、前端 47 项单元／集成测试、15 项 Chromium E2E，以及类型、Lint、构建和 Python 语法检查。其中 6 项 E2E 使用真实 HTTP／SQLite，另 9 项使用路由夹具检查界面，不能混作持久化证据。真实断言覆盖新增、筛选、完成／取消、刷新、后端进程重启及提交后回包丢失等恢复场景；便签没有用 localStorage 冒充真实存储。复验未重置日常开发库，前后数据与文件指纹一致；宽窄短屏截图已实际检查，测试进程及隔离副本已收尾。仍有约 571 KB 的前端单包构建提示；未验证 Firefox／WebKit、生产部署及真实断电恢复。
+
+无 UI 产品与纯后端索引需求的两次真实适用性判断均为不适用。质量／反馈的双域路由、原发现传递、能力缺失和旧现场只读保护由自动化覆盖，未重复执行两个完整真实产品周期；本次本地链未验证 GitLab 建仓或远程推送。证据保存在根工作区忽略的 `.test-screenshots/pcm-frontend-flow/` 及其 `launch-info.json` 指向的隔离运行目录，不纳入产品交付文件。

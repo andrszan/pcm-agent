@@ -37,6 +37,7 @@ class QualityCLITests(unittest.TestCase):
         ensure_runtime(self.product, self.key, "source", record)
         self.source = {
             "run_id": "source", "status": "success", "workspace": {"final_path": str(self.product)},
+            "applicable_repositories": ["root"],
             "coordination": {"schema_version": 1, "execution_run_id": "source", "claim_phase": "claimed",
                              "product_key": self.key, "product_path": str(self.product),
                              "port_slot": record["port_slot"], "ports": record["ports"],
@@ -78,6 +79,7 @@ class QualityCLITests(unittest.TestCase):
                 "phase": "product_quality_iteration", "current_node": "quality:prepare",
                 "step": None, "current_step": None, "status": "running",
                 "workspace": copy.deepcopy(source["workspace"]),
+                "applicable_repositories": copy.deepcopy(source["applicable_repositories"]),
                 "quality": {"round": 1, "batch_requirement_ids": []}}
 
     def fail(self, path, state, error):
@@ -106,6 +108,62 @@ class QualityCLITests(unittest.TestCase):
         self.assertEqual(self.snapshot(), self.before)
         self.assertTrue((path / "timings.json").is_file())
         self.workflow.new_state.assert_called_once()
+
+    def test_new_frontend_cycle_without_capabilities_has_no_side_effects(self):
+        self.source["applicable_repositories"].append("frontend")
+        write_state(self.runs / "source", self.source)
+        before = self.snapshot()
+        stderr = io.StringIO()
+        with (
+            patch.object(run_quality, "create_run_dir") as create,
+            patch.object(run_quality, "attach_product") as attach,
+            patch.object(self.workflow, "run_node") as agent,
+            patch.object(run_all, "run_child") as child,
+            redirect_stderr(stderr),
+        ):
+            code = run_quality.main(["--source-run", "source", "--run-id", "quality"])
+        self.assertEqual(code, 1)
+        self.assertIn("failed", stderr.getvalue())
+        self.assertNotIn("恢复命令", stderr.getvalue())
+        self.assertFalse((self.runs / "quality").exists())
+        self.assertEqual(self.snapshot(), before)
+        create.assert_not_called()
+        attach.assert_not_called()
+        agent.assert_not_called()
+        child.assert_not_called()
+
+    def test_frontend_gate_precedes_creation_and_completed_resume_skips_it(self):
+        self.source["applicable_repositories"].append("frontend")
+        write_state(self.runs / "source", self.source)
+
+        def ready(workspace):
+            self.assertEqual(workspace, self.product)
+            self.assertFalse((self.runs / "quality").exists())
+
+        with patch.object(run_quality, "ensure_frontend_capabilities", side_effect=ready) as gate:
+            path = self.create()
+        gate.assert_called_once_with(self.product)
+        state = read_state(path)
+        state.update(status="success", current_node="quality:completed")
+        write_state(path, state)
+        before = (path / "state.json").read_bytes()
+        with (
+            patch.object(run_quality, "ensure_frontend_capabilities", side_effect=AssertionError("历史完成不补能力")) as gate,
+            patch.object(self.workflow, "run_node") as agent,
+            patch.object(run_all, "run_child") as child,
+        ):
+            self.assertEqual(run_quality.main(["--resume", "quality"]), 0)
+        gate.assert_not_called()
+        agent.assert_not_called()
+        child.assert_not_called()
+        self.assertEqual((path / "state.json").read_bytes(), before)
+
+    def test_backend_cycle_does_not_require_frontend_capabilities(self):
+        self.source["applicable_repositories"].append("backend")
+        write_state(self.runs / "source", self.source)
+        with patch.object(run_quality, "ensure_frontend_capabilities", side_effect=AssertionError("后端不需前端能力")) as gate:
+            self.create()
+        gate.assert_not_called()
 
     def test_new_attachment_failure_reports_reason_and_result_path(self):
         stderr = io.StringIO()

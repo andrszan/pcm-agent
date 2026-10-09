@@ -11,6 +11,14 @@ from common.claude_agent import run_claude
 from common.coordination import acquire_lock
 from common.decision import render_decision_system_prompt, request_decision
 from common.files import resolve_workspace_output, sha256, write_json
+from common.frontend_scope import (
+    PROTOTYPE_ENTRY,
+    LegacyFrontendContractError,
+    classify_frontend_scope,
+    ensure_frontend_capabilities,
+    validate_frontend_scope,
+    validate_prototype,
+)
 from common.state import write_state, write_step_result
 from config import LLMConfig
 from steps.step_01_create_workspace import inspect_root_repository
@@ -46,10 +54,29 @@ DECISION_LOOP_SPEC = AgentDecisionLoopSpec(
 )
 
 
+PROTOTYPE_DECISION_RULES = """- completed：Agent 已完成可操作 HTML 产品原型、浏览器检查、独立体验评审和必要精修，并交接实际模拟边界；两份产品文档与原型一致。
+- continue：仍需完成原型、修复文件或收敛授权内的行为与体验；明确给出可执行指令。
+- 负责人处理流程语义、产品取舍和交接，不读取截图重做视觉验收，也不要求真人确认原型。"""
+
+PROTOTYPE_LOOP_SPEC = AgentDecisionLoopSpec(
+    key="product_prototype",
+    state_key="product_prototype",
+    skill_name="frontend-ui-ux",
+    max_decision_rounds=MAX_DECISION_ROUNDS,
+    max_turns=PROJECT_INTAKE_MAX_TURNS,
+    task="development",
+    decision_system_prompt=render_decision_system_prompt(PROTOTYPE_DECISION_RULES, {}),
+)
+
+
 class ProjectIntakeBlocked(RuntimeError):
-    def __init__(self, reason: str, required_inputs: list[str]):
+    def __init__(
+        self, reason: str, required_inputs: list[str],
+        prototype: dict[str, Any] | None = None,
+    ):
         super().__init__(reason)
         self.required_inputs = required_inputs
+        self.prototype = prototype
 
 
 def result(
@@ -59,6 +86,7 @@ def result(
     blocked: dict[str, Any] | None = None,
     error: dict[str, Any] | None = None,
     outputs: list[str] | None = None,
+    prototype: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "step": STEP,
@@ -69,6 +97,7 @@ def result(
         "outputs": outputs or [],
         "blocked": blocked,
         "error": error,
+        **({"prototype": validate_prototype(prototype)} if prototype is not None else {}),
     }
 
 
@@ -179,33 +208,64 @@ def draft_contents(draft: Path) -> str:
         raise RuntimeError("产品初稿不可读取") from error
 
 
-def output_contents(workspace: Path) -> dict[str, str] | None:
-    """返回可用正式文档；缺失或空文件可修复，路径异常必须失败。"""
+def output_contents(
+    workspace: Path, paths: tuple[Path, ...] = OUTPUTS
+) -> dict[str, str] | None:
+    """返回可用产物正文；缺失或空文件可修复，路径异常必须失败。"""
 
     contents: dict[str, str] = {}
     incomplete = False
-    for relative in OUTPUTS:
+    for relative in paths:
         current = workspace
         for index, part in enumerate(relative.parts):
             current /= part
             if current.is_symlink():
-                raise RuntimeError("产品定义产物路径不能包含符号链接")
+                raise RuntimeError("产品定义或原型产物路径不能包含符号链接")
             if index < len(relative.parts) - 1 and current.exists() and not current.is_dir():
-                raise RuntimeError("产品定义产物父路径与预期目录冲突")
+                raise RuntimeError("产品定义或原型产物父路径与预期目录冲突")
         if not current.exists():
             incomplete = True
             continue
         if not current.is_file():
-            raise RuntimeError("产品定义产物不是普通文件")
+            raise RuntimeError("产品定义或原型产物不是普通文件")
         try:
             content = current.read_text(encoding="utf-8")
         except (OSError, UnicodeError) as error:
-            raise RuntimeError("产品定义产物不可读取") from error
+            raise RuntimeError("产品定义或原型产物不可读取") from error
         if not content.strip():
             incomplete = True
             continue
         contents[relative.as_posix()] = content
     return None if incomplete else contents
+
+
+def validate_existing_contract(run_dir: Path, state: dict[str, Any]) -> None:
+    """CLI 在任何失败回写前调用；只拒绝当前节点的不兼容成功，不迁移历史。"""
+
+    if not _has_valid_entry_position(state):
+        return
+    path = run_dir / "steps/02.json"
+    # 第 1 步成功也会把当前位置推进到本节点；不能把尚无 02.json 当作旧成功。
+    current_success = _is_legacy_completed_position(state) or (
+        state.get("status") == "success"
+        and state.get("current_node") == CURRENT_NODE
+        and path.is_file()
+    )
+    try:
+        existing = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        if current_success:
+            raise LegacyFrontendContractError("当前第 2 步成功结果不可读取；请使用原版本收口旧运行") from error
+        raise RuntimeError("第 2 步结果不可读取") from error
+    if isinstance(existing, dict) and existing.get("status") == "success":
+        try:
+            validate_prototype(existing.get("prototype"))
+        except (ValueError, RuntimeError, TypeError) as error:
+            raise LegacyFrontendContractError(
+                "当前第 2 步旧 success 缺少有效 prototype 合同；请使用原版本收口旧运行"
+            ) from error
+    elif current_success:
+        raise LegacyFrontendContractError("当前第 2 步成功状态缺少有效 prototype 结果；请使用原版本收口旧运行")
 
 
 def verify_existing_intake_success(run_dir: Path) -> dict[str, Any]:
@@ -219,6 +279,7 @@ def verify_existing_intake_success(run_dir: Path) -> dict[str, Any]:
         or existing.get("outputs") != [path.as_posix() for path in OUTPUTS]
     ):
         raise RuntimeError("第 2 步成功结果不可复用")
+    validate_prototype(existing.get("prototype"))
     return existing
 
 
@@ -266,6 +327,22 @@ def completion_repair_prompt() -> str:
     return f"请生成或补全两份非空正式产品定义文档：{paths}。"
 
 
+def prototype_prompt(initial_resources: str | None = None) -> str:
+    resources = f"\n原始补充资料位于 `./{initial_resources}`，按需读取，不改写原件。" if initial_resources else ""
+    return f"""/frontend-ui-ux
+实际通过 Skill 工具调用 `/ui-ux-pro-max:ui-ux-pro-max`，完成 HTML 产品原型。
+读取两份产品定义 `docs/requirements/项目需求说明.md`、`docs/requirements/产品功能说明.md`，以及工作区规则、已有品牌约束和适用资源。{resources}
+使用原生 HTML/CSS/JavaScript，固定入口 `{PROTOTYPE_ENTRY.as_posix()}`，其它页面、样式、脚本和正式资产放在同目录。
+覆盖主要页面、导航、核心任务及代表性加载、空态、失败、权限、冲突、成功与恢复状态；只处理实际适用状态。
+不初始化正式框架工程，不在 frontend/ 或 backend/ 写业务代码。页面使用正式业务内容，不出现演示、模拟数据或待接接口等过程说明；实际模拟边界在交接中明确。
+允许修正两份产品文档中已授权的行为澄清、术语和一致性问题；产品功能说明提供原型入口及需要长期保留的交互决定。不增加第三份产品定义、manifest 或全量逐页规格。
+不改写产品初稿及导入原始资料，不擅自增减产品承诺；实质范围变化在原对话中交给负责人决定并同步有效正文。
+静态预览严格复用 `.pcm/runtime.json` 的 frontend host、port、endpoint。未知占用按冲突处理，不换端口或停止未知进程；交接前释放本任务明确启动的预览服务。
+完成浏览器操作和实际渲染检查，覆盖目标视口与基本可访问性；进行独立体验评审和必要定向精修。按工作区约定把验收截图放入忽略目录，不作为正式资产。
+专业子任务写清产品目标、设计依据、行为、范围、验证及完整插件调用要求，并确保接收方具备 Skill 工具；独立评审由具备相应能力的角色完成。
+不提交、不 push。报告原型入口、与文档的一致性、浏览器验证、独立评审与精修结果、实际模拟范围和未验证项。"""
+
+
 async def run(
     run_dir: Path,
     state: dict[str, Any],
@@ -275,15 +352,24 @@ async def run(
     config_loader=LLMConfig.load,
     resume_message: ResumeMessage | None = None,
 ) -> dict[str, Any]:
+    validate_existing_contract(run_dir, state)
     workspace, draft = validate_inputs(run_dir, state)
     initial_resources = initial_resources_reference(state, workspace)
     existing_outputs = output_contents(workspace)
-    if existing_outputs is not None and (run_dir / "steps" / "02.json").is_file():
+    existing = None
+    if (run_dir / "steps" / "02.json").is_file():
         try:
             existing = verify_existing_intake_success(run_dir)
         except RuntimeError:
             existing = None
         if existing is not None:
+            prototype = validate_prototype(existing["prototype"])
+            recorded = state.get("project_intake", {}).get("prototype")
+            if recorded is not None and validate_prototype(recorded) != prototype:
+                raise RuntimeError("原型适用性记录与成功结果不一致")
+        if existing is not None and existing_outputs is not None and (
+            not prototype["applicable"] or output_contents(workspace, (PROTOTYPE_ENTRY,)) is not None
+        ):
             state.update(
                 {
                     "status": "success",
@@ -297,8 +383,8 @@ async def run(
             )
             write_state(run_dir, state)
             return existing
-    if _is_legacy_completed_position(state):
-        raise RuntimeError("第 2 步成功状态缺少可复用的完整结果")
+    if existing is not None:
+        state.setdefault("project_intake", {})["prototype"] = prototype
 
     state.update(
         {
@@ -355,10 +441,64 @@ async def run(
     if decision.verdict != "completed":
         raise RuntimeError("Agent 决策循环未返回完成或阻塞结论")
 
+    section = state.setdefault("project_intake", {})
+    if "prototype" in section:
+        prototype = validate_prototype(section["prototype"])
+    else:
+        documents = output_contents(workspace)
+        scope = validate_frontend_scope(await classify_frontend_scope(
+            config_loader(), purpose="prototype",
+            context=json.dumps(documents, ensure_ascii=False),
+        ))
+        prototype = validate_prototype({
+            **scope,
+            "entry": PROTOTYPE_ENTRY.as_posix() if scope["applicable"] else None,
+        })
+        section["prototype"] = prototype
+        write_state(run_dir, state)
+
+    if prototype["applicable"]:
+        ensure_frontend_capabilities(workspace)
+        if state.get("status") == "blocked" and state.get("claude_sessions", {}).get("product_prototype") is None:
+            # 文档域阻塞已解决；已有原型阻塞仍交给原循环自动恢复。
+            state.update({"status": "running", "blocked": None, "error": None})
+            write_state(run_dir, state)
+
+        def verify_prototype_completed() -> str | None:
+            validate_inputs(run_dir, state)
+            if output_contents(workspace) is None:
+                return completion_repair_prompt()
+            if output_contents(workspace, (PROTOTYPE_ENTRY,)) is None:
+                return f"请在原会话补全可读、非空的 HTML 原型入口 {PROTOTYPE_ENTRY.as_posix()}，并复核与两份产品定义的一致性。"
+            return None
+
+        prototype_spec = replace(
+            PROTOTYPE_LOOP_SPEC,
+            decision_system_prompt=render_decision_system_prompt(
+                PROTOTYPE_DECISION_RULES,
+                {
+                    "产品定义": output_contents(workspace),
+                    "原型交接": prototype,
+                    **({"已导入补充资料": {"path": initial_resources}} if initial_resources else {}),
+                },
+            ),
+        )
+        decision = await run_agent_decision_loop(
+            run_dir, state, workspace, prototype_spec,
+            prototype_prompt(initial_resources), verify_prototype_completed,
+            agent_runner=agent_runner, decision_runner=decision_runner,
+            config_loader=config_loader, resume_message=resume_message,
+        )
+        if decision.verdict == "blocked":
+            raise ProjectIntakeBlocked(decision.reason, decision.required_inputs, prototype)
+        if decision.verdict != "completed":
+            raise RuntimeError("原型决策循环未返回完成或阻塞结论")
+
     completed = result(
         "success",
-        "project-intake 已生成产品定义文档。",
+        "产品定义文档与适用的 HTML 原型已完成。",
         outputs=[relative.as_posix() for relative in OUTPUTS],
+        prototype=prototype,
     )
     write_step_result(run_dir, STEP, completed)
     state.update(

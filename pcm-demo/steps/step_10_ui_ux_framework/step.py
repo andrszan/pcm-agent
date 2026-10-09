@@ -20,6 +20,7 @@ from steps.step_05_project_readiness.step import (
     product_output_contents,
     verify_existing_readiness_success,
 )
+from steps.step_06_project_bootstrap.step import load_prototype, prototype_reference
 from steps.step_07_solution_design.step import (
     DESIGN_PATH,
     verify_existing_solution_success,
@@ -500,21 +501,27 @@ def advance_success(
     return saved
 
 
-def initial_prompt(product_outputs: list[str], architecture_path: Path) -> str:
+def initial_prompt(
+    product_outputs: list[str], architecture_path: Path, prototype: dict[str, Any]
+) -> str:
     product_references = "\n".join(f"- @./{output}" for output in product_outputs)
     return f"""/ui-ux-framework
 调用方授权你按 bootstrap 模式，依据以下权威资料和实际前端创建或更新唯一固定产物 `docs/ui-ux/framework.md`。
 
 权威产品定义：
 {product_references}
+产品原型交接：
+{prototype_reference(prototype)}
 项目准备事实：
 - @./{CHECKLIST.as_posix()}
 总体技术方案：
 - @./{DESIGN_PATH.as_posix()}
 工程架构设计：
 - @./{architecture_path.as_posix()}
-权威前端工程：
+权威前端工程与当前主题、品牌实现（只读核验实际入口、样式和资产引用）：
 - @./frontend
+
+原型表达已确定的体验方向，工程中的主题与品牌表达当前实现。继承这些事实，整理并补齐导航、Shell、页面模式、滚动、常驻关系、响应式与跨页面使用规则，不另起设计或重新选择风格；真实冲突通过当前对话处理，只回写框架文档。
 
 只定义跨需求适用的产品级体验框架。只允许修改该固定产物，不得开展单项需求设计或实现，不得修改其它文档、代码、测试、配置、依赖或规则，不得执行 Git 写操作或处理秘密。"""
 
@@ -565,7 +572,6 @@ async def run(
         architecture_path,
         architecture,
     ) = validate_inputs(run_dir, state)
-    initial_agent_prompt = initial_prompt(product_outputs, architecture_path)
     existing_step_status = step_result_status(run_dir, STEP)
     fresh = (
         position == (STEP, STEP, CURRENT_NODE)
@@ -597,6 +603,9 @@ async def run(
             raise RuntimeError("第 10 步既有成功缺少有效固定文档或 clean 仓库")
         return advance_success(run_dir, state, names, repositories)
 
+    prototype = load_prototype(run_dir, workspace)
+    initial_agent_prompt = initial_prompt(product_outputs, architecture_path, prototype)
+
     repositories, root_status = _verify_worktree_boundary(workspace, names)
     if not started and (
         root_status != "" or any(not item["worktree_clean"] for item in repositories)
@@ -619,6 +628,8 @@ async def run(
                 "总体技术方案": design,
                 "工程架构设计": architecture,
                 "权威前端工程": "frontend",
+                "产品原型": prototype,
+                "主题与品牌": "只读核验 frontend 当前主题、字体、品牌资产及其实际引用，继承原型方向，不另起设计；真实冲突在当前对话收敛，仅写 framework.md。",
                 "固定输出": FRAMEWORK_PATH.as_posix(),
             },
         ),
