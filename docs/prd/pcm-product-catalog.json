@@ -277,8 +277,32 @@
         "获取项目代码、文档与验证结果",
         "提交反馈并在原项目上增量迭代"
       ],
-      "productForm": "开源、macOS 本地运行的 Web 产品，由独立 Next.js 官网、独立 Next.js 工作台和 Python FastAPI 业务与生产后端组成，以现有 PCM Demo 自动化能力为核心。",
+      "productForm": "开源、macOS 本地运行的 Web 工作台，由独立 Next.js 前端和 Python FastAPI 业务与生产后端组成，以现有 PCM Demo 自动化能力为核心。",
       "prdFile": "PCM-产品需求文档-v1.md",
+      "createdAt": "2026-10-10",
+      "updatedAt": "2026-10-10"
+    },
+    {
+      "productId": "PCM-20261010-013",
+      "brand": {
+        "zh": "PCM 官网",
+        "en": "PCM Website",
+        "subtitle": "PCM 开源项目介绍与使用指南"
+      },
+      "repository": "pcm-website",
+      "targetUsers": [
+        "希望了解 PCM 能力并判断是否适合自身需要的访问者",
+        "希望获取 PCM 源码和本地使用说明的访问者"
+      ],
+      "coreNeed": "通过准确的产品介绍、真实界面与案例理解 PCM，并找到可执行的快速开始、文档和源码入口。",
+      "coreBusinessLoop": [
+        "访问官网理解 PCM 的用途与开源形态",
+        "阅读核心使用流程并查看真实界面与成果",
+        "了解 macOS 本地使用条件",
+        "通过快速开始、文档和源码入口获取并使用 PCM"
+      ],
+      "productForm": "PCM 开源项目的独立 Next.js 内容型官网前端，以产品介绍、真实展示、快速开始、文档与源码入口以及 SEO 为完整开发范围。",
+      "prdFile": "PCM-官网产品需求文档-v1.md",
       "createdAt": "2026-10-10",
       "updatedAt": "2026-10-10"
     }
