@@ -1,6 +1,6 @@
 {
   "catalogVersion": "2.0",
-  "updatedAt": "2026-10-09",
+  "updatedAt": "2026-10-10",
   "products": [
     {
       "productId": "PCM-20260809-001",
@@ -255,6 +255,32 @@
       "prdFile": "BOSS直聘AI精准投递助手-产品初稿.md",
       "createdAt": "2026-10-09",
       "updatedAt": "2026-10-09"
+    },
+    {
+      "productId": "PCM-20261010-012",
+      "brand": {
+        "zh": "PCM",
+        "en": "PCM",
+        "subtitle": "AI 自动化产品开发工作台"
+      },
+      "repository": "pcm",
+      "targetUsers": [
+        "希望将产品想法和已有资料转化为可运行项目的使用者",
+        "希望在 PCM 生成的项目上通过反馈持续改进的使用者"
+      ],
+      "coreNeed": "通过本地 Web 工作台整理产品需求并驱动自动开发，减少人工调度，在必要条件具备后获得经过验证的代码与文档，并继续反馈迭代。",
+      "coreBusinessLoop": [
+        "在工作台配置并检查必要运行条件",
+        "通过对话结合想法与资料形成并确认 PRD",
+        "启动连续的开发与质量改进流程",
+        "按需暂停、继续或处理真实阻塞",
+        "获取项目代码、文档与验证结果",
+        "提交反馈并在原项目上增量迭代"
+      ],
+      "productForm": "开源、macOS 本地运行的 Web 产品，由独立 Next.js 官网、独立 Next.js 工作台和 Python FastAPI 业务与生产后端组成，以现有 PCM Demo 自动化能力为核心。",
+      "prdFile": "PCM-产品需求文档-v1.md",
+      "createdAt": "2026-10-10",
+      "updatedAt": "2026-10-10"
     }
   ]
 }
