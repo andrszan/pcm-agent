@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from common.frontend_scope import (
     FRONTEND_PLUGIN_FILES,
     FRONTEND_SKILL_FILES,
+    TAILWIND_THEME_FILES,
     PROTOTYPE_ENTRY,
     FrontendScope,
     classify_frontend_scope,
@@ -73,6 +74,10 @@ class FrontendScopeTests(unittest.IsolatedAsyncioTestCase):
                 path = root / ".claude/skills/frontend-ui-ux" / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text("受控能力", encoding="utf-8")
+            for name in TAILWIND_THEME_FILES:
+                path = root / ".claude/skills/tailwind-theme" / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("主题能力", encoding="utf-8")
             plugin = root / ".agents/plugins/ui-ux-pro-max"
             (plugin / ".claude-plugin").mkdir(parents=True)
             (plugin / ".claude-plugin/plugin.json").write_text('{"name":"ui-ux-pro-max","skills":"./.claude/skills/"}', encoding="utf-8")
@@ -86,6 +91,20 @@ class FrontendScopeTests(unittest.IsolatedAsyncioTestCase):
             lock = root / "plugins-lock.json"
             lock.write_text(json.dumps({"version": 1, "plugins": [{"id": "ui-ux-pro-max@test", "path": ".agents/plugins/ui-ux-pro-max"}]}), encoding="utf-8")
             ensure_frontend_capabilities(root)
+            for name in TAILWIND_THEME_FILES:
+                target = root / ".claude/skills/tailwind-theme" / name
+                original = target.read_text()
+                for invalid in ("missing", "empty", "symlink"):
+                    with self.subTest(name=name, invalid=invalid):
+                        target.unlink()
+                        if invalid == "empty":
+                            target.write_text("  ", encoding="utf-8")
+                        elif invalid == "symlink":
+                            target.symlink_to(root / ".claude/skills/frontend-ui-ux/SKILL.md")
+                        with self.assertRaisesRegex(RuntimeError, "tailwind-theme"):
+                            ensure_frontend_capabilities(root)
+                        target.unlink(missing_ok=True)
+                        target.write_text(original, encoding="utf-8")
             manifest = plugin / ".claude-plugin/plugin.json"
             manifest.write_text('{"name":"ui-ux-pro-max","skills":"missing"}', encoding="utf-8")
             with self.assertRaises(RuntimeError):

@@ -132,6 +132,7 @@ uv run python run_step.py \
 - `docs/` 只包含 `产品初稿.md`；
 - `CLAUDE.md`、`AGENTS.md`、`project-intake` Skill、`frontend/`、`backend/` 存在；
 - `frontend-ui-ux` 的 Skill 入口、五份 references、子任务模板与独立评审角色均为工作区内非空、非符号链接文件；评估用例及 fixture 不属于运行门禁；
+- `tailwind-theme` 的 `SKILL.md` 和 `references/theme-selection.md` 同样为工作区内非空、非符号链接文件；不扫描或要求完整 preset 资源库；
 - 工作区 `plugins-lock.json` 注册本地 `ui-ux-pro-max` 插件，插件 manifest 与实际 Skill 入口有效；不借用用户缓存代替模板能力；
 - `.claude/agents/dev.md` 使用受控 frontmatter 格式，显式 tools 包含 `Skill`，或省略 tools 继承工具；
 - 根 `.env` 与当前配置源原始字节一致、权限为 `0600`，且实际根 Git 忽略该文件；

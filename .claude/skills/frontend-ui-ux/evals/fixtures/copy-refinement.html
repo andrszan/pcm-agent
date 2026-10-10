@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>拾页阅读设置</title>
+<style>
+:root{--brand:#27634a;--paper:#f5f1e8;--ink:#24382c}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px system-ui,sans-serif}.topbar{height:72px;padding:18px 24px;background:#fff;border-bottom:1px solid #d8d4c8;display:flex;justify-content:space-between}.logo{color:var(--brand);font-weight:700}main{width:760px;margin:40px auto;min-height:1100px}.panel{background:white;border:1px solid #d8d4c8;padding:28px}.row{display:flex;align-items:center;justify-content:space-between;margin:28px 0}select,input,button{font:inherit}button{background:var(--brand);color:white;border:0;padding:12px 24px;cursor:pointer}select{padding:10px}.hint{color:#b9c0bb;font-size:12px}.status{min-height:24px}footer{margin-top:600px}a{color:var(--brand)}
+</style>
+</head>
+<body>
+<header class="topbar"><span class="logo">拾页</span><nav aria-label="主要导航"><a href="#settings">阅读设置</a></nav></header>
+<main id="settings"><p class="hint">YOUR READING, YOUR RHYTHM</p><h1>阅读设置</h1><p>在这里管理你的阅读设置，让每一次阅读都更符合你的习惯。</p><section class="panel" aria-label="阅读偏好"><h2>阅读偏好</h2><p class="hint">通过下方选项调整你的个性化阅读偏好。</p><div class="row"><span>字号</span><select id="size"><option value="16">标准</option><option value="20">大字</option></select></div><div class="row"><span>夜间阅读</span><input id="night" type="checkbox"></div><p class="hint">修改仅在保存后生效，刷新后恢复默认。</p><p class="hint">点击保存设置按钮，即可保存你的阅读设置。</p><button id="save">保存设置</button><p class="status" id="status" role="status"></p></section><footer>拾页 · 让阅读更轻松，让生活更美好</footer></main>
+<script>
+const preferences={size:'16',night:false};
+document.querySelector('#save').onclick=()=>{preferences.size=document.querySelector('#size').value;preferences.night=document.querySelector('#night').checked;document.querySelector('#status').textContent='已保存阅读偏好';};
+</script>
+</body></html>

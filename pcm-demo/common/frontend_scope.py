@@ -23,6 +23,10 @@ FRONTEND_SKILL_FILES = (
     "agents/experience-reviewer.md",
 )
 
+TAILWIND_THEME_FILES = (
+    "SKILL.md",
+    "references/theme-selection.md",
+)
 
 FRONTEND_PLUGIN_FILES = (
     "SKILL.md",
@@ -117,6 +121,8 @@ def ensure_frontend_capabilities(workspace: Path) -> None:
     root = workspace.resolve()
     for name in FRONTEND_SKILL_FILES:
         _require_file(root, Path(".claude/skills/frontend-ui-ux") / name)
+    for name in TAILWIND_THEME_FILES:
+        _require_file(root, Path(".claude/skills/tailwind-theme") / name)
     role = Path(".claude/agents/dev.md")
     _require_file(root, role)
     parts = (root / role).read_text(encoding="utf-8").split("---", 2)

@@ -714,6 +714,13 @@ class ProjectIntakeTests(unittest.TestCase):
         self.assertEqual(prompt.splitlines()[0], "/frontend-ui-ux")
         for text in ("/ui-ux-pro-max:ui-ux-pro-max", "docs/prototype/index.html", ".pcm/runtime.json", "initial-resources/客户资料"):
             self.assertIn(text, prompt)
+        for text in (
+            "首次视觉方向选择", "继承已有品牌和已确认方向",
+            "比较少量实质不同的方案后自主选定一个", "本地主题参考",
+            "不要求多套完整 HTML", "不新增方向报告", "不等待真人批准",
+            "不调用依赖 Tailwind 工程的主题 Skill",
+        ):
+            self.assertIn(text, prompt)
         self.assertNotIn("第 2 步", prompt)
         self.assertEqual(PROTOTYPE_LOOP_SPEC.task, "development")
 

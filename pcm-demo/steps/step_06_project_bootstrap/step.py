@@ -44,7 +44,7 @@ NEXT_NODE = "project:07_solution_design"
 CONVERSATION_KEY = "project_bootstrap"
 SKILL_NAME = "project-bootstrap"
 TAILWIND_THEME_CONVERSATION_KEY = "tailwind_theme"
-TAILWIND_THEME_SKILL_NAME = "frontend-ui-ux"
+TAILWIND_THEME_SKILL_NAME = "tailwind-theme"
 BRAND_ASSETS_CONVERSATION_KEY = "brand_assets"
 BRAND_ASSETS_SKILL_NAME = "frontend-ui-ux"
 CHECKLIST = Path("docs/requirements/项目准备清单.md")
@@ -457,14 +457,14 @@ def tailwind_theme_initial_prompt(
     product_outputs: list[str], prototype: dict[str, Any]
 ) -> str:
     product_references = "\n".join(f"- @./{output}" for output in product_outputs)
-    return f"""/frontend-ui-ux
-请实际调用 /ui-ux-pro-max:ui-ux-pro-max，依据以下权威产品定义、原型和实际前端落实共享视觉基础：
+    return f"""/tailwind-theme
+请实际通过 Skill 工具调用 /ui-ux-pro-max:ui-ux-pro-max，依据以下权威产品定义、原型和实际前端落实共享视觉基础：
 {product_references}
 - @./frontend
 产品原型交接：
 {prototype_reference(prototype)}
 
-任务仅限主题、字体、间距和共享视觉基础。原型已确定的设计优先，不重新选择 preset 或另起风格覆盖原型；允许技术性补齐和必要可读性修正。没有适用原型时依据产品定义与当前工程收敛。
+任务仅限主题、字体、间距和共享视觉基础。不推翻已确认的产品与视觉方向；可以借用或适配 preset 实现同一方向，对比度、暗色、字体与组件状态可作工程校准，不逐个冻结原型中的偶然 CSS。插件推荐仅服务既选方向的工程校准和验证，不重新挑选品牌。没有适用原型时先继承产品定义与当前工程的有效决定，再收敛缺失的风格。
 两份产品定义与 docs/prototype/ 全部只读，不开发业务页面，不回写原型或产品定义。可复用仍有效的验证证据，不重复检查整套原型；按实际改动执行相称验证并如实报告。"""
 
 
@@ -487,7 +487,7 @@ def brand_assets_initial_prompt(
 {runtime_reference}
 
 优先复用原型品牌和已有正式资产，补齐同一身份的页面标识及 favicon，不另选风格覆盖原型；需要新制作时结合产品定义和当前前端主题，保持品牌文字可编辑。生成、选择、派生、实际查看、质量检查、前端接入及适用验证由你完成。
-整套资产共享最多 8 次生成调用，首次生成包含在内，满足用途即可停止；继续或恢复时沿用已有候选和已用次数，不重新分配额度。生成服务不可用或额度耗尽仍无合适结果时，采用合格的简洁 SVG 或文字标识兜底。
+生成服务不可用时，采用合格的简洁 SVG 或文字标识兜底。
 媒体凭据只用于工作区工具，不进入产品运行配置、开发资源清单或客户端内容。
 最终资产进入目标前端的实际资产位置并完成必要引用，不重构无关页面或主题，不重做业务布局；不存在业务页面时不为展示品牌提前开发页面。两份产品定义与 docs/prototype/ 全部只读。可复用仍有效的验证证据，不重复检查整套原型。报告采用方式、最终资产和接入结果，以及实际尚未解决的事项。"""
 
@@ -648,7 +648,7 @@ async def run(
                 "产品定义": product_output_contents(workspace, product_outputs),
                 "实际前端": ["frontend"],
                 "产品原型": prototype,
-                "设计继承": "原型设计优先，仅落实共享视觉基础；产品定义和原型只读，不开发业务页面。",
+                "设计继承": "不推翻已确认方向，可借用或适配 preset 并作工程校准；仅落实共享视觉基础，产品定义和原型只读，不开发业务页面。",
             },
         ),
     )

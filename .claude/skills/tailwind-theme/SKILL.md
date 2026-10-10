@@ -3,7 +3,7 @@ name: tailwind-theme
 description: Use when 需要依据产品与现有工程，自主选择保留默认、采用全部或部分 preset、适配 preset 或 custom，并完成 Tailwind CSS v4 基础风格定制；负责主题颜色、字体、排版、圆角、阴影、边框、spacing 等风格，不负责页面布局和组件重构。
 argument-hint: <项目资料、主题要求、前端路径或希望调整的风格问题>
 disable-model-invocation: true
-allowed-tools: Read, Glob, Grep, Bash, Write, Edit, TodoWrite
+allowed-tools: Read, Glob, Grep, Bash, Write, Edit, Skill, TodoWrite
 ---
 
 # Tailwind 基础风格定制
@@ -43,9 +43,9 @@ allowed-tools: Read, Glob, Grep, Bash, Write, Edit, TodoWrite
 
 ## 选择与实现
 
-1. 从项目事实形成简短风格方向，避免只凭行业标签套用流行配色、字体或特效。
+1. 从项目事实识别本次是选择新方向还是实现已有方向，避免只凭行业标签套用流行配色、字体或特效。已有原型或明确视觉决定时，将选定的品牌、层级与表面关系落实到真实主题，不重新挑选风格；在授权内校准字体可用性、对比度、明暗模式和组件状态，不机械冻结原型的每个数值，也不改变业务布局。
 2. 视需要参考本地 preset。若使用本 Skill 自带资源，路径和安全读取方法见 [`references/theme-selection.md`](./references/theme-selection.md)；调用方提供其它本地目录时也可使用，不强制扫描或比较固定数量候选。
-3. 自主决定保留默认、完整 preset、部分 preset、适配或 custom。可以只借用适合项目的颜色、字体或其它局部关系，也可以在明确品牌约束下直接 custom；说明关键依据即可。
+3. 自主决定保留默认、完整 preset、部分 preset、适配或 custom。可以只借用适合项目的颜色、字体或其它局部关系，也可以在明确品牌约束下直接 custom；已有视觉方向时，preset 是实现素材，不是替换该方向的理由。说明关键依据即可。
 4. light/dark 按项目现有合同处理：修改颜色时分别校准，不机械反转；未要求或无需改变的风格保持原样。共享几何值通常保持稳定，避免主题切换造成不必要的尺寸跳动。
 5. 字体名称只有在已有依赖、本地资源、`@font-face` 或框架 loader 可用时才宣称已加载；否则使用诚实的可用字体栈或明确报告限制。中文内容保留合理 fallback。
 6. 将选定值写入真实活动入口。可新增当前设计需要的变量，即使尚无消费者；不要为了制造消费者而改组件，也不要把“变量已声明”夸大为所有界面已生效。

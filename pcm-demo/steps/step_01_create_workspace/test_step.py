@@ -22,7 +22,7 @@ import run_step
 from common import gitlab
 from common.error_diagnostics import write_diagnostic
 from common.files import resolve_workspace_output, write_json
-from common.frontend_scope import FRONTEND_PLUGIN_FILES, FRONTEND_SKILL_FILES
+from common.frontend_scope import FRONTEND_PLUGIN_FILES, FRONTEND_SKILL_FILES, TAILWIND_THEME_FILES
 from common.openai_responses import ResponsesAccessError, ResponsesFailure, parse_response
 from config import (
     CAPABILITY_REPOSITORY_ROOT,
@@ -60,6 +60,10 @@ def install_frontend_capabilities(root: Path) -> None:
         path = root / ".claude/skills/frontend-ui-ux" / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("前端运行能力", encoding="utf-8")
+    for name in TAILWIND_THEME_FILES:
+        path = root / ".claude/skills/tailwind-theme" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("主题运行能力", encoding="utf-8")
     role = root / ".claude/agents/dev.md"
     role.parent.mkdir(parents=True, exist_ok=True)
     role.write_text("---\nname: dev\ntools: Read, Bash, Skill\n---\n开发任务", encoding="utf-8")
@@ -904,6 +908,8 @@ class WorkspaceStepTests(unittest.TestCase):
             self.assertTrue(verify_required_paths(root))
             self.assertFalse((root / ".claude/skills/frontend-ui-ux/evals").exists())
             paths = [root / ".claude/skills/frontend-ui-ux" / name for name in FRONTEND_SKILL_FILES]
+            paths.extend(root / ".claude/skills/tailwind-theme" / name for name in TAILWIND_THEME_FILES)
+            self.assertFalse((root / ".claude/skills/tailwind-theme/assets").exists())
             paths.extend([
                 root / "plugins-lock.json",
                 root / ".agents/plugins/ui-ux-pro-max/.claude/skills/ui-ux-pro-max/SKILL.md",

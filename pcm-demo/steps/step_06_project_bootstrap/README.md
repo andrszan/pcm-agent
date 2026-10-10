@@ -13,7 +13,7 @@
 本步骤在同一个数字步骤中顺序运行三个独立 `AgentDecisionLoopSpec`，各自拥有 Claude session、decision conversation、XML system snapshot 和私有恢复状态：
 
 1. `project_bootstrap`：显式调用 `/project-bootstrap` 完成有限项目化和真实工程验证；
-2. `tailwind_theme`：仅当 `steps/04.json.outputs` 含 `frontend` 时，在 bootstrap 完成后显式调用 `/frontend-ui-ux` 并要求显式调用 ui-ux-pro-max 插件，从原型落实主题、字体、间距和共享视觉基础；
+2. `tailwind_theme`：仅当 `steps/04.json.outputs` 含 `frontend` 时，在 bootstrap 完成后显式调用 `/tailwind-theme`，并要求通过 Skill 工具实际调用 `/ui-ux-pro-max:ui-ux-pro-max`，从原型落实主题、字体、间距和共享视觉基础；
 3. `brand_assets`：同样仅 frontend 适用，在 theme 完成后显式调用 `/frontend-ui-ux` 并要求显式调用 ui-ux-pro-max 插件，按需使用品牌能力与工作区媒体工具，准备并接入基础品牌资产。
 
 三个任务不共用 Claude session，也不写入同一 conversation。任务标识 `project_bootstrap`、`tailwind_theme`、`brand_assets` 分别对应模型策略中的 `6.bootstrap`、`6.theme`、`6.brand`；实际 model 与 effort 由 `model-policy.toml` 按本次进程启动时加载的策略固定，恢复时显式传入。公共循环、步骤编号和 `current_node` 不增加阶段抽象；步骤程序只在全部适用任务完成后写 success 并推进第 7 步。
@@ -40,15 +40,15 @@ Agent 负责项目身份、基础配置、README、模板测试迁移、经引�
 
 版本无法可靠判断、非 v4 或缺少 CSS-first 证据属于本地模板合同错误，返回 `failed`，不创建主题 session，也不映射为 `blocked`。Python 不实现完整 semver、CSS import graph、token parser 或工作树 fingerprint。
 
-`tailwind_theme` 保留既有 domain key 与 task，但设计实施入口改为 `/frontend-ui-ux`，显式使用 ui-ux-pro-max 插件。原型已确定的设计优先，不另选 preset 覆盖原型；允许技术性补齐和必要可读性修正，没有适用原型时依据产品定义与当前工程收敛。任务仅落实主题、字体、间距与共享视觉基础，不开发业务页面；可复用仍有效的验证证据，不重复检查整套原型。独立主题能力本身不改动。
+`tailwind_theme` 的主 Skill 和设计实施入口为 `/tailwind-theme`，保留既有 domain key、task、session 和三态生命周期。PCM Prompt 还要求实际调用 `/ui-ux-pro-max:ui-ux-pro-max`，插件推荐仅用于既选方向的工程校准和验证，不重新挑选品牌。不推翻已确认的产品与视觉方向，可以借用或适配 preset 实现同一方向；对比度、暗色、字体与组件状态可作工程校准，不逐个冻结原型中的偶然 CSS。没有适用原型时先继承产品定义与当前工程的有效决定，再收敛缺失的风格。任务仅落实主题、字体、间距与共享视觉基础，不开发业务页面，产品定义与原型只读；可复用仍有效的验证证据，不重复检查整套原型。
 
 ### 基础品牌资产
 
-`brand_assets` 读取两份产品定义、原型交接、实际 frontend 和适用的 `.pcm/runtime.json`，优先复用原型品牌与已有正式品牌资产；没有既定品牌时结合产品和当前主题制作。基础交付是页面品牌标识与浏览器 favicon，保持同一视觉身份；Apple Touch Icon、PWA 图标、社交分享图及背景变体按实际用途决定，不自动增加业务功能或插画。
+`brand_assets` 读取两份产品定义、原型交接、实际 frontend 和适用的 `.pcm/runtime.json`，优先复用原型品牌与已有正式品牌资产；没有既定品牌时结合产品和当前主题制作。基础交付是页面品牌标识与浏览器 favicon，保持同一视觉身份；Apple Touch Icon、PWA 图标、社交分享图及背景变体按实际用途决定，不自动增加业务功能。
 
 Agent 负责生成、选择、派生、实际看图、质量检查、前端接入与适用验证。品牌文字保持可编辑；PNG 和 SVG 按真实用途选择，不强制矢量化。favicon 要检查小尺寸辨识度，最终文件按目标前端已有约定落地并完成必要引用，不依赖工具路径或临时 URL。不存在相应页面时不为展示 Logo 提前开发页面。
 
-整套共享最多 8 次生成调用，首次包含在内，由 Agent 在提示约束下自行调度；满足用途即可停止，继续或恢复时沿用候选和已用次数，不重新分配额度。额度耗尽或生成服务不可用时允许合格简洁 SVG／文字标识兜底。Python 不增加计数器、预算状态、配置项或图像质量检查，也不以生图调用发生作为完成条件。媒体凭据仍是工作区工具私有配置，不进入目标产品运行配置或开发资源清单。
+生成服务不可用时允许合格简洁 SVG／文字标识兜底。媒体凭据仍是工作区工具私有配置，不进入目标产品运行配置或开发资源清单。
 
 负责人只依据 Agent 回复判断交付是否完成，防止明确遗漏，不读文件、看图评选或复做验收，不要求逐项证明或“一切无问题”的完成声明。品牌任务的授权和尝试规则由 PCM 传入，不修改或耦合其它 Skill。完整范围见[基础品牌资产准备 TRD](../../docs/trd/20260910-PCM%20Demo%20基础品牌资产准备%20TRD.md)。
 

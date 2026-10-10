@@ -332,7 +332,8 @@ def prototype_prompt(initial_resources: str | None = None) -> str:
     return f"""/frontend-ui-ux
 实际通过 Skill 工具调用 `/ui-ux-pro-max:ui-ux-pro-max`，完成 HTML 产品原型。
 读取两份产品定义 `docs/requirements/项目需求说明.md`、`docs/requirements/产品功能说明.md`，以及工作区规则、已有品牌约束和适用资源。{resources}
-使用原生 HTML/CSS/JavaScript，固定入口 `{PROTOTYPE_ENTRY.as_posix()}`，其它页面、样式、脚本和正式资产放在同目录。
+首次视觉方向选择由 frontend-ui-ux 规则处理：继承已有品牌和已确认方向；没有既定品牌或视觉方向时，结合产品、用户与核心任务比较少量实质不同的方案后自主选定一个，再制作原型。可按需借用已有本地主题参考，不要求多套完整 HTML，不新增方向报告，不等待真人批准。
+使用原生 HTML/CSS/JavaScript，不调用依赖 Tailwind 工程的主题 Skill，固定入口 `{PROTOTYPE_ENTRY.as_posix()}`，其它页面、样式、脚本和正式资产放在同目录。
 覆盖主要页面、导航、核心任务及代表性加载、空态、失败、权限、冲突、成功与恢复状态；只处理实际适用状态。
 不初始化正式框架工程，不在 frontend/ 或 backend/ 写业务代码。页面使用正式业务内容，不出现演示、模拟数据或待接接口等过程说明；实际模拟边界在交接中明确。
 允许修正两份产品文档中已授权的行为澄清、术语和一致性问题；产品功能说明提供原型入口及需要长期保留的交互决定。不增加第三份产品定义、manifest 或全量逐页规格。

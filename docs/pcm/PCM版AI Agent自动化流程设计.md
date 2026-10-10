@@ -56,7 +56,7 @@ PCM 编排器按既定顺序执行步骤，不把“返回第 N 步”设计成�
 PCM 步骤可以顺序调用多个 Skill，但不改变 Skill 自身职责。例如：
 
 - `ui-ux-framework` 只负责建立、校正或演进跨需求稳定的产品级 UI/UX 框架，不负责单需求设计或开发后验收；
-- `trd-design` 收敛当前需求行为，`frontend-ui-ux` 在独立会话完成适用前端，`dev-workflow` 承接成果并完成剩余实现与真实集成；领域能力不管理需求生命周期。前端能力显式使用 `ui-ux-pro-max`，插件调用不能代替实现及实际验证；
+- `trd-design` 收敛当前需求行为，`frontend-ui-ux` 在独立会话完成适用前端，`dev-workflow` 承接成果并完成剩余实现与真实集成；领域能力不管理需求生命周期。前端能力显式使用 `ui-ux-pro-max`，插件调用不能代替实现及实际验证。所有产品（含后台与平台）都要打磨组件质感和适当交互动效，删除重复副标题、装饰眉题、口号和无用小字，保留必要业务信息、规则、风险与恢复说明，并依据浏览器与独立评审的具体发现多轮定向精修；
 - `product-experience-audit` 在阶段二由外层显式调度一次完整审计；它只返回候选、重复项、覆盖缺口和高影响边界，不创建或修改 canonical Backlog、正式需求或 TRD，不分配正式 ID，也不自动调用需求化、开发、提交或其它能力；
 - `session-rule-retrospective` 只在原开发 session 中增量修改 `.claude/rules/`，不暂存、提交、建分支或合并；
 - 需要更新活动 TRD 时，步骤编排器调用负责设计或维护活动 TRD 的能力；
@@ -379,6 +379,7 @@ Demo 从第 1 步开始，通过 `--product-draft` 接收 UTF-8 文本文件路�
 - 产品定义：形成 `docs/requirements/项目需求说明.md` 和 `docs/requirements/产品功能说明.md`，明确最终范围、非目标、用户语言、核心任务、首次成功结果和关键假设。负责人通过既有对话处理必要决定，不追加人工批准或审美判断。
 - 适用性：两文档完成后，负责人模型基于完整正文作一次 `applicable` 与 `reason` 的结构化流程判断，保存至现有 `project_intake.prototype` 私有状态。无用户界面时零原型 Agent/插件调用；不通过目录存在或 Markdown 关键词判定。
 - 原型：固定入口 `docs/prototype/index.html`，用原生 HTML/CSS/JavaScript 实现主要页面、导航、核心任务和代表性状态，必要资源同目录组织。Agent 可同步两文档中授权内的行为细化与一致性修正，不改产品初稿、导入资料或正式工程目录。原型不代替逐需求详细设计和真实业务交付。
+- 视觉方向：首次设计且没有明确品牌／视觉方向时，`frontend-ui-ux` 简短比较少量实质不同且适合产品的方向（通常两个），依据产品任务选定一个再实施；已有明确方向直接继承，模板默认不自动成为产品品牌。方向差异涉及排版、密度、构图、表面或品牌色关系，不靠随机换色；不设禁用颜色、固定候选报告或额外真人审美审批。
 - 体验与运行：Agent 自行完成实际操作、渲染检查、独立体验评审和定向精修。界面使用正式业务内容，模拟边界只在开发交接说明。静态预览使用 `.pcm/runtime.json` 的 frontend endpoint，完成后停止自己启动的预览服务；不增加原型端口，不占用后续工程组装目录。
 - 输出：`outputs` 继续只含上述两文档；结果顶层新增 `prototype={applicable,entry,reason}`。适用时 entry 固定为 `docs/prototype/index.html`，不适用为 null。产品功能文档链接原型，不另建 manifest。
 - 完成：两域 completed／原型不适用后，Python 核验最终两文档及适用 HTML 入口真实、可读、非空，沿用路径保护；Agent 负责语义一致性、资源引用与交互质量。负责人信任有效交接，不索取逐项完成声明；Python 不给页面评分。第 8 步自然提交本步骤产物。
@@ -413,12 +414,12 @@ Demo 从第 1 步开始，通过 `--product-draft` 接收 UTF-8 文本文件路�
 
 ### 第 6 步：项目化基础工程、项目风格定制与基础品牌资产
 
-- 能力：同一数字步骤先调用 `project-bootstrap`；存在 frontend 时，主题与品牌两个独立任务均以 `frontend-ui-ux` 为设计实施入口，按需使用插件专项能力及工作区媒体工具。保留 `project_bootstrap`、`tailwind_theme`、`brand_assets` 三个领域 key、现有模型 task 及独立 session/conversation，不新增步骤编号。
+- 能力：同一数字步骤先调用 `project-bootstrap`；存在 frontend 时，主题任务调用 `/tailwind-theme`，品牌任务调用 `/frontend-ui-ux`；两者均实际调用 `/ui-ux-pro-max:ui-ux-pro-max`，按需使用插件专项能力及工作区媒体工具。保留 `project_bootstrap`、`tailwind_theme`、`brand_assets` 三个领域 key、现有模型 task 及独立 session/conversation，不新增步骤编号。
 - 输入：基础工程、两份产品定义、原型交接与入口、基础工程选型结论及已核验准备基线；已有项目可另外提供既有技术方案。原型和产品定义只读，不作为模板残留清理，不因主题／品牌整理改变第 5 步的文档指纹依据。
 - 项目化：`project-bootstrap` 完成项目身份、基础配置、文档和最小联调，保持或建立可替换的 Tailwind 基础主题接线，但不选择或生成项目专属主题，也不把模板默认样式认定为最终产品主题。配置可以为匹配工程实际加载合同迁移键名与结构并同步无秘密公开示例，但必须复用同一既有资源绑定和真实值，保持资源身份、endpoint 与权限范围，不重新选择、创建、派生、轮换或替换外部资源或凭据。模板声明需按资源绑定保留唯一派生变体时，以准备清单最终绑定为权威选择，Agent 完整收口未选变体的目录、依赖和锁文件、配置与公开示例、构建测试入口、README 及适用本地 Agent 规则，并完成真实构建和适用运行验证；Python 不解析清单 Markdown、不持久化数据库枚举，也不新增变体状态机。
 - 主题适用性：无 frontend 时只运行项目化并以 `tailwind_theme:false` 跳过主题。存在 frontend 时，bootstrap 完成后由 Python 确认 `frontend/package.json` 直接声明可明确判断为 major 4 的 `tailwindcss`，并在 frontend 自身 Git 可见且未忽略的 CSS 中找到 `@import "tailwindcss"` CSS-first 证据；版本不明确、非 v4 或缺少 CSS-first 证据属于本地模板合同 `failed`，不创建主题 session，也不作为 `blocked`。
-- 主题动作：初始提示调用 `/frontend-ui-ux`，依据原型把颜色、字体、间距等基础落实到实际 frontend。既定设计优先，允许技术性补齐和必要可读性修正，不重新选 preset 覆盖原型，也不开始业务页面开发。沿用 `tailwind_theme` 任务名称与技术 gate，不把领域 key 等同于必须调用同名 Skill。
-- 品牌资产：theme 完成后，以 `/frontend-ui-ux` 承接原型、当前 frontend 和适用运行配置，按需使用插件品牌能力和工作区媒体工具，复用或补齐同一视觉身份的页面品牌标识与 favicon，其它资产按需。优先复用，品牌文字保持可编辑，Agent 负责实际看图、质量、派生、接入及验证。整套共享最多 8 次生成调用，仅作为提示约束，继续或恢复不重置，满足用途即停；额度耗尽或生成服务不可用时允许合格简洁 SVG／文字标识兜底。负责人只根据回复防漏，不读文件或复做视觉验收；Python 不增加预算状态、次数核验或图像评分。
+- 主题动作：初始提示调用 `/tailwind-theme`，并明确要求实际调用 `/ui-ux-pro-max:ui-ux-pro-max`，依据原型把颜色、字体、间距等基础落实到实际 frontend。保持已选方向，允许适配 preset，校准字体可用性、明暗模式、对比度与组件状态；原型只读，不以 preset 覆盖既定方向，不改业务布局或开始业务页面开发。沿用 `tailwind_theme` 任务名称与技术 gate。
+- 品牌资产：theme 完成后，以 `/frontend-ui-ux` 承接原型、当前 frontend 和适用运行配置，按需使用插件品牌能力和工作区媒体工具，复用或补齐同一视觉身份的页面品牌标识与 favicon，其它资产按需。优先复用，品牌文字保持可编辑，Agent 负责实际看图、质量、派生、接入及验证。主动选择合适的 SVG、图标和媒体；生成服务不可用时遵循工具错误处理规则，可采用合格的本地 SVG 或文字标识。负责人只根据回复防漏，不读文件或复做视觉验收；Python 不做图像评分。
 - 输出：完成项目化、条件性风格定制与品牌资产准备的工程。`steps/06.json.outputs` 继续等于第 4 步实际适用工程，顶层 `applicable` 语义不变，保留真实布尔 `tailwind_theme`，严格满足 `tailwind_theme == ("frontend" in outputs)`；有 frontend 时 success 摘要的风格定制部分只写“已完成项目风格定制”。字段缺失、类型错误或不一致的旧 success 不可复用。品牌任务不增加 result 必需字段，也不收紧历史 success 准入。
 - 完成条件：适用安装、检查、测试、构建、启动、健康检查、真实浏览器检查和基础联调通过；声明派生变体的模板已按准备清单最终绑定收口到唯一选择，未选变体在目录、依赖、配置、README 和适用本地 Agent 规则中没有残留；有 frontend 时项目风格定制任务完成，并按实际改动完成相称验证或准确说明未验证范围；品牌资产已交付并完成适用接入，允许合理复用或合格兜底。各独立适用领域 completed 后才写 success 并推进第 7 步，留下待提交变更；负责人不要求逐项完成声明。
 - 恢复：仍停留在 `project:06_bootstrap_foundation`。前序任务 completed 后只复验、不重跑 Agent；品牌失败或 blocked 时恢复原品牌会话，人工消息只投递当前 blocked 领域，前序 blocked 不创建后续执行产物。品牌 completed 后推进中断不重复生成；result 已写而 state 未推进时按严格 marker、前序交接、Tailwind gate 和 Git 事实只补状态。已完成历史保持不变；未完成旧现场不能沿用旧主题／品牌 snapshot 冒充原型继承，按本次 TRD 的启用与恢复边界处理。
