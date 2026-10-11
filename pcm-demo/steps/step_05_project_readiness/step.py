@@ -9,7 +9,7 @@ from typing import Any
 from common.agent_decision_loop import AgentDecisionLoopSpec, ResumeMessage, run_agent_decision_loop
 from common.claude_agent import run_claude
 from common.decision import render_decision_system_prompt, request_decision
-from common.files import resolve_workspace_output, sha256
+from common.files import resolve_workspace_output
 from common.state import step_result_status, write_state, write_step_result
 from config import LLMConfig, load_dev_resource_list
 from steps.step_03_foundation_selection.step import FoundationSelectionResult
@@ -28,7 +28,6 @@ SKILL_NAME = "project-readiness"
 CHECKLIST = Path("docs/requirements/项目准备清单.md")
 MAX_DECISION_ROUNDS = 32
 PROJECT_READINESS_MAX_TURNS = 9999
-READINESS_SCOPE_CONTRACT = "development-external-resources-v3"
 
 PROJECT_READINESS_DECISION_RULES = """
 completed：开发资源准备基线已建立，必需资源均真实可用。
@@ -67,7 +66,6 @@ def result(
     blocked: dict[str, Any] | None = None,
     error: dict[str, Any] | None = None,
     outputs: list[str] | None = None,
-    readiness_baseline: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "step": STEP,
@@ -78,7 +76,6 @@ def result(
         "outputs": outputs or [],
         "blocked": blocked,
         "error": error,
-        "readiness_baseline": readiness_baseline,
     }
 
 
@@ -116,59 +113,22 @@ def checklist_present(workspace: Path) -> bool:
         return False
 
 
-def readiness_baseline(
-    workspace: Path, product_outputs: list[str]
-) -> dict[str, Any]:
-    if checklist_contents(workspace) is None:
-        raise RuntimeError("项目准备清单不存在或为空")
-    try:
-        checklist = resolve_workspace_output(workspace, CHECKLIST.as_posix())
-        product_hashes = {
-            output: sha256(resolve_workspace_output(workspace, output))
-            for output in product_outputs
-        }
-        return {
-            "scope_contract": READINESS_SCOPE_CONTRACT,
-            "checklist_sha256": sha256(checklist),
-            "product_outputs_sha256": product_hashes,
-        }
-    except (OSError, ValueError) as error:
-        raise RuntimeError("项目准备基线证据无法生成") from error
-
-
 def verify_existing_readiness_success(
-    run_dir: Path, workspace: Path, product_outputs: list[str]
+    run_dir: Path, workspace: Path
 ) -> dict[str, Any]:
     try:
         existing = json.loads((run_dir / "steps" / "05.json").read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise RuntimeError("第 5 步成功结果不可读取") from error
-    expected_keys = {
-        "step",
-        "name",
-        "status",
-        "summary",
-        "applicable",
-        "outputs",
-        "blocked",
-        "error",
-        "readiness_baseline",
-    }
     if (
-        set(existing) != expected_keys
+        not isinstance(existing, dict)
         or existing.get("step") != STEP
-        or existing.get("name") != NAME
         or existing.get("status") != "success"
-        or not isinstance(existing.get("summary"), str)
-        or not existing["summary"].strip()
-        or existing.get("applicable") is not True
         or existing.get("outputs") != [CHECKLIST.as_posix()]
-        or existing.get("blocked") is not None
-        or existing.get("error") is not None
-        or existing.get("readiness_baseline")
-        != readiness_baseline(workspace, product_outputs)
     ):
-        raise RuntimeError("第 5 步成功结果或准备基线不可复用")
+        raise RuntimeError("第 5 步成功结果不可复用")
+    if checklist_contents(workspace) is None:
+        raise RuntimeError("项目准备清单不存在或为空")
     return existing
 
 
@@ -330,8 +290,6 @@ def completion_repair_prompt() -> str:
 def advance_success(
     run_dir: Path,
     state: dict[str, Any],
-    workspace: Path,
-    product_outputs: list[str],
 ) -> dict[str, Any]:
     state.update(
         {
@@ -348,7 +306,6 @@ def advance_success(
         "success",
         "project-readiness 已建立并验证当前自动化开发周期的资源准备基线。",
         outputs=[CHECKLIST.as_posix()],
-        readiness_baseline=readiness_baseline(workspace, product_outputs),
     )
     write_step_result(run_dir, STEP, saved)
     write_state(run_dir, state)
@@ -372,9 +329,7 @@ async def run(
     if position == (STEP + 1, STEP + 1, NEXT_NODE) and state.get("status") == "success":
         if checklist is None:
             raise RuntimeError("第 5 步成功现场不完整")
-        existing = verify_existing_readiness_success(
-            run_dir, workspace, product_outputs
-        )
+        existing = verify_existing_readiness_success(run_dir, workspace)
         return existing
 
     if (
@@ -382,9 +337,7 @@ async def run(
         and checklist is not None
         and step_result_status(run_dir, STEP) == "success"
     ):
-        existing = verify_existing_readiness_success(
-            run_dir, workspace, product_outputs
-        )
+        existing = verify_existing_readiness_success(run_dir, workspace)
         state.update(
             {
                 "status": "success",
@@ -449,4 +402,4 @@ async def run(
         )
     if decision.verdict != "completed":
         raise RuntimeError("Agent 决策循环未返回完成或阻塞结论")
-    return advance_success(run_dir, state, workspace, product_outputs)
+    return advance_success(run_dir, state)

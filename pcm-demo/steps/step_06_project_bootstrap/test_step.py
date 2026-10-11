@@ -28,7 +28,6 @@ from steps.step_01_create_workspace import initialize_root_repository
 from steps.step_03_foundation_selection.step import TemplateSelection
 from steps.step_05_project_readiness.step import (
     product_output_contents,
-    readiness_baseline,
     result as readiness_result,
 )
 from steps.step_06_project_bootstrap.step import (
@@ -216,9 +215,6 @@ class ProjectBootstrapTests(unittest.TestCase):
                 "success",
                 "准备基线已完成。",
                 outputs=[checklist],
-                readiness_baseline=readiness_baseline(
-                    workspace, [requirements, features]
-                ),
             ),
         )
         root_repository = initialize_root_repository(workspace)

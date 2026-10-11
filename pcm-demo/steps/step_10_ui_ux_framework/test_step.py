@@ -18,10 +18,7 @@ from common.files import write_json
 from common.frontend_scope import LegacyFrontendContractError
 from common.state import read_state, write_state
 from steps.step_01_create_workspace import initialize_root_repository
-from steps.step_05_project_readiness.step import (
-    readiness_baseline,
-    result as readiness_result,
-)
+from steps.step_05_project_readiness.step import result as readiness_result
 from steps.step_10_ui_ux_framework.step import (
     ARCHITECTURE_OUTPUT_PATH,
     CONVERSATION_KEY,
@@ -111,7 +108,6 @@ class UIUXFrameworkTests(unittest.TestCase):
                 "success",
                 "准备基线已完成。",
                 outputs=[checklist],
-                readiness_baseline=readiness_baseline(workspace, outputs),
             ),
         )
         write_json(run_dir / "steps/07.json", {"step": 7, "status": "success", "applicable": True, "outputs": [design]})
@@ -165,7 +161,7 @@ class UIUXFrameworkTests(unittest.TestCase):
             self.assertEqual(git_run.call_count, 0)
             self.assertFalse((workspace / "docs/ui-ux").exists())
 
-    def test_inapplicable_rejects_readiness_baseline_drift(self) -> None:
+    def test_inapplicable_reuses_readiness_after_document_changes(self) -> None:
         for relative in (
             "docs/requirements/项目准备清单.md",
             "docs/requirements/项目需求说明.md",
@@ -173,14 +169,15 @@ class UIUXFrameworkTests(unittest.TestCase):
         ):
             with self.subTest(relative=relative), tempfile.TemporaryDirectory() as directory:
                 run_dir, workspace, state = self.make_run(Path(directory), ["backend"])
-                (workspace / relative).write_text("# 漂移内容\n", encoding="utf-8")
+                original = (run_dir / "steps/05.json").read_bytes()
+                (workspace / relative).write_text("# 更新后的正文\n", encoding="utf-8")
 
                 async def unexpected(*_args: object, **_kwargs: object) -> ClaudeRunResult:
-                    raise AssertionError("准备基线漂移不得执行 Agent 或决策")
+                    raise AssertionError("不适用路径不得执行 Agent 或决策")
 
                 with patch.object(ui_ux_step.subprocess, "run", wraps=subprocess.run) as git_run:
-                    with self.assertRaisesRegex(RuntimeError, "准备基线不可复用"):
-                        self.run_step(
+                    for _ in range(2):
+                        saved = self.run_step(
                             run_dir,
                             state,
                             agent_runner=unexpected,
@@ -189,6 +186,9 @@ class UIUXFrameworkTests(unittest.TestCase):
                                 AssertionError("不得加载配置")
                             ),
                         )
+                        self.assertEqual(saved["status"], "success")
+                        self.assertFalse(saved["applicable"])
+                        self.assertEqual((run_dir / "steps/05.json").read_bytes(), original)
                 self.assertEqual(git_run.call_count, 0)
 
     def test_inapplicable_rejects_execution_artifact_by_presence_only(self) -> None:

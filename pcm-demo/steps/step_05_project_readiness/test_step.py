@@ -24,17 +24,16 @@ from steps.step_05_project_readiness.step import (
     CURRENT_NODE,
     NEXT_NODE,
     PROJECT_READINESS_DECISION_RULES,
-    READINESS_SCOPE_CONTRACT,
     ProjectReadinessBlocked,
     checklist_contents,
     checklist_present,
     completion_repair_prompt,
     initial_prompt,
     product_output_contents,
-    readiness_baseline,
     readiness_selection_projection,
     resource_list_facts,
     run,
+    verify_existing_readiness_success,
 )
 
 
@@ -172,7 +171,7 @@ class ProjectReadinessTests(unittest.TestCase):
             "docs/requirements/产品功能说明.md",
         ]
 
-    def success_result(self, workspace: Path) -> dict[str, object]:
+    def success_result(self) -> dict[str, object]:
         return {
             "step": 5,
             "name": "核验项目准备状态",
@@ -182,9 +181,6 @@ class ProjectReadinessTests(unittest.TestCase):
             "outputs": [CHECKLIST.as_posix()],
             "blocked": None,
             "error": None,
-            "readiness_baseline": readiness_baseline(
-                workspace, self.product_outputs()
-            ),
         }
 
     def test_initial_prompt_passes_inputs_and_minimal_selection_projection(self) -> None:
@@ -264,14 +260,7 @@ class ProjectReadinessTests(unittest.TestCase):
             self.assertEqual((saved["current_step"], saved["current_node"]), (6, NEXT_NODE))
             saved_result = json.loads((run_dir / "steps/05.json").read_text())
             self.assertEqual(saved_result["status"], "success")
-            self.assertEqual(
-                saved_result["readiness_baseline"],
-                readiness_baseline(workspace, self.product_outputs()),
-            )
-            self.assertEqual(
-                saved_result["readiness_baseline"]["scope_contract"],
-                READINESS_SCOPE_CONTRACT,
-            )
+            self.assertNotIn("readiness_baseline", saved_result)
             self.assertNotIn("pending_agent_prompt", saved["project_readiness"])
             history = json.loads(
                 (run_dir / "conversations/project_readiness.json").read_text(encoding="utf-8")
@@ -411,7 +400,7 @@ class ProjectReadinessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             run_dir, workspace, state = self.make_run(Path(directory))
             (workspace / CHECKLIST).write_text("# 准备\n", encoding="utf-8")
-            write_json(run_dir / "steps/05.json", self.success_result(workspace))
+            write_json(run_dir / "steps/05.json", self.success_result())
             state.update(
                 {
                     "status": "success",
@@ -433,101 +422,99 @@ class ProjectReadinessTests(unittest.TestCase):
             "project-readiness 已建立并验证当前自动化开发周期的资源准备基线。",
         )
 
-    def test_existing_success_rejects_changed_checklist(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            run_dir, workspace, state = self.make_run(Path(directory))
-            (workspace / CHECKLIST).write_text("# 已验证准备基线\n", encoding="utf-8")
-            write_json(run_dir / "steps/05.json", self.success_result(workspace))
-            state.update(
-                {
-                    "status": "success",
-                    "step": 6,
-                    "current_step": 6,
-                    "current_node": NEXT_NODE,
-                }
-            )
-            write_state(run_dir, state)
-            (workspace / CHECKLIST).write_text("# 被替换的清单\n", encoding="utf-8")
+    def test_existing_success_reuses_document_format_and_body_changes(self) -> None:
+        for output in [CHECKLIST.as_posix(), *self.product_outputs()]:
+            for content in ("\n\n# 定义\n\n", "# 更新后的正文\n\n新增开发需求或资源说明。\n"):
+                with self.subTest(output=output, content=content), tempfile.TemporaryDirectory() as directory:
+                    run_dir, workspace, state = self.make_run(Path(directory))
+                    (workspace / CHECKLIST).write_text("# 定义\n", encoding="utf-8")
+                    saved = self.success_result()
+                    write_json(run_dir / "steps/05.json", saved)
+                    original = (run_dir / "steps/05.json").read_bytes()
+                    (workspace / output).write_text(content, encoding="utf-8")
 
-            async def unexpected_agent(*args: object, **kwargs: object) -> ClaudeRunResult:
-                raise AssertionError("准备基线漂移不应调用 Agent")
+                    async def unexpected(*args: object, **kwargs: object) -> ClaudeRunResult:
+                        raise AssertionError("已有成功不应再次调用 Agent 或决策")
 
-            with self.assertRaisesRegex(RuntimeError, "准备基线不可复用"):
-                self.run_step(run_dir, state, agent_runner=unexpected_agent)
+                    for _ in range(2):
+                        outcome = self.run_step(
+                            run_dir, state, agent_runner=unexpected, decision_runner=unexpected
+                        )
+                        self.assertEqual(outcome, saved)
+                        self.assertEqual(read_state(run_dir)["current_node"], NEXT_NODE)
+                        self.assertEqual((run_dir / "steps/05.json").read_bytes(), original)
 
-    def test_existing_success_rejects_changed_product_definition(self) -> None:
-        for output in self.product_outputs():
-            with self.subTest(output=output), tempfile.TemporaryDirectory() as directory:
+    def test_existing_success_ignores_legacy_fields_without_rewriting_history(self) -> None:
+        hashes = {
+            "checklist_sha256": "a" * 64,
+            "product_outputs_sha256": {output: "b" * 64 for output in self.product_outputs()},
+        }
+        for extra in (
+            {},
+            {"readiness_baseline": hashes},
+            {"readiness_baseline": {"scope_contract": "old-contract", **hashes}, "historical_field": True},
+        ):
+            with self.subTest(extra=extra), tempfile.TemporaryDirectory() as directory:
                 run_dir, workspace, state = self.make_run(Path(directory))
-                (workspace / CHECKLIST).write_text("# 已验证准备基线\n", encoding="utf-8")
-                write_json(run_dir / "steps/05.json", self.success_result(workspace))
-                state.update(
-                    {
-                        "status": "success",
-                        "step": 6,
-                        "current_step": 6,
-                        "current_node": NEXT_NODE,
-                    }
-                )
-                write_state(run_dir, state)
-                (workspace / output).write_text("# 变化后的产品范围\n", encoding="utf-8")
+                (workspace / CHECKLIST).write_text("# 当前清单\n", encoding="utf-8")
+                saved = {"step": 5, "status": "success", "outputs": [CHECKLIST.as_posix()], **extra}
+                write_json(run_dir / "steps/05.json", saved)
+                original = (run_dir / "steps/05.json").read_bytes()
 
-                async def unexpected_agent(
-                    *args: object, **kwargs: object
-                ) -> ClaudeRunResult:
-                    raise AssertionError("产品范围漂移不应调用 Agent")
+                async def unexpected(*args: object, **kwargs: object) -> ClaudeRunResult:
+                    raise AssertionError("旧成功交接不应调用 Agent 或决策")
 
-                with self.assertRaisesRegex(RuntimeError, "准备基线不可复用"):
-                    self.run_step(run_dir, state, agent_runner=unexpected_agent)
+                for _ in range(2):
+                    self.assertEqual(
+                        self.run_step(run_dir, state, agent_runner=unexpected, decision_runner=unexpected),
+                        saved,
+                    )
+                    self.assertEqual((run_dir / "steps/05.json").read_bytes(), original)
 
-    def test_existing_success_without_baseline_is_not_reused(self) -> None:
+    def test_readiness_handoff_rejects_unsuccessful_or_invalid_results(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            run_dir, workspace, state = self.make_run(Path(directory))
-            (workspace / CHECKLIST).write_text("# 旧准备清单\n", encoding="utf-8")
+            run_dir, workspace, _state = self.make_run(Path(directory))
+            (workspace / CHECKLIST).write_text("# 准备\n", encoding="utf-8")
+            saved = {"step": 5, "status": "success", "outputs": [CHECKLIST.as_posix()]}
+            for invalid in (
+                *(dict(saved, status=status) for status in (None, "failed", "blocked", "running")),
+                dict(saved, step=4),
+                dict(saved, outputs=[]),
+                dict(saved, outputs=["other.md"]),
+                None,
+                [],
+            ):
+                with self.subTest(invalid=invalid):
+                    write_json(run_dir / "steps/05.json", invalid)
+                    with self.assertRaisesRegex(RuntimeError, "第 5 步成功结果"):
+                        verify_existing_readiness_success(run_dir, workspace)
+            (run_dir / "steps/05.json").write_text("{", encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "不可读取"):
+                verify_existing_readiness_success(run_dir, workspace)
+            (run_dir / "steps/05.json").unlink()
+            with self.assertRaisesRegex(RuntimeError, "不可读取"):
+                verify_existing_readiness_success(run_dir, workspace)
+
+    def test_readiness_handoff_rejects_missing_empty_or_unreadable_checklist(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir, workspace, _state = self.make_run(Path(directory))
             write_json(
                 run_dir / "steps/05.json",
                 {"step": 5, "status": "success", "outputs": [CHECKLIST.as_posix()]},
             )
-            state.update(
-                {
-                    "status": "success",
-                    "step": 6,
-                    "current_step": 6,
-                    "current_node": NEXT_NODE,
-                }
-            )
-            write_state(run_dir, state)
-
-            async def unexpected_agent(*args: object, **kwargs: object) -> ClaudeRunResult:
-                raise AssertionError("旧成功结果不应调用 Agent 或自动升级")
-
-            with self.assertRaisesRegex(RuntimeError, "准备基线不可复用"):
-                self.run_step(run_dir, state, agent_runner=unexpected_agent)
-
-    def test_existing_success_without_scope_contract_is_not_reused(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            run_dir, workspace, state = self.make_run(Path(directory))
-            (workspace / CHECKLIST).write_text("# 旧范围合同准备清单\n", encoding="utf-8")
-            legacy = self.success_result(workspace)
-            baseline = legacy["readiness_baseline"]
-            self.assertIsInstance(baseline, dict)
-            baseline.pop("scope_contract")
-            write_json(run_dir / "steps/05.json", legacy)
-            state.update(
-                {
-                    "status": "success",
-                    "step": 6,
-                    "current_step": 6,
-                    "current_node": NEXT_NODE,
-                }
-            )
-            write_state(run_dir, state)
-
-            async def unexpected_agent(*args: object, **kwargs: object) -> ClaudeRunResult:
-                raise AssertionError("旧范围合同不应调用 Agent 或自动升级")
-
-            with self.assertRaisesRegex(RuntimeError, "准备基线不可复用"):
-                self.run_step(run_dir, state, agent_runner=unexpected_agent)
+            for content in (None, b"", b" \n\t", b"\xff"):
+                with self.subTest(content=content):
+                    if content is not None:
+                        (workspace / CHECKLIST).write_bytes(content)
+                    with self.assertRaisesRegex(RuntimeError, "项目准备清单"):
+                        verify_existing_readiness_success(run_dir, workspace)
+            (workspace / CHECKLIST).write_text("# 准备\n", encoding="utf-8")
+            (workspace / CHECKLIST).chmod(0)
+            try:
+                with self.assertRaisesRegex(RuntimeError, "项目准备清单不可读取"):
+                    verify_existing_readiness_success(run_dir, workspace)
+            finally:
+                (workspace / CHECKLIST).chmod(0o600)
 
     def test_completed_verifier_rejects_handoff_conflict_and_nonregular_checklist(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

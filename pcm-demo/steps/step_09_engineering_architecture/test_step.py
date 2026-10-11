@@ -17,10 +17,7 @@ from common.claude_agent import ClaudeRunResult
 from common.files import write_json
 from common.state import read_state, write_state
 from steps.step_01_create_workspace import initialize_root_repository
-from steps.step_05_project_readiness.step import (
-    readiness_baseline,
-    result as readiness_result,
-)
+from steps.step_05_project_readiness.step import result as readiness_result
 from steps.step_09_engineering_architecture.step import (
     ARCHITECTURE_PATH,
     ARCHITECTURE_REPAIR_PROMPT,
@@ -129,7 +126,6 @@ class EngineeringArchitectureTests(unittest.TestCase):
                 "success",
                 "准备基线已完成。",
                 outputs=[checklist],
-                readiness_baseline=readiness_baseline(workspace, product_outputs),
             ),
         )
         write_json(run_dir / "steps/07.json", {"step": 7, "status": "success", "applicable": True, "outputs": [design]})
@@ -389,19 +385,6 @@ class EngineeringArchitectureTests(unittest.TestCase):
             for relative, marker in markers.items():
                 (workspace / relative).write_text(marker + "\n", encoding="utf-8")
             commit_paths(workspace, *markers)
-            product_outputs = [
-                "docs/requirements/项目需求说明.md",
-                "docs/requirements/产品功能说明.md",
-            ]
-            write_json(
-                run_dir / "steps/05.json",
-                readiness_result(
-                    "success",
-                    "准备基线已完成。",
-                    outputs=["docs/requirements/项目准备清单.md"],
-                    readiness_baseline=readiness_baseline(workspace, product_outputs),
-                ),
-            )
             system_prompts: list[str] = []
 
             async def agent(_prompt: str, **kwargs: object) -> ClaudeRunResult:

@@ -5,7 +5,7 @@
 - 运行状态位于 `project:06_bootstrap_foundation`，产品根仍是零提交、空 index 的 `main`；每个适用基础工程已经是自身 top-level 为目录本身、unborn HEAD、空 index 的 `main` 独立 Git 仓库，不适用端不存在。
 - `steps/02.json.outputs` 仍只引用两份工作区内非空、非符号链接的产品定义文档；当前执行单独读取顶层 `prototype`，适用时核验固定入口 `docs/prototype/index.html` 为非空、非符号链接普通文件。
 - `steps/04.json` 提供实际适用工程目录和组装证据；第 3 步选型只用于核验该组装事实。
-- `steps/05.json` 是严格成功结果，包含当前 `docs/requirements/项目准备清单.md` 和两份产品定义的无秘密 `readiness_baseline` 指纹；当前文件必须与该指纹一致。
+- `steps/05.json` 成功，唯一输出为 `docs/requirements/项目准备清单.md`，当前清单是可读、非空、非符号链接的普通文件。
 - 适用工程内部的 README、manifest、锁文件、配置、代码和测试由 Agent 按当前现场读取，不由 Python 重复建模。
 
 ## 行为

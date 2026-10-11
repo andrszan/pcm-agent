@@ -17,10 +17,7 @@ from common.claude_agent import ClaudeRunResult
 from common.files import write_json
 from common.state import read_state, write_state
 from steps.step_01_create_workspace import initialize_root_repository
-from steps.step_05_project_readiness.step import (
-    readiness_baseline,
-    result as readiness_result,
-)
+from steps.step_05_project_readiness.step import result as readiness_result
 from steps.step_11_requirement_breakdown.step import (
     ARCHITECTURE_OUTPUT_PATH,
     BACKLOG_PATH,
@@ -117,7 +114,6 @@ class RequirementBreakdownTests(unittest.TestCase):
                 "success",
                 "准备基线已完成。",
                 outputs=[checklist],
-                readiness_baseline=readiness_baseline(workspace, outputs),
             ),
         )
         write_json(run_dir / "steps/07.json", {"step": 7, "status": "success", "applicable": True, "outputs": [design]})

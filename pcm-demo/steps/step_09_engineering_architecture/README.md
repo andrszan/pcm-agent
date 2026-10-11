@@ -7,7 +7,7 @@
 固定输入为：
 
 - 第 2 步 `steps/02.json.outputs` 指向的两份非空产品定义；
-- 第 5 步严格成功结果及固定项目准备清单 `docs/requirements/项目准备清单.md`；当前清单和两份产品定义必须与 `readiness_baseline` 指纹一致；
+- 第 5 步成功结果，唯一输出为 `docs/requirements/项目准备清单.md`，当前清单是可读、非空、非符号链接的普通文件；
 - 第 7 步固定总体技术方案 `docs/design/技术方案.md`；
 - 第 8 步成功 result/state 一致的有序 `applicable_repositories`，且第 8 步 `outputs` 必须为空。
 
