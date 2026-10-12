@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>交班便签</title>
+<link rel="icon" href="data:,">
+<style>
+:root{font-family:system-ui,sans-serif;color:#203047;background:#f5f7fa;line-height:1.6}
+*{box-sizing:border-box}body{margin:0}header{padding:1rem 2rem;border-bottom:1px solid #cbd5e1;background:white;display:flex;gap:1.5rem;align-items:center}header strong{font-size:1.2rem}nav{display:flex;gap:1rem}a{color:#175b9c;text-underline-offset:3px}a[aria-current=page]{font-weight:700}main{max-width:1200px;margin:auto;padding:1.5rem}h1{margin:.5rem 0}h2{font-size:1.1rem}button,input,select,textarea{font:inherit}button{padding:.55rem 1rem;background:#fff;border:1px solid #8a9aad;border-radius:6px;cursor:pointer}button:disabled{opacity:.6;cursor:wait}input,select,textarea{padding:.5rem;border:1px solid #8a9aad;border-radius:5px;background:white;color:inherit}textarea{min-height:6rem;resize:vertical}label{display:grid;gap:.3rem;margin-bottom:1rem}form{max-width:42rem}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible{outline:3px solid #175b9c;outline-offset:3px}.toolbar{display:flex;gap:1rem;align-items:end;flex-wrap:wrap;margin:1.2rem 0}.toolbar label{margin:0}.note-card{padding:2.2rem;min-height:12rem;margin-bottom:1.5rem;border:1px solid #cbd5e1;border-radius:8px;background:white}.note-card h2{font-size:1.1rem;margin:0 0 1rem}.meta{margin-top:1.8rem;color:#526477}.status{font-size:1rem;font-weight:400}.explanation{margin:1rem 0 2rem;color:#526477}.message{min-height:1.8rem;color:#175b9c}.error{color:#a12622}.actions{display:flex;flex-wrap:wrap;gap:.8rem;margin-top:1rem}.help{max-width:42rem;padding:1.2rem;background:white;border:1px solid #cbd5e1;border-radius:8px}.body-text{white-space:pre-wrap;overflow-wrap:anywhere}[hidden]{display:none!important}@media(max-width:600px){header{padding:1rem;flex-wrap:wrap}main{padding:1rem}.note-card{padding:1.2rem}.toolbar{align-items:stretch;flex-direction:column}}
+</style>
+</head>
+<body>
+<header><strong>交班便签</strong><nav aria-label="主导航"><a href="#notes" data-nav="notes">便签</a><a href="#help" data-nav="help">使用帮助</a></nav></header>
+<main id="main"></main>
+<script>
+const key='pcm-quality-ui-notes';
+const initial=[
+{id:1,title:'确认周一交接时间',body:'与下一班确认交接时间，并说明待完成事项。',category:'交接',done:false},
+{id:2,title:'核对值班联系名单',body:'检查值班联系名单是否已经更新。',category:'交接',done:false},
+{id:3,title:'补充打印纸',body:'查看储物柜余量后补充打印纸。',category:'物品',done:true},
+{id:4,title:'整理工作台',body:'收好已处理材料，保留待办清单。',category:'物品',done:false}
+];
+let selected='全部',notice='';
+function read(){const raw=localStorage.getItem(key);return raw?JSON.parse(raw):structuredClone(initial)}
+function save(notes){localStorage.setItem(key,JSON.stringify(notes))}
+function el(tag,text,attrs={}){const node=document.createElement(tag);if(text!==null)node.textContent=text;for(const [k,v] of Object.entries(attrs))node.setAttribute(k,v);return node}
+function button(text,handler){const node=el('button',text,{type:'button'});node.addEventListener('click',handler);return node}
+function link(text,href){return el('a',text,{href})}
+function field(labelText,node){const label=el('label',labelText);label.append(node);return label}
+function message(main){const node=el('p',notice,{role:'status',class:'message'});main.append(node);notice='';return node}
+function render(){
+ const main=document.querySelector('main');main.replaceChildren();
+ const route=location.hash.slice(1)||'notes';
+ for(const item of document.querySelectorAll('[data-nav]')){if((route==='help'?'help':'notes')===item.dataset.nav)item.setAttribute('aria-current','page');else item.removeAttribute('aria-current')}
+ if(route==='help'){
+  main.append(el('h1','使用帮助'));const help=el('section',null,{class:'help'});help.append(el('h2','从一条便签开始'),el('p','记录一件交班事项，选择分类。完成后标记为已完成，仍可查看原内容。'),el('p','便签只保存在当前浏览器中，刷新页面不会丢失。清除浏览器网站数据会移除保存内容。'),link('返回便签','#notes'));main.append(help);return;
+ }
+ if(route==='new'){
+  main.append(link('返回便签','#notes'),el('h1','新建便签'));const form=el('form',null);const title=el('input',null,{name:'title',required:'',maxlength:'80'});const category=el('select',null,{name:'category'});for(const value of ['交接','物品'])category.append(el('option',value,{value}));const body=el('textarea',null,{name:'body',required:'',maxlength:'1000'});const error=el('p','',{role:'alert',class:'error'});const submit=el('button','保存便签',{type:'submit'});form.append(field('标题',title),field('分类',category),field('事项内容',body),error,submit,link('取消','#notes'));form.addEventListener('submit',event=>{event.preventDefault();if(!title.value.trim()||!body.value.trim()){error.textContent='请填写标题和事项内容。';return}try{const notes=read();const id=Math.max(0,...notes.map(n=>n.id))+1;notes.push({id,title:title.value.trim(),body:body.value.trim(),category:category.value,done:false});save(notes);notice='便签已保存。';location.hash='note/'+id}catch{error.textContent='保存失败，请检查浏览器是否允许网站保存数据，然后重试。'}});main.append(form);return;
+ }
+ if(route.startsWith('note/')){
+  const note=read().find(n=>n.id===Number(route.split('/')[1]));main.append(link('返回便签','#notes'));if(!note){main.append(el('h1','便签不存在'));return}main.append(el('h1',note.title));message(main);main.append(el('p',note.category+' · '+(note.done?'已完成':'待处理')),el('p',note.body,{class:'body-text'}));const actions=el('div',null,{class:'actions'});actions.append(button(note.done?'恢复为待处理':'标记为已完成',()=>{try{const notes=read();const current=notes.find(n=>n.id===note.id);current.done=!current.done;save(notes);notice=current.done?'已标记为完成。':'已恢复为待处理。';render()}catch{notice='保存失败，状态未确认，请刷新后核对。';render()}}));main.append(actions);return;
+ }
+ main.append(el('h1','便签列表'),el('p','当前界面展示本客户端读取到的便签数据。请通过相关记录进入后续操作，依据记录的当前技术状态选择下一步。',{class:'explanation'}));message(main);
+ const toolbar=el('div',null,{class:'toolbar'});const select=el('select',null,{id:'category'});for(const value of ['全部','交接','物品'])select.append(el('option',value,{value}));select.value=selected;select.addEventListener('change',()=>{selected=select.value;render()});toolbar.append(field('筛选分类',select),link('新建便签','#new'));main.append(toolbar);
+ const notes=read().filter(n=>selected==='全部'||n.category===selected);main.append(el('p',`共 ${notes.length} 条`,{'data-testid':'count'}));
+ for(const note of notes){const card=el('article',null,{class:'note-card','data-note-id':String(note.id)});const heading=el('h2',null);heading.append(link(note.title,'#note/'+note.id));card.append(heading,el('p',note.category+' · '+(note.done?'已完成':'待处理'),{class:'status'}),el('p',note.body),el('p',`当前记录的技术字段：id=${note.id}，category=${note.category}，done=${note.done}。这是当前浏览器读取到的对象，请进入记录进行操作。`,{class:'meta'}));main.append(card)}
+ if(!notes.length)main.append(el('p','此分类还没有便签。可以新建一条。'));
+}
+window.addEventListener('hashchange',render);render();
+</script>
+</body>
+</html>
