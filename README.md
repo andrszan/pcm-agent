@@ -124,7 +124,7 @@ PCM 将开发能力和基础工程分开维护：
 
 | 仓库 | 职责 |
 |---|---|
-| [`pcm-agent-skills`](https://github.com/andrszan/pcm-agent-skills) | Skills、Subagents、规则和模板选择快照 |
+| [`pcm-agent`](https://github.com/andrszan/pcm-agent) | Skills、Subagents、规则和模板选择快照 |
 | [`pcm-template-projects`](https://github.com/andrszan/pcm-template-projects) | 模板体系的上层导航、准入规则和治理 |
 | [`pcm-frontend-templates`](https://github.com/andrszan/pcm-frontend-templates) | Next.js、React/Vite、Vue/Vite 等前端基础工程 |
 | [`pcm-python-templates`](https://github.com/andrszan/pcm-python-templates) | FastAPI + SQLAlchemy 后端基础工程 |
