@@ -283,11 +283,12 @@ def _requirements_completed(state: dict[str, Any]) -> bool:
     )
 
 
-def phase_one_completed(state: dict[str, Any]) -> bool:
+def phase_one_completed(state: dict[str, Any], *, local_only: bool = False) -> bool:
     expected = (None, None, "phase_1:completed") if remote_sync_enabled(state) else (13, 13, "phase_1:select_requirement")
+    position = (state.get("step"), state.get("current_step"), state.get("current_node"))
     return (
         state.get("status") == "success"
-        and (state.get("step"), state.get("current_step"), state.get("current_node")) == expected
+        and (position == expected or (local_only and position == (13, 13, "phase_1:select_requirement")))
         and _requirements_completed(state)
     )
 

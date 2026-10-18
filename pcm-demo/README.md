@@ -117,6 +117,9 @@ uv run python run_all.py --resume <run-id>
 
 ```bash
 uv run python run_quality.py --source-run <completed-run-id> --run-id <quality-run-id>
+
+# 仅本地质量运行：也接受全部需求已完成第 18 步本地合并、尚未远程收尾的阶段一来源
+uv run python run_quality.py --source-run <source-run-id> --run-id <quality-run-id> --local-only
 uv run python run_quality.py --resume <quality-run-id>
 
 # 只执行 state 当前指向的质量命名节点
@@ -125,6 +128,8 @@ uv run python run_quality.py --resume <quality-run-id> --node quality:audit
 # 当前需求进入数值步骤后，仍可使用原单步入口
 uv run python run_step.py --step <13-18> --run-id <quality-run-id>
 ```
+
+`--local-only` 只用于新建质量 run：不继承来源的远程同步，不修改来源完成状态；仍须满足全部需求完成、没有活动需求及 clean main 等条件。模式保存在新 run 中，完整恢复与单步执行均不推送；`--resume` 不接受 `--local-only`，直接沿用保存的模式。省略此选项时保留原有来源准入及远程同步行为。
 
 审计与入池从完整有序对话提取当前有效成果，后续局部补证不替代整份报告。分流只依据已保存审计材料作负责人处置；有必要覆盖缺口时不能最终收口。公共 Responses API 请求使用 `timeout=None`，允许长时间推理。
 

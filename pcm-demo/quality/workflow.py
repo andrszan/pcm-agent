@@ -138,9 +138,9 @@ def is_completed(state: dict[str, Any]) -> bool:
     )
 
 
-def new_state(source_state: dict[str, Any], source_run_id: str, run_id: str) -> dict[str, Any]:
+def new_state(source_state: dict[str, Any], source_run_id: str, run_id: str, *, local_only: bool = False) -> dict[str, Any]:
     from run_all import phase_one_completed
-    if not (phase_one_completed(source_state) or is_completed(source_state)):
+    if not (phase_one_completed(source_state, local_only=local_only) or is_completed(source_state)):
         raise RuntimeError("来源运行尚未完成或仍有活动需求")
     if source_run_id == run_id or any(not value or Path(value).name != value or value in {".", ".."} for value in (source_run_id, run_id)):
         raise ValueError("来源与新的运行标识必须是不同的安全名称")
@@ -152,11 +152,11 @@ def new_state(source_state: dict[str, Any], source_run_id: str, run_id: str) -> 
         "workspace": copy.deepcopy(source_state["workspace"]),
         "applicable_repositories": copy.deepcopy(source_state["applicable_repositories"]),
         "repositories": copy.deepcopy(source_state["repositories"]),
-        **({"remote_sync": copy.deepcopy(source_state["remote_sync"])} if remote_sync_enabled(source_state) else {}),
+        **({"remote_sync": copy.deepcopy(source_state["remote_sync"])} if not local_only and remote_sync_enabled(source_state) else {}),
         "requirement_registry": copy.deepcopy(source_state["requirement_registry"]),
         "active_requirement": None, "requirement_cycle": None,
         "quality": {
-            "round": 1, "entry_versions": {},
+            "round": 1, "entry_versions": {}, "local_only": local_only,
             "baseline_requirement_ids": [row["id"] for row in source_state["requirement_registry"]["requirements"]],
             "batch_requirement_ids": [],
         },

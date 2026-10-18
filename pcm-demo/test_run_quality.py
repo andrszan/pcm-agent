@@ -74,7 +74,7 @@ class QualityCLITests(unittest.TestCase):
         paths += [self.coordination / "products.json", self.product / ".pcm/runtime.json", self.product / ".gitignore"]
         return {str(path): path.read_bytes() for path in paths if path.is_file()}
 
-    def new_state(self, source, source_run_id, run_id):
+    def new_state(self, source, source_run_id, run_id, *, local_only=False):
         return {"run_id": run_id, "workflow": "product_quality", "source_run_id": source_run_id,
                 "phase": "product_quality_iteration", "current_node": "quality:prepare",
                 "step": None, "current_step": None, "status": "running",
@@ -349,6 +349,10 @@ with adopt_execution_locks(root, 'source-quality', sys.argv[3], 1) as locks:
                      requirement_registry={"requirements": [{"id": "BR-001", "status": "completed", "completion": {"step": 18}}]},
                      remote_sync={"enabled": True, "project_name": "product", "repositories": {}})
         write_state(path, state)
+        before = (path / "state.json").read_bytes()
+        with self.assertRaises(SystemExit):
+            run_quality.main(["--resume", "quality", "--local-only"])
+        self.assertEqual((path / "state.json").read_bytes(), before)
         local = {"data": {"versions": {"root": "a" * 40}}, "summary": "本地核验完成"}
         registry = copy.deepcopy(state["requirement_registry"])
         seen = []
@@ -389,8 +393,7 @@ with adopt_execution_locks(root, 'source-quality', sys.argv[3], 1) as locks:
         sleep.assert_not_called()
         self.assertEqual(read_state(path)["status"], "failed")
 
-    def test_real_workflow_new_state_has_no_round_budget(self):
-        from quality import workflow
+    def completed_source(self):
         source = copy.deepcopy(self.source)
         source.update(phase="phase_1_requirement_development", step=13, current_step=13,
                       current_node="phase_1:select_requirement", active_requirement=None, requirement_cycle=None,
@@ -399,6 +402,11 @@ with adopt_execution_locks(root, 'source-quality', sys.argv[3], 1) as locks:
                           {"id": "BR-001", "title": "原需求", "order": 1, "depends_on": [],
                            "status": "completed", "completion": {"step": 18}}]})
         source["workspace"]["root"] = str(self.root)
+        return source
+
+    def test_real_workflow_new_state_has_no_round_budget(self):
+        from quality import workflow
+        source = self.completed_source()
         write_state(self.runs / "source", source)
         before = self.snapshot()
         with patch.object(run_quality, "_workflow", return_value=workflow), patch.object(run_quality, "_drive", return_value=0):
@@ -407,6 +415,51 @@ with adopt_execution_locks(root, 'source-quality', sys.argv[3], 1) as locks:
             state = read_state(path)
             self.assertEqual(state["quality"]["baseline_requirement_ids"], ["BR-001"])
             self.assertNotIn("max_rounds", state["quality"])
+        self.assertEqual(self.snapshot(), before)
+
+    def test_local_only_creation_and_full_or_named_resume_preserve_mode(self):
+        from common.timing import StepTiming
+        from quality import workflow
+        source = self.completed_source()
+        source["remote_sync"] = {"enabled": True, "project_name": "product", "repositories": {}}
+        write_state(self.runs / "source", source)
+        before = self.snapshot()
+        path = self.runs / "quality"
+        with patch.object(run_quality, "_workflow", return_value=workflow):
+            with patch.object(run_quality, "_drive", return_value=0):
+                self.assertEqual(run_quality.main(["--source-run", "source", "--run-id", "quality"]), 2)
+                self.assertFalse(path.exists())
+                self.assertEqual(run_quality.main(["--source-run", "source", "--run-id", "quality", "--local-only"]), 0)
+            state = read_state(path)
+            self.assertTrue(state["quality"]["local_only"])
+            self.assertNotIn("remote_sync", state)
+            state.update(current_node="quality:complete")
+            write_state(path, state)
+            saved = (path / "state.json").read_bytes()
+            with self.assertRaises(SystemExit):
+                run_quality.main(["--resume", "quality", "--local-only"])
+            self.assertEqual((path / "state.json").read_bytes(), saved)
+
+            def child(command, *unused):
+                self.assertNotIn("--local-only", command)
+                node = command[command.index("--node") + 1]
+                return run_quality._execute_node(SimpleNamespace(resume="quality", node=node), None, StepTiming())
+
+            with patch.object(workflow, "_prior", return_value={"coverage": [], "required_inputs": []}), \
+                 patch.object(workflow, "_local_completion", side_effect=[
+                     RuntimeError("本地核验未完成"), {"data": {}, "summary": "本地核验完成"},
+                 ]) as complete, \
+                 patch.object(workflow, "sync_repositories", side_effect=AssertionError("不能同步")) as sync, \
+                 patch.object(run_all, "run_child", side_effect=child):
+                self.assertEqual(run_quality.main(["--resume", "quality"]), 1)
+                self.assertEqual(read_state(path)["status"], "failed")
+                self.assertEqual(run_quality.main(["--resume", "quality", "--node", "quality:complete"]), 0)
+                self.assertEqual(run_quality.main(["--resume", "quality"]), 0)
+                self.assertTrue(workflow.is_completed(read_state(path)))
+                self.assertEqual(complete.call_count, 2)
+                sync.assert_not_called()
+        self.assertTrue(read_state(path)["quality"]["local_only"])
+        self.assertNotIn("remote_sync", read_state(path))
         self.assertEqual(self.snapshot(), before)
 
     def test_real_workflow_protects_saved_success_but_cli_reports_advance_failure(self):

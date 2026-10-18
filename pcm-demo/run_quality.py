@@ -38,6 +38,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     source.add_argument("--source-run")
     source.add_argument("--resume")
     parser.add_argument("--run-id")
+    parser.add_argument("--local-only", action="store_true", help="新质量运行只做本地收尾，不继承来源的远程同步")
     parser.add_argument("--node", choices=QUALITY_NODES)
     parser.add_argument("--resume-message-file", type=Path)
     parser.add_argument("--coordination-locks", help=argparse.SUPPRESS)
@@ -46,6 +47,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("新质量运行必须指定 --run-id")
     if args.resume and args.run_id:
         parser.error("--resume 不能与 --run-id 同时使用")
+    if args.resume and args.local_only:
+        parser.error("--local-only 只能用于新质量运行；恢复沿用已保存模式")
     if (args.node or args.resume_message_file) and not args.resume:
         parser.error("--node 和 --resume-message-file 只能用于 --resume")
     return args
@@ -162,7 +165,7 @@ def _locked(args, run_id, run_dir, locks, snapshot) -> int:
         source = read_state(run_all.run_dir_for(args.source_run))
         if source.get("run_id") != args.source_run:
             raise ValueError("来源运行身份与运行目录不一致")
-        state = workflow.new_state(source, args.source_run, run_id)
+        state = workflow.new_state(source, args.source_run, run_id, local_only=args.local_only)
         if "frontend" in state["applicable_repositories"]:
             try:
                 ensure_frontend_capabilities(Path(state["workspace"]["final_path"]))

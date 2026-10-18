@@ -575,6 +575,144 @@ class QualityWorkflowTests(unittest.TestCase):
         child["remote_sync"]["repositories"]["root"]["project_id"] = 99
         self.assertEqual(source["remote_sync"]["repositories"]["root"]["project_id"], 1)
 
+    def test_local_only_accepts_local_remote_and_quality_completion_without_changing_source(self):
+        self.reach("quality:completed")
+        self.enable_remote()
+        local = {**copy.deepcopy(self.source), "remote_sync": copy.deepcopy(self.state["remote_sync"])}
+        remote = {**copy.deepcopy(local), "step": None, "current_step": None, "current_node": "phase_1:completed"}
+        for source in (local, remote, self.state):
+            with self.subTest(node=source["current_node"]):
+                before = copy.deepcopy(source)
+                child = flow.new_state(source, "original", "next-quality", local_only=True)
+                self.assertTrue(child["quality"]["local_only"])
+                self.assertFalse(flow.remote_sync_enabled(child))
+                self.assertNotIn("remote_sync", child)
+                self.assertEqual(child["requirement_registry"], source["requirement_registry"])
+                self.assertEqual(source, before)
+        self.assertEqual((self.source_dir / "state.json").read_bytes(), self.source_bytes)
+
+    def test_local_only_does_not_relax_source_completion_checks(self):
+        self.enable_remote()
+        source = {**copy.deepcopy(self.source), "remote_sync": copy.deepcopy(self.state["remote_sync"])}
+        changes = [
+            {"status": "failed"}, {"status": "blocked"}, {"status": "running"},
+            {"active_requirement": {"id": "BR-001"}}, {"requirement_cycle": {}},
+            {"current_node": "requirement:18_merge"}, {"current_step": 18},
+            {"step": None, "current_step": None, "current_node": "phase_1:complete"},
+            {"phase": "other"}, {"remote_sync": {"enabled": False}},
+        ]
+        for change in changes:
+            with self.subTest(change=change), self.assertRaises(RuntimeError):
+                flow.new_state({**source, **change}, "original", "new", local_only=True)
+        for row in ({**self.old, "status": "pending"}, {**self.old, "status": "active"},
+                    {**self.old, "completion": None}, {**self.old, "completion": {"step": 17}}, None):
+            invalid = copy.deepcopy(source)
+            invalid["requirement_registry"]["requirements"] = [row] if row else []
+            with self.subTest(row=row), self.assertRaises(RuntimeError):
+                flow.new_state(invalid, "original", "new", local_only=True)
+        self.assertEqual(source["remote_sync"], self.state["remote_sync"])
+
+    def start_local_only(self):
+        self.enable_remote()
+        source = {**copy.deepcopy(self.source), "remote_sync": copy.deepcopy(self.state["remote_sync"])}
+        self.state = flow.new_state(source, "original", self.run.name, local_only=True)
+        write_json(self.run / "state.json", self.state)
+
+    def test_local_only_preserves_clean_main_requirement(self):
+        self.start_local_only()
+        git(self.root, "switch", "-c", "unfinished")
+        with self.assertRaisesRegex(RuntimeError, "分支 main"):
+            self.execute()
+        git(self.root, "switch", "main")
+        extra = self.root / "unknown.txt"
+        extra.write_text("保留现场")
+        with self.assertRaisesRegex(RuntimeError, "未提交"):
+            self.execute()
+        self.assertEqual(extra.read_text(), "保留现场")
+        self.assertEqual(self.calls, [])
+
+    def check_local_only_completion(self, *, repair):
+        self.start_local_only()
+        with patch.object(flow, "sync_repositories", side_effect=AssertionError("本地模式不能同步")) as sync:
+            if repair:
+                self.finish_repair_batch()
+            self.reach("quality:complete")
+            self.state = read_state(self.run)
+            self.execute()
+            self.assertTrue(flow.is_completed(self.state))
+            self.assertTrue(self.state["quality"]["local_only"])
+            self.assertNotIn("remote_sync", self.state)
+            self.assertEqual(self.state["quality"]["batch_requirement_ids"], ["BR-002"] if repair else [])
+            self.state = read_state(self.run)
+            self.execute()
+        sync.assert_not_called()
+        self.assertFalse((self.run / "quality/push.json").exists())
+        self.assertFalse((self.run / "quality/local-completion.json").exists())
+        self.assertEqual((self.source_dir / "state.json").read_bytes(), self.source_bytes)
+
+    def test_local_only_completion_without_repairs(self):
+        self.check_local_only_completion(repair=False)
+
+    def test_local_only_completion_with_repairs(self):
+        self.check_local_only_completion(repair=True)
+
+    def test_local_only_numeric_selection_and_merge_success_recovery_never_sync(self):
+        from common.state import write_requirement_step_result, write_state
+        from steps.step_13_select_requirement import step as selection
+        from steps.step_18_merge import step as merge
+
+        self.start_local_only()
+        self.defect = True
+        snapshots = []
+        with patch.object(flow, "sync_repositories", side_effect=AssertionError("本地模式不能同步")) as sync:
+            self.reach("quality:select_requirement")
+            self.execute()
+            self.state = read_state(self.run)
+            selected = selection.run(self.run, self.state)
+            self.assertEqual(selected["requirement_id"], "BR-002")
+            self.state = read_state(self.run)
+            snapshots.append(copy.deepcopy(self.state))
+            self.assertEqual(self.state["current_node"], "requirement:14_trd_design")
+            self.assertEqual(selection.run(self.run, self.state), selected)
+
+            # 用已提交的本地修复交接替代 Agent 步骤，选择与合并执行真实代码。
+            (self.root / "fix.txt").write_text("修复结果")
+            git(self.root, "add", "fix.txt")
+            git(self.root, "commit", "-m", "fix: 修复任务")
+            cycle = self.state["requirement_cycle"]
+            cycle["repositories"]["root"].update(tip_sha=git(self.root, "rev-parse", "HEAD"), merged=False)
+            write_requirement_step_result(self.run, "BR-002", 17, {
+                "step": 17, "status": "success", "applicable": True, "blocked": None, "error": None,
+                "requirement_id": "BR-002", "branch": cycle["branch"],
+                "repositories": [{"name": "root", "path": ".",
+                                  "base_sha": cycle["repositories"]["root"]["base_sha"],
+                                  "tip_sha": cycle["repositories"]["root"]["tip_sha"]}],
+            })
+            self.state.update(step=18, current_step=18, current_node="requirement:18_merge")
+            write_state(self.run, self.state)
+            with patch.object(merge, "_advance", side_effect=RuntimeError("结果落盘后中断")):
+                with self.assertRaisesRegex(RuntimeError, "结果落盘后中断"):
+                    merge.run(self.run, self.state)
+            self.state = read_state(self.run)
+            snapshots.append(copy.deepcopy(self.state))
+            self.assertTrue(merge.has_complete_success(self.run, self.state))
+            with patch.object(merge, "_git_write", side_effect=AssertionError("成功恢复不能重复写 Git")):
+                self.assertEqual(merge.run(self.run, self.state)["status"], "success")
+            self.state = read_state(self.run)
+            snapshots.append(copy.deepcopy(self.state))
+            self.assertEqual(self.state["current_node"], "quality:select_requirement")
+            self.assertIsNone(self.state["requirement_cycle"])
+            self.assertEqual(self.state["requirement_registry"]["requirements"][-1]["completion"], {"step": 18})
+            self.assertEqual(git(self.root, "branch", "--show-current"), "main")
+            self.reach("quality:completed")
+            snapshots.append(read_state(self.run))
+        sync.assert_not_called()
+        self.assertTrue(flow.is_completed(snapshots[-1]))
+        for state in snapshots:
+            self.assertTrue(state["quality"]["local_only"])
+            self.assertNotIn("remote_sync", state)
+        self.assertEqual((self.source_dir / "state.json").read_bytes(), self.source_bytes)
+
     def test_legacy_completion_does_not_push_or_create_remote_results(self):
         with patch.object(flow, "sync_repositories") as sync:
             self.reach("quality:completed")
