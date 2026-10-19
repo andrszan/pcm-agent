@@ -351,7 +351,12 @@ def _repository_facts(repository: dict[str, Any], branch: str) -> dict[str, Any]
     main = _ref(path, "refs/heads/main")
     target = _ref(path, f"refs/heads/{branch}")
     current = _git(path, "branch", "--show-current")
-    clean = _git(path, "status", "--porcelain=v1", "--untracked-files=all") == ""
+    ready = _git(path, "status", "--porcelain=v1", "--untracked-files=all") == ""
+    if "adoption" in repository:
+        from quality.git import validate_adoption
+        validate_adoption(path, repository["adoption"], branches=("main", branch))
+        # 显式接管已逐文件验证；其它调用仍要求真正 clean。
+        ready = True
     if not isinstance(head, str) or not _HEX_SHA.fullmatch(head):
         raise RuntimeError("Git 仓库 HEAD 不符合约定")
     if main is not None and not _HEX_SHA.fullmatch(main):
@@ -361,7 +366,7 @@ def _repository_facts(repository: dict[str, Any], branch: str) -> dict[str, Any]
     return {
         "path": path,
         "current": current,
-        "clean": clean,
+        "ready": ready,
         "head": head,
         "main": main,
         "target": target,
@@ -372,7 +377,7 @@ def _verify_on_main(repository: dict[str, Any], branch: str, base_sha: str, *, t
     facts = _repository_facts(repository, branch)
     if (
         facts["current"] != "main"
-        or not facts["clean"]
+        or not facts["ready"]
         or facts["head"] != base_sha
         or facts["main"] != base_sha
         or target_absent
@@ -385,7 +390,7 @@ def _verify_on_target(repository: dict[str, Any], branch: str, base_sha: str) ->
     facts = _repository_facts(repository, branch)
     if (
         facts["current"] != branch
-        or not facts["clean"]
+        or not facts["ready"]
         or facts["head"] != base_sha
         or facts["main"] != base_sha
         or facts["target"] != base_sha
@@ -538,6 +543,24 @@ def _run(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
     if position != (STEP, STEP, selection_node_for(state)):
         raise RuntimeError("运行状态不位于需求选择锚点")
 
+    if state.get("workflow") == "product_quality" and state.get("quality", {}).get("supplement") is not None:
+        from quality.workflow import batch_metadata, requirement_adoption
+        identifier = _select(context["requirements"])["id"] if context["mode"] == "fresh" else context["requirement_id"]
+        adoption = requirement_adoption(run_dir, state, identifier)
+        if adoption is None:
+            raise RuntimeError("补充需求缺少明确接管归属")
+        branch = f"req/{identifier.lower()}"
+        for repository in context["repositories"]:
+            record = adoption[repository["name"]]
+            repository["adoption"] = record
+            facts = _repository_facts(repository, branch)
+            if facts["target"] not in (None, record["head"]):
+                raise RuntimeError("接管目标分支已有未知提交")
+            if context["mode"] == "recovery" and context["bases"][repository["name"]] != record["head"]:
+                raise RuntimeError("接管 cycle 与已批准基线不一致")
+        if context["mode"] == "recovery" and state["requirement_cycle"].get("adoption_input") != batch_metadata(state)["input"]:
+            raise RuntimeError("接管 cycle 缺少补充输入引用")
+
     if context["mode"] == "fresh":
         selected = _select(context["requirements"])
         requirement_id = selected["id"]
@@ -549,7 +572,7 @@ def _run(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
             facts = _repository_facts(repository, branch)
             if (
                 facts["current"] != "main"
-                or not facts["clean"]
+                or not facts["ready"]
                 or facts["main"] is None
                 or facts["head"] != facts["main"]
                 or facts["target"] is not None
@@ -573,6 +596,8 @@ def _run(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
                         for repository in context["repositories"]
                     },
                     "return_node_after_completion": selection_node_for(state),
+                    **({"adoption_input": batch_metadata(state)["input"]}
+                       if any("adoption" in repository for repository in context["repositories"]) else {}),
                 },
                 "blocked": None,
                 "error": None,

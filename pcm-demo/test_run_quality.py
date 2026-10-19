@@ -216,6 +216,26 @@ class QualityCLITests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 attach_product(self.coordination, "quality", read_state(path), locks)
 
+    def test_supplement_registration_runs_under_both_locks_before_drive(self):
+        path = self.create()
+        supplied = self.root / "supplement.json"
+        supplied.write_text("{}")
+        def begin(run_dir, state, input_file):
+            self.assertEqual((run_dir, input_file), (path, supplied))
+            with self.assertRaises(RuntimeError):
+                acquire_execution_locks(self.coordination, "quality", 2)
+            with self.assertRaises(RuntimeError):
+                release_product(self.coordination, self.product)
+            state.update(current_node="quality:route")
+            write_state(path, state)
+        self.workflow.begin_supplement = Mock(side_effect=begin)
+        with patch.object(run_quality, "_drive", return_value=0) as drive:
+            self.assertEqual(run_quality.main(["--resume", "quality", "--supplement-file", str(supplied)]), 0)
+            self.workflow.begin_supplement.assert_called_once()
+            self.assertEqual(read_state(path)["current_node"], "quality:route")
+            drive.assert_called_once()
+        self.assertEqual(self.snapshot(), self.before)
+
     def test_round_budget_option_is_rejected(self):
         with self.assertRaises(SystemExit):
             run_quality.parse_args(["--resume", "quality", "--max-rounds", "4"])

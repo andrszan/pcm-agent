@@ -139,6 +139,86 @@ uv run python run_step.py --step <13-18> --run-id <quality-run-id>
 
 在新建或恢复阶段一的命令中追加 `--with-quality`，即可在阶段一成功后自动启动独立的 `<阶段一-run-id>-quality`；同源质量 run 已存在时恢复，不重复创建。后续另一个质量周期以最近完成的质量 run 为来源。质量运行有自己的 run 锁，与前序共用产品互斥边界，不重新认领产品或重新分配端口。
 
+#### 在原质量收口追加既有修复
+
+当原审计的定向补证发现了新问题，且负责人已明确批准接管一组尚未提交的修复时，可在同一质量 run 正式追加登记，再复用第 13～18 步。首次入口仅接受 `quality:complete`、全部正式需求已完成、没有活动 cycle，且尚无成功收口或已完成本地收口待推送的记录。
+
+```bash
+uv run python run_quality.py --resume <quality-run-id> --supplement-file /absolute/path/supplement.json
+# 登记后的中断恢复，也可继续使用相同输入；不会再次入池或分配 ID
+uv run python run_quality.py --resume <quality-run-id>
+```
+
+`--supplement-file` 不与 `--node`、`--resume-message-file` 混用；登记在 run 与产品锁内进行，随后正常驱动当前节点。当前每个 run 支持一个明确补充批；同批输入内容不同会被拒绝。需要沿原会话交互时，在登记后使用正常恢复消息入口。
+
+JSON 必须符合 `quality.models.SupplementInput`，不接受未知字段。以下为仅含 root/backend 的产品示例；实际必须列齐 `applicable_repositories` 中的所有仓库，并替换所有占位值。
+
+```json
+{
+  "run_id": "quality-run-id",
+  "product_path": "/absolute/products/product",
+  "audit_session_id": "原 quality_audit_r0001 的 session ID",
+  "finding_source": {
+    "message_index": 4,
+    "sha256": "原审计会话该消息完整 content 的 UTF-8 SHA256",
+    "quote": "该执行 Agent 回复中的补证发现原文"
+  },
+  "owner_decision": {
+    "path": "/absolute/evidence/owner-decision.md",
+    "sha256": "该文件全部字节的 SHA256",
+    "quote": "真实负责人批准这组既有修复正式接管的原文"
+  },
+  "handoff_source": {
+    "path": "/absolute/evidence/implementation-handoff.md",
+    "sha256": "该文件全部字节的 SHA256",
+    "quote": "既有实现、验证及剩余事项的交接原文"
+  },
+  "findings": [{
+    "title": "诊断和工具错误反馈未保持合同",
+    "user_task": "调用工具并理解失败原因",
+    "trigger": "上游调用失败",
+    "observed": "已复现的具体错误反馈",
+    "expected": "明确、保真的失败反馈",
+    "basis": "现有接口及用户任务约定",
+    "impact": "用户无法定位失败原因",
+    "evidence": ["可定位的真实复现及证据"],
+    "priority": "high",
+    "confidence": "high"
+  }],
+  "implementation": "已有实现及受影响范围",
+  "validation": ["实际执行的检查、结果及定位"],
+  "remaining": ["仍需原会话补齐的证据"],
+  "repositories": {
+    "root": {"head": "完整 main HEAD", "changes": []},
+    "backend": {
+      "head": "完整 main HEAD",
+      "changes": [{
+        "path": "src/diagnostics.py",
+        "change": "M",
+        "sha256": "当前文件全部字节的 SHA256",
+        "mode": "100644",
+        "base_sha256": "该 HEAD 中文件 blob 字节的 SHA256",
+        "base_mode": "100644"
+      }]
+    }
+  }
+}
+```
+
+`finding_source.message_index` 从零开始，指向该 run 已记录的 `conversations/quality_audit_rNNNN.json` 中 `messages` 的执行 Agent 回复（`role=user`）；程序核对 session、消息内容指纹与原文。负责人决定和实现交接必须来自独立、明确的 `.md`、`.txt` 或 `.json` 文件，使用绝对路径、完整文件指纹和非空原文引用；不能把输入 JSON 自己当作授权来源。程序只核对所提供来源的一致性，提交者须如实引用真实决定与已执行验证，不得自行编造授权或审计通过。
+
+接管清单中的 HEAD 为完整 Git SHA（40 或 64 位小写十六进制），SHA256 为 64 位小写十六进制。`changes` 必须精确覆盖当前全部未提交变化，路径为仓库相对的单个普通文件，模式仅为 `100644` 或 `100755`：
+
+- `M`：当前与基线指纹、模式均必填，含纯模式变更。
+- `A`：未跟踪新增文件；`base_sha256`、`base_mode` 为 `null`。
+- `D`：明确缺失的基线文件；`sha256`、`mode` 为 `null`，基线指纹和模式必填。重命名按明确的删除与新增列出。
+
+root 必须 clean main 且 `changes=[]`；代码仓只能保持所批准 HEAD 与精确未暂存集合。未知或缺少的变化、暂存内容（含 intent-to-add）、HEAD 漂移、进行中的 Git 操作、目录/通配符/越界路径、符号链接、隐藏工作树标记都会拒绝，保留现场。只读取授权文件内容，不读取 ignored 配置。
+
+产物保存在 `quality/supplements/0001/`：`input.json`、`route.json`、`pool-intent.json`、`pool-plan.json`、`pool.json`、`register.json`、`select_requirement.json`，以及 `coverage-intent.json`、`coverage.json`、`complete.json`。原 `round`、原批 ID、历史成功结果不改写。入池仍只在根仓文档分支精确提交并 ff-only 合并；全部既有修改必须归属一个新需求。第 13 步先验证全部仓库，以保存的根 pool tip 和批准的代码 HEAD 建需求分支，保留修改，支持部分建分支恢复；不用 stash、reset、clean 或回滚。
+
+接管指纹约束到第 13 步成功交接为止。第 14/15 步收到原候选、回归归属、已有实现/验证、剩余事项及文件清单，正常编写活动 TRD、复核承接，只补必要工作，不伪造步骤成功。收口分别核对原批和补充批的登记及真实第 18 步结果，最终必须是包含所有合并 tip 的 clean main，不能混入未知后续提交；该核验在保存补证锚点或调用 Agent 前执行。补证沿原审计 session，以当前版本和当前会话报告为锚点，必须实际发出当前版本补证指令并取得其后的有效 Agent 回复，补写旧回复的负责人裁决不算新证据。旧的一次性检查批准不重发，旧回复及待完成裁决仍保留。新补证成功落盘后中断可复用。原 `local_only` 模式继续有效，不启动外层远程同步。
+
 ### 独立人工反馈迭代
 
 来源必须是已成功结束、没有活动或待开发需求的质量 run 或反馈 run。新批次附着同一产品，原记录只读；当前适用仓库须位于 clean main。没有反馈时无需启动，不影响前两阶段完成。

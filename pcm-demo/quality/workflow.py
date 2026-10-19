@@ -22,10 +22,10 @@ from common.state import write_state
 from config import LLMConfig
 from quality.git import (
     ancestor, branch_tip, changed_paths, check_operations, clean_repository, git,
-    main_versions, repositories, validate_document_path, workspace,
+    main_versions, repositories, validate_adoption, validate_document_path, workspace,
 )
 from quality.models import (
-    AuditReport, ExtractionInput, PoolPlan, RoutingReport, validate_audit, validate_pool_plan, validate_routing,
+    AuditReport, ExtractionInput, PoolPlan, RoutingReport, SupplementInput, validate_audit, validate_pool_plan, validate_routing,
 )
 
 WORKFLOW = "product_quality"
@@ -82,18 +82,143 @@ def _node(state: dict[str, Any]) -> str:
     return str(value).split(":", 1)[1]
 
 
+def batch_metadata(state: dict[str, Any]) -> dict[str, Any]:
+    return state["quality"].get("supplement", state["quality"])
+
+
+def _original(state: dict[str, Any]) -> dict[str, Any]:
+    return {**state, "quality": {key: value for key, value in state["quality"].items() if key != "supplement"}}
+
+
+def _batch_directory(state: dict[str, Any]) -> str:
+    if state["quality"].get("supplement") is not None:
+        return "quality/supplements/0001"
+    return f"quality/rounds/{_round(state):04d}"
+
+
+def _completion_path(run_dir: Path, state: dict[str, Any], name: str) -> Path:
+    directory = _batch_directory(state) if state["quality"].get("supplement") is not None else "quality"
+    return _path(run_dir, f"{directory}/{name}.json")
+
+
+def _input_digest(value: dict[str, Any]) -> str:
+    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+
+
+def _supplement_input(run_dir: Path, state: dict[str, Any]) -> dict[str, Any] | None:
+    if state["quality"].get("supplement") is None:
+        return None
+    supplied = _read(_path(run_dir, f"{_batch_directory(state)}/input.json"))
+    if _input_digest(supplied) != batch_metadata(state).get("input_sha256"):
+        raise RuntimeError("补充批原始输入已变化")
+    return supplied
+
+
+def _batch_audit(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
+    supplement = _supplement_input(run_dir, state)
+    if supplement is None:
+        return _prior(run_dir, state, "audit")
+    return {"summary": "原审计补证发现的正式追加登记", "applicable": True,
+            "candidates": [{"id": f"S001-C{index + 1:03d}", **finding}
+                           for index, finding in enumerate(supplement["findings"])],
+            "coverage": [], "limitations": supplement["remaining"],
+            "versions": {name: record["head"] for name, record in supplement["repositories"].items()},
+            "report": json.dumps(supplement, ensure_ascii=False)}
+
+
+def _adoption_versions(state: dict[str, Any], adoption: dict[str, Any] | None) -> dict[str, str]:
+    if adoption is None:
+        return main_versions(state)
+    return {name: (clean_repository(path, "main") if name == "root" else validate_adoption(path, adoption[name]))
+            for name, path in repositories(state)}
+
+
+def begin_supplement(run_dir: Path, state: dict[str, Any], input_file: Path) -> None:
+    """在调用方持有 run/product 锁时登记一个显式补充批。"""
+    supplied = SupplementInput.model_validate(_read(input_file)).model_dump()
+    if (state.get("workflow") != WORKFLOW or state.get("phase") != PHASE
+            or supplied["run_id"] != state.get("run_id") or supplied["run_id"] != run_dir.name
+            or supplied["product_path"] != str(workspace(state))):
+        raise RuntimeError("补充输入的 run/product 身份不匹配")
+    key = f"quality_audit_r{_round(state):04d}"
+    if supplied["audit_session_id"] != state.get("claude_sessions", {}).get(key):
+        raise RuntimeError("补充输入没有绑定原审计 session")
+    input_path = _path(run_dir, "quality/supplements/0001/input.json")
+    if input_path.exists() and _read(input_path) != supplied:
+        raise RuntimeError("同一补充批不能使用不同输入")
+    if state["quality"].get("supplement") is not None:
+        if not input_path.exists():
+            raise RuntimeError("补充批缺少原始输入")
+        _supplement_input(run_dir, state)
+        return
+    if (state.get("current_node") != "quality:complete" or state.get("step") is not None
+            or state.get("current_step") is not None or state.get("active_requirement") is not None
+            or state.get("requirement_cycle") is not None
+            or any(row["status"] != "completed" for row in state["requirement_registry"]["requirements"])):
+        raise RuntimeError("首次补充只允许无活动或 pending 需求的 quality:complete")
+    for name in ("complete", "local-completion"):
+        path = _path(run_dir, f"quality/{name}.json")
+        if path.exists() and (name == "local-completion" or _read(path).get("status") == "success"):
+            raise RuntimeError("原质量运行已成功收口，不能追加补充")
+    _prior(run_dir, state, "audit")
+    _prior(run_dir, state, "route")
+    reference = f"conversations/{key}.json"
+    if state.get("decision_conversations", {}).get(key, {}).get("path") != reference:
+        raise RuntimeError("补充输入缺少原审计会话引用")
+    messages = _read(_path(run_dir, reference)).get("messages", [])
+    source = supplied["finding_source"]
+    index = source["message_index"]
+    if index >= len(messages):
+        raise RuntimeError("补充发现来源消息不存在")
+    message = messages[index]
+    content = message.get("content", "")
+    if (message.get("role") != "user" or not source["quote"] or source["quote"] not in content
+            or hashlib.sha256(content.encode()).hexdigest() != source["sha256"]):
+        raise RuntimeError("补充发现与原审计回复来源不一致")
+    for name in ("owner_decision", "handoff_source"):
+        source = supplied[name]
+        path = Path(source["path"])
+        if (not path.is_absolute() or path.suffix not in {".md", ".txt", ".json"}
+                or any(item.is_symlink() for item in (path, *path.parents)) or not path.is_file()
+                or path == input_file.resolve()):
+            raise RuntimeError("补充授权/交接来源必须是独立的明确文本文件")
+        data = path.read_bytes()
+        if hashlib.sha256(data).hexdigest() != source["sha256"] or source["quote"] not in data.decode("utf-8"):
+            raise RuntimeError("补充授权/交接来源指纹或原文不匹配")
+    names = {name for name, _ in repositories(state)}
+    adoption = supplied["repositories"]
+    if set(adoption) != names or adoption["root"]["changes"] or not any(row["changes"] for row in adoption.values()):
+        raise RuntimeError("补充接管须列出全部仓库，仅代码仓允许明确既有变更")
+    if _adoption_versions(state, adoption) != {name: row["head"] for name, row in adoption.items()}:
+        raise RuntimeError("补充接管 main 版本不匹配")
+    # 全部来源、Git 与入口检查完成前不落盘、不切分支。
+    if not input_path.exists():
+        _write(input_path, supplied)
+    updated = copy.deepcopy(state)
+    updated["quality"]["supplement"] = {
+        "input": "quality/supplements/0001/input.json", "input_sha256": _input_digest(supplied),
+        "baseline_requirement_ids": [row["id"] for row in state["requirement_registry"]["requirements"]],
+        "batch_requirement_ids": [],
+    }
+    updated.update(current_node="quality:route", status="success", blocked=None, error=None)
+    _replace_state(run_dir, state, updated)
+
+
 def node_result_path(run_dir: Path, state: dict[str, Any]) -> Path:
     name = _node(state)
     if name == "completed":
         name = "complete"
-    relative = f"quality/rounds/{_round(state):04d}/{name}.json" if name in _ROUND_NODES else f"quality/{name}.json"
+    if name == "complete":
+        return _completion_path(run_dir, state, name)
+    relative = f"{_batch_directory(state)}/{name}.json" if name in _ROUND_NODES else f"quality/{name}.json"
     return _path(run_dir, relative)
 
 
 def _round_path(run_dir: Path, state: dict[str, Any], name: str) -> Path:
     if name not in {"audit", "route", "pool", "register", "pool-intent", "pool-plan", "audit-intent"}:
         raise RuntimeError("未知质量产物")
-    return _path(run_dir, f"quality/rounds/{_round(state):04d}/{name}.json")
+    directory = f"quality/rounds/{_round(state):04d}" if name in {"audit", "audit-intent"} else _batch_directory(state)
+    return _path(run_dir, f"{directory}/{name}.json")
 
 
 def _prior(run_dir: Path, state: dict[str, Any], name: str) -> dict[str, Any]:
@@ -116,13 +241,17 @@ def _history(run_dir: Path, state: dict[str, Any]) -> list[dict[str, Any]]:
         source = _read(_path(source_dir, "state.json"))
         if source.get("workflow") != WORKFLOW:
             break
-        audit = _prior(source_dir, source, "audit")
-        routing = _prior(source_dir, source, "route")
-        history.append({
-            "run_id": source_id, "round": _round(source),
-            "audit": {key: audit[key] for key in ("versions", "candidates", "coverage", "limitations")},
-            "routing": {key: routing[key] for key in ("summary", "decisions", "document_changes")},
-        })
+        # 倒序收集后统一反转，补充批不替代原审计处置。
+        batches = [source, _original(source)] if source["quality"].get("supplement") is not None else [source]
+        for batch in batches:
+            audit = _batch_audit(source_dir, batch)
+            routing = _prior(source_dir, batch, "route")
+            history.append({
+                "run_id": source_id, "round": _round(source),
+                **({"supplement": "0001"} if batch["quality"].get("supplement") is not None else {}),
+                "audit": {key: audit[key] for key in ("versions", "candidates", "coverage", "limitations")},
+                "routing": {key: routing[key] for key in ("summary", "decisions", "document_changes")},
+            })
         source_id = source.get("source_run_id")
     return list(reversed(history))
 
@@ -171,6 +300,7 @@ def node_resume_keys(state: dict[str, Any]) -> tuple[str, ...]:
     if node in {"audit", "complete"}:
         return (f"quality_audit_{suffix}",)
     if node == "pool":
+        suffix = "s0001" if state["quality"].get("supplement") is not None else suffix
         return (f"quality_pool_{suffix}", f"quality_pool_design_{suffix}", f"quality_pool_commit_{suffix}")
     return ()
 
@@ -193,7 +323,7 @@ def _advance(run_dir: Path, state: dict[str, Any], saved: dict[str, Any]) -> dic
         following[node] = "pool" if any(row["action"] == "include" for row in data["decisions"]) else "complete"
     elif node == "register":
         updated["requirement_registry"] = data["registry"]
-        updated["quality"]["batch_requirement_ids"] = data["new_ids"]
+        batch_metadata(updated)["batch_requirement_ids"] = data["new_ids"]
     elif node == "select_requirement":
         following[node] = data["next_node"]
     updated.update({"status": "success", "blocked": None, "error": None,
@@ -388,7 +518,10 @@ async def _audit(run_dir: Path, state: dict[str, Any], message: ResumeMessage | 
 
 
 async def _route(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
-    audit = _prior(run_dir, state, "audit")
+    audit = _batch_audit(run_dir, state)
+    supplement = _supplement_input(run_dir, state)
+    if supplement is not None and _adoption_versions(state, supplement["repositories"]) != audit["versions"]:
+        raise RuntimeError("分流开始版本与补充接管不一致")
     requirements = state["requirement_registry"]["requirements"]
     prompt = (
         "你是产品质量负责人，只依据已完成的完整审计材料决定处理范围，不执行新的产品调查。"
@@ -411,6 +544,9 @@ async def _route(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
         "不得把普通取舍、本地错误、范围外观察或没有自述完成当成外部阻塞。"
         "材料不足而又不属于外部资源缺失时令 ready_to_complete=false，并在 summary 准确说明原因。"
     )
+    if supplement is not None:
+        prompt += ("本次输入是原审计补证发现、真实负责人决定来源与已有实现验证交接，不是一轮新的完整审计。"
+                   "仅就明确发现作正式追加处置；全部既有修改必须归属一个新增需求，不得静默排除后直接收口。")
     report = await parse_response(
         LLMConfig.load(), system_prompt=prompt,
         input_model=ExtractionInput(
@@ -425,12 +561,16 @@ async def _route(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
         validate_document_path(change.path)
     raw = report.model_dump_json()
 
-    if main_versions(state) != audit["versions"]:
+    supplement = _supplement_input(run_dir, state)
+    if supplement is not None and not any(row.action == "include" for row in report.decisions):
+        raise ValueError("既有修改必须归属一个正式接管需求，不能排除后收口")
+    if _adoption_versions(state, supplement["repositories"] if supplement else None) != audit["versions"]:
         raise RuntimeError("分流期间产品版本发生变化")
     return _success(run_dir, state, {**report.model_dump(), "report": raw}, "候选分流完成")
 
 
-def _pool_boundary(state: dict[str, Any], intent: dict[str, Any], *, clean: bool = False) -> None:
+def _pool_boundary(state: dict[str, Any], intent: dict[str, Any], *, clean: bool = False,
+                   adoption: dict[str, Any] | None = None) -> None:
     root = workspace(state)
     check_operations(root)
     if git(root, "branch", "--show-current") != intent["branch"]:
@@ -440,7 +580,8 @@ def _pool_boundary(state: dict[str, Any], intent: dict[str, Any], *, clean: bool
     if not changed_paths(root, intent["base"]) <= set(intent["allowed_paths"]):
         raise RuntimeError("入池存在范围外变更，保留现场")
     for name, path in repositories(state)[1:]:
-        if clean_repository(path, "main") != intent["versions"][name]:
+        head = validate_adoption(path, adoption[name]) if adoption is not None else clean_repository(path, "main")
+        if head != intent["versions"][name]:
             raise RuntimeError("入池改变了代码仓库")
     if clean:
         clean_repository(root, intent["branch"])
@@ -470,17 +611,24 @@ def _validate_increment(state: dict[str, Any], catalog: list[dict[str, Any]], pl
 async def _pool(run_dir: Path, state: dict[str, Any], message: ResumeMessage | None) -> dict[str, Any]:
     root = workspace(state)
     routing = _prior(run_dir, state, "route")
-    audit = _prior(run_dir, state, "audit")
+    audit = _batch_audit(run_dir, state)
+    supplement = _supplement_input(run_dir, state)
+    adoption = supplement["repositories"] if supplement else None
     included = [row for row in routing["decisions"] if row["action"] == "include"]
     if not included:
         raise RuntimeError("没有纳入项，不应进入入池节点")
+    for name, path in repositories(state)[1:]:
+        head = validate_adoption(path, adoption[name]) if adoption is not None else clean_repository(path, "main")
+        if head != audit["versions"][name]:
+            raise RuntimeError("入池代码仓库已偏离已批准版本")
     intent_path = _round_path(run_dir, state, "pool-intent")
     plan_path = _round_path(run_dir, state, "pool-plan")
     if not intent_path.exists():
-        versions = main_versions(state)
+        versions = _adoption_versions(state, adoption)
         if versions != audit["versions"]:
             raise RuntimeError("入池开始版本与审计不一致")
-        branch = f"quality/{run_dir.name}/r{_round(state):03d}-pool"
+        label = "s001" if supplement else f"r{_round(state):03d}"
+        branch = f"quality/{run_dir.name}/{label}-pool"
         if branch_tip(root, branch) is not None:
             raise RuntimeError("入池目标分支已存在但无本轮归属记录")
         allowed = {state["requirement_registry"]["source"]["path"]}
@@ -496,8 +644,8 @@ async def _pool(run_dir: Path, state: dict[str, Any], message: ResumeMessage | N
             if clean_repository(root, "main") != intent["base"]:
                 raise RuntimeError("无法恢复入池建分支，main 已偏离基线")
             git(root, "switch", "-c", intent["branch"], intent["base"])
-        _pool_boundary(state, intent)
-        suffix = f"r{_round(state):04d}"
+        _pool_boundary(state, intent, adoption=adoption)
+        suffix = "s0001" if supplement else f"r{_round(state):04d}"
         if not plan_path.exists():
             prompt = (
                 "/requirement-breakdown\n依据充分资料直接生成本批正式增量需求，不再逐项等待普通草案批准。"
@@ -507,6 +655,7 @@ async def _pool(run_dir: Path, state: dict[str, Any], message: ResumeMessage | N
                 "不要将建议方案锁死为验收目标，不以隐藏关键数据、删除状态、减少业务记录或放宽权限制造简洁。不要创建TRD、代码、规则或Git变更。"
                 "所有纳入候选都必须承接，ID按既有惯例且不能重用历史ID；候选可合并或拆分，但拆分时明确负责完整原场景回归的最后需求，"
                 "并设置对其余必要项的依赖。最终返回每个新增正式ID及candidate_ids，以及每候选的完整回归requirement_id。\n"
+                + ("本批只有一个正式接管需求，诊断与工具合同等全部既有修改归属该需求，不拆分脏文件；承接已有实现和验证，只补必要缺口。\n" if supplement else "")
                 + json.dumps({"审计": audit, "分流": routing, "既有需求": state["requirement_registry"]["requirements"]}, ensure_ascii=False)
             )
             parsed_source = None
@@ -515,13 +664,15 @@ async def _pool(run_dir: Path, state: dict[str, Any], message: ResumeMessage | N
             async def check_plan(report: PoolPlan) -> None:
                 nonlocal parsed_source, parsed_catalog
                 validate_pool_plan(report, routing, {row["id"] for row in state["requirement_registry"]["requirements"]})
+                if supplement and len(report.requirements) != 1:
+                    raise ValueError("全部既有修改必须由唯一接管需求承接")
                 parsed_source, parsed_catalog = await _catalog(state)
                 _validate_increment(state, parsed_catalog, report)
 
             raw, plan = await _task(run_dir, state, f"quality_pool_{suffix}", "quality_pool", prompt,
                                     "本批增量已写入正式Backlog，完整承接纳入发现，拆分依赖和原场景回归归属清楚时完成；不重拆既有产品。",
                                     skill="requirement-breakdown", output_model=PoolPlan, validate=check_plan,
-                                    resume_message=message, completion_verifier=lambda: _pool_repair(state, intent))
+                                    resume_message=message, completion_verifier=lambda: _pool_repair(state, intent, adoption=adoption))
             if parsed_source is None or parsed_catalog is None:
                 raise RuntimeError("入池任务没有交接已核验的需求目录")
             _write(plan_path, {"plan": plan.model_dump(), "report": raw, "source": parsed_source, "catalog": parsed_catalog})
@@ -533,23 +684,31 @@ async def _pool(run_dir: Path, state: dict[str, Any], message: ResumeMessage | N
                       + json.dumps({"文档": routing["document_changes"], "决定": routing["report"], "本批需求": planned["plan"]}, ensure_ascii=False))
             await _task(run_dir, state, f"quality_pool_design_{suffix}", "quality_pool", prompt,
                         "授权的当前文档已按既定决定校正，或已满足而无需修改时完成。", resume_message=message,
-                        completion_verifier=lambda: _pool_repair(state, intent))
+                        completion_verifier=lambda: _pool_repair(state, intent, adoption=adoption))
         if _backlog(state)[2] != planned["source"]:
             raise RuntimeError("本批 Backlog 在计划提取后变化，不能提交未知需求")
-        _pool_boundary(state, intent)
+        _pool_boundary(state, intent, adoption=adoption)
         if git(root, "status", "--porcelain=v1", "--untracked-files=all"):
             prompt = ("/commit-changes\n只在当前根仓入池分支精确提交已完成的本批文档，不重做设计或开发，不改业务语义，"
                       "不切换分支、不合并、不push，不处理代码仓。\n"
                       + json.dumps({"分支": intent["branch"], "文件范围": intent["allowed_paths"]}, ensure_ascii=False))
             await _task(run_dir, state, f"quality_pool_commit_{suffix}", "requirement_commit", prompt,
                         "本批文档已精确提交且工作树干净时完成，不重新验收产品。", skill="commit-changes", resume_message=message,
-                        completion_verifier=lambda: _pool_commit_repair(state, intent))
-        _pool_boundary(state, intent, clean=True)
+                        completion_verifier=lambda: _pool_commit_repair(state, intent, adoption=adoption))
+        _pool_boundary(state, intent, clean=True, adoption=adoption)
         intent["tip"] = git(root, "rev-parse", "HEAD")
         _write(intent_path, intent)
     else:
         planned = _read(plan_path)
         plan = PoolPlan.model_validate(planned["plan"])
+    validate_pool_plan(plan, routing, set(batch_metadata(state)["baseline_requirement_ids"]))
+    if supplement and len(plan.requirements) != 1:
+        raise RuntimeError("补充批必须只有一个接管需求")
+    # 保存 pool tip 后恢复也先核验代码仓，不能带未知变化执行根仓合并。
+    for name, path in repositories(state)[1:]:
+        head = validate_adoption(path, adoption[name]) if adoption is not None else clean_repository(path, "main")
+        if head != intent["versions"][name]:
+            raise RuntimeError("入池改变了代码仓库")
     main = branch_tip(root, "main")
     tip = intent["tip"]
     target = branch_tip(root, intent["branch"])
@@ -570,17 +729,19 @@ async def _pool(run_dir: Path, state: dict[str, Any], message: ResumeMessage | N
     if clean_repository(root, "main") != tip:
         raise RuntimeError("入池最终版本与保存提交不一致")
     return _success(run_dir, state, {**planned, "branch": intent["branch"], "base": intent["base"], "tip": tip,
+                                    **({"adoption_requirement_id": plan.requirements[0].requirement_id,
+                                        "adoption_input": batch_metadata(state)["input"]} if supplement else {}),
                                     "allowed_paths": intent["allowed_paths"]}, "本批正式需求已提交并合并到根 main")
 
 
-def _pool_repair(state: dict[str, Any], intent: dict[str, Any]) -> str | None:
-    _pool_boundary(state, intent)
+def _pool_repair(state: dict[str, Any], intent: dict[str, Any], *, adoption: dict[str, Any] | None = None) -> str | None:
+    _pool_boundary(state, intent, adoption=adoption)
     _backlog(state)
     return None
 
 
-def _pool_commit_repair(state: dict[str, Any], intent: dict[str, Any]) -> str | None:
-    _pool_boundary(state, intent)
+def _pool_commit_repair(state: dict[str, Any], intent: dict[str, Any], *, adoption: dict[str, Any] | None = None) -> str | None:
+    _pool_boundary(state, intent, adoption=adoption)
     if git(workspace(state), "status", "--porcelain=v1", "--untracked-files=all"):
         return "本批文档仍有未提交变化，请只按授权文件范围补完精确提交。"
     return None
@@ -608,7 +769,7 @@ def _select(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError("质量批次仍有活动需求，不能重新选择")
     requirements = state["requirement_registry"]["requirements"]
     pending = [row for row in requirements if row["status"] == "pending"]
-    batch = set(state["quality"]["batch_requirement_ids"])
+    batch = set(batch_metadata(state)["batch_requirement_ids"])
     if any(row["status"] == "active" for row in requirements) or any(row["id"] not in batch for row in pending):
         raise RuntimeError("质量批次需求生命周期不一致")
     if pending:
@@ -622,8 +783,8 @@ def _select(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
 
 
 def _complete(run_dir: Path, state: dict[str, Any], *, coverage_report: str | None = None) -> dict[str, Any]:
-    enabled = remote_sync_enabled(state)
-    prepared_path = _path(run_dir, "quality/local-completion.json")
+    enabled = not state["quality"].get("local_only", False) and remote_sync_enabled(state)
+    prepared_path = _completion_path(run_dir, state, "local-completion")
     if enabled and prepared_path.exists():
         prepared = _read(prepared_path)
     else:
@@ -632,65 +793,176 @@ def _complete(run_dir: Path, state: dict[str, Any], *, coverage_report: str | No
             # 推送失败只恢复同步，不重新开启已经成功的补证会话。
             _write(prepared_path, prepared)
     if enabled:
-        sync_repositories(run_dir, state, _path(run_dir, "quality/push.json"), targets=prepared["data"]["versions"])
+        sync_repositories(run_dir, state, _completion_path(run_dir, state, "push"), targets=prepared["data"]["versions"])
     return _success(run_dir, state, prepared["data"], prepared["summary"])
 
 
-def _local_completion(run_dir: Path, state: dict[str, Any], *, coverage_report: str | None = None) -> dict[str, Any]:
-    audit = _prior(run_dir, state, "audit")
-    routed = _prior(run_dir, state, "route")
-    report = RoutingReport.model_validate({key: routed[key] for key in RoutingReport.model_fields})
-    validate_routing(report, audit, state["requirement_registry"]["requirements"])
+def _completion_handoff(run_dir: Path, state: dict[str, Any], *, check_coverage: bool) -> dict[str, Any]:
+    """核验两批正式登记和真实合并归属；补证开始前允许必要覆盖仍待完成。"""
     if state.get("active_requirement") or state.get("requirement_cycle"):
         raise RuntimeError("仍有活动需求，不能完成质量运行")
-    if any(row["status"] != "completed" for row in state["requirement_registry"]["requirements"]):
+    requirements = state["requirement_registry"]["requirements"]
+    if any(row["status"] != "completed" for row in requirements):
         raise RuntimeError("仍有正式需求未完成")
-    if coverage_report is None:
-        if report.required_inputs:
-            raise QualityBlocked(report.summary, report.required_inputs)
-        gaps = [f"{row['user_task']}：{row['reason']}" for row in audit["coverage"] if row["outcome"] == "gap"]
-        if gaps:
-            raise RuntimeError("仍有未由本批修复承接的必要覆盖缺口：" + "；".join(gaps))
     versions = main_versions(state)
-    included = any(row.action == "include" for row in report.decisions)
-    batch = state["quality"]["batch_requirement_ids"]
-    if included:
-        pooled = _prior(run_dir, state, "pool")
-        registered = _prior(run_dir, state, "register")
-        plan = PoolPlan.model_validate(pooled["plan"])
-        validate_pool_plan(plan, routed, set(state["quality"]["baseline_requirement_ids"]))
-        if set(batch) != {row.requirement_id for row in plan.requirements} or batch != registered["new_ids"]:
-            raise RuntimeError("本次完成需求与入池登记不一致")
-        merged_tips: dict[str, set[str]] = {name: set() for name in versions}
-        for row in state["requirement_registry"]["requirements"]:
-            if row["id"] not in batch:
-                continue
-            merged = _read(_path(run_dir, f"steps/requirements/{row['id']}/18.json"))
-            if merged.get("status") != "success" or merged.get("requirement_id") != row["id"]:
-                raise RuntimeError(f"需求 {row['id']} 缺少成功合并结果")
-            tips = {repo["name"]: repo["tip_sha"] for repo in merged["repositories"]}
-            if set(tips) != set(versions):
-                raise RuntimeError("需求合并仓库与当前仓库不一致")
-            for name, tip in tips.items():
-                merged_tips[name].add(tip)
+    supplemented = state["quality"].get("supplement") is not None
+    batches = [_original(state), state] if supplemented else [state]
+    merged_tips: dict[str, set[str]] = {name: set() for name in versions}
+    completed_ids: list[str] = []
+    dispositions = []
+    limitations = []
+    for current in batches:
+        audit = _batch_audit(run_dir, current)
+        routed = _prior(run_dir, current, "route")
+        report = RoutingReport.model_validate({key: routed[key] for key in RoutingReport.model_fields})
+        validate_routing(report, audit, requirements)
+        if check_coverage:
+            if report.required_inputs:
+                raise QualityBlocked(report.summary, report.required_inputs)
+            gaps = [f"{row['user_task']}：{row['reason']}" for row in audit["coverage"] if row["outcome"] == "gap"]
+            if gaps:
+                raise RuntimeError("仍有未由本批修复承接的必要覆盖缺口：" + "；".join(gaps))
+        batch = batch_metadata(current)["batch_requirement_ids"]
+        dispositions.extend(routed["decisions"])
+        limitations.extend(audit["limitations"])
+        if any(row.action == "include" for row in report.decisions):
+            pooled = _prior(run_dir, current, "pool")
+            registered = _prior(run_dir, current, "register")
+            plan = PoolPlan.model_validate(pooled["plan"])
+            validate_pool_plan(plan, routed, set(batch_metadata(current)["baseline_requirement_ids"]))
+            if (set(batch) != {row.requirement_id for row in plan.requirements} or batch != registered["new_ids"]
+                    or len(set(batch)) != len(batch) or set(batch) & set(completed_ids)
+                    or not set(batch) <= {row["id"] for row in requirements}):
+                raise RuntimeError("本次完成需求与入池登记不一致")
+            if not ancestor(workspace(state), pooled["tip"], versions["root"]):
+                raise RuntimeError("最终根版本未包含入池文档提交")
+            if current["quality"].get("supplement") is not None:
+                requirement_adoption(run_dir, current, batch[0])
+            for identifier in batch:
+                merged = _read(_path(run_dir, f"steps/requirements/{identifier}/18.json"))
+                if merged.get("status") != "success" or merged.get("requirement_id") != identifier:
+                    raise RuntimeError(f"需求 {identifier} 缺少成功合并结果")
+                tips = {repo["name"]: repo["tip_sha"] for repo in merged["repositories"]}
+                if set(tips) != set(versions) or len(tips) != len(merged["repositories"]):
+                    raise RuntimeError("需求合并仓库与当前仓库不一致")
+                for name, tip in tips.items():
+                    merged_tips[name].add(tip)
+            completed_ids.extend(batch)
+        elif (not report.ready_to_complete and check_coverage) or batch:
+            raise RuntimeError("本次审计尚未满足直接完成条件")
+        elif not supplemented and versions != audit["versions"]:
+            raise RuntimeError("本次审计未覆盖当前版本")
+    if completed_ids:
         for name, path in repositories(state):
             if versions[name] not in merged_tips[name] or any(
                 not ancestor(path, tip, versions[name]) for tip in merged_tips[name]
             ):
                 raise RuntimeError("最终版本与本批需求合并结果不一致")
-    elif (not report.ready_to_complete and coverage_report is None) or batch:
-        raise RuntimeError("本次审计尚未满足直接完成条件")
-    elif versions != audit["versions"]:
-        raise RuntimeError("本次审计未覆盖当前版本")
     return {"data": {"versions": versions, "audit_round": _round(state),
-                     "completed_requirement_ids": batch,
+                     "completed_requirement_ids": completed_ids,
+                     **({"supplement_input": batch_metadata(state)["input"],
+                         "coverage": f"{_batch_directory(state)}/coverage.json"} if supplemented else {}),
                      "summary": "本次完整审计及纳入需求处理完成",
-                     "limitations": audit["limitations"],
-                     "dispositions": routed["decisions"]}, "summary": "一次审计及本批修复已完成"}
+                     "limitations": limitations, "dispositions": dispositions},
+            "summary": "一次审计及正式修复批次已完成"}
+
+
+def _has_supplement_exchange(report: str, intent: dict[str, Any], *, require_reply: bool = True) -> bool:
+    """新版本指令和其后的 Agent 回复均须位于保存的旧报告之后。"""
+    messages = json.loads(report)
+    anchor = json.loads(intent["anchor"])
+    if not isinstance(messages, list) or not isinstance(anchor, list) or messages[:len(anchor)] != anchor:
+        raise RuntimeError("补证会话与保存的历史锚点不一致")
+    instructed = False
+    for row in messages[len(anchor):]:
+        content = row.get("content", "")
+        if row.get("role") == "assistant" and (content == intent["prompt"] or content.startswith(intent["prompt"] + "\n\n负责人补充：\n")):
+            instructed = True
+        elif instructed and row.get("role") == "user" and content.strip():
+            return True
+    return instructed and not require_reply
+
+
+def _local_completion(run_dir: Path, state: dict[str, Any], *, coverage_report: str | None = None) -> dict[str, Any]:
+    prepared = _completion_handoff(run_dir, state, check_coverage=coverage_report is None)
+    versions = prepared["data"]["versions"]
+    if state["quality"].get("supplement") is not None:
+        evidence_path = _completion_path(run_dir, state, "coverage")
+        if coverage_report is None or not evidence_path.exists():
+            raise RuntimeError("补充批完成后必须沿原会话提供当前版本补证")
+        evidence = _read(evidence_path)
+        intent = _read(_completion_path(run_dir, state, "coverage-intent"))
+        key = f"quality_audit_r{_round(state):04d}"
+        if (evidence.get("versions") != versions or evidence.get("report") != coverage_report
+                or evidence.get("session_id") != state.get("claude_sessions", {}).get(key)
+                or evidence.get("input") != batch_metadata(state)["input"]
+                or intent.get("versions") != versions or intent.get("session_id") != evidence.get("session_id")
+                or evidence.get("anchor_sha256") != hashlib.sha256(intent["anchor"].encode()).hexdigest()
+                or not coverage_report or not _has_supplement_exchange(coverage_report, intent)):
+            raise RuntimeError("补充批补证与当前版本/session 不一致")
+    return prepared
+
+
+async def _finish_supplement(run_dir: Path, state: dict[str, Any], message: ResumeMessage | None) -> dict[str, Any]:
+    versions = _completion_handoff(run_dir, state, check_coverage=False)["data"]["versions"]
+    supplied = _supplement_input(run_dir, state)
+    key = f"quality_audit_r{_round(state):04d}"
+    if state.get("claude_sessions", {}).get(key) != supplied["audit_session_id"]:
+        raise RuntimeError("补充批必须沿原审计 session 补证")
+    intent_path = _completion_path(run_dir, state, "coverage-intent")
+    evidence_path = _completion_path(run_dir, state, "coverage")
+    spec = AgentDecisionLoopSpec(key=key, state_key=key, skill_name="product-experience-audit",
+                                 max_decision_rounds=32, max_turns=9999, task="quality_audit",
+                                 decision_system_prompt="沿原审计会话补充当前版本证据")
+    original = _original(state)
+    audit = _prior(run_dir, original, "audit")
+    routed = _prior(run_dir, original, "route")
+    prompt = (
+        "正式补充需求已经经过正常开发、提交及合并。沿本 session 为当前版本补齐必要证据，"
+        "保留原审计、候选处置和原批完成事实，不重跑完整审计、不重做已经完成的修复或业务验收。"
+        "旧版本后续回复不代表当前版本通过；读取正式需求与现有验证交接，只补剩余原场景缺口。"
+        "不修改产品代码、文档、Backlog、Git 或历史结果；仍缺必要条件时如实报告。\n"
+        + json.dumps({"当前版本": versions, "原覆盖": audit["coverage"], "原必要条件": routed["required_inputs"],
+                      "补充交接": supplied, "补充需求": batch_metadata(state)["batch_requirement_ids"]}, ensure_ascii=False)
+    )
+    if not intent_path.exists():
+        anchor = agent_conversation_report(run_dir, state, spec)
+        _write(intent_path, {"versions": versions, "session_id": supplied["audit_session_id"],
+                             "anchor": anchor, "prompt": prompt})
+    intent = _read(intent_path)
+    if intent["versions"] != versions or intent["session_id"] != supplied["audit_session_id"]:
+        raise RuntimeError("补充批补证版本或 session 已变化，不能复用旧证据")
+    if evidence_path.exists():
+        if message:
+            raise RuntimeError("当前版本补证已保存，不能重复投递消息")
+        return _complete(run_dir, state, coverage_report=_read(evidence_path)["report"])
+    delivery = message
+    if not _has_supplement_exchange(agent_conversation_report(run_dir, state, spec), intent, require_reply=False):
+        # 使用既有消息入口，先收齐旧回复裁决，再发新版本指令；旧的一次性批准不重发。
+        delivery = ResumeMessage(key, intent["prompt"] + ("\n\n负责人补充：\n" + message.content if message else ""))
+    try:
+        raw, _ = await _task(run_dir, state, key, "quality_audit", intent["prompt"],
+                             "仅对当前版本补齐剩余必要证据，不把旧报告当作新版本通过。",
+                             skill="product-experience-audit", resume_message=delivery, continue_from_report=intent["anchor"],
+                             completion_verifier=lambda: None if _has_supplement_exchange(
+                                 agent_conversation_report(run_dir, state, spec), intent) else intent["prompt"])
+    finally:
+        if message is not None and delivery is not message and delivery.consumed:
+            message.consumed = True
+    if not raw or not _has_supplement_exchange(raw, intent):
+        raise RuntimeError("尚无当前版本的新会话补证")
+    if main_versions(state) != versions or state.get("claude_sessions", {}).get(key) != intent["session_id"]:
+        raise RuntimeError("补证期间产品版本或 session 发生变化")
+    _write(evidence_path, {"versions": versions, "session_id": intent["session_id"], "report": raw,
+                           "anchor_sha256": hashlib.sha256(intent["anchor"].encode()).hexdigest(),
+                           "input": batch_metadata(state)["input"]})
+    return _complete(run_dir, state, coverage_report=raw)
 
 
 async def _finish(run_dir: Path, state: dict[str, Any], message: ResumeMessage | None) -> dict[str, Any]:
-    if remote_sync_enabled(state) and _path(run_dir, "quality/local-completion.json").exists():
+    if state["quality"].get("supplement") is not None:
+        return await _finish_supplement(run_dir, state, message)
+    if not state["quality"].get("local_only", False) and remote_sync_enabled(state) and _path(run_dir, "quality/local-completion.json").exists():
         if message:
             raise RuntimeError("本地质量核验已完成，当前只恢复远程同步，不能投递补证消息")
         return _complete(run_dir, state)
@@ -754,16 +1026,32 @@ async def run_node(run_dir: Path, state: dict[str, Any], *, resume_message: Resu
     return {"register": _register, "select_requirement": _select}[node](run_dir, state)
 
 
+def requirement_adoption(run_dir: Path, state: dict[str, Any], identifier: str) -> dict[str, Any] | None:
+    supplied = _supplement_input(run_dir, state)
+    if supplied is None or identifier not in batch_metadata(state)["batch_requirement_ids"]:
+        return None
+    pooled = _prior(run_dir, state, "pool")
+    plan = PoolPlan.model_validate(pooled["plan"])
+    if (len(plan.requirements) != 1 or plan.requirements[0].requirement_id != identifier
+            or pooled.get("adoption_requirement_id") != identifier
+            or pooled.get("adoption_input") != batch_metadata(state)["input"]):
+        raise RuntimeError("补充批缺少唯一正式接管需求")
+    return {**supplied["repositories"], "root": {"head": pooled["tip"], "changes": []}}
+
+
 def requirement_evidence(run_dir: Path, state: dict[str, Any]) -> str:
     if state.get("workflow") != WORKFLOW:
         return ""
     identifier = state.get("active_requirement")
+    if identifier not in batch_metadata(state)["batch_requirement_ids"]:
+        state = _original(state)
     pooled = _prior(run_dir, state, "pool")
     plan = PoolPlan.model_validate(pooled["plan"])
     binding = next((row for row in plan.requirements if row.requirement_id == identifier), None)
     if binding is None:
         raise RuntimeError("活动质量需求缺少原审计候选归属")
-    audit = _prior(run_dir, state, "audit")
+    audit = _batch_audit(run_dir, state)
+    supplement = _supplement_input(run_dir, state)
     owners = {row.candidate_id: row.requirement_id for row in plan.regression_owners}
     routing = _prior(run_dir, state, "route")
     decisions = {row["candidate_id"]: row for row in routing["decisions"]}
@@ -786,6 +1074,9 @@ def requirement_evidence(run_dir: Path, state: dict[str, Any]) -> str:
         "交互目标重走原任务，共享变化检查相关消费者。不以隐藏关键数据、删除状态、减少业务记录或放宽权限制造简洁。"
         "本需求负责完整回归的候选须在必要前置项完成后证明完整任务；其它候选验证本需求承接的结果，不冒充完整修复。"
         "保留相称证据于活动TRD和正常回复，不重跑无关完整验收。\n"
+        + ("本需求接管已存在的实现：正常编写活动TRD，复核交接并只补受影响的必要验证与剩余事项；不重做业务、不为完成步骤制造改动，不把已有实现或验证冒充本次执行。\n"
+           + json.dumps({key: supplement[key] for key in ("implementation", "validation", "remaining", "repositories", "handoff_source", "owner_decision")}, ensure_ascii=False)
+           + "\n" if supplement else "")
         + json.dumps({"原发现": candidates, "受阻任务": blocked_tasks,
                       "完整回归归属": related}, ensure_ascii=False)
     )

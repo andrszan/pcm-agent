@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import os
+import stat
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -71,6 +73,70 @@ def check_operations(path: Path) -> None:
 
 def main_versions(state: dict[str, Any]) -> dict[str, str]:
     return {name: clean_repository(path, "main") for name, path in repositories(state)}
+
+
+def validate_adoption(path: Path, record: dict[str, Any], *, branches: tuple[str, ...] = ("main",)) -> str:
+    """只接管清单中当前未暂存的普通文件，不改变一般 clean main 合同。"""
+    if path.is_symlink() or not path.is_dir() or git(path, "rev-parse", "--show-toplevel") != str(path):
+        raise RuntimeError("接管目标不是独立 Git 仓库")
+    check_operations(path)
+    head = record["head"]
+    if (git(path, "branch", "--show-current") not in branches
+            or git(path, "rev-parse", "HEAD") != head or branch_tip(path, "main") != head):
+        raise RuntimeError("接管仓库分支或 HEAD 已漂移")
+    if git(path, "diff", "--cached", "--ita-visible-in-index", "--name-only", "-z"):
+        raise RuntimeError("接管不允许 staged 内容")
+    # 名称集合先比较，避免读取任何未授权文件（包括 ignored 配置）。
+    changes = record["changes"]
+    expected = {row["path"] for row in changes}
+    if len(expected) != len(changes):
+        raise RuntimeError("接管路径重复")
+    for relative in expected:
+        parts = Path(relative).parts
+        if (not parts or Path(relative).is_absolute() or Path(relative).as_posix() != relative
+                or any(part in {".", "..", ".git"} for part in parts)
+                or any(char in relative for char in "*?[]\\\x00\n\r")):
+            raise RuntimeError("接管路径必须是明确的仓库相对文件路径")
+        target = path / relative
+        if any(item.is_symlink() for item in (target, *target.parents) if item != path.parent):
+            raise RuntimeError("接管路径不能经过符号链接")
+    if changed_paths(path, head) != expected:
+        raise RuntimeError("接管变更集合与授权不一致")
+    flags = git(path, "ls-files", "-v", "-z") or ""
+    if any(row and (row[0].islower() or row[0] == "S") for row in flags.split("\0")):
+        raise RuntimeError("接管不允许 assume-unchanged 或 skip-worktree 隐藏变更")
+    for row in changes:
+        relative = row["path"]
+        target = path / relative
+        entry = git(path, "--literal-pathspecs", "ls-tree", "-z", head, "--", relative) or ""
+        base = None
+        base_mode = None
+        if entry:
+            metadata, found = entry.rstrip("\0").split("\t", 1)
+            base_mode, kind, oid = metadata.split()
+            if found != relative or kind != "blob" or base_mode not in {"100644", "100755"}:
+                raise RuntimeError("接管基线不是普通文件")
+            data = subprocess.check_output(
+                ["git", "-C", str(path), "cat-file", "blob", oid], timeout=120,
+                env={key: value for key, value in os.environ.items()
+                     if not key.startswith("GIT_") and key.upper() != "PCM_GITLAB_TOKEN"},
+            )
+            base = hashlib.sha256(data).hexdigest()
+        if (row["base_sha256"], row["base_mode"]) != (base, base_mode):
+            raise RuntimeError("接管文件基线指纹不一致")
+        if target.exists():
+            mode = target.lstat().st_mode
+            if not stat.S_ISREG(mode) or stat.S_IMODE(mode) not in {0o644, 0o755}:
+                raise RuntimeError("接管文件类型或模式不合法")
+            current = hashlib.sha256(target.read_bytes()).hexdigest()
+            current_mode = "100755" if mode & stat.S_IXUSR else "100644"
+            change = "M" if entry else "A"
+        else:
+            current = current_mode = None
+            change = "D" if entry else None
+        if (row["change"], row["sha256"], row["mode"]) != (change, current, current_mode):
+            raise RuntimeError("接管文件变更类型、SHA256 或模式不一致")
+    return head
 
 
 def branch_tip(path: Path, branch: str) -> str | None:

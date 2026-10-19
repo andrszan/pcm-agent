@@ -135,6 +135,28 @@ class QualityAgentHandoffTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.agent.await_count, 2)
         self.parse.assert_awaited_once()
 
+    async def test_new_version_uses_current_report_anchor_not_original_audit(self) -> None:
+        self.agent.return_value = self.result("原审计交接", skill="product-experience-audit")
+        self.parse.return_value = self.report()
+        original, _ = await self.audit()
+        self.agent.return_value = self.result("旧版本后续补证仍发现问题", skill="product-experience-audit")
+        previous, _ = await workflow._task(
+            self.run_dir, self.state, "quality_audit_r0001", "quality_audit", "旧版本定向补证", "保留发现",
+            skill="product-experience-audit", continue_from_report=original,
+        )
+        self.assertNotEqual(previous, original)
+        self.assertEqual(self.agent.await_count, 2)
+        self.agent.return_value = self.result("当前已合并版本补证完成", skill="product-experience-audit")
+        current, _ = await workflow._task(
+            self.run_dir, self.state, "quality_audit_r0001", "quality_audit", "当前版本定向补证", "验证当前版本",
+            skill="product-experience-audit", continue_from_report=previous,
+        )
+        self.assertEqual(self.agent.await_count, 3)
+        self.assertEqual(self.agent.await_args.kwargs["resume_session_id"], "quality-session")
+        self.assertEqual(self.state["claude_sessions"], {"quality_audit_r0001": "quality-session"})
+        self.assertIn("当前已合并版本补证完成", [row["content"] for row in json.loads(current)])
+        self.parse.assert_awaited_once()
+
     async def test_plain_task_completes_without_skill_and_returns_saved_reply(self) -> None:
         self.agent.return_value = self.result("准备完成\n保留完整交接")
         raw, parsed = await workflow._task(
@@ -291,7 +313,7 @@ class QualityAgentHandoffTests(unittest.IsolatedAsyncioTestCase):
             audit["coverage"][0].update(outcome="covered", reason="保存可用", blocking_candidates=[])
             route["decisions"][0].update(action="exclude", reason="非阻断偏好")
             self.parse.return_value = RoutingReport.model_validate(route)
-        prior_artifacts = (("audit", audit), ("route", route), ("pool", {"plan": plan}), ("register", {"new_ids": ["BR-002"]}))
+        prior_artifacts = (("audit", audit), ("route", route), ("pool", {"plan": plan, "tip": "fixed"}), ("register", {"new_ids": ["BR-002"]}))
         for name, data in prior_artifacts if with_repairs else prior_artifacts[:1]:
             workflow._write(self.run_dir / f"quality/rounds/0001/{name}.json", {
                 "node": f"quality:{name}", "round": 1, "status": "success", "data": data,

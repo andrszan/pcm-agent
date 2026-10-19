@@ -41,6 +41,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--local-only", action="store_true", help="新质量运行只做本地收尾，不继承来源的远程同步")
     parser.add_argument("--node", choices=QUALITY_NODES)
     parser.add_argument("--resume-message-file", type=Path)
+    parser.add_argument("--supplement-file", type=Path, help="在原质量收口登记补证发现及精确既有修复接管")
     parser.add_argument("--coordination-locks", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if args.source_run and not args.run_id:
@@ -49,6 +50,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--resume 不能与 --run-id 同时使用")
     if args.resume and args.local_only:
         parser.error("--local-only 只能用于新质量运行；恢复沿用已保存模式")
+    if args.supplement_file and (not args.resume or args.node or args.resume_message_file):
+        parser.error("--supplement-file 仅用于 --resume，不能与 --node 或 --resume-message-file 混用")
     if (args.node or args.resume_message_file) and not args.resume:
         parser.error("--node 和 --resume-message-file 只能用于 --resume")
     return args
@@ -197,6 +200,8 @@ def _locked(args, run_id, run_dir, locks, snapshot) -> int:
         if args.node is not None and state.get("current_node") != args.node:
             raise ValueError("--node 只能执行当前质量节点")
         attach_product(run_all.COORDINATION_ROOT, run_id, state, locks)
+        if getattr(args, "supplement_file", None) is not None:
+            workflow.begin_supplement(run_dir, state, args.supplement_file)
     if args.resume_message_file is not None:
         step = _numeric_step(state)
         if step is not None:

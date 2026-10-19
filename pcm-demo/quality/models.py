@@ -128,6 +128,46 @@ def validate_routing(report: RoutingReport, audit: dict, requirements: list[dict
         raise ValueError(f"没有可推进的修复且未满足收口，材料或本地现场需纠正：{report.summary}")
 
 
+class SourceReference(Document):
+    path: Text
+    sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+    quote: Text
+
+
+class FindingSource(Document):
+    message_index: Annotated[int, Field(ge=0, strict=True)]
+    sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+    quote: Text
+
+
+class AdoptedChange(Document):
+    path: Text
+    change: Literal["A", "M", "D"]
+    sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")] | None
+    mode: Literal["100644", "100755"] | None
+    base_sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")] | None
+    base_mode: Literal["100644", "100755"] | None
+
+
+class AdoptedRepository(Document):
+    head: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")]
+    changes: list[AdoptedChange]
+
+
+class SupplementInput(Document):
+    run_id: Text
+    product_path: Text
+    audit_session_id: Text
+    finding_source: FindingSource
+    owner_decision: SourceReference
+    handoff_source: SourceReference
+    findings: list[Finding] = Field(min_length=1)
+    implementation: Text
+    validation: list[Text] = Field(min_length=1)
+    remaining: list[Text]
+    repositories: dict[str, AdoptedRepository]
+
+
 class RequirementBinding(Document):
     requirement_id: Text
     candidate_ids: list[Text] = Field(min_length=1)
