@@ -41,7 +41,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--local-only", action="store_true", help="新质量运行只做本地收尾，不继承来源的远程同步")
     parser.add_argument("--node", choices=QUALITY_NODES)
     parser.add_argument("--resume-message-file", type=Path)
-    parser.add_argument("--supplement-file", type=Path, help="在原质量收口登记补证发现及精确既有修复接管")
+    parser.add_argument("--supplement-file", type=Path, help="登记后续补充批（clean 开发或 dirty 接管）；已成功收口须附明确 correction")
     parser.add_argument("--coordination-locks", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if args.source_run and not args.run_id:

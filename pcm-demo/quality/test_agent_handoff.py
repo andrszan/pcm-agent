@@ -351,7 +351,10 @@ class QualityAgentHandoffTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("恢复备份", self.agent.await_args.args[0])
             self.assertIn("隔离恢复环境", self.agent.await_args.args[0])
             self.agent.return_value = self.result("隔离环境已可用，仅补恢复备份：实际恢复与查询结果一致", skill="product-experience-audit")
-            completed = AgentDecision(verdict="completed", answer="", reason="独立必要缺口已补证", required_inputs=[])
+            from common.decision import PhaseCompletionDecision
+            completed = PhaseCompletionDecision(verdict="completed", answer="", reason="独立必要缺口已补证", required_inputs=[],
+                                                phase_completion_allowed=True)
+            self.parse.return_value = self.report()
             self.decision.return_value = (completed.model_dump(), 1, completed.model_dump_json())
             if with_message:
                 message = self.base / "resume.txt"
@@ -369,7 +372,7 @@ class QualityAgentHandoffTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(registry, json.dumps(self.state["requirement_registry"], sort_keys=True))
         self.assertEqual(artifacts, {p: p.read_bytes() for p in artifacts})
         if not with_repairs:
-            self.parse.assert_awaited_once()
+            self.assertEqual(self.parse.await_count, 2)  # 分流与当前事实提取；阶段批准仍来自原负责人。
             completed_result = json.loads((self.run_dir / "quality/complete.json").read_text())
             self.assertEqual(completed_result["data"]["dispositions"], route["decisions"])
 

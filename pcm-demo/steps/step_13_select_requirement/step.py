@@ -543,22 +543,24 @@ def _run(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
     if position != (STEP, STEP, selection_node_for(state)):
         raise RuntimeError("运行状态不位于需求选择锚点")
 
-    if state.get("workflow") == "product_quality" and state.get("quality", {}).get("supplement") is not None:
-        from quality.workflow import batch_metadata, requirement_adoption
+    if state.get("workflow") == "product_quality" and any(
+        key in state.get("quality", {}) for key in ("supplement", "supplements")
+    ):
+        from quality.workflow import batch_metadata, requirement_adoption, requirement_baseline
         identifier = _select(context["requirements"])["id"] if context["mode"] == "fresh" else context["requirement_id"]
         adoption = requirement_adoption(run_dir, state, identifier)
-        if adoption is None:
-            raise RuntimeError("补充需求缺少明确接管归属")
+        baseline = requirement_baseline(run_dir, state, identifier)
         branch = f"req/{identifier.lower()}"
         for repository in context["repositories"]:
-            record = adoption[repository["name"]]
-            repository["adoption"] = record
+            name = repository["name"]
+            if adoption is not None:
+                repository["adoption"] = adoption[name]
             facts = _repository_facts(repository, branch)
-            if facts["target"] not in (None, record["head"]):
-                raise RuntimeError("接管目标分支已有未知提交")
-            if context["mode"] == "recovery" and context["bases"][repository["name"]] != record["head"]:
-                raise RuntimeError("接管 cycle 与已批准基线不一致")
-        if context["mode"] == "recovery" and state["requirement_cycle"].get("adoption_input") != batch_metadata(state)["input"]:
+            if facts["main"] != baseline[name] or facts["head"] != baseline[name] or facts["target"] not in (None, baseline[name]):
+                raise RuntimeError("质量需求仓库偏离已批准 pool/18 基线")
+            if context["mode"] == "recovery" and context["bases"][name] != baseline[name]:
+                raise RuntimeError("质量 cycle 与已批准基线不一致")
+        if adoption is not None and context["mode"] == "recovery" and state["requirement_cycle"].get("adoption_input") != batch_metadata(state)["input"]:
             raise RuntimeError("接管 cycle 缺少补充输入引用")
 
     if context["mode"] == "fresh":

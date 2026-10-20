@@ -42,6 +42,18 @@ def pool_plan() -> PoolPlan:
                                     "regression_owners": [{"candidate_id": "Q001-C001", "requirement_id": "BR-002"}]})
 
 
+def final_report(run_dir, state, prompt, intent, facts=None):
+    from common.decision import PhaseCompletionDecision
+    decision = PhaseCompletionDecision(verdict="completed", answer="", reason="当前必要验收均满足", required_inputs=[],
+                                       phase_completion_allowed=True)
+    messages = json.loads(intent["anchor"]) + [
+        {"role": "assistant", "content": prompt}, {"role": "user", "content": "当前合并版本已补齐必要证据"},
+        {"role": "assistant", "content": decision.model_dump_json()},
+    ]
+    flow._write(run_dir / "conversations/quality_audit_r0001.json", {"messages": messages})
+    return json.dumps(messages, ensure_ascii=False), facts or audit_report()
+
+
 class QualityWorkflowTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
@@ -87,6 +99,19 @@ class QualityWorkflowTests(unittest.TestCase):
             if key == "quality_prepare":
                 return "全部任务、开发身份和端口已准备，数据可复位", None
             if key.startswith("quality_audit_"):
+                if kwargs.get("phase_intent"):
+                    routed = flow._prior(run_dir, state, "route")
+                    if routed["required_inputs"]:
+                        raise flow.QualityBlocked(routed["summary"], routed["required_inputs"])
+                    gaps = [row["user_task"] for row in flow._prior(run_dir, state, "audit")["coverage"] if row["outcome"] == "gap"]
+                    if gaps:
+                        raise RuntimeError("必要覆盖尚缺：" + "、".join(gaps))
+                    return final_report(run_dir, state, prompt, kwargs["phase_intent"])
+                state.setdefault("claude_sessions", {})[key] = "audit-session"
+                state.setdefault("decision_conversations", {})[key] = {"path": f"conversations/{key}.json"}
+                flow._write(run_dir / f"conversations/{key}.json", {"messages": [
+                    {"role": "system", "content": "调查交接职责"}, {"role": "assistant", "content": prompt},
+                    {"role": "user", "content": "已执行审计"}]})
                 return "已执行审计", audit_report(self.defect, self.blocked)
             if key.startswith("quality_pool_commit_"):
                 git(self.root, "add", "docs/backlog/backlog.md")
@@ -377,7 +402,7 @@ class QualityWorkflowTests(unittest.TestCase):
     def test_repaired_batch_completes_after_one_audit(self):
         self.finish_repair_batch()
         self.reach("quality:completed")
-        self.assertEqual([key for key in self.calls if key.startswith("quality_audit_")], ["quality_audit_r0001"])
+        self.assertEqual([key for key in self.calls if key.startswith("quality_audit_")], ["quality_audit_r0001", "quality_audit_r0001"])
         self.assertNotIn("max_rounds", self.state["quality"])
         self.assertTrue(flow.is_completed(self.state))
 
@@ -430,7 +455,7 @@ class QualityWorkflowTests(unittest.TestCase):
         self.finish_repair_batch()
         self.reach("quality:completed")
         self.assertTrue(flow.is_completed(self.state))
-        self.assertEqual([key for key in self.calls if key.startswith("quality_audit_")], ["quality_audit_r0001"])
+        self.assertEqual([key for key in self.calls if key.startswith("quality_audit_")], ["quality_audit_r0001", "quality_audit_r0001"])
 
     def test_later_batches_handoff_structured_dispositions_without_conversation_wrappers(self):
         self.defect = True
@@ -519,7 +544,7 @@ class QualityWorkflowTests(unittest.TestCase):
     def test_completion_resume_does_not_restart_audit(self):
         self.finish_repair_batch()
         self.reach("quality:complete")
-        with patch.object(flow, "_replace_state", side_effect=OSError("状态写入中断")):
+        with patch.object(flow, "_advance", side_effect=OSError("状态写入中断")):
             with self.assertRaises(OSError):
                 self.execute()
         self.state = read_state(self.run)
@@ -527,6 +552,44 @@ class QualityWorkflowTests(unittest.TestCase):
         self.execute()
         self.assertTrue(flow.is_completed(self.state))
         self.assertEqual(before, self.calls)
+
+    def test_original_completion_requires_current_explicit_phase_decision(self):
+        self.reach("quality:complete")
+        async def legacy(*args, **kwargs):
+            raw, facts = final_report(args[0], args[1], args[4], kwargs["phase_intent"])
+            messages = json.loads(raw)
+            decision = json.loads(messages[-1]["content"])
+            decision.pop("phase_completion_allowed")
+            messages[-1]["content"] = json.dumps(decision)
+            return json.dumps(messages), facts
+        with patch.object(flow, "_task", side_effect=legacy), self.assertRaisesRegex(RuntimeError, "阶段"):
+            self.execute()
+        self.assertFalse((self.run / "quality/coverage.json").exists())
+        self.assertFalse((self.run / "quality/complete.json").exists())
+
+    def test_current_facts_replace_history_but_cannot_hide_explicit_gaps(self):
+        self.reach("quality:complete")
+        audit_path = self.run / "quality/rounds/0001/audit.json"
+        audit = flow._read(audit_path)
+        audit["data"]["limitations"] = ["旧版本，尚待提交，未调用"]
+        flow._write(audit_path, audit)
+        history = audit_path.read_bytes()
+        for outcome in ("gap", "blocked_by_defect"):
+            facts = audit_report(True, outcome == "blocked_by_defect")
+            facts.coverage[0].outcome = outcome
+            with patch.object(flow, "_task", side_effect=lambda *args, **kw: final_report(
+                args[0], args[1], args[4], kw["phase_intent"], facts)), self.assertRaisesRegex(ValueError, "缺口"):
+                self.execute()
+            self.assertFalse((self.run / "quality/coverage.json").exists())
+        facts = audit_report()
+        facts.limitations = ["当前正式范围外的观察"]
+        with patch.object(flow, "_task", side_effect=lambda *args, **kw: final_report(
+            args[0], args[1], args[4], kw["phase_intent"], facts)):
+            self.execute()
+        result = flow._read(self.run / "quality/complete.json")
+        self.assertEqual(result["data"]["limitations"], facts.limitations)
+        self.assertEqual(result["data"]["current_facts"], facts.model_dump())
+        self.assertEqual(audit_path.read_bytes(), history)
 
     def test_pending_repair_cannot_complete(self):
         self.defect = True
@@ -733,7 +796,7 @@ class QualityWorkflowTests(unittest.TestCase):
         sync.assert_called_once_with(self.run, self.state, self.run / "quality/push.json", targets=versions)
         self.assertTrue(flow.is_completed(self.state))
         self.assertEqual(self.state["requirement_registry"], registry)
-        self.assertEqual(self.calls, calls)
+        self.assertEqual(self.calls, calls + ["quality_audit_r0001"])
 
     def test_remote_completion_with_repairs(self):
         self.check_remote_completion(repair=True)
@@ -752,7 +815,7 @@ class QualityWorkflowTests(unittest.TestCase):
         self.reach("quality:complete")
         registry = copy.deepcopy(self.state["requirement_registry"])
         versions = flow.main_versions(self.state)
-        with patch.object(flow, "_task", return_value=("已补齐恢复备份证据", None)) as task, \
+        with patch.object(flow, "_task", side_effect=lambda *args, **kw: final_report(args[0], args[1], args[4], kw["phase_intent"])) as task, \
              patch.object(flow, "sync_repositories", side_effect=RuntimeError("root 网络失败")) as sync:
             with self.assertRaises(RuntimeError) as caught:
                 self.execute()
@@ -763,10 +826,11 @@ class QualityWorkflowTests(unittest.TestCase):
             task.assert_awaited_once()
             sync.assert_called_once()
         self.state = read_state(self.run)
+        local_bytes = (self.run / "quality/local-completion.json").read_bytes()
         with patch.object(flow, "_task", side_effect=AssertionError("不能重跑补证")), \
-             patch.object(flow, "_local_completion", side_effect=AssertionError("应复用本地成功结果")), \
              patch.object(flow, "sync_repositories", return_value=[]) as sync:
             self.execute()
+        self.assertEqual((self.run / "quality/local-completion.json").read_bytes(), local_bytes)
         sync.assert_called_once_with(self.run, self.state, self.run / "quality/push.json", targets=versions)
         self.assertTrue(flow.is_completed(self.state))
         self.assertEqual(self.state["requirement_registry"], registry)
@@ -810,6 +874,21 @@ class QualityWorkflowTests(unittest.TestCase):
 
 
 class QualityModelTests(unittest.TestCase):
+    def test_phase_schema_is_opt_in_and_old_decisions_remain_readable(self):
+        from common.decision import AgentDecision, PhaseCompletionDecision, parse_agent_decision
+        from pydantic import ValidationError
+        old = {"verdict": "completed", "answer": "", "reason": "调查交接完成", "required_inputs": []}
+        self.assertEqual(set(AgentDecision.model_json_schema()["properties"]), set(old))
+        self.assertEqual(parse_agent_decision(json.dumps(old)).model_dump(), old)
+        for allowed in (True, False, None):
+            value = {**old, "phase_completion_allowed": allowed}
+            self.assertEqual(parse_agent_decision(json.dumps(value)).model_dump(), value)
+        for allowed in ("true", 1):
+            with self.assertRaises(ValidationError):
+                PhaseCompletionDecision.model_validate({**old, "phase_completion_allowed": allowed})
+        with self.assertRaises(ValidationError):
+            PhaseCompletionDecision.model_validate(old)
+
     def test_blocked_tasks_must_point_to_real_finding(self):
         data = audit_report(True, True).model_dump()
         data["coverage"][0]["blocking_findings"] = [9]

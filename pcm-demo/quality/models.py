@@ -154,7 +154,25 @@ class AdoptedRepository(Document):
     changes: list[AdoptedChange]
 
 
+class ArtifactReference(Document):
+    path: Text
+    sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+
+
+class CompletionCorrection(Document):
+    complete: ArtifactReference
+    coverage: ArtifactReference
+    versions: dict[str, Annotated[str, Field(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")]]
+    last_reply: FindingSource
+    approval_source: SourceReference
+    included_findings: list[Annotated[int, Field(ge=0, strict=True)]] = Field(min_length=1)
+    reason: Text
+
+
 class SupplementInput(Document):
+    version: Literal[1] = 1
+    mode: Literal["dirty", "clean"] = "dirty"
+    correction: CompletionCorrection | None = None
     run_id: Text
     product_path: Text
     audit_session_id: Text
@@ -162,8 +180,8 @@ class SupplementInput(Document):
     owner_decision: SourceReference
     handoff_source: SourceReference
     findings: list[Finding] = Field(min_length=1)
-    implementation: Text
-    validation: list[Text] = Field(min_length=1)
+    implementation: str = ""
+    validation: list[Text] = Field(default_factory=list)
     remaining: list[Text]
     repositories: dict[str, AdoptedRepository]
 

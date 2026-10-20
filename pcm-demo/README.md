@@ -133,15 +133,20 @@ uv run python run_step.py --step <13-18> --run-id <quality-run-id>
 
 审计与入池从完整有序对话提取当前有效成果，后续局部补证不替代整份报告。分流只依据已保存审计材料作负责人处置；有必要覆盖缺口时不能最终收口。公共 Responses API 请求使用 `timeout=None`，允许长时间推理。
 
-当前 Backlog 的正式 ID 必须能与来源完成记录对应；标题、旧指纹和当前 main 的正常变化不要求回写历史。新增正式需求在本周期单独登记，原发现回归属于提交合并前的开发完成条件；本批需求全部完成后结束阶段二。
+当前 Backlog 的正式 ID 必须能与来源完成记录对应；标题、旧指纹和当前 main 的正常变化不要求回写历史。新增正式需求在本周期单独登记，原发现回归属于提交合并前的开发完成条件；本批需求全部完成后进入最终阶段裁决。
 
-每个质量 run 执行一次完整审计；中断恢复续接原任务。准备、审计和入池的 Agent 恢复消息通过 `--resume-message-file` 传入，适用边界与下节一致。分流直接调用负责人 Responses API，使用 `--resume` 重试请求。收口时仍有独立必要缺口，则在 `quality:complete` 沿原审计会话定向补证；条件缺失保持阻塞，补齐后可用同一 run 恢复并传入原会话消息，不重跑完整审计或已完成需求。
+每个质量 run 执行一次完整审计；中断恢复续接原任务。准备、审计和入池的 Agent 恢复消息通过 `--resume-message-file` 传入，适用边界与下节一致。分流直接调用负责人 Responses API，使用 `--resume` 重试请求。`quality:complete` 沿原审计 session 核对当前版本，只补真实尚未通过的必要验收，不重跑已完成需求或已验证场景。普通原批与补充批都必须取得当前版本指令之后的有效回复，以及原负责人 `verdict=completed`、`phase_completion_allowed=true` 的明确裁决，才能生成成功 coverage/complete。仅调查交接完成、缺字段、`false` 或 `null` 均不批准阶段收口；结构化当前覆盖仍有必要 `gap` 或 `blocked_by_defect` 也不能成功。其它步骤仍使用原决定 schema，历史 system 和旧消息不改写。
 
 在新建或恢复阶段一的命令中追加 `--with-quality`，即可在阶段一成功后自动启动独立的 `<阶段一-run-id>-quality`；同源质量 run 已存在时恢复，不重复创建。后续另一个质量周期以最近完成的质量 run 为来源。质量运行有自己的 run 锁，与前序共用产品互斥边界，不重新认领产品或重新分配端口。
 
-#### 在原质量收口追加既有修复
+#### 在原质量运行追加需求或更正误收口
 
-当原审计的定向补证发现了新问题，且负责人已明确批准接管一组尚未提交的修复时，可在同一质量 run 正式追加登记，再复用第 13～18 步。首次入口仅接受 `quality:complete`、全部正式需求已完成、没有活动 cycle，且尚无成功收口或已完成本地收口待推送的记录。
+当定向补证发现新问题且已在授权范围内明确批准纳入时，可在同一质量 run 登记后续批，再复用第 13～18 步。入口要求全部正式需求已完成、没有活动 cycle。未成功收口时从 `quality:complete` 追加；已有成功 complete 时，必须通过同一个输入中的 `correction` 明确更正，不能直接把成功状态改回未完成。旧报告、旧成功需求、原 session 和计数均保留。
+
+补充输入有两种模式：
+
+- `dirty`（旧输入缺字段时的默认值）：接管一组明确的既有未暂存修改。必须有已有实现与实际验证交接，全部修改归属唯一新需求。
+- `clean`：全部适用仓库在已知交接版本的 clean main，所有 `changes=[]`。`implementation` 为空字符串、`validation=[]`（也可省略这两个字段）；从真实发现进入正常开发，可按依赖拆成多项正式需求。不能把尚未发生的实现或验证填成完成事实。
 
 ```bash
 uv run python run_quality.py --resume <quality-run-id> --supplement-file /absolute/path/supplement.json
@@ -149,9 +154,9 @@ uv run python run_quality.py --resume <quality-run-id> --supplement-file /absolu
 uv run python run_quality.py --resume <quality-run-id>
 ```
 
-`--supplement-file` 不与 `--node`、`--resume-message-file` 混用；登记在 run 与产品锁内进行，随后正常驱动当前节点。当前每个 run 支持一个明确补充批；同批输入内容不同会被拒绝。需要沿原会话交互时，在登记后使用正常恢复消息入口。
+`--supplement-file` 不与 `--node`、`--resume-message-file` 混用；登记在 run 与产品锁内进行，随后正常驱动当前节点。批号从状态按 `0001`、`0002`、`0003` 递增，不从目录猜号。已登记的同一输入只幂等定位，不重新验证已合并后的旧 dirty 工作树，也不倒退当前批；不同输入不能覆盖同批。输入先落盘、状态尚未推进时，可用相同输入重入。需要沿原会话交互时，在登记后使用正常恢复消息入口。
 
-JSON 必须符合 `quality.models.SupplementInput`，不接受未知字段。以下为仅含 root/backend 的产品示例；实际必须列齐 `applicable_repositories` 中的所有仓库，并替换所有占位值。
+JSON 必须符合 `quality.models.SupplementInput`，不接受未知字段。`version` 可为 `1`，`mode` 可为 `dirty` 或 `clean`；程序以原始 JSON 对象作为身份，不把新增默认字段写进旧输入或改变旧 SHA。以下为仅含 root/backend 的 dirty 产品示例；实际必须列齐 `applicable_repositories` 中的所有仓库，并替换所有占位值。
 
 ```json
 {
@@ -205,7 +210,43 @@ JSON 必须符合 `quality.models.SupplementInput`，不接受未知字段。以
 }
 ```
 
-`finding_source.message_index` 从零开始，指向该 run 已记录的 `conversations/quality_audit_rNNNN.json` 中 `messages` 的执行 Agent 回复（`role=user`）；程序核对 session、消息内容指纹与原文。负责人决定和实现交接必须来自独立、明确的 `.md`、`.txt` 或 `.json` 文件，使用绝对路径、完整文件指纹和非空原文引用；不能把输入 JSON 自己当作授权来源。程序只核对所提供来源的一致性，提交者须如实引用真实决定与已执行验证，不得自行编造授权或审计通过。
+`finding_source.message_index` 从零开始，指向该 run 已记录的 `conversations/quality_audit_rNNNN.json` 中 `messages` 的执行 Agent 回复（`role=user`）；程序核对 session、消息内容指纹与原文。`owner_decision` 是本次批准纳入的来源，须区分真人决定与负责人在既有委托内作出的决定；`handoff_source` 是实际发现、已有工作与剩余事项的交接来源；clean 模式无需声称已经实现。两者必须是独立、明确的 `.md`、`.txt` 或 `.json` 文件，使用绝对路径、完整文件指纹和非空原文引用；不能把输入 JSON 自己当作授权来源。程序核对来源一致性，不识别文件作者身份；提交者须如实引用真实决定与验证，不能自行编造授权或审计通过。本次明确纳入的发现全部须有正式修复归属，分流不能静默排除。
+
+已成功收口的输入还须带 `correction`，示例如下（它是上面输入对象的附加字段，不是单独文件格式）：
+
+```json
+{
+  "correction": {
+    "complete": {
+      "path": "quality/supplements/0001/complete.json",
+      "sha256": "旧 complete 文件全部字节的 SHA256"
+    },
+    "coverage": {
+      "path": "quality/supplements/0001/coverage.json",
+      "sha256": "旧 coverage 文件全部字节的 SHA256"
+    },
+    "versions": {
+      "root": "旧完成版本的完整 main HEAD",
+      "frontend": "旧完成版本的完整 main HEAD",
+      "backend": "旧完成版本的完整 main HEAD"
+    },
+    "last_reply": {
+      "message_index": 45,
+      "sha256": "最后真实补证回复完整 content 的 UTF-8 SHA256",
+      "quote": "该回复中的原文"
+    },
+    "approval_source": {
+      "path": "/absolute/evidence/current-user-approval.md",
+      "sha256": "本次用户批准来源文件全部字节的 SHA256",
+      "quote": "用户批准更正误收口并纳入这些发现的原文"
+    },
+    "included_findings": [0, 1, 2],
+    "reason": "需要更正的具体误收口事实"
+  }
+}
+```
+
+complete/coverage 的路径是相对当前 run 的精确旧批路径；通常为同批的 `complete.json`、`coverage.json`，普通原批位于 `quality/`。经历旧补证合同续接的完成记录可能引用 `phase-coverage.json`，此时 `correction.coverage.path` 必须精确匹配旧 complete 的 `data.coverage`，不能改指旁边的旧 coverage 文件。`versions` 必须列齐适用仓库，同时匹配旧完成版本、旧 coverage 和当前 HEAD；`last_reply` 必须是该原 session 最后真实补证回复，其后有旧 completed 裁决。`included_findings` 是本次 `findings` 的从零开始完整索引集合，不可遗漏或重复。所有来源、版本、历史合并归属和入口检查通过前不落盘；通过后在新批保存输入、更正记录及原 conversation 的原字节，再推进 `quality:route`。此入口不会覆盖旧成功产物，也不把已有本地收口待推送当成通用重开许可。
 
 接管清单中的 HEAD 为完整 Git SHA（40 或 64 位小写十六进制），SHA256 为 64 位小写十六进制。`changes` 必须精确覆盖当前全部未提交变化，路径为仓库相对的单个普通文件，模式仅为 `100644` 或 `100755`：
 
@@ -215,9 +256,13 @@ JSON 必须符合 `quality.models.SupplementInput`，不接受未知字段。以
 
 root 必须 clean main 且 `changes=[]`；代码仓只能保持所批准 HEAD 与精确未暂存集合。未知或缺少的变化、暂存内容（含 intent-to-add）、HEAD 漂移、进行中的 Git 操作、目录/通配符/越界路径、符号链接、隐藏工作树标记都会拒绝，保留现场。只读取授权文件内容，不读取 ignored 配置。
 
-产物保存在 `quality/supplements/0001/`：`input.json`、`route.json`、`pool-intent.json`、`pool-plan.json`、`pool.json`、`register.json`、`select_requirement.json`，以及 `coverage-intent.json`、`coverage.json`、`complete.json`。原 `round`、原批 ID、历史成功结果不改写。入池仍只在根仓文档分支精确提交并 ff-only 合并；全部既有修改必须归属一个新需求。第 13 步先验证全部仓库，以保存的根 pool tip 和批准的代码 HEAD 建需求分支，保留修改，支持部分建分支恢复；不用 stash、reset、clean 或回滚。
+产物保存在 `quality/supplements/<批号>/`：`input.json`、`original-conversation.json`、需要更正时的 `correction.json`，以及 `route.json`、`pool-intent.json`、`pool-plan.json`、`pool.json`、`register.json`、`select_requirement.json`、`coverage-intent.json`、`coverage.json`、`complete.json`。旧 `quality.supplement` 单对象兼容；追加下一批时转为有序 `quality.supplements`，当前批取末项，旧 input 文件和 SHA 不变。候选、入池分支和入池 session key 按批号区分；最终补证仍复用原审计 session。登记下一批时，目标目录只允许与本次输入逐一匹配的 `input.json`、所需 `correction.json` 和 `original-conversation.json` 前置文件；没有 input 的孤立文件或已有 route 等下游产物均拒绝认领。同输入的合法登记中断可重入，未知目录不参与批号分配。
 
-接管指纹约束到第 13 步成功交接为止。第 14/15 步收到原候选、回归归属、已有实现/验证、剩余事项及文件清单，正常编写活动 TRD、复核承接，只补必要工作，不伪造步骤成功。收口分别核对原批和补充批的登记及真实第 18 步结果，最终必须是包含所有合并 tip 的 clean main，不能混入未知后续提交；该核验在保存补证锚点或调用 Agent 前执行。补证沿原审计 session，以当前版本和当前会话报告为锚点，必须实际发出当前版本补证指令并取得其后的有效 Agent 回复，补写旧回复的负责人裁决不算新证据。旧的一次性检查批准不重发，旧回复及待完成裁决仍保留。新补证成功落盘后中断可复用。原 `local_only` 模式继续有效，不启动外层远程同步。
+入池只在根仓文档分支精确提交并 ff-only 合并。第 13 步只为 dirty 模式挂接管清单，并保留精确修改；clean 模式走普通分支创建。首项基线绑定根 pool tip 与输入代码 HEAD，后续项绑定前序真实成功第 18 步交接，不能吞入未知 clean main 提交。支持部分建分支恢复，不用 stash、reset、clean 或回滚。dirty 指纹约束到第 13 步成功交接为止；第 14/15 步收到对应批的发现、回归归属和实际交接，正常开发，只补必要工作。clean 交接同样包含明确批准来源、原交接来源和剩余事项，但不声明已有实现或验证，有限恢复授权仍以本次明确边界为准。
+
+收口遍历原批及所有补充批的登记和真实第 18 步结果，最终必须是包含所有合并 tip 的精确 clean main；该核验在保存补证锚点或调用 Agent 前执行。旧 pending 回复仍按旧职责裁决，新版本指令及回复进入历史后才启用阶段合同。旧的一次性批准不重发；新回复已保存但裁决失败时只补裁决，不重跑 SDK。成功 coverage 保存当前版本、session、锚点、原负责人阶段裁决和整理后的当前事实；complete 引用这些证据、全部完成需求和更正记录，不把旧报告中的过时限制抄成当前事实。提取器只整理原负责人认可的事实，不另作阶段批准。原 `local_only` 模式继续有效，不启动外层远程同步；一次手动推送不构成后续自动推送许可。
+
+尚未成功收口的旧运行若已保存不含 `phase_completion_contract` 的 `coverage-intent.json`，可直接正常 `--resume` 或使用原恢复消息入口。程序保留旧 intent、coverage 和本地收口文件，验证原版本、session 与会话锚点后，在同批追加 `phase-coverage-intent.json`、`phase-coverage.json`；需要远程同步时使用独立 `phase-local-completion.json`、`phase-push.json`。新 intent 记录旧产物指纹，新 complete 的 `data.coverage`、`data.coverage_intent` 精确引用本次阶段产物。旧 pending 先按旧职责裁决，已消费的旧 assistant 指令不重发，新的阶段合同只作用于追加指令之后的回复；旧 completed 或旧 coverage 不作为阶段批准。已有成功 complete 仍须走正式 correction 入口。
 
 ### 独立人工反馈迭代
 

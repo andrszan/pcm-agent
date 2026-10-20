@@ -113,6 +113,8 @@ class AgentDecisionLoopSpec:
     task: str
     decision_system_prompt: str
     legacy_completion_messages: tuple[str, ...] = ()
+    # 调用方仅在新指令及其回复已进入历史后返回本次裁决合同，不改写旧消息。
+    decision_context: Callable[[list[dict[str, Any]]], tuple[str, type[AgentDecision]] | None] | None = None
 
     def __post_init__(self) -> None:
         for field_name, value in (("key", self.key), ("state_key", self.state_key)):
@@ -1145,10 +1147,12 @@ async def _request_next_decision(
         )
 
     try:
+        context = spec.decision_context(messages) if spec.decision_context else None
         data, _attempts, raw = await decision_runner(
             messages,
             config,
-            system_prompt=messages[0]["content"],
+            system_prompt=context[0] if context else messages[0]["content"],
+            **({"output_model": context[1]} if context else {}),
         )
     except asyncio.CancelledError:
         raise

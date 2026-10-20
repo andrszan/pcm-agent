@@ -100,10 +100,20 @@ class AgentDecision(BaseModel):
         return self
 
 
+class PhaseCompletionDecision(AgentDecision):
+    """仅阶段最终裁决请求使用；旧决定和普通步骤仍使用原 schema。"""
+
+    phase_completion_allowed: bool | None
+
+
 def parse_agent_decision(value: Any) -> AgentDecision:
     if isinstance(value, str):
-        return AgentDecision.model_validate_json(value)
-    return AgentDecision.model_validate(value)
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return AgentDecision.model_validate_json(value)
+    model = PhaseCompletionDecision if isinstance(value, dict) and "phase_completion_allowed" in value else AgentDecision
+    return model.model_validate(value)
 
 
 def render_decision_system_prompt(

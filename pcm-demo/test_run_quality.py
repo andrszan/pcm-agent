@@ -52,7 +52,7 @@ class QualityCLITests(unittest.TestCase):
             is_completed=lambda state: state.get("current_node") == "quality:completed" and state["status"] == "success",
             node_resume_keys=lambda state: ("quality_prepare",),
             node_result_path=lambda path, state: path / "quality" / "prepare.json",
-            record_failure=Mock(side_effect=self.fail),
+            record_failure=Mock(side_effect=self.record_failure),
             run_node=self.complete,
         )
         for item in (
@@ -82,7 +82,7 @@ class QualityCLITests(unittest.TestCase):
                 "applicable_repositories": copy.deepcopy(source["applicable_repositories"]),
                 "quality": {"round": 1, "batch_requirement_ids": []}}
 
-    def fail(self, path, state, error):
+    def record_failure(self, path, state, error):
         state.update(status="failed", error={"type": type(error).__name__, "message": str(error)})
         write_state(path, state)
         return {"status": "failed", "error": state["error"]}
@@ -381,7 +381,7 @@ with adopt_execution_locks(root, 'source-quality', sys.argv[3], 1) as locks:
             seen.append(node)
             return run_quality._execute_node(SimpleNamespace(resume="quality", node=node), None, StepTiming())
         with patch.object(run_quality, "_workflow", return_value=workflow), \
-             patch.object(workflow, "_prior", return_value={"coverage": [], "required_inputs": []}), \
+             patch.object(workflow, "_finish", side_effect=lambda run, state, message: workflow._complete(run, state)), \
              patch.object(workflow, "_local_completion", return_value=local) as prepare, \
              patch.object(workflow, "sync_repositories", side_effect=[RuntimeError("root 网络失败"), workflow.RemoteBlocked("root 缺少 SSH 权限"), []]) as sync, \
              patch.object(run_step.time, "sleep") as sleep, \
@@ -394,7 +394,7 @@ with adopt_execution_locks(root, 'source-quality', sys.argv[3], 1) as locks:
             self.assertEqual(run_quality.main(["--resume", "quality"]), 0)
             self.assertTrue(workflow.is_completed(read_state(path)))
             self.assertEqual(sync.call_count, 3)
-            prepare.assert_called_once()
+            self.assertEqual(prepare.call_count, 3)  # 恢复仅做确定性证据核验，不重开 Agent。
             sleep.assert_not_called()
         self.assertEqual(seen, ["quality:complete", "quality:complete"])
 
@@ -465,7 +465,7 @@ with adopt_execution_locks(root, 'source-quality', sys.argv[3], 1) as locks:
                 node = command[command.index("--node") + 1]
                 return run_quality._execute_node(SimpleNamespace(resume="quality", node=node), None, StepTiming())
 
-            with patch.object(workflow, "_prior", return_value={"coverage": [], "required_inputs": []}), \
+            with patch.object(workflow, "_finish", side_effect=lambda run, state, message: workflow._complete(run, state)), \
                  patch.object(workflow, "_local_completion", side_effect=[
                      RuntimeError("本地核验未完成"), {"data": {}, "summary": "本地核验完成"},
                  ]) as complete, \

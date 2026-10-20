@@ -46,7 +46,7 @@ class SupplementTests(unittest.TestCase):
         self.messages = [{"role": "system", "content": "任务"},
                          {"role": "assistant", "content": "补齐必要证据"},
                          {"role": "user", "content": "补证发现诊断与工具合同错误，已有修复需要正式登记"}]
-        (self.run / "conversations").mkdir()
+        (self.run / "conversations").mkdir(exist_ok=True)
         write_json(self.run / f"conversations/{self.key}.json", {"messages": self.messages})
         self.owner = self.base / "owner.md"
         self.owner.write_text("负责人同意将诊断与工具合同修复作为一个正式补充需求接管，复用开发与合并流程。")
@@ -68,6 +68,11 @@ class SupplementTests(unittest.TestCase):
                 ]} for name, path in flow.repositories(self.state)
             },
         }
+        # 现场三仓是这份审计的已知基线，非补充入口吞入的未知 HEAD。
+        path = self.run / "quality/rounds/0001/audit.json"
+        audit = flow._read(path)
+        audit["data"]["versions"] = {name: row["head"] for name, row in self.input["repositories"].items()}
+        flow._write(path, audit)
         self.input_file = self.base / "supplement.json"
         write_json(self.input_file, self.input)
         write_json(self.run / "state.json", self.state)
@@ -350,9 +355,7 @@ class SupplementTests(unittest.TestCase):
         self.assertEqual(calls, [(self.key, anchor)])
         self.assertFalse((self.run / "quality/supplements/0001/coverage.json").exists())
         async def fresh(*args, **kwargs):
-            return json.dumps(json.loads(anchor) + [
-                {"role": "assistant", "content": args[4]},
-                {"role": "user", "content": "当前合并版本已补证"}], ensure_ascii=False), None
+            return fixtures.final_report(args[0], args[1], args[4], kwargs["phase_intent"])
         flow._task.side_effect = fresh
         with patch.object(flow, "_complete", side_effect=RuntimeError("补证落盘后中断")), self.assertRaises(RuntimeError):
             self.execute()
@@ -406,9 +409,7 @@ class SupplementTests(unittest.TestCase):
             flow._local_completion(self.run, self.state, coverage_report="fixture")
         old_merge.write_bytes(historical[old_merge])
         async def fresh(*args, **kwargs):
-            return json.dumps(json.loads(kwargs["continue_from_report"]) + [
-                {"role": "assistant", "content": args[4]},
-                {"role": "user", "content": "当前版本已补齐原缺口"}], ensure_ascii=False), None
+            return fixtures.final_report(args[0], args[1], args[4], kwargs["phase_intent"])
         flow._task.side_effect = fresh
         self.execute()
         completed = flow._read(self.run / "quality/supplements/0001/complete.json")
@@ -467,7 +468,7 @@ class SupplementTests(unittest.TestCase):
         self.drive_real_supplement_exchange()
         self.assertTrue(flow.is_completed(self.state))
 
-    def drive_real_supplement_exchange(self, *, events=None, fail_new_decision=False, resume_message=None):
+    def drive_real_supplement_exchange(self, *, events=None, fail_new_decision=False, resume_message=None, phase_allowed=True):
         from common import agent_decision_loop as loop
         from common.claude_agent import ClaudeRunResult
         from common.decision import AgentDecision
@@ -486,9 +487,21 @@ class SupplementTests(unittest.TestCase):
 
         async def decide(messages, *args, **kwargs):
             events.append(("decision", messages[-1]["content"]))
+            if messages[-1]["content"] == "当前合并版本的新补证回复":
+                from common.decision import PhaseCompletionDecision
+                self.assertIs(kwargs.get("output_model"), PhaseCompletionDecision)
+                self.assertNotEqual(kwargs["system_prompt"], messages[0]["content"])
+                self.assertIn("phase_completion_allowed", kwargs["output_model"].model_fields)
+            else:
+                self.assertNotIn("output_model", kwargs)
+                self.assertEqual(kwargs["system_prompt"], messages[0]["content"])
             if fail_new_decision and messages[-1]["content"] == "当前合并版本的新补证回复":
                 raise RuntimeError("模拟新回复落盘后裁决失败")
-            return decision.model_dump(), 1, decision.model_dump_json()
+            result = decision
+            if "output_model" in kwargs and phase_allowed != "legacy":
+                from common.decision import PhaseCompletionDecision
+                result = PhaseCompletionDecision(**decision.model_dump(), phase_completion_allowed=phase_allowed)
+            return result.model_dump(), 1, result.model_dump_json()
 
         async def real_loop(*args, **kwargs):
             return await loop.run_agent_decision_loop(*args, **kwargs, agent_runner=agent,
@@ -496,7 +509,8 @@ class SupplementTests(unittest.TestCase):
 
         with patch.object(flow, "_task", side_effect=run_quality_task), \
              patch.object(flow, "run_agent_decision_loop", side_effect=real_loop), \
-             patch.object(loop, "get_agent_profile", return_value=AgentProfile("planning", "test-model", "high")):
+             patch.object(loop, "get_agent_profile", return_value=AgentProfile("planning", "test-model", "high")), \
+             patch.object(flow, "parse_response", return_value=audit_report()):
             asyncio.run(flow.run_node(self.run, self.state, resume_message=resume_message))
         return events
 
@@ -556,6 +570,425 @@ class SupplementTests(unittest.TestCase):
         intent = flow._read(self.run / "quality/supplements/0001/coverage-intent.json")
         self.assertEqual(prompts[0], intent["prompt"] + "\n\n负责人补充：\n" + message.content)
         self.assertTrue(flow.is_completed(self.state))
+
+    def test_legacy_completed_cannot_approve_phase_completion(self):
+        self.merge_supplement()
+        with self.assertRaisesRegex(RuntimeError, "阶段"):
+            self.drive_real_supplement_exchange(phase_allowed="legacy")
+        self.assertFalse((self.run / "quality/supplements/0001/coverage.json").exists())
+        self.assertFalse(flow.is_completed(self.state))
+
+    def assert_legacy_intent_recovers(self, stage, *, with_message=False, interrupt_decision=False):
+        from common.decision import AgentDecision
+        self.merge_supplement()
+        path = self.run / f"conversations/{self.key}.json"
+        before = flow._read(path)["messages"]
+        old_prompt = "旧版本只批准执行一次的补证指令"
+        versions = flow.main_versions(self.state)
+        old_intent_path = flow._completion_path(self.run, self.state, "coverage-intent")
+        old_intent = {"versions": versions, "session_id": "original-session",
+                      "anchor": json.dumps(before, ensure_ascii=False), "prompt": old_prompt}
+        flow._write(old_intent_path, old_intent)
+        messages = before + [{"role": "assistant", "content": old_prompt}]
+        if stage != "sdk":
+            messages.append({"role": "user", "content": "旧版本补证的已保存回复"})
+        if stage in {"decided", "coverage"}:
+            decision = AgentDecision(verdict="completed", answer="", reason="旧调查交接完成", required_inputs=[])
+            messages.append({"role": "assistant", "content": decision.model_dump_json()})
+        flow._write(path, {"messages": messages})
+        old_files = {old_intent_path: old_intent_path.read_bytes()}
+        if stage == "coverage":
+            old_coverage_path = flow._completion_path(self.run, self.state, "coverage")
+            flow._write(old_coverage_path, {"versions": versions, "session_id": "original-session",
+                "report": json.dumps(messages, ensure_ascii=False), "input": flow.batch_metadata(self.state)["input"],
+                "anchor_sha256": hashlib.sha256(old_intent["anchor"].encode()).hexdigest()})
+            old_files[old_coverage_path] = old_coverage_path.read_bytes()
+            local_path = flow._completion_path(self.run, self.state, "local-completion")
+            flow._write(local_path, {"data": {"versions": versions}, "summary": "旧本地交接"})
+            old_files[local_path] = local_path.read_bytes()
+            self.state["remote_sync"] = {"enabled": True, "project_name": "fixture", "repositories": {}}
+        self.state.update(status="running", error=None, blocked=None)
+        write_json(self.run / "state.json", self.state)
+        message = None
+        if with_message:
+            from common.agent_decision_loop import prepare_node_resume_message
+            message_file = self.base / "phase-resume.txt"
+            message_file.write_text("只补本次批准范围内尚未通过的证据")
+            message = prepare_node_resume_message(self.run, self.state, "quality:complete", (self.key,), message_file)
+        events = []
+        with patch.object(flow, "sync_repositories") as sync:
+            if interrupt_decision:
+                with self.assertRaises(RuntimeError):
+                    self.drive_real_supplement_exchange(events=events, resume_message=message, fail_new_decision=True)
+                self.assertEqual([event[0] for event in events], ["decision", "agent", "decision"])
+                self.state = read_state(self.run)
+                events = self.drive_real_supplement_exchange()
+                self.assertEqual([event[0] for event in events], ["decision"])
+            else:
+                self.drive_real_supplement_exchange(events=events, resume_message=message)
+                expected = ["decision", "agent", "decision"] if stage == "pending" else ["agent", "decision"]
+                self.assertEqual([event[0] for event in events], expected)
+                prompts = [content for kind, content in events if kind == "agent"]
+                self.assertNotIn(old_prompt, prompts)
+            if stage == "coverage":
+                sync.assert_called_once()
+        if message:
+            self.assertTrue(message.consumed)
+        self.assertTrue(flow.is_completed(self.state))
+        after = flow._read(path)["messages"]
+        self.assertEqual(after[:len(messages)], messages)
+        for saved, data in old_files.items():
+            self.assertEqual(saved.read_bytes(), data)
+        complete = flow._read(flow._completion_path(self.run, self.state, "complete"))
+        self.assertEqual(complete["data"]["coverage"], "quality/supplements/0001/phase-coverage.json")
+        self.assertEqual(complete["data"]["coverage_intent"], "quality/supplements/0001/phase-coverage-intent.json")
+        self.assertTrue(complete["data"]["phase_completion_allowed"])
+
+    def test_legacy_sdk_interruption_resumes_with_new_contract_and_owner_message(self):
+        self.assert_legacy_intent_recovers("sdk", with_message=True)
+
+    def test_legacy_pending_reply_uses_old_decision_then_recovers_new_pending_decision(self):
+        self.assert_legacy_intent_recovers("pending", interrupt_decision=True)
+
+    def test_legacy_completed_decision_does_not_approve_new_phase(self):
+        self.assert_legacy_intent_recovers("decided")
+
+    def test_legacy_saved_coverage_and_local_completion_are_preserved_on_resume(self):
+        self.assert_legacy_intent_recovers("coverage")
+
+    def test_migrated_correction_requires_exact_current_phase_coverage(self):
+        self.assert_legacy_intent_recovers("coverage")
+        supplied = self.clean_input(correction=True, count=1)
+        self.assertEqual(supplied["correction"]["coverage"]["path"], "quality/supplements/0001/phase-coverage.json")
+        before = {path: path.read_bytes() for path in self.run.rglob("*.json")}
+        wrong = copy.deepcopy(supplied)
+        old_path = flow._completion_path(self.run, self.state, "coverage")
+        wrong["correction"]["coverage"] = {"path": old_path.relative_to(self.run).as_posix(),
+                                           "sha256": hashlib.sha256(old_path.read_bytes()).hexdigest()}
+        write_json(self.input_file, wrong)
+        with self.assertRaisesRegex(RuntimeError, "路径"):
+            self.begin()
+        self.assertEqual({path: path.read_bytes() for path in self.run.rglob("*.json")}, before)
+        write_json(self.input_file, supplied)
+        self.begin()
+        self.assertEqual(flow._batch_id(self.state), "0002")
+        for path, data in before.items():
+            if path.name != "state.json":
+                self.assertEqual(path.read_bytes(), data)
+
+    def test_unregistered_next_batch_cannot_adopt_unknown_downstream_artifacts(self):
+        self.merge_supplement()
+        supplied = self.clean_input(count=1)
+        write_json(self.input_file, supplied)
+        directory = self.run / "quality/supplements/0002"
+        flow._write(directory / "route.json", {"status": "success", "node": "quality:route", "round": 1,
+                                               "data": {"decisions": [], "ready_to_complete": True}})
+        for with_input in (False, True):
+            if with_input:
+                flow._write(directory / "input.json", supplied)
+            before = {path: path.read_bytes() for path in self.run.rglob("*.json")}
+            state = copy.deepcopy(self.state)
+            with self.assertRaisesRegex(RuntimeError, "无归属"):
+                self.begin()
+            self.assertEqual(self.state, state)
+            self.assertEqual({path: path.read_bytes() for path in self.run.rglob("*.json")}, before)
+        # 仅移除本测试创建的未知产物；同输入前置落盘仍允许安全重入。
+        (directory / "route.json").unlink()
+        self.begin()
+        self.assertEqual(flow._batch_id(self.state), "0002")
+        self.assertEqual(self.state["current_node"], "quality:route")
+
+    def test_clean_input_rejects_unknown_head_even_when_manifest_matches(self):
+        for _, path in flow.repositories(self.state)[1:]:
+            git(path, "restore", "--", "fix.py")
+        supplied = self.clean_input(count=1)
+        tip = git(self.root, "rev-parse", "HEAD")
+        git(self.root, "commit", "--allow-empty", "-m", "docs: 未知后续版本")
+        supplied["repositories"]["root"]["head"] = git(self.root, "rev-parse", "HEAD")
+        write_json(self.input_file, supplied)
+        with self.assertRaisesRegex(RuntimeError, "当前版本"):
+            self.begin()
+        self.assertFalse((self.run / "quality/supplements").exists())
+        git(self.root, "reset", "--soft", tip)
+        supplied["repositories"]["root"]["head"] = tip
+        supplied.pop("implementation")
+        supplied.pop("validation")
+        write_json(self.input_file, supplied)
+        self.begin()
+        self.assertEqual(flow._supplement_input(self.run, self.state), supplied)
+        self.assertIsNone(flow.requirement_adoption(self.run, self.state, "BR-002"))
+
+    def test_final_decision_saved_before_coverage_does_not_repeat_sdk(self):
+        self.merge_supplement()
+        write = flow._write
+        def interrupt(path, value):
+            if path.name == "coverage.json":
+                raise OSError("阶段裁决已存、证据文件未写")
+            return write(path, value)
+        with patch.object(flow, "_write", side_effect=interrupt), self.assertRaises(OSError):
+            self.drive_real_supplement_exchange()
+        events = self.drive_real_supplement_exchange()
+        self.assertEqual(events, [])
+        self.assertTrue(flow.is_completed(self.state))
+
+    def test_phase_false_null_and_legacy_coverage_never_complete(self):
+        self.merge_supplement()
+        for allowed in (False, None, "legacy"):
+            with self.subTest(allowed=allowed), self.assertRaisesRegex(RuntimeError, "阶段"):
+                self.drive_real_supplement_exchange(phase_allowed=allowed)
+            self.assertFalse(flow.is_completed(self.state))
+            self.assertFalse(flow._completion_path(self.run, self.state, "coverage").exists())
+            # 仅隔离 fixture 恢复到该次已保存的新回复，重新测试裁决，不重发 SDK。
+            path = self.run / f"conversations/{self.key}.json"
+            value = flow._read(path)
+            value["messages"].pop()
+            flow._write(path, value)
+        self.drive_real_supplement_exchange()
+        coverage_path = flow._completion_path(self.run, self.state, "coverage")
+        coverage = flow._read(coverage_path)
+        coverage.pop("phase_completion_allowed")
+        flow._write(coverage_path, coverage)
+        with self.assertRaisesRegex(RuntimeError, "阶段"):
+            flow._local_completion(self.run, self.state)
+
+    def clean_input(self, *, correction=False, count=3):
+        supplied = copy.deepcopy(self.input)
+        supplied.update(mode="clean", implementation="", validation=[], findings=[
+            {**self.input["findings"][0], "title": f"新增真实发现 {index}"} for index in range(count)])
+        supplied["repositories"] = {name: {"head": git(path, "rev-parse", "HEAD"), "changes": []}
+                                    for name, path in flow.repositories(self.state)}
+        messages = flow._read(self.run / f"conversations/{self.key}.json")["messages"]
+        index = max(i for i, row in enumerate(messages) if row["role"] == "user")
+        content = messages[index]["content"]
+        supplied["finding_source"] = {"message_index": index, "sha256": hashlib.sha256(content.encode()).hexdigest(), "quote": content}
+        if correction:
+            complete_path = flow._completion_path(self.run, self.state, "complete")
+            coverage_path = self.run / flow._read(complete_path)["data"]["coverage"]
+            supplied["correction"] = {
+                name: {"path": path.relative_to(self.run).as_posix(),
+                       "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+                for name, path in (("complete", complete_path), ("coverage", coverage_path))}
+            supplied["correction"].update(
+                versions={name: row["head"] for name, row in supplied["repositories"].items()},
+                last_reply=copy.deepcopy(supplied["finding_source"]), approval_source=copy.deepcopy(supplied["owner_decision"]),
+                included_findings=list(range(count)), reason="旧负责人只认可调查交接，用户批准更正误收口并纳入这些发现")
+        return supplied
+
+    def configure_clean_batch(self):
+        from quality.models import PoolPlan, RoutingReport
+        audit = flow._batch_audit(self.run, self.state)
+        self.routing.side_effect = None
+        self.routing.return_value = RoutingReport.model_validate({
+            "summary": "按依赖正式纳入", "decisions": [
+                {"candidate_id": row["id"], "action": "include", "reason": "用户明确纳入", "covered_by": None}
+                for row in audit["candidates"]], "document_changes": [], "ready_to_complete": False})
+        prior = [{key: row[key] for key in ("id", "title", "order", "depends_on")}
+                 for row in self.state["requirement_registry"]["requirements"]]
+        added = []
+        for index, row in enumerate(audit["candidates"]):
+            order = len(prior) + index + 1
+            added.append({"id": f"BR-{order:03d}", "title": row["title"], "order": order,
+                          "depends_on": [added[-1]["id"] if added else prior[-1]["id"]]})
+        self.catalog_override = prior + added
+        plan = PoolPlan.model_validate({"summary": "依赖拆分", "requirements": [
+            {"requirement_id": row["id"], "candidate_ids": [candidate["id"]]}
+            for row, candidate in zip(added, audit["candidates"])], "regression_owners": [
+            {"candidate_id": candidate["id"], "requirement_id": row["id"]}
+            for row, candidate in zip(added, audit["candidates"])]})
+        async def task(run_dir, state, key, task, prompt, responsibility, **kwargs):
+            self.calls.append(key)
+            if key == f"quality_pool_s{flow._batch_id(state)}":
+                self.backlog.write_text(self.backlog.read_text() + "\n".join(row["id"] + " " + row["title"] for row in added))
+                await kwargs["validate"](plan)
+                return "已拆分真实依赖", plan
+            if key.startswith("quality_pool_commit_"):
+                git(self.root, "add", "docs/backlog/backlog.md")
+                git(self.root, "commit", "-m", "docs: 正式追加需求")
+                return "已提交", None
+            if kwargs.get("phase_intent"):
+                return fixtures.final_report(run_dir, state, prompt, kwargs["phase_intent"])
+            raise AssertionError(key)
+        flow._task.side_effect = task
+        return [row["id"] for row in added]
+
+    def merge_clean_requirement(self, identifier):
+        from common.state import write_requirement_step_result
+        from steps.step_13_select_requirement import step as selection
+        from steps.step_17_commit import step as commit
+        from steps.step_18_merge import step as merge
+        self.execute()
+        baseline = flow.requirement_baseline(self.run, self.state, identifier)
+        selection.run(self.run, self.state)
+        self.assertEqual(self.state["active_requirement"], identifier)
+        self.assertNotIn("adoption_input", self.state["requirement_cycle"])
+        supplied = flow._supplement_input(self.run, self.state)
+        evidence = flow.requirement_evidence(self.run, self.state)
+        for source in ("owner_decision", "handoff_source"):
+            self.assertIn(supplied[source]["path"], evidence)
+            self.assertIn(supplied[source]["quote"], evidence)
+        for remaining in supplied["remaining"]:
+            self.assertIn(remaining, evidence)
+        self.assertEqual({name: row["base_sha"] for name, row in self.state["requirement_cycle"]["repositories"].items()}, baseline)
+        trd = f"docs/trd/{identifier}.md"
+        (self.root / trd).write_text("真实临时 Git 开发交接\n")
+        results = []
+        for name, path in flow.repositories(self.state):
+            relative = trd if name == "root" else f"{identifier}.py"
+            if name != "root":
+                (path / relative).write_text("实现当前需求\n")
+            git(path, "add", relative)
+            git(path, "commit", "-m", "fix: 当前正式需求")
+            tip = git(path, "rev-parse", "HEAD")
+            record = self.state["requirement_cycle"]["repositories"][name]
+            record.update(tip_sha=tip, merged=False)
+            results.append({"name": name, "path": "." if name == "root" else name,
+                            "base_sha": record["base_sha"], "tip_sha": tip})
+        self.state["requirement_cycle"].update(trd_path=trd, development_session_id="fixture-development")
+        self.state.update(step=18, current_step=18, current_node="requirement:18_merge")
+        write_requirement_step_result(self.run, identifier, 17, commit.result(
+            "success", "隔离开发交接", requirement_id=identifier, branch=f"req/{identifier.lower()}", repositories=results))
+        self.assertEqual(merge.run(self.run, self.state)["status"], "success")
+
+    def test_correction_sources_drift_and_interrupt_are_fail_closed(self):
+        self.merge_supplement()
+        self.drive_real_supplement_exchange()
+        supplied = self.clean_input(correction=True)
+        before = {path: path.read_bytes() for path in self.run.rglob("*.json")}
+        baseline = copy.deepcopy(self.state)
+        mutations = [
+            lambda value: value.pop("correction"),
+            lambda value: value["correction"]["complete"].update(path="quality/complete.json"),
+            lambda value: value["correction"]["coverage"].update(sha256="0" * 64),
+            lambda value: value["correction"]["versions"].update(root="0" * 40),
+            lambda value: value["correction"]["last_reply"].update(sha256="0" * 64),
+            lambda value: value["correction"]["approval_source"].update(quote="不存在的用户批准"),
+            lambda value: value["correction"]["included_findings"].pop(),
+            lambda value: value["correction"]["approval_source"].update(path=str(self.input_file)),
+        ]
+        for mutate in mutations:
+            invalid = copy.deepcopy(supplied)
+            mutate(invalid)
+            write_json(self.input_file, invalid)
+            with self.assertRaises((RuntimeError, ValueError)):
+                self.begin()
+            self.assertEqual(self.state, baseline)
+            self.assertEqual({path: path.read_bytes() for path in self.run.rglob("*.json")}, before)
+        write_json(self.input_file, supplied)
+        repo = self.root / "backend"
+        tip = git(repo, "rev-parse", "HEAD")
+        git(repo, "commit", "--allow-empty", "-m", "fix: 未知漂移")
+        with self.assertRaises(RuntimeError):
+            self.begin()
+        self.assertFalse((self.run / "quality/supplements/0002").exists())
+        git(repo, "reset", "--soft", tip)  # 仅本测试创建的临时空提交。
+        with patch.object(flow, "_replace_state", side_effect=RuntimeError("输入落盘后中断")), self.assertRaises(RuntimeError):
+            self.begin()
+        saved = (self.run / "quality/supplements/0002/input.json").read_bytes()
+        self.begin()
+        self.assertEqual(saved, (self.run / "quality/supplements/0002/input.json").read_bytes())
+        self.assertEqual(self.state["current_node"], "quality:route")
+        for path, data in before.items():
+            if path.name != "state.json":
+                self.assertEqual(path.read_bytes(), data)
+        self.assertEqual((self.run / "quality/supplements/0002/original-conversation.json").read_bytes(),
+                         before[self.run / f"conversations/{self.key}.json"])
+
+    def test_multiple_clean_batches_use_distinct_ids_history_and_real_git_cycles(self):
+        self.state["quality"]["local_only"] = True
+        self.merge_supplement()
+        first_input = (self.run / "quality/supplements/0001/input.json").read_bytes()
+        first_sha = flow.batch_metadata(self.state)["input_sha256"]
+        self.drive_real_supplement_exchange()
+        # 旧单对象没有 id 字段；下一批仍须从状态确定为 0002。
+        self.state["quality"]["supplement"].pop("id")
+        write_json(self.run / "state.json", self.state)
+        flow._write(self.run / "quality/supplements/0099/unregistered.json", {"fixture": True})
+        # 模拟旧版本只批准调查交接的历史产物；更正允许读取但不修改这些旧文件。
+        path = self.run / f"conversations/{self.key}.json"
+        messages = flow._read(path)["messages"]
+        decision = json.loads(messages[-1]["content"])
+        decision.pop("phase_completion_allowed")
+        messages[-1]["content"] = json.dumps(decision)
+        flow._write(path, {"messages": messages})
+        coverage_path = flow._completion_path(self.run, self.state, "coverage")
+        coverage = flow._read(coverage_path)
+        coverage["report"] = json.dumps(messages, ensure_ascii=False)
+        for field in ("decision", "facts", "phase_completion_allowed"):
+            coverage.pop(field)
+        flow._write(coverage_path, coverage)
+        historical = {path: path.read_bytes() for path in (self.run / "quality/supplements/0001").glob("*.json")}
+        for number in (2, 3):
+            supplied = self.clean_input(correction=True, count=3 if number == 2 else 1)
+            write_json(self.input_file, supplied)
+            self.begin()
+            self.assertEqual(flow._batch_id(self.state), f"{number:04d}")
+            history = flow._history(self.run, self.state)
+            self.assertEqual([row.get("supplement") for row in history], [None] + [f"{i:04d}" for i in range(1, number)])
+            identifiers = self.configure_clean_batch()
+            self.reach("quality:select_requirement")
+            self.assertIn(f"quality_pool_s{number:04d}", self.calls)
+            pooled = flow._prior(self.run, self.state, "pool")
+            self.assertNotIn("adoption_input", pooled)
+            for identifier in identifiers:
+                self.merge_clean_requirement(identifier)
+            self.execute()
+            self.assertEqual(self.state["current_node"], "quality:complete")
+            with patch.object(flow, "sync_repositories", side_effect=AssertionError("local_only 不同步")):
+                self.execute()
+            self.assertTrue(flow.is_completed(self.state))
+            completed = flow._read(flow._completion_path(self.run, self.state, "complete"))
+            self.assertEqual(completed["data"]["completed_requirement_ids"], [row["id"] for row in self.state["requirement_registry"]["requirements"]][1:])
+            self.assertTrue(completed["data"]["phase_completion_allowed"])
+            self.assertEqual(len(completed["data"]["corrections"]), number - 1)
+            for previous in ("BR-002", identifiers[0]):
+                path = self.run / f"steps/requirements/{previous}/18.json"
+                saved = path.read_bytes()
+                path.unlink()
+                with self.assertRaises(RuntimeError):
+                    flow._local_completion(self.run, self.state)
+                path.write_bytes(saved)
+            old_state = {**self.state, "active_requirement": "BR-002"}
+            self.assertIn("S001-C001", flow.requirement_evidence(self.run, old_state))
+        for path, data in historical.items():
+            self.assertEqual(path.read_bytes(), data)
+        self.assertEqual((self.run / "quality/supplements/0001/input.json").read_bytes(), first_input)
+        self.assertEqual(flow._supplements(self.state)[0]["input_sha256"], first_sha)
+        # 同一个旧 dirty 输入仅定位，不用最终 clean 现场重新验其 dirty 指纹。
+        write_json(self.input_file, self.input)
+        before = copy.deepcopy(self.state)
+        self.begin()
+        self.assertEqual(self.state, before)
+
+    def test_clean_batch_rejects_unknown_first_and_later_baseline(self):
+        self.merge_supplement()
+        supplied = self.clean_input(count=2)
+        write_json(self.input_file, supplied)
+        self.begin()
+        identifiers = self.configure_clean_batch()
+        self.reach("quality:select_requirement")
+        from steps.step_13_select_requirement import step as selection
+        for identifier in identifiers:
+            self.execute()
+            before = copy.deepcopy(self.state)
+            tip = git(self.root, "rev-parse", "HEAD")
+            git(self.root, "commit", "--allow-empty", "-m", "docs: 未知 clean 提交")
+            with self.assertRaisesRegex(RuntimeError, "基线"):
+                selection.run(self.run, self.state)
+            self.assertEqual(self.state, before)
+            git(self.root, "reset", "--soft", tip)
+            # helper 从非数值选择节点开始；仅恢复该临时测试的调度位置。
+            self.state.update(step=None, current_step=None)
+            self.merge_clean_requirement(identifier)
+
+    def test_explicit_findings_cannot_be_excluded(self):
+        self.begin()
+        self.configure_supplement_tasks()
+        report = self.routing.return_value
+        report.decisions[0].action = "exclude"
+        report.ready_to_complete = True
+        with self.assertRaisesRegex(ValueError, "明确纳入"):
+            self.execute()
+        self.assertFalse((self.run / "quality/supplements/0001/route.json").exists())
 
     def test_supplement_cli_entry(self):
         from run_quality import parse_args
