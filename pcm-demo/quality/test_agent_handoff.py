@@ -171,6 +171,29 @@ class QualityAgentHandoffTests(unittest.IsolatedAsyncioTestCase):
         self.decision.assert_awaited_once()
         self.parse.assert_not_awaited()
 
+    async def test_ordinary_tasks_keep_the_32_round_limit(self) -> None:
+        follow_up = AgentDecision(verdict="continue", answer="补当前任务证据", reason="补证", required_inputs=[])
+        completed = AgentDecision(verdict="completed", answer="", reason="交接完成", required_inputs=[])
+        for task, skill in (("quality_audit", "product-experience-audit"), ("quality_prepare", None), ("quality_pool", None)):
+            with self.subTest(task=task):
+                self.agent.reset_mock()
+                self.decision.reset_mock()
+                self.agent.return_value = self.result("当前任务完整回复", skill=skill)
+                self.decision.side_effect = [(value.model_dump(), 1, value.model_dump_json())
+                                             for value in [follow_up] * 31 + [completed]]
+                raw, _ = await workflow._task(self.run_dir, self.state, task, task, "当前任务", "交接", skill=skill)
+                self.assertEqual(self.agent.await_count, 32)
+                self.assertEqual(self.decision.await_count, 32)
+                self.assertEqual(self.specs[-1].max_decision_rounds, 32)
+                message = loop.ResumeMessage(task, "继续补证")
+                with self.assertRaisesRegex(RuntimeError, "决策循环达到上限"):
+                    await workflow._task(self.run_dir, self.state, task, task, "当前任务", "交接",
+                                         skill=skill, resume_message=message)
+                self.assertFalse(message.consumed)
+                self.assertEqual(self.agent.await_count, 32)
+                self.assertEqual(self.decision.await_count, 32)
+                self.assertEqual(loop.agent_conversation_report(self.run_dir, self.state, self.specs[-1]), raw)
+
     async def test_conversation_report_is_read_only(self) -> None:
         self.agent.return_value = self.result("准备完成")
         await workflow._task(self.run_dir, self.state, "quality_prepare", "quality_prepare", "准备", "交接")

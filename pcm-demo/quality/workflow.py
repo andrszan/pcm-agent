@@ -13,7 +13,7 @@ from pydantic import BaseModel, ValidationError
 from common.agent_decision_loop import (
     AgentDecisionLoopSpec, ResumeMessage, agent_conversation_report, run_agent_decision_loop,
 )
-from common.decision import PhaseCompletionDecision, parse_agent_decision, render_decision_system_prompt
+from common.decision import PhaseCompletionDecision, count_decisions, parse_agent_decision, render_decision_system_prompt
 from common.error_diagnostics import redact_text
 from common.files import resolve_workspace_output, write_json
 from common.openai_responses import parse_response
@@ -515,9 +515,10 @@ async def _task(
     completion_verifier: Callable[[], str | None] | None = None,
     continue_from_report: str | None = None,
     phase_intent: dict[str, Any] | None = None,
+    max_decision_rounds: int = 32,
 ) -> tuple[str, Any]:
     spec = AgentDecisionLoopSpec(
-        key=key, state_key=key, skill_name=skill, max_decision_rounds=32, max_turns=9999, task=task,
+        key=key, state_key=key, skill_name=skill, max_decision_rounds=max_decision_rounds, max_turns=9999, task=task,
         decision_system_prompt=render_decision_system_prompt(responsibility, {"当前任务": prompt}),
         decision_context=(lambda messages: _phase_context(messages, phase_intent)) if phase_intent else None,
     )
@@ -1154,6 +1155,8 @@ async def _finish(run_dir: Path, state: dict[str, Any], message: ResumeMessage |
                                 "仅对当前版本补齐剩余必要证据，由原负责人明确决定是否允许阶段收口。",
                                 skill="product-experience-audit", resume_message=delivery, continue_from_report=intent["anchor"],
                                 phase_intent=intent, output_model=AuditReport, validate=_validate_current_facts,
+                                # 正式补充批以已校验的固定锚点计新增额度，同批恢复不刷新起点。
+                                max_decision_rounds=32 + (count_decisions(json.loads(intent["anchor"])) if supplied else 0),
                                 completion_verifier=lambda: None if _has_supplement_exchange(
                                     agent_conversation_report(run_dir, state, spec), intent) else intent["prompt"])
     finally:

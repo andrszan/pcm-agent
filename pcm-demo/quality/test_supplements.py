@@ -468,7 +468,8 @@ class SupplementTests(unittest.TestCase):
         self.drive_real_supplement_exchange()
         self.assertTrue(flow.is_completed(self.state))
 
-    def drive_real_supplement_exchange(self, *, events=None, fail_new_decision=False, resume_message=None, phase_allowed=True):
+    def drive_real_supplement_exchange(self, *, events=None, fail_new_decision=False, resume_message=None, phase_allowed=True,
+                                       continue_rounds=0):
         from common import agent_decision_loop as loop
         from common.claude_agent import ClaudeRunResult
         from common.decision import AgentDecision
@@ -486,6 +487,7 @@ class SupplementTests(unittest.TestCase):
             )
 
         async def decide(messages, *args, **kwargs):
+            nonlocal continue_rounds
             events.append(("decision", messages[-1]["content"]))
             if messages[-1]["content"] == "当前合并版本的新补证回复":
                 from common.decision import PhaseCompletionDecision
@@ -501,6 +503,10 @@ class SupplementTests(unittest.TestCase):
             if "output_model" in kwargs and phase_allowed != "legacy":
                 from common.decision import PhaseCompletionDecision
                 result = PhaseCompletionDecision(**decision.model_dump(), phase_completion_allowed=phase_allowed)
+                if continue_rounds:
+                    continue_rounds -= 1
+                    result = PhaseCompletionDecision(verdict="continue", answer="只补当前剩余证据", reason="必要证据未齐",
+                                                     required_inputs=[], phase_completion_allowed=False)
             return result.model_dump(), 1, result.model_dump_json()
 
         async def real_loop(*args, **kwargs):
@@ -513,6 +519,132 @@ class SupplementTests(unittest.TestCase):
              patch.object(flow, "parse_response", return_value=audit_report()):
             asyncio.run(flow.run_node(self.run, self.state, resume_message=resume_message))
         return events
+
+    def save_exhausted_audit(self):
+        from common.decision import AgentDecision, count_decisions
+        path = self.run / f"conversations/{self.key}.json"
+        messages = flow._read(path)["messages"]
+        decision = AgentDecision(verdict="completed", answer="", reason="旧交接完成", required_inputs=[])
+        for index in range(32):
+            if messages[-1]["role"] != "user":
+                messages.append({"role": "user", "content": f"旧审计补证 {index}"})
+            messages.append({"role": "assistant", "content": decision.model_dump_json()})
+        flow._write(path, {"messages": messages})
+        self.assertEqual(count_decisions(messages), 32)
+        return messages
+
+    def test_saved_batch_anchor_grants_32_rounds_and_survives_interruptions(self):
+        from common.decision import count_decisions
+        self.merge_supplement()
+        before = self.save_exhausted_audit()
+        # 模拟已保存 intent 后因旧全局上限而停止；不向 intent 添加额度字段。
+        with patch.object(flow, "_task", side_effect=RuntimeError("保存 intent 后中断")), self.assertRaises(RuntimeError):
+            self.execute()
+        intent_path = flow._phase_path(self.run, self.state, "coverage-intent")
+        intent_bytes = intent_path.read_bytes()
+        self.assertEqual(json.loads(flow._read(intent_path)["anchor"]), before)
+        events = []
+        with self.assertRaises(RuntimeError):
+            self.drive_real_supplement_exchange(events=events, fail_new_decision=True)
+        self.assertEqual([kind for kind, _ in events], ["agent", "decision"])
+        self.state = read_state(self.run)
+        path = self.run / f"conversations/{self.key}.json"
+        pending = flow._read(path)["messages"]
+        events = []
+        write = flow._write
+        def interrupt(path, value):
+            if path.name == "coverage.json":
+                raise OSError("第32轮终态已保存、证据未写")
+            return write(path, value)
+        with patch.object(flow, "_write", side_effect=interrupt), self.assertRaises(OSError):
+            self.drive_real_supplement_exchange(events=events, continue_rounds=31)
+        self.assertEqual([kind for kind, _ in events], ["decision"] + ["agent", "decision"] * 31)
+        after = flow._read(path)["messages"]
+        self.assertEqual(after[:len(pending)], pending)
+        self.assertEqual(after[:len(before)], before)
+        self.assertEqual(count_decisions(after), 64)
+        self.state = read_state(self.run)
+        self.assertEqual(self.drive_real_supplement_exchange(), [])
+        self.assertEqual(intent_path.read_bytes(), intent_bytes)
+        self.assertEqual(flow._read(path)["messages"], after)
+        self.assertTrue(flow.is_completed(self.state))
+
+    def test_batch_capacity_is_fixed_on_resume_and_next_batch_has_its_own_anchor(self):
+        from common.decision import count_decisions
+        self.merge_supplement()
+        before = self.save_exhausted_audit()
+        events = []
+        with self.assertRaisesRegex(RuntimeError, "决策循环达到上限"):
+            self.drive_real_supplement_exchange(events=events, continue_rounds=32)
+        self.assertEqual([kind for kind, _ in events], ["agent", "decision"] * 32)
+        path = self.run / f"conversations/{self.key}.json"
+        exhausted = flow._read(path)["messages"]
+        self.assertEqual(exhausted[:len(before)], before)
+        self.assertEqual(count_decisions(exhausted), 64)
+        intent_path = flow._phase_path(self.run, self.state, "coverage-intent")
+        intent_bytes = intent_path.read_bytes()
+        for message in (None, flow.ResumeMessage(self.key, "继续当前批")):
+            self.state = read_state(self.run)
+            events = []
+            with self.assertRaisesRegex(RuntimeError, "决策循环达到上限"):
+                self.drive_real_supplement_exchange(events=events, resume_message=message)
+            self.assertEqual(events, [])
+            self.assertEqual(flow._read(path)["messages"], exhausted)
+            self.assertEqual(intent_path.read_bytes(), intent_bytes)
+            if message:
+                self.assertFalse(message.consumed)
+        # 新的正式批经原入口登记并合并，不能靠同批 resume 获得新额度。
+        write_json(self.input_file, self.clean_input(count=1))
+        self.begin()
+        identifiers = self.configure_clean_batch()
+        self.reach("quality:select_requirement")
+        for identifier in identifiers:
+            self.merge_clean_requirement(identifier)
+        self.execute()
+        events = self.drive_real_supplement_exchange(continue_rounds=31)
+        self.assertEqual([kind for kind, _ in events], ["agent", "decision"] * 32)
+        new_intent_path = flow._phase_path(self.run, self.state, "coverage-intent")
+        self.assertNotEqual(new_intent_path, intent_path)
+        self.assertEqual(json.loads(flow._read(new_intent_path)["anchor"]), exhausted)
+        self.assertEqual(count_decisions(flow._read(path)["messages"]), 96)
+        self.assertEqual(intent_path.read_bytes(), intent_bytes)
+        self.assertTrue(flow.is_completed(self.state))
+
+    def test_original_finish_does_not_gain_supplement_capacity(self):
+        for name in ("frontend", "backend"):
+            (self.root / name / "fix.py").write_text("before\n")
+        before = self.save_exhausted_audit()
+        events = []
+        with self.assertRaisesRegex(RuntimeError, "决策循环达到上限"):
+            self.drive_real_supplement_exchange(events=events)
+        self.assertEqual(events, [])
+        self.assertEqual(flow._read(self.run / f"conversations/{self.key}.json")["messages"], before)
+        self.assertFalse(flow._phase_path(self.run, self.state, "coverage").exists())
+
+    def test_saved_batch_intent_must_match_before_any_model_call(self):
+        self.merge_supplement()
+        self.save_exhausted_audit()
+        with patch.object(flow, "_task", side_effect=RuntimeError("保存 intent 后中断")), self.assertRaises(RuntimeError):
+            self.execute()
+        path = flow._phase_path(self.run, self.state, "coverage-intent")
+        intent = flow._read(path)
+        conversation_path = self.run / f"conversations/{self.key}.json"
+        conversation_bytes = conversation_path.read_bytes()
+        wrong_anchor = json.loads(intent["anchor"])
+        wrong_anchor[0]["content"] = "不属于当前会话的历史"
+        for field, value, error in (("session_id", "other-session", "session"), ("versions", {}, "版本"),
+                                    ("anchor", json.dumps(wrong_anchor, ensure_ascii=False), "历史锚点")):
+            with self.subTest(field=field):
+                flow._write(path, {**intent, field: value})
+                events = []
+                with patch.object(flow.LLMConfig, "load", side_effect=AssertionError("非法 intent 不加载模型配置")), \
+                     self.assertRaisesRegex(RuntimeError, error):
+                    self.drive_real_supplement_exchange(events=events)
+                self.assertEqual(events, [])
+                self.assertEqual(conversation_path.read_bytes(), conversation_bytes)
+        flow._write(path, intent)
+        self.drive_real_supplement_exchange()
+        self.assertTrue(flow.is_completed(self.state))
 
     def test_finish_old_pending_reply_decision_cannot_count_as_new_version_evidence(self):
         self.merge_supplement()
@@ -582,7 +714,7 @@ class SupplementTests(unittest.TestCase):
         from common.decision import AgentDecision
         self.merge_supplement()
         path = self.run / f"conversations/{self.key}.json"
-        before = flow._read(path)["messages"]
+        before = self.save_exhausted_audit()
         old_prompt = "旧版本只批准执行一次的补证指令"
         versions = flow.main_versions(self.state)
         old_intent_path = flow._completion_path(self.run, self.state, "coverage-intent")
@@ -621,9 +753,12 @@ class SupplementTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     self.drive_real_supplement_exchange(events=events, resume_message=message, fail_new_decision=True)
                 self.assertEqual([event[0] for event in events], ["decision", "agent", "decision"])
+                phase_intent_path = flow._phase_path(self.run, self.state, "coverage-intent")
+                phase_intent_bytes = phase_intent_path.read_bytes()
                 self.state = read_state(self.run)
                 events = self.drive_real_supplement_exchange()
                 self.assertEqual([event[0] for event in events], ["decision"])
+                self.assertEqual(phase_intent_path.read_bytes(), phase_intent_bytes)
             else:
                 self.drive_real_supplement_exchange(events=events, resume_message=message)
                 expected = ["decision", "agent", "decision"] if stage == "pending" else ["agent", "decision"]
@@ -637,6 +772,7 @@ class SupplementTests(unittest.TestCase):
         self.assertTrue(flow.is_completed(self.state))
         after = flow._read(path)["messages"]
         self.assertEqual(after[:len(messages)], messages)
+        self.assertEqual(json.loads(flow._read(flow._phase_path(self.run, self.state, "coverage-intent"))["anchor"]), messages)
         for saved, data in old_files.items():
             self.assertEqual(saved.read_bytes(), data)
         complete = flow._read(flow._completion_path(self.run, self.state, "complete"))
@@ -733,6 +869,7 @@ class SupplementTests(unittest.TestCase):
 
     def test_phase_false_null_and_legacy_coverage_never_complete(self):
         self.merge_supplement()
+        self.save_exhausted_audit()
         for allowed in (False, None, "legacy"):
             with self.subTest(allowed=allowed), self.assertRaisesRegex(RuntimeError, "阶段"):
                 self.drive_real_supplement_exchange(phase_allowed=allowed)
