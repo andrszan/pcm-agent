@@ -355,6 +355,33 @@ CLI 取得执行锁后校验目标，并只读取一次可读、非空白的 UTF
 
 **凭据边界：文件参数只避免正文出现在 shell 命令行，不提供脱敏或秘密隔离。正文会进入 PCM 对话历史、Agent session 和模型请求。API key、令牌、密码等秘密必须先写入已有受保护配置，指令只引用配置路径、配置键和资源说明，不得直接包含秘密。** 不要手改 `state.json`、步骤结果、conversation 或 Claude session，也不要使用 stdin 管道代替该入口。
 
+## 交接到新的开发 SDK 会话
+
+原 SDK 无法继续且已明确批准更换执行会话时，质量运行当前未完成的第 15 步可使用：
+
+```bash
+uv run python run_quality.py --resume <quality-run-id> \
+  --session-handoff-file /absolute/path/session-handoff.json
+```
+
+输入 JSON 必须是当前用户私有的普通文件（0600），字段如下；路径均为绝对路径，交接正文是非空 UTF-8 文本，摘要对应其完整字节：
+
+```json
+{
+  "version": 1,
+  "key": "development_BR-001",
+  "expected_old_session_id": "<原 SDK session ID>",
+  "handoff_file": "/absolute/path/handoff.md",
+  "handoff_sha256": "<交接正文 SHA256>",
+  "approval": "<更换执行会话的明确批准及范围>",
+  "old_session_file": "/absolute/path/<原 SDK session ID>.jsonl"
+}
+```
+
+入口在 run／产品锁内核对唯一原开发对话、两处 session 绑定和未消费回复，先将原状态、对话、失败诊断、计时及完整 SDK 转录保存到私有的 `session-handoffs/<key>.json`，再由正常执行创建新 SDK。只有真实初始化回调才能同时发布新 session 与需求周期绑定；不改写旧 SDK，不重建任务、不清零负责人轮次或业务消费。新会话收到正常步骤约束及具名交接，后续仍由原负责人对话裁决。
+
+该参数不与 `--node`、`--resume-message-file`、`--supplement-file` 或 `--local-only` 混用。同一输入中断后可幂等重入；新 SDK 初始化已落盘时复用新 ID，成功回复已保存时先消费，不重新派发。冲突输入、来源漂移、活动 SDK、待消费旧回复或已完成步骤均拒绝。交接不自动授权重放业务、维护或额外调用，保全记录含完整私有运行资料，不应提交或对外发送。
+
 ## 产品端口与锁
 
 ```bash

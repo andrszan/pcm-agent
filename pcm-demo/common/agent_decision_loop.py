@@ -801,6 +801,25 @@ def _save_agent_update(
     value: ClaudeRunResult,
 ) -> None:
     previous_session = _session(state, spec)
+    section = _state_section(state, spec)
+    handoff = section.get("session_handoff")
+    if handoff is not None and not isinstance(handoff, dict):
+        raise RuntimeError("开发会话交接状态不符合约定")
+    if handoff is not None and handoff.get("new_session_id") is None:
+        from steps.step_15_development.step import session_handoff_record
+
+        if spec.state_key != spec.key or session_handoff_record(run_dir, state, spec.key) is None:
+            raise RuntimeError("新开发会话缺少正式交接记录")
+        if (
+            not isinstance(value.init, dict) or value.result_subtype is not None
+            or not isinstance(value.session_id, str) or not value.session_id
+            or value.session_id in state.get("claude_sessions", {}).values()
+            or value.init.get("session_id") != value.session_id
+        ):
+            raise RuntimeError("新开发会话必须通过真实 init 回调建立")
+        handoff["new_session_id"] = value.session_id
+        state["requirement_cycle"]["development_session_id"] = value.session_id
+        previous_session = value.session_id
     if value.session_id is not None and (
         not isinstance(value.session_id, str) or not value.session_id
     ):
@@ -813,7 +832,6 @@ def _save_agent_update(
             raise RuntimeError("Claude session 状态不符合约定")
         sessions[spec.key] = value.session_id
 
-    section = _state_section(state, spec)
     if value.init is not None:
         if not isinstance(value.init, dict):
             raise RuntimeError("Agent SDK init 信息不符合约定")
@@ -1072,13 +1090,15 @@ async def _run_agent(
         # 先确认额度再保存实际指令，区分新调用与同一 pending 回复的补写。
         messages.append(conversation_message("assistant", prompt))
         _save_conversation(run_dir, state, spec, messages)
+    handoff = _state_section(state, spec).get("session_handoff")
     try:
         profile = get_agent_profile(spec.task)
         value = await run_timed_agent(
             agent_runner,
             prompt,
             cwd=workspace,
-            resume_session_id=_session(state, spec),
+            resume_session_id=(None if handoff is not None and handoff.get("new_session_id") is None
+                               else _session(state, spec)),
             max_turns=spec.max_turns,
             task=spec.task,
             model=profile.model,
@@ -1124,6 +1144,9 @@ async def _run_agent(
         )
         raise failure from error
     _validate_agent_result(run_dir, state, workspace, spec, value)
+    if handoff is not None and handoff["pending_call"]:
+        handoff["pending_call"] = False
+        write_state(run_dir, state)
     messages = _load_conversation(run_dir, state, spec)
     return _append_pending_agent_text(run_dir, state, spec, messages)
 
@@ -1222,10 +1245,29 @@ async def run_agent_decision_loop(
     if not isinstance(initial_prompt, str) or not initial_prompt.strip():
         raise RuntimeError("初始 Agent 提示不能为空")
 
+    handoff = _state_section(state, spec).get("session_handoff")
+    if handoff is not None:
+        from steps.step_15_development.step import session_handoff_record
+
+        record = session_handoff_record(run_dir, state, spec.key)
+        if spec.state_key != spec.key or record is None:
+            raise RuntimeError("开发会话缺少正式交接记录")
     _discard_legacy_pending_prompt(run_dir, state, spec)
     messages = _load_conversation(run_dir, state, spec)
     _validate_pending_agent_result(run_dir, state, workspace, spec)
     messages = _append_pending_agent_text(run_dir, state, spec, messages)
+    if handoff is not None and handoff["pending_call"]:
+        if _last_agent_finished_normally(state, spec):
+            # 成功回复已经由上面的原消费路径补写，不能再次调用新会话。
+            handoff["pending_call"] = False
+            write_state(run_dir, state)
+        else:
+            prompt = initial_prompt + "\n\n已批准的新会话交接（保留既有成果，仅续做未完成部分）：\n" + record["text"]
+            _require_decision_capacity(messages, spec)
+            if messages[-1]["content"] != prompt:
+                messages.append(conversation_message("assistant", prompt))
+                _save_conversation(run_dir, state, spec, messages)
+            messages = await _run_agent(run_dir, state, workspace, spec, prompt, agent_runner)
     initial_tail_decision = _tail_decision(messages)
     blocked_resume_pending = (
         state.get("status") == "blocked"

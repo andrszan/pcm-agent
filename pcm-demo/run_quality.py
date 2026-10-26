@@ -42,6 +42,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--node", choices=QUALITY_NODES)
     parser.add_argument("--resume-message-file", type=Path)
     parser.add_argument("--supplement-file", type=Path, help="登记后续补充批（clean 开发或 dirty 接管）；已成功收口须附明确 correction")
+    parser.add_argument("--session-handoff-file", type=Path, help="在当前开发节点按已批准交接建立新 SDK 会话")
     parser.add_argument("--coordination-locks", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if args.source_run and not args.run_id:
@@ -54,6 +55,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--supplement-file 仅用于 --resume，不能与 --node 或 --resume-message-file 混用")
     if (args.node or args.resume_message_file) and not args.resume:
         parser.error("--node 和 --resume-message-file 只能用于 --resume")
+    if args.session_handoff_file and (
+        not args.resume or args.supplement_file or args.resume_message_file or args.node or args.local_only
+    ):
+        parser.error("--session-handoff-file 只能单独用于 --resume")
     return args
 
 
@@ -200,6 +205,10 @@ def _locked(args, run_id, run_dir, locks, snapshot) -> int:
         if args.node is not None and state.get("current_node") != args.node:
             raise ValueError("--node 只能执行当前质量节点")
         attach_product(run_all.COORDINATION_ROOT, run_id, state, locks)
+        if getattr(args, "session_handoff_file", None) is not None:
+            from steps.step_15_development.step import prepare_session_handoff
+
+            prepare_session_handoff(run_dir, state, args.session_handoff_file)
         if getattr(args, "supplement_file", None) is not None:
             workflow.begin_supplement(run_dir, state, args.supplement_file)
     if args.resume_message_file is not None:

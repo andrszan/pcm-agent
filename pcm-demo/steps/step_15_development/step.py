@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
+import os
+import stat
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +13,11 @@ from common.agent_decision_loop import (
     AgentDecisionLoopSpec,
     ResumeMessage,
     agent_conversation_report,
+    _agent_result_finished_normally,
+    _decision_at,
+    _read_resume_message,
+    _validate_messages,
+    validate_resume_target,
     run_agent_decision_loop,
 )
 from common.claude_agent import run_claude
@@ -18,6 +28,7 @@ from common.frontend_scope import (
     ensure_frontend_capabilities,
     validate_frontend_scope,
 )
+from common.files import write_json
 from common.requirement_context import phase_for
 from common.state import (
     is_valid_requirement_id,
@@ -321,6 +332,213 @@ def _saved_result(run_dir: Path, requirement_id: str) -> dict[str, Any] | None:
     return _read_json(path, "实现与验证结果不可读取")
 
 
+def _handoff_source(run_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
+    cycle = state["requirement_cycle"]
+    return {
+        **{key: state.get(key) for key in (
+            "run_id", "workflow", "phase", "source_run_id", "workspace", "coordination",
+            "active_requirement", "quality",
+        )},
+        "cycle": {key: value for key, value in cycle.items() if key != "development_session_id"},
+        "frontend": _frontend_result(state, state["active_requirement"]),
+        "trd_result_sha256": hashlib.sha256(requirement_step_result_path(
+            run_dir, state["active_requirement"], 14,
+        ).read_bytes()).hexdigest(),
+    }
+
+
+def _reject_active_session(session_id: str, workspace: Path) -> None:
+    # 新建 SDK 的命令行未必携带 ID；同时按工作区排除失去父进程的 SDK。
+    try:
+        processes = subprocess.run(
+            ["ps", "-axww", "-o", "pid=,args="], check=True, capture_output=True, text=True, timeout=10,
+        ).stdout
+    except (OSError, subprocess.SubprocessError) as error:
+        raise RuntimeError("无法核验交接目标 SDK 活动进程") from error
+    for line in processes.splitlines():
+        if "claude" not in line and "cli.js" not in line:
+            continue
+        if session_id in line:
+            raise ValueError("交接目标 SDK 仍有活动进程")
+        pid = line.split(maxsplit=1)[0]
+        try:
+            cwd = subprocess.run(
+                ["lsof", "-a", "-p", pid, "-d", "cwd", "-Fn"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if cwd.returncode:
+                try:
+                    os.kill(int(pid), 0)
+                except ProcessLookupError:
+                    continue
+                raise RuntimeError("无法核验 SDK 进程工作区")
+            directories = [Path(row[1:]).resolve() for row in cwd.stdout.splitlines() if row.startswith("n")]
+            if not directories:
+                raise RuntimeError("无法核验 SDK 进程工作区")
+            if workspace.resolve() in directories:
+                raise ValueError("交接目标工作区仍有活动 SDK 进程")
+        except (OSError, subprocess.SubprocessError) as error:
+            raise RuntimeError("无法核验 SDK 进程工作区") from error
+
+
+def session_handoff_record(run_dir: Path, state: dict[str, Any], key: str) -> dict[str, Any] | None:
+    section = state.get(key)
+    handoff = section.get("session_handoff") if isinstance(section, dict) else None
+    record_path = run_dir / "session-handoffs" / f"{key}.json"
+    if handoff is None:
+        if record_path.exists() or record_path.is_symlink():
+            raise RuntimeError("开发会话交接归档已发布，请使用原 --session-handoff-file 完成幂等重入")
+        return None
+    if (
+        not isinstance(handoff, dict)
+        or set(handoff) != {"old_session_id", "new_session_id", "pending_call"}
+        or type(handoff["pending_call"]) is not bool
+        or (handoff["new_session_id"] is not None
+            and (not isinstance(handoff["new_session_id"], str) or not handoff["new_session_id"]))
+        or state.get("workflow") != "product_quality"
+        or _position(state) != (STEP, STEP, CURRENT_NODE)
+        or key != f"development_{state.get('active_requirement')}"
+    ):
+        raise RuntimeError("开发会话交接不在原目标节点")
+    if record_path.parent.is_symlink():
+        raise RuntimeError("开发会话交接目录不能是符号链接")
+    record = _read_json(record_path, "开发会话交接记录不可读取")
+    request = record.get("request")
+    if (not isinstance(request, dict) or not isinstance(request.get("expected_old_session_id"), str)
+            or request.get("key") != key or not isinstance(record.get("text"), str)
+            or hashlib.sha256(record["text"].encode("utf-8")).hexdigest() != request.get("handoff_sha256")):
+        raise RuntimeError("开发会话交接记录不符合约定")
+    old_id = request["expected_old_session_id"]
+    conversation = f"conversations/{key}.json"
+    try:
+        original = _validate_messages(json.loads(base64.b64decode(record["preserved_files"][conversation]))["messages"])
+        current = _validate_messages(_read_json(run_dir / conversation, "原开发对话不可读取").get("messages"))
+    except (KeyError, ValueError, TypeError) as error:
+        raise RuntimeError("开发会话交接缺少原对话保全") from error
+    if current[:len(original)] != original:
+        raise RuntimeError("开发会话原对话来源已变化")
+    current_id = handoff.get("new_session_id") or old_id
+    if (
+        record.get("source") != _handoff_source(run_dir, state)
+        or handoff.get("old_session_id") != old_id
+        or _session(state, key) != current_id
+        or state["requirement_cycle"].get("development_session_id") != current_id
+    ):
+        raise RuntimeError("开发会话交接来源或 session 已变化")
+    return record
+
+
+def prepare_session_handoff(run_dir: Path, state: dict[str, Any], input_file: Path) -> None:
+    """仅由质量运行在 run/product 双锁内调用；先保全，再发布待初始化状态。"""
+    if (
+        state.get("workflow") != "product_quality"
+        or _position(state) != (STEP, STEP, CURRENT_NODE)
+        or state.get("status") not in {"running", "blocked", "failed"}
+    ):
+        raise ValueError("会话交接只支持当前未完成的质量开发节点")
+    metadata = input_file.lstat()
+    if (not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o077
+            or metadata.st_uid != os.getuid()):
+        raise ValueError("会话交接 JSON 必须是当前用户私有的普通文件（0600）")
+    request = json.loads(_read_resume_message(input_file, "session_handoff").content)
+    fields = {"version", "key", "expected_old_session_id", "handoff_file", "handoff_sha256", "approval", "old_session_file"}
+    if (not isinstance(request, dict) or set(request) != fields
+            or type(request["version"]) is not int or request["version"] != 1
+            or any(not isinstance(request[name], str) or not request[name].strip()
+                   for name in fields - {"version"})):
+        raise ValueError("会话交接 JSON 字段不符合版本 1 合同")
+    validate_existing_contract(run_dir, state)
+    context = _context(run_dir, state)
+    key = context["key"]
+    old_id = request["expected_old_session_id"]
+    if request["key"] != key:
+        raise ValueError("会话交接 key 不是当前活动开发需求")
+    text_file = Path(request["handoff_file"])
+    old_file = Path(request["old_session_file"])
+    if (not text_file.is_absolute() or text_file.is_symlink()
+            or not old_file.is_absolute() or old_file.is_symlink()
+            or old_file.name != f"{old_id}.jsonl" or not old_file.is_file()):
+        raise ValueError("交接正文及旧 SDK 转录必须是指定的绝对普通文件路径")
+    text = _read_resume_message(text_file, key).content
+    if hashlib.sha256(text.encode("utf-8")).hexdigest() != request["handoff_sha256"]:
+        raise ValueError("交接正文 SHA256 不一致")
+    saved = _saved_result(run_dir, context["requirement_id"])
+    if saved is not None and saved.get("status") == "success":
+        raise ValueError("已有开发成功结果，不能建立交接会话")
+    section = state[key]
+    marker = section.get("session_handoff")
+    if marker is None and (
+        validate_resume_target(run_dir, state, STEP) != key
+        or _session(state, key) != old_id
+        or context["cycle"].get("development_session_id") != old_id
+    ):
+        raise ValueError("交接必须匹配唯一原开发会话及两处 session ID")
+    frontend = _frontend_result(state, context["requirement_id"])
+    if frontend["applicable"]:
+        frontend_key = f"frontend_ui_ux_{context['requirement_id']}"
+        frontend_messages = _validate_messages(_read_json(
+            run_dir / "conversations" / f"{frontend_key}.json", "前端正式对话不可读取",
+        ).get("messages"))
+        frontend_decision = _decision_at(frontend_messages, -1)
+        frontend_section = state.get(frontend_key, {})
+        if (not frontend["session_id"] or frontend_decision is None
+                or frontend_decision.verdict != "completed"
+                or not isinstance(frontend_section, dict)
+                or frontend_section.get("pending_agent_text") is not None
+                or not _agent_result_finished_normally(frontend_section.get("last_agent_result"))):
+            raise ValueError("前端尚未正式完成，不能交接开发会话")
+    record_path = run_dir / "session-handoffs" / f"{key}.json"
+    if record_path.parent.is_symlink():
+        raise ValueError("交接保全目录不能是符号链接")
+    if marker is not None:
+        record = session_handoff_record(run_dir, state, key)
+        if record["request"] != request:
+            raise ValueError("已有不同会话交接，拒绝覆盖")
+        _reject_active_session(marker.get("new_session_id") or old_id, context["workspace"])
+        if hashlib.sha256(old_file.read_bytes()).hexdigest() != record["old_sdk"]["sha256"]:
+            raise ValueError("旧 SDK 转录已变化")
+        return
+    messages = _validate_messages(_read_json(
+        run_dir / "conversations" / f"{key}.json", "原开发对话不可读取",
+    ).get("messages"))
+    tail = _decision_at(messages, -1)
+    if (section.get("pending_agent_text") is not None or messages[-1]["role"] == "user"
+            or _agent_result_finished_normally(section.get("last_agent_result"))
+            or (tail is not None and tail.verdict == "completed")):
+        raise ValueError("原开发会话有待消费回复或已完成，不能交接")
+    _reject_active_session(old_id, context["workspace"])
+    preserved = {}
+    if any((run_dir / name).is_symlink() for name in ("logs", "conversations", "steps")):
+        raise ValueError("交接保全目录不能是符号链接")
+    paths = [Path("state.json"), Path(f"conversations/{key}.json"), Path("timings.json"),
+             Path(f"logs/{key}-agent.json"), Path("logs/step-15-error.json"),
+             Path("steps/15.json"), requirement_step_result_path(run_dir, context["requirement_id"], STEP).relative_to(run_dir)]
+    for relative in paths:
+        path = run_dir / relative
+        if path.is_symlink():
+            raise ValueError("交接保全文件不能是符号链接")
+        if path.exists():
+            preserved[relative.as_posix()] = base64.b64encode(path.read_bytes()).decode("ascii")
+    sdk_bytes = old_file.read_bytes()
+    record = {
+        "request": request, "source": _handoff_source(run_dir, state), "text": text,
+        "preserved_files": preserved,
+        "old_sdk": {"sha256": hashlib.sha256(sdk_bytes).hexdigest(),
+                    "bytes": base64.b64encode(sdk_bytes).decode("ascii")},
+    }
+    if record_path.exists() or record_path.is_symlink():
+        if _read_json(record_path, "已有交接保全记录不可读取") != record:
+            raise ValueError("已有不同交接保全记录，拒绝覆盖")
+    else:
+        record_path.parent.mkdir(exist_ok=True)
+        write_json(record_path, record)
+    # 旧事实已经进入具名记录；别名保留到真实 init 回调，不冒用旧执行事实。
+    for field in ("init", "skill_loaded", "slash_command_loaded", "last_agent_result"):
+        section.pop(field, None)
+    section["session_handoff"] = {"old_session_id": old_id, "new_session_id": None, "pending_call": True}
+    write_state(run_dir, state)
+
+
 def _sync_development_session(
     run_dir: Path, state: dict[str, Any], context: dict[str, Any]
 ) -> str | None:
@@ -454,6 +672,8 @@ async def run(
     context = _context(run_dir, state)
     saved = _saved_result(run_dir, context["requirement_id"])
     position = _position(state)
+    if position == (STEP, STEP, CURRENT_NODE) and session_handoff_record(run_dir, state, context["key"]) is not None:
+        _reject_active_session(_session(state, context["key"]), context["workspace"])
 
     if position == (STEP + 1, STEP + 1, NEXT_NODE):
         if (
